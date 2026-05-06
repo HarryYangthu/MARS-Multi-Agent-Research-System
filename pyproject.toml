@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mars"
+version = "0.1.0"
+description = "MARS - Multi-Agent Research System (V0)"
+requires-python = ">=3.11"
+authors = [{ name = "Harry" }]
+dependencies = [
+  "fastapi>=0.111",
+  "uvicorn[standard]>=0.30",
+  "python-socketio>=5.11",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "loguru>=0.7",
+  "pyyaml>=6.0",
+  "jsonschema>=4.21",
+  "python-frontmatter>=1.1",
+  "httpx>=0.27",
+  "redis>=5.0",
+  "chromadb>=0.5",
+  "numpy>=1.26",
+  "anthropic>=0.34",
+  "openai>=1.40",
+  "langgraph>=0.2.0",
+  "pypdf>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "mypy>=1.10",
+  "import-linter>=2.0",
+  "types-PyYAML",
+  "types-jsonschema",
+  "types-redis",
+]
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
+addopts = "-ra -q"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "backend"
+namespace_packages = true
+explicit_package_bases = true
+exclude = [
+  "frontend/",
+  "build/",
+  ".venv/",
+  "workspace/",
+  "knowledge/",
+  "runs/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "chromadb.*",
+  "langgraph.*",
+  "frontmatter",
+  "socketio.*",
+  "anthropic.*",
+  "openai.*",
+]
+ignore_missing_imports = true

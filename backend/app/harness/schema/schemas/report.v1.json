@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/report.v1.json",
+  "title": "Writing Agent report frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "deliverable_type",
+    "target_audience",
+    "chain_refs"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "report.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "writing" },
+    "deliverable_type": {
+      "enum": ["research_report", "paper_fragment", "ppt_outline", "tech_summary"]
+    },
+    "target_audience": { "type": "string", "minLength": 2 },
+    "chain_refs": {
+      "type": "object",
+      "properties": {
+        "proposal": { "type": "string" },
+        "plan": { "type": "string" },
+        "code": { "type": "string" },
+        "runs": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "debate_summary": {
+      "type": "object",
+      "properties": {
+        "rounds": { "type": "integer", "minimum": 0 },
+        "reviewer_critiques": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

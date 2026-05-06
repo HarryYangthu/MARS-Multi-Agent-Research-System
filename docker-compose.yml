@@ -1,0 +1,79 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: mars-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:0.5.3
+    container_name: mars-chromadb
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./knowledge/.chromadb-server:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "</dev/tcp/localhost/8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mars-backend
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMADB_PATH=/app/knowledge/.chromadb
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./configs:/app/configs
+      - ./projects:/app/projects
+      - ./templates:/app/templates
+      - ./knowledge:/app/knowledge
+      - ./workspace:/app/workspace
+      - ./runs:/app/runs
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mars-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+
+  # vLLM serve (optional — uncomment when running on GPU host with Coding Agent local backend)
+  # vllm-serve:
+  #   image: vllm/vllm-openai:latest
+  #   container_name: mars-vllm
+  #   ports:
+  #     - "8001:8000"
+  #   command: --model qwen2.5-coder-7b-instruct
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]

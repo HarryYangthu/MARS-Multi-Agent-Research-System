@@ -1,0 +1,19 @@
+gates:
+  plan_finalized:
+    enabled: true
+  large_refactor:
+    enabled: true
+    files_changed_threshold: 5
+  experiment_launch:
+    enabled: true
+    gpu_hours_threshold: 12
+  conclusion_output:
+    enabled: true
+  baseline_compatibility:
+    enabled: true
+    # Tools whose dispatch must be checked. The check reads the project's
+    # AGENTS.md / repo_link.yaml protected paths.
+    monitored_tools:
+      - code.patch_generator
+      - code.write_file
+      - code.delete_file

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/proposal.v1.json",
+  "title": "Idea Agent proposal frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "research_question",
+    "hypothesis",
+    "novelty"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "proposal.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "idea" },
+    "created": { "type": "string" },
+    "research_question": { "type": "string", "minLength": 8 },
+    "hypothesis": { "type": "string", "minLength": 8 },
+    "novelty": { "type": "string", "minLength": 8 },
+    "theoretical_basis": { "type": "string" },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related_literature": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      }
+    },
+    "debate_summary": {
+      "type": "object",
+      "properties": {
+        "rounds": { "type": "integer", "minimum": 0 },
+        "consensus": { "type": "string" }
+      }
+    }
+  }
+}

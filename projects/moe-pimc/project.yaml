@@ -1,0 +1,9 @@
+project: moe-pimc
+domain: signal_processing/wireless
+description: PIMC for FDD Massive MIMO under beam/layer switching (ATK-MoE)
+tags:
+  - PIM
+  - MoE
+  - massive_mimo
+  - FDD
+  - beam_switching

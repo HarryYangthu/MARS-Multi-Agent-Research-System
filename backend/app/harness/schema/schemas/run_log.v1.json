@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/run_log.v1.json",
+  "title": "Execution Agent run_log frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "run_id",
+    "status",
+    "metrics",
+    "fingerprint_hash"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "run_log.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "execution" },
+    "upstream_artifact": { "type": "string" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "batch_size": { "type": "integer", "minimum": 1 },
+    "gpu_used": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "duration_seconds": { "type": "number", "minimum": 0 },
+    "status": { "enum": ["completed", "failed", "interrupted"] },
+    "metrics": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": ["number", "string", "null"] }
+    },
+    "fingerprint_hash": {
+      "type": "string",
+      "pattern": "^(sha256:)?[a-fA-F0-9]+$"
+    },
+    "is_mock": { "type": "boolean" }
+  }
+}

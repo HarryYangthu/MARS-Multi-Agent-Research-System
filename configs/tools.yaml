@@ -1,0 +1,33 @@
+tools:
+  search.local_docs:
+    enabled: true
+  search.arxiv_search:
+    enabled: false   # V0 placeholder; needs network
+  knowledge.kb_query:
+    enabled: true
+  knowledge.baseline_match:
+    enabled: true
+  knowledge.experiment_memory:
+    enabled: true
+  knowledge.code_assets:
+    enabled: true
+  knowledge.methodology:
+    enabled: true
+  knowledge.run_archive:
+    enabled: true
+  code.repo_reader:
+    enabled: true
+  code.patch_generator:
+    enabled: true
+  code.test_runner:
+    enabled: true
+  code.lint:
+    enabled: true
+  execution.simulation_runner:
+    enabled: true
+  execution.batch_runner:
+    enabled: true
+  execution.log_streamer:
+    enabled: true
+  execution.metrics_collector:
+    enabled: true

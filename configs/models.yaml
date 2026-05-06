@@ -1,0 +1,23 @@
+# Provider registry — declares which providers are available.
+# API keys come from .env via environment variables.
+
+providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+  openai:
+    api_key_env: OPENAI_API_KEY
+  qwen:
+    api_key_env: QWEN_API_KEY
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  gemini:
+    api_key_env: GEMINI_API_KEY
+  local_vllm:
+    api_key_env: LOCAL_VLLM_API_KEY
+    base_url_env: LOCAL_VLLM_BASE_URL
+  custom:
+    api_key_env: CUSTOM_ENDPOINT_API_KEY
+    base_url_env: CUSTOM_ENDPOINT_URL
+  deepseek:
+    api_key_env: DEEPSEEK_API_KEY
+    base_url_env: DEEPSEEK_BASE_URL
+    base_url: https://api.deepseek.com/v1

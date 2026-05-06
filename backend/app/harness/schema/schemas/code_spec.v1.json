@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/code_spec.v1.json",
+  "title": "Coding Agent code_spec frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "target_lang",
+    "baseline_compat",
+    "files_changed"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "code_spec.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "coding" },
+    "upstream_artifact": { "type": "string" },
+    "target_lang": { "enum": ["python", "c", "cpp", "rust"] },
+    "baseline_compat": {
+      "type": "object",
+      "required": ["preserved"],
+      "properties": {
+        "preserved": { "type": "boolean" },
+        "rationale": { "type": "string" }
+      }
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "type"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["modified", "added", "deleted", "renamed"] },
+          "risk": { "enum": ["low", "medium", "high"] }
+        }
+      }
+    },
+    "new_dependencies": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "test_coverage": {
+      "type": "object",
+      "properties": {
+        "unit_tests_added": { "type": "integer", "minimum": 0 },
+        "baseline_smoke_test": { "enum": ["pass", "fail", "skipped"] }
+      }
+    }
+  }
+}

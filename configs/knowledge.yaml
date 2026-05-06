@@ -1,0 +1,24 @@
+embedding:
+  # V0 uses a deterministic local embedder so KB tests are network-free.
+  # Set `provider: chroma_default` to use Chroma's bundled all-MiniLM model
+  # once the host has it cached (Hardware E2E lane).
+  provider: hash_local
+  dim: 256
+
+zones:
+  literature:
+    chunk_size: 1500
+    overlap: 200
+  methodology:
+    chunk_size: 2000
+    overlap: 200
+  code_assets:
+    chunk_size: 800
+    overlap: 50
+  run_archive:
+    chunk_size: 1000
+    overlap: 100
+
+baseline:
+  match_threshold: 0.85
+  top_k: 3

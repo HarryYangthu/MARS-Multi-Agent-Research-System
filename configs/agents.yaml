@@ -1,0 +1,118 @@
+# MARS V0 — Agent configuration.
+# All agents use DeepSeek (per user setup). Each agent picks its own model.
+# Multi-model debate uses different DeepSeek model versions per role so the
+# auto-degrade logic stays in REAL_MULTI_MODEL mode (all participants share
+# the deepseek provider).
+#
+# Model alias map (V0):
+#   deepseek-chat       → DeepSeek's strongest general chat model (current "V4")
+#   deepseek-reasoner   → DeepSeek-R1 long chain-of-thought reasoning
+#   deepseek-coder      → DeepSeek-Coder for code generation
+#
+# Missing API keys auto-fall back to mock_provider.
+
+idea:
+  enabled: true
+  output_schema: proposal.v1
+  model:
+    provider: deepseek
+    model: deepseek-chat            # strongest general — "V4" alias
+    temperature: 0.7
+    max_tokens: 4096
+  debate:
+    enabled: true
+    rounds: 1                         # 1 round × 3 roles = 3 DeepSeek calls (was 6 with rounds=2)
+    participants:
+      - role: proposer
+        provider: deepseek
+        model: deepseek-chat        # V4 chat — bold proposer
+      - role: critic
+        provider: deepseek
+        model: deepseek-reasoner    # R1 — long-CoT critique
+      - role: judge
+        provider: deepseek
+        model: deepseek-chat        # V4 chat — synthesizer
+  tools:
+    - search.local_docs
+    - search.arxiv_search
+    - knowledge.kb_query
+    - knowledge.baseline_match
+    - code.repo_reader
+
+experiment:
+  enabled: true
+  output_schema: experiment_plan.v1
+  model:
+    provider: deepseek
+    model: deepseek-reasoner        # R1 — good for ablation matrix design
+    temperature: 0.3
+    max_tokens: 4096
+  debate:
+    enabled: false
+  tools:
+    - knowledge.kb_query
+    - knowledge.baseline_match
+    - knowledge.experiment_memory
+
+coding:
+  enabled: true
+  output_schema: code_spec.v1
+  model:
+    provider: deepseek
+    model: deepseek-chat            # DeepSeek-Coder is merged into deepseek-chat now
+    temperature: 0.1
+    max_tokens: 8192
+  post_training:
+    enabled: false
+    mode: load_only
+    adapter_path: ""
+    custom_endpoint: ""
+    fine_tuned_model_id: ""
+    live_checkpoint_path: ""
+  language_tracks:
+    - python_research
+    - c_production
+  tools:
+    - code.repo_reader
+    - code.patch_generator
+    - code.test_runner
+    - code.lint
+    - knowledge.code_assets
+
+execution:
+  enabled: true
+  output_schema: run_log.v1
+  model:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.1
+    max_tokens: 2048
+  debate:
+    enabled: false
+  tools:
+    - execution.simulation_runner
+    - execution.batch_runner
+    - execution.log_streamer
+    - execution.metrics_collector
+
+writing:
+  enabled: true
+  output_schema: report.v1
+  model:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.4
+    max_tokens: 8192
+  debate:
+    enabled: true
+    rounds: 1
+    participants:
+      - role: critic
+        provider: deepseek
+        model: deepseek-reasoner    # R1 — careful reviewer
+      - role: positive_reviewer
+        provider: deepseek
+        model: deepseek-chat        # V4 chat — encouraging
+  tools:
+    - knowledge.methodology
+    - knowledge.run_archive

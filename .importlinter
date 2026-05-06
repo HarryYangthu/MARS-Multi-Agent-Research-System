@@ -1,0 +1,50 @@
+[importlinter]
+root_packages =
+    app
+
+[importlinter:contract:harness-no-upward]
+name = harness/ must not import bridge/ or agents/
+type = forbidden
+source_modules =
+    app.harness
+forbidden_modules =
+    app.bridge
+    app.agents
+    app.api
+    app.hitl
+    app.execution
+    app.workers
+
+[importlinter:contract:bridge-no-direct-agents]
+name = bridge/ must not import concrete agent implementations directly
+type = forbidden
+source_modules =
+    app.bridge
+forbidden_modules =
+    app.agents.idea
+    app.agents.experiment
+    app.agents.coding
+    app.agents.execution
+    app.agents.writing
+
+[importlinter:contract:agents-only-via-harness]
+name = agents/ must not import bridge/ or api/
+type = forbidden
+source_modules =
+    app.agents
+forbidden_modules =
+    app.bridge
+    app.api
+
+[importlinter:contract:layered]
+name = layered architecture
+type = layers
+layers =
+    api
+    bridge
+    hitl
+    agents | execution | workers
+    storage
+    harness
+containers =
+    app
