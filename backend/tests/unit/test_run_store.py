@@ -7,7 +7,7 @@ from pathlib import Path
 from app.storage.run_store import RUN_SUBDIRS, RunStore
 
 
-def test_create_run_makes_9_subdirs(tmp_path: Path) -> None:
+def test_create_run_makes_all_subdirs(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
     handle = store.create(
         task="pimc moe ablation!",
@@ -18,6 +18,9 @@ def test_create_run_makes_9_subdirs(tmp_path: Path) -> None:
     )
     assert handle.run_id.startswith("2026-05-04T2310_")
     assert handle.root.exists()
+    # 10 subdirs: the original 9 + diagnosis/ (Phase D self-heal).
+    assert len(RUN_SUBDIRS) == 10
+    assert "diagnosis" in RUN_SUBDIRS
     for sub in RUN_SUBDIRS:
         assert (handle.root / sub).is_dir(), sub
     meta = json.loads((handle.root / "run_meta.json").read_text())

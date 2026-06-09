@@ -34,6 +34,7 @@ export type GraphEdge = { src: string; dst: string };
 export type RunDetail = RunSummary & {
   states: Record<string, string>;
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; entrypoints: string[] };
+  run_status: string;
 };
 
 export type ArtifactView = {
@@ -117,6 +118,7 @@ export async function createRun(body: {
   user_request?: string;
   standalone?: boolean;
   seed_artifact?: string;
+  idempotency_key?: string;
 }): Promise<RunDetail> {
   return jsonOrThrow(
     await fetch(`${BASE}/api/runs`, {
@@ -133,6 +135,76 @@ export async function createRun(body: {
 }
 export async function startRun(runId: string): Promise<{ status: string }> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/start`, { method: "POST" }));
+}
+
+// ---------- run commands ----------
+async function runCommand(runId: string, cmd: string): Promise<{ status: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/${cmd}`, { method: "POST" }));
+}
+export const pauseRun = (runId: string) => runCommand(runId, "pause");
+export const cancelRun = (runId: string) => runCommand(runId, "cancel");
+export const retryRun = (runId: string) => runCommand(runId, "retry");
+
+export async function deleteRun(runId: string): Promise<{ status: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}`, { method: "DELETE" }));
+}
+
+export async function sendFeedback(
+  runId: string,
+  text: string,
+  agent?: string,
+): Promise<{ status: string }> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/runs/${runId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, agent: agent ?? null }),
+    }),
+  );
+}
+
+// ---------- context manifest / thinking / experiments ----------
+export type ContextManifest = {
+  exists: boolean;
+  agent?: string;
+  timestamp?: string;
+  summary?: Record<string, unknown>;
+  tokens_estimated?: number;
+};
+export async function getContextManifest(
+  runId: string,
+  agent: string,
+): Promise<ContextManifest> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/context/${agent}`));
+}
+
+export async function getThinking(
+  runId: string,
+  agent: string,
+): Promise<{ exists: boolean; text: string }> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/thinking/${agent}`));
+}
+
+export type PlannedExperiment = {
+  experiment_id: string;
+  label: string;
+  config: Record<string, unknown>;
+  template: string;
+  seed: number;
+};
+export async function getPlannedExperiments(
+  runId: string,
+): Promise<{ experiments: PlannedExperiment[]; count: number }> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/execution/planned`));
+}
+
+export type ExperimentMetric = {
+  run_id: string;
+  metrics: Record<string, number>;
+  fingerprint_hash?: string;
+};
+export async function getExecutionMetrics(runId: string): Promise<ExperimentMetric[]> {
+  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/execution/metrics`));
 }
 
 // ---------- artifacts ----------

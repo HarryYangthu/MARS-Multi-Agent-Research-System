@@ -27,7 +27,7 @@ export default function LabDashboard(): JSX.Element {
           </div>
         </aside>
       </div>
-      <HumanFeedback />
+      <HumanFeedback runId={selectedRunId} />
     </div>
   );
 }

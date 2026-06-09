@@ -29,6 +29,22 @@ def _clear_keys_and_register(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     settings_mod._settings = None
 
+    # Fast execution config so the post-approval sim batch doesn't run the
+    # demo-tuned ~72s simulation during the test.
+    from app.execution.config import ExecutionConfig
+
+    fast = ExecutionConfig(
+        max_concurrency=4,
+        default_steps=3,
+        agent_batch_steps=3,
+        backend="mock",
+        job_timeout_seconds=10.0,
+        feedback_max_attempts=2,
+        planned_experiments=4,
+        tick_seconds=0.0,
+    )
+    monkeypatch.setattr("app.execution.config.get_execution_config", lambda: fast)
+
     reset_registry_for_tests()
     from app.agents.coding.agent import CodingAgent
     from app.agents.execution.agent import ExecutionAgent

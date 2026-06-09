@@ -46,6 +46,7 @@ class Completion:
 class Delta:
     text: str
     finish_reason: str | None = None
+    kind: str = "content"  # "content" | "reasoning" (DeepSeek R1 chain-of-thought)
 
 
 class LLMProvider(ABC):

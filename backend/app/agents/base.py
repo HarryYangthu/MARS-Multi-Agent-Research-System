@@ -41,6 +41,7 @@ class ContextPack:
     task: str
     upstream: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    kb_excerpts: list[str] = field(default_factory=list)
 
     def to_messages(self, *, agent_name: str, output_schema: str) -> list[Message]:
         # Pull the schema's reference template (templates/artifacts/<schema>.md)
@@ -56,6 +57,18 @@ class ContextPack:
         except Exception:
             schema_template = ""
 
+        from app.settings import get_settings
+
+        lang_rule = ""
+        if get_settings().mars_agent_language == "zh":
+            lang_rule = (
+                "7. 语言:用简体中文撰写所有自然语言内容 —— 即正文(body)与描述性"
+                "字段的取值(如 research_question / hypothesis / root_cause 等)。\n"
+                "8. 但 YAML 字段名、`schema`/`agent` 等常量值、以及参考模板中出现的"
+                "枚举取值(如 status / risk / deliverable_type)必须原样保留英文,"
+                "否则 Schema 校验会失败。\n"
+            )
+
         sys_text = (
             self.system
             + "\n\n"
@@ -67,7 +80,9 @@ class ContextPack:
             + "3. The document begins with YAML frontmatter delimited by `---` lines.\n"
             + "4. The frontmatter MUST contain every required field for the schema.\n"
             + "5. Below the closing `---` write the body in markdown.\n"
-            + "6. NEVER wrap the whole document in ```markdown ... ``` fences.\n\n"
+            + "6. NEVER wrap the whole document in ```markdown ... ``` fences.\n"
+            + lang_rule
+            + "\n"
             + (
                 "REFERENCE TEMPLATE for this schema (copy the structure, replace values):\n\n"
                 + schema_template
@@ -80,6 +95,17 @@ class ContextPack:
         msgs = [Message(role="system", content=sys_text)]
         if self.project:
             msgs.append(Message(role="system", content=self.project))
+        if self.kb_excerpts:
+            joined = "\n\n---\n\n".join(e[:1500] for e in self.kb_excerpts[:6])
+            msgs.append(
+                Message(
+                    role="user",
+                    content=(
+                        "[knowledge base — relevant prior research/runs, for grounding; "
+                        "cite where useful]\n" + joined
+                    ),
+                )
+            )
         for label, content in self.upstream.items():
             msgs.append(
                 Message(
@@ -116,6 +142,11 @@ class BaseAgent(ABC):
 
     name: str = "base"
     output_schema: str = ""
+    # Per-agent specialization hooks (overridden by subclasses):
+    #   kb_zones          — which KB zones to retrieve excerpts from at draft time
+    #   quality_directives — agent-specific quality instructions appended to system
+    kb_zones: tuple[str, ...] = ()
+    quality_directives: str = ""
 
     def __init__(self, *, agent_config: AgentConfig | None = None) -> None:
         self._config = agent_config or get_agent_config(self.name)
@@ -129,12 +160,60 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------- defaults
 
     async def build_context(self, request: RunRequest) -> ContextPack:
-        return ContextPack(
-            system=f"MARS {self.name} agent. Output schema: {self.output_schema}.",
-            project=f"Project: {request.project}.",
-            task=request.user_request,
-            upstream=dict(request.upstream_artifacts),
-        )
+        """Rich, project-grounded context for the LLM draft.
+
+        Uses the 3-layer loader (system + project rules from AGENTS.md +
+        task) and, if the agent declares ``kb_zones``, KB excerpts retrieved
+        for the user request. Everything is wrapped in try/except so a missing
+        project, empty KB, or mock run silently falls back to minimal context.
+        """
+        try:
+            from app.harness.context.loader import build_context as load_ctx
+
+            kb_excerpts: list[str] = []
+            if self.kb_zones:
+                try:
+                    from app.harness.kb.retriever import query as kb_query
+
+                    hits = kb_query(
+                        query=request.user_request or self.name,
+                        zones=self.kb_zones,
+                        top_k=4,
+                    )
+                    kb_excerpts = [h.record.text for h in hits if h.record.text]
+                except Exception as exc:  # KB optional — never block a draft
+                    logger.debug("KB retrieval skipped for {}: {}", self.name, exc)
+
+            pack = load_ctx(
+                agent_role=self.name,
+                output_schema=self.output_schema,
+                project=request.project,
+                user_request=request.user_request,
+                upstream_handoff=dict(request.upstream_artifacts),
+                kb_excerpts=kb_excerpts,
+            )
+            system_text = pack.system.render()
+            if self.quality_directives:
+                system_text += "\n\n" + self.quality_directives
+            return ContextPack(
+                system=system_text,
+                project=pack.project.render(),
+                task=request.user_request,
+                upstream=dict(request.upstream_artifacts),
+                kb_excerpts=kb_excerpts,
+            )
+        except Exception as exc:
+            logger.warning(
+                "rich context build failed for {} ({}); using minimal context",
+                self.name,
+                exc,
+            )
+            return ContextPack(
+                system=f"MARS {self.name} agent. Output schema: {self.output_schema}.",
+                project=f"Project: {request.project}.",
+                task=request.user_request,
+                upstream=dict(request.upstream_artifacts),
+            )
 
     async def validate_output(self, artifact: Artifact) -> ValidationResult:
         return validate_document(artifact.text, expected_schema=self.output_schema)
@@ -203,8 +282,67 @@ class BaseAgent(ABC):
         messages = context.to_messages(
             agent_name=self.name, output_schema=self.output_schema
         )
-        completion = await self._call_llm(messages, debate_role=debate_role)
+        sink = request.extra.get("stream_publish") if request.extra else None
+        if sink is not None:
+            completion = await self._stream_llm(messages, sink, debate_role=debate_role)
+        else:
+            completion = await self._call_llm(messages, debate_role=debate_role)
         return self._artifact_from_completion(completion)
+
+    async def _stream_llm(
+        self,
+        messages: Sequence[Message],
+        sink: Any,
+        *,
+        debate_role: str | None = None,
+    ) -> Completion:
+        """Stream tokens, forwarding reasoning + content deltas to ``sink``.
+
+        ``sink`` is an async callable taking a payload dict. The final artifact
+        text is the accumulated ``content`` (reasoning is display-only). Any
+        failure falls back to the non-streaming path (and ultimately mock).
+        """
+        provider, cfg = self._select_provider()
+        cfg.extra = dict(cfg.extra or {})
+        if debate_role is not None:
+            cfg.extra["debate_role"] = debate_role
+        content_parts: list[str] = []
+        try:
+            await sink({"event": "thinking.start", "agent": self.name})
+            async for delta in provider.stream(list(messages), cfg):
+                if delta.finish_reason:
+                    break
+                if not delta.text:
+                    continue
+                if delta.kind == "content":
+                    content_parts.append(delta.text)
+                await sink(
+                    {
+                        "event": "thinking.delta",
+                        "agent": self.name,
+                        "kind": delta.kind,
+                        "text": delta.text,
+                    }
+                )
+            await sink({"event": "thinking.end", "agent": self.name})
+            text = "".join(content_parts)
+            if not text.strip():
+                raise RuntimeError("stream produced no content")
+            return Completion(
+                text=text,
+                provider=provider.name,
+                model=cfg.model,
+                is_mock=False,
+                debate_role=debate_role,
+            )
+        except Exception as exc:
+            logger.warning(
+                "agent {} streaming failed ({}); falling back to non-stream",
+                self.name,
+                exc,
+            )
+            await sink({"event": "thinking.end", "agent": self.name})
+            return await self._call_llm(messages, debate_role=debate_role)
 
     def _artifact_from_completion(self, completion: Completion) -> Artifact:
         # Real LLMs sometimes wrap the document in a ```markdown ... ``` fence,

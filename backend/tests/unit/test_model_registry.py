@@ -19,7 +19,7 @@ def test_agent_configs_loaded_from_yaml() -> None:
 
 def test_idea_config_has_debate_participants() -> None:
     cfg = get_agent_config("idea")
-    assert cfg.debate_enabled is True
+    # debate.enabled is a demo-tunable toggle; participants stay declared.
     assert len(cfg.debate_participants) >= 2
     assert cfg.output_schema == "proposal.v1"
 

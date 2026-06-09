@@ -13,6 +13,7 @@ patterns from there (lightweight regex scan).
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +26,29 @@ from app.settings import repo_root
 
 GATE_ID = "baseline_compatibility"
 
-# Tool names whose dispatch we care about.
-MONITORED_TOOLS: tuple[str, ...] = (
+# Fallback list if configs/gates.yaml is missing or omits monitored_tools.
+_DEFAULT_MONITORED_TOOLS: tuple[str, ...] = (
     "code.patch_generator",
     "code.write_file",
     "code.delete_file",
 )
+
+
+@lru_cache(maxsize=1)
+def monitored_tools() -> tuple[str, ...]:
+    """Tool names whose dispatch Gate 5 screens.
+
+    Source of truth is ``configs/gates.yaml::gates.baseline_compatibility.
+    monitored_tools`` so the config isn't a dead duplicate of the code.
+    """
+    p = repo_root() / "configs" / "gates.yaml"
+    if p.exists():
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        bc = (data.get("gates", {}) or {}).get(GATE_ID, {}) or {}
+        tools = bc.get("monitored_tools")
+        if isinstance(tools, list) and tools:
+            return tuple(str(t) for t in tools)
+    return _DEFAULT_MONITORED_TOOLS
 
 # Forbidden regex against the third positional arg of forward(...) — pulled
 # straight from projects/moe-pimc/AGENTS.md rule #2.
@@ -104,7 +122,7 @@ def static_check(
     Returns ``GateOutcome.triggered=True / blocking=True / requires_human=True``
     when a rule fires.
     """
-    if tool_name not in MONITORED_TOOLS:
+    if tool_name not in monitored_tools():
         return GateOutcome(gate_id=GATE_ID, triggered=False, blocking=False, requires_human=False)
 
     repo_link = _load_repo_link(project)

@@ -2,27 +2,30 @@
 
 import { useState } from "react";
 
+import { sendFeedback } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
-export function HumanFeedback(): JSX.Element {
+export function HumanFeedback({ runId }: { runId?: string | null }): JSX.Element {
   const { t } = useI18n();
   const [v, setV] = useState("");
   const [sent, setSent] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  function send(): void {
+  async function send(): Promise<void> {
     if (!v.trim()) return;
-    // V0 just stores locally; V1 will POST to a feedback endpoint.
+    if (!runId) {
+      setErr(t("feedback.no_run"));
+      setTimeout(() => setErr(null), 1500);
+      return;
+    }
     try {
-      const key = "mars.feedback.log";
-      const prev = window.localStorage.getItem(key);
-      const list = prev ? JSON.parse(prev) : [];
-      list.push({ ts: new Date().toISOString(), text: v });
-      window.localStorage.setItem(key, JSON.stringify(list.slice(-50)));
+      await sendFeedback(runId, v);
       setSent(v);
       setV("");
       setTimeout(() => setSent(null), 1500);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setErr(String(e));
+      setTimeout(() => setErr(null), 2500);
     }
   }
 
@@ -32,14 +35,21 @@ export function HumanFeedback(): JSX.Element {
       <input
         value={v}
         onChange={(e) => setV(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && send()}
-        placeholder={t("feedback.placeholder")}
+        onKeyDown={(e) => e.key === "Enter" && void send()}
+        placeholder={runId ? t("feedback.placeholder") : t("feedback.no_run")}
         className="flex-1 rounded border border-mars-border bg-mars-bg/60 px-2 py-1 text-xs text-slate-200 outline-none focus:border-mars-accent"
       />
-      {sent ? (
-        <span className="text-[10px] text-emerald-300">✓ saved</span>
+      {err ? (
+        <span className="text-[10px] text-rose-300">{err}</span>
+      ) : sent ? (
+        <span className="text-[10px] text-emerald-300">✓ {t("feedback.sent_ok")}</span>
       ) : (
-        <span className="text-[10px] text-slate-500">▸ V1: 发送给当前活跃 Agent</span>
+        <button
+          onClick={() => void send()}
+          className="rounded bg-mars-accent px-2 py-0.5 text-[10px] text-white hover:bg-mars-accent2"
+        >
+          {t("feedback.send")}
+        </button>
       )}
     </div>
   );

@@ -23,6 +23,20 @@ def _setup(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     import app.settings as settings_mod
     settings_mod._settings = None
 
+    from app.execution.config import ExecutionConfig
+
+    fast = ExecutionConfig(
+        max_concurrency=4,
+        default_steps=3,
+        agent_batch_steps=3,
+        backend="mock",
+        job_timeout_seconds=10.0,
+        feedback_max_attempts=2,
+        planned_experiments=4,
+        tick_seconds=0.0,
+    )
+    monkeypatch.setattr("app.execution.config.get_execution_config", lambda: fast)
+
     reset_registry_for_tests()
     reset_review()
     from app.agents.coding.agent import CodingAgent

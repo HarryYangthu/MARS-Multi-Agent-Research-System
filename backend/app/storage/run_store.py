@@ -22,6 +22,7 @@ RUN_SUBDIRS: tuple[str, ...] = (
     "coding",
     "execution",
     "writing",
+    "diagnosis",
     "hitl",
     "events",
 )

@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 .env
@@ -28,7 +29,7 @@ knowledge/literature/_index.json
 knowledge/methodology/_index.json
 knowledge/code_assets/_index.json
 knowledge/run_archive/_index.json
-runs/
+/runs/
 workspace/uploads/
 workspace/repos/*
 !workspace/repos/pimc-stub/

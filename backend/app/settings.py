@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     mars_mock_mode: Literal["auto", "always", "never"] = "auto"
     mars_log_level: str = "INFO"
     mars_default_project: str = "moe-pimc"
+    # Natural-language for Agent outputs (body + free-text field values).
+    # Schema keys / consts / enum values always stay English regardless.
+    mars_agent_language: Literal["zh", "en"] = "zh"
 
 
 _settings: Settings | None = None

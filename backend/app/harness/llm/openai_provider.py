@@ -71,9 +71,17 @@ class _OpenAICompatProvider(LLMProvider):
             stream=True,
         )
         async for chunk in stream:
-            piece = chunk.choices[0].delta.content if chunk.choices else None
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            # DeepSeek-reasoner (R1) streams the chain-of-thought on a separate
+            # `reasoning_content` field before the final answer `content`.
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield Delta(text=reasoning, kind="reasoning")
+            piece = getattr(delta, "content", None)
             if piece:
-                yield Delta(text=piece)
+                yield Delta(text=piece, kind="content")
         yield Delta(text="", finish_reason="stop")
 
 

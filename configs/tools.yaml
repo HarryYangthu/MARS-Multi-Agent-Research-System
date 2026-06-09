@@ -19,6 +19,13 @@ tools:
     enabled: true
   code.patch_generator:
     enabled: true
+  # Write-ops below mutate the working tree — screened by Gate 5
+  # (baseline_compatibility) on the dispatch path. Keep in sync with
+  # configs/gates.yaml::baseline_compatibility.monitored_tools.
+  code.write_file:
+    enabled: true
+  code.delete_file:
+    enabled: true
   code.test_runner:
     enabled: true
   code.lint:

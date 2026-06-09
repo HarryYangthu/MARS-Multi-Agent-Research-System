@@ -24,6 +24,7 @@ ZONES: tuple[str, ...] = (
     "methodology",
     "code_assets",
     "run_archive",
+    "failure_memory",
 )
 
 

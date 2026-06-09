@@ -1,0 +1,28 @@
+# MARS — execution / simulation scheduling config.
+#
+# Governs how Execution Agent runs simulation jobs. In V0 these jobs are mock
+# (see app/execution/mock_simulation.py); the same knobs drive the real
+# subprocess/GPU backend in V1. Source of truth for concurrency — do NOT
+# hardcode these values in code (CLAUDE.md style rule: 配置统一用 YAML).
+# Which execution backend to use:
+#   mock — synthetic loss curves, zero external deps (V0 default, CLAUDE.md #9)
+#   real — run the project repo's main.py as a CPU subprocess (Phase C)
+# Falls back to mock automatically if the repo / main.py is missing.
+backend: mock
+job_timeout_seconds: 120   # kill a single experiment subprocess after this many seconds
+
+concurrency:
+  max_concurrent: 16       # max parallel simulation jobs (asyncio semaphore cap)
+
+simulation:
+  default_steps: 30        # mock training steps per job (loss-curve resolution)
+  agent_batch_steps: 90    # steps per job (more points = smoother + longer curves)
+  planned_experiments: 16  # demo: target size of the experiment grid
+  tick_seconds: 0.8        # seconds between curve points → demo sim ≈ steps × tick (~72s)
+
+feedback_loop:
+  max_attempts: 2          # self-heal re-routes per run before halting (Phase D)
+
+gpu:
+  devices: 4               # NVIDIA L40S count on the target box (informational in V0)
+  per_job_gpus: 1          # GPUs reserved per simulation job (V1 scheduler input)

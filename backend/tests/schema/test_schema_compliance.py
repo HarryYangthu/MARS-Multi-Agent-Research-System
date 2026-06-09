@@ -83,12 +83,25 @@ def report_v1_base() -> dict[str, Any]:
     }
 
 
+def diagnosis_v1_base() -> dict[str, Any]:
+    return {
+        "schema": "diagnosis.v1",
+        "project": "moe-pimc",
+        "agent": "diagnosis",
+        "failed_node": "execution",
+        "root_cause": "Execution crashed: bad batch config produced NaN loss.",
+        "recommended_action": "revise_coding",
+        "target_node": "coding",
+    }
+
+
 BASE_BUILDERS: dict[str, Callable[[], dict[str, Any]]] = {
     "proposal.v1": proposal_v1_base,
     "experiment_plan.v1": experiment_plan_v1_base,
     "code_spec.v1": code_spec_v1_base,
     "run_log.v1": run_log_v1_base,
     "report.v1": report_v1_base,
+    "diagnosis.v1": diagnosis_v1_base,
 }
 
 
@@ -232,12 +245,47 @@ def _report_valid_variants() -> list[dict[str, Any]]:
     return out
 
 
+def _diagnosis_valid_variants() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = [diagnosis_v1_base()]
+    # each recommended_action enum value, with a matching plausible target
+    for action, target in [
+        ("retry", "execution"),
+        ("revise_coding", "coding"),
+        ("revise_experiment", "experiment"),
+        ("manual", "execution"),
+    ]:
+        v = diagnosis_v1_base()
+        v["recommended_action"] = action
+        v["target_node"] = target
+        out.append(v)
+    # optional fields
+    v = diagnosis_v1_base()
+    v["created"] = "2026-06-09T10:00Z"
+    out.append(v)
+    v = diagnosis_v1_base()
+    v["attempt"] = 2
+    out.append(v)
+    v = diagnosis_v1_base()
+    v["confidence"] = 0.9
+    out.append(v)
+    v = diagnosis_v1_base()
+    v["evidence"] = ["traceback line 1", "traceback line 2"]
+    out.append(v)
+    # long-text root_cause variations
+    for i in range(4):
+        v = diagnosis_v1_base()
+        v["root_cause"] = f"Variant {i}: upstream code_spec produced an invalid patch."
+        out.append(v)
+    return out
+
+
 VALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "proposal.v1": _proposal_valid_variants(),
     "experiment_plan.v1": _experiment_plan_valid_variants(),
     "code_spec.v1": _code_spec_valid_variants(),
     "run_log.v1": _run_log_valid_variants(),
     "report.v1": _report_valid_variants(),
+    "diagnosis.v1": _diagnosis_valid_variants(),
 }
 
 
@@ -345,12 +393,27 @@ def _report_invalid_variants() -> list[dict[str, Any]]:
     ]
 
 
+def _diagnosis_invalid_variants() -> list[dict[str, Any]]:
+    base = diagnosis_v1_base()
+    return [
+        _drop(base, "schema"),
+        _set(base, "schema", "diagnosis.v2"),
+        _drop(base, "failed_node"),
+        _drop(base, "root_cause"),
+        _set(base, "root_cause", "short"),  # < 8 chars
+        _set(base, "recommended_action", "explode"),  # not in enum
+        _drop(base, "target_node"),
+        _set(base, "agent", "execution"),  # must be const "diagnosis"
+    ]
+
+
 INVALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "proposal.v1": _proposal_invalid_variants(),
     "experiment_plan.v1": _experiment_plan_invalid_variants(),
     "code_spec.v1": _code_spec_invalid_variants(),
     "run_log.v1": _run_log_invalid_variants(),
     "report.v1": _report_invalid_variants(),
+    "diagnosis.v1": _diagnosis_invalid_variants(),
 }
 
 

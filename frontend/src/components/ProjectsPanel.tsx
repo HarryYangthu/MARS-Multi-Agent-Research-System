@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import {
   createRun,
+  deleteRun,
   getStats,
   listProjects,
   listRuns,
+  pauseRun,
+  retryRun,
   startRun,
   type ProjectSummary,
   type RunSummary,
@@ -35,27 +38,22 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
   const [err, setErr] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
 
+  const refresh = useCallback(async () => {
+    try {
+      const [p, r, s] = await Promise.all([listProjects(), listRuns(), getStats()]);
+      setProjects(p);
+      setRuns(r.reverse());
+      setStats(s);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
-    let alive = true;
-    const refresh = async () => {
-      try {
-        const [p, r, s] = await Promise.all([listProjects(), listRuns(), getStats()]);
-        if (alive) {
-          setProjects(p);
-          setRuns(r.reverse());
-          setStats(s);
-        }
-      } catch {
-        /* ignore */
-      }
-    };
     void refresh();
     const iv = setInterval(refresh, 4000);
-    return () => {
-      alive = false;
-      clearInterval(iv);
-    };
-  }, []);
+    return () => clearInterval(iv);
+  }, [refresh]);
 
   // Map run_id -> waiting agent name for visual highlight on RunCards.
   const waitingByRun = new Map<string, string>(
@@ -194,6 +192,7 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
               run={r}
               onSelect={onSelectRun}
               waitingAgent={waitingByRun.get(r.run_id)}
+              onAction={refresh}
             />
           ))
         )}
@@ -232,13 +231,31 @@ function RunCard({
   run,
   onSelect,
   waitingAgent,
+  onAction,
 }: {
   run: RunSummary;
   onSelect?: (runId: string) => void;
   waitingAgent?: string;
+  onAction?: () => void;
 }): JSX.Element {
   const { t } = useI18n();
   const isWaiting = !!waitingAgent;
+
+  async function act(
+    e: React.MouseEvent,
+    fn: (id: string) => Promise<unknown>,
+    confirmKey?: string,
+  ): Promise<void> {
+    e.stopPropagation();
+    if (confirmKey && !window.confirm(t(confirmKey))) return;
+    try {
+      await fn(run.run_id);
+      onAction?.();
+    } catch {
+      /* ignore — list refresh will reconcile */
+    }
+  }
+
   return (
     <div
       onClick={() => onSelect?.(run.run_id)}
@@ -266,25 +283,29 @@ function RunCard({
       <div className="mt-1.5 flex gap-1 text-[10px]">
         <Link
           href={`/runs/${run.run_id}`}
-          className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-300 hover:bg-amber-500/30"
+          className="rounded bg-mars-accent/20 px-2 py-0.5 text-mars-accent hover:bg-mars-accent/30"
           onClick={(e) => e.stopPropagation()}
+        >
+          ⤢ {t("run.detail")}
+        </Link>
+        <button
+          onClick={(e) => void act(e, pauseRun)}
+          className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-300 hover:bg-amber-500/30"
         >
           ⏸ {t("run.pause")}
-        </Link>
-        <Link
-          href={`/runs/${run.run_id}`}
+        </button>
+        <button
+          onClick={(e) => void act(e, retryRun)}
           className="rounded bg-cyan-500/20 px-2 py-0.5 text-cyan-300 hover:bg-cyan-500/30"
-          onClick={(e) => e.stopPropagation()}
         >
-          ↻ {t("run.resume")}
-        </Link>
-        <Link
-          href={`/runs/${run.run_id}`}
+          ↻ {t("run.retry")}
+        </button>
+        <button
+          onClick={(e) => void act(e, deleteRun, "run.delete_confirm")}
           className="rounded bg-rose-500/20 px-2 py-0.5 text-rose-300 hover:bg-rose-500/30"
-          onClick={(e) => e.stopPropagation()}
         >
           🗑 {t("run.delete")}
-        </Link>
+        </button>
       </div>
     </div>
   );

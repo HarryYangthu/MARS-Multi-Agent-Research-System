@@ -79,15 +79,44 @@ async def run_agent_node(
     debate_path = run.subdir(node_key) / "debate_transcript.v1.md"
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Live "thinking" stream: forward reasoning/content deltas to the run's
+    # thinking channel, and buffer them so we can persist a replayable copy.
+    think_buf: dict[str, list[str]] = {"reasoning": [], "content": []}
+
+    async def _thinking_sink(payload: dict[str, Any]) -> None:
+        if payload.get("event") == "thinking.delta":
+            kind = str(payload.get("kind", "content"))
+            think_buf.setdefault(kind, []).append(str(payload.get("text", "")))
+        if bus is not None:
+            await bus.publish(f"run.{run.run_id}.thinking", payload)
+        run.write_event("thinking", payload)
+
     request = AgentRunRequest(
         project=run.project,
         user_request=user_request,
         upstream_artifacts=upstream,
-        extra={"debate_progress_path": str(debate_path)},
+        extra={
+            "debate_progress_path": str(debate_path),
+            "stream_publish": _thinking_sink,
+            "run_id": run.run_id,
+        },
     )
     context = await agent.build_context(request)
 
     artifact = await agent.draft(request, context)
+
+    # Persist the streamed thinking for replay on page reload.
+    if think_buf["reasoning"] or think_buf["content"]:
+        try:
+            (run.subdir(node_key) / "thinking.md").write_text(
+                "# 思考过程 (reasoning)\n\n"
+                + "".join(think_buf["reasoning"])
+                + "\n\n# 输出 (content)\n\n"
+                + "".join(think_buf["content"]),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     # Validate; ALWAYS persist the artifact under <agent>/<stem>.v1.md, even
     # when schema validation fails — the HITL UI will then show the validation
@@ -179,78 +208,155 @@ async def run_agent_node(
     except Exception as exc:  # pragma: no cover
         logger.warning("sedimentation failed: {}", exc)
 
-    # Phase 6: Execution Agent additionally runs the mock simulation batch
-    # so the run gets per-experiment run_log_<exp>.v1.md + curves + metrics.
+    # Execution Agent only PROPOSES the experiment grid at draft time; the
+    # actual simulation batch runs after the human approves (orchestrator calls
+    # run_execution_batch on the APPROVED transition). This gives the
+    # "propose → confirm → simulate live" flow.
     if node_key == "execution":
         try:
-            await _run_execution_batch(run=run, bus=bus)
+            write_planned_experiments(run)
         except Exception as exc:  # pragma: no cover
-            logger.warning("execution batch failed: {}", exc)
+            logger.warning("planning experiments failed: {}", exc)
 
 
-async def _run_execution_batch(*, run: RunHandle, bus: Any | None = None) -> None:
-    """Trigger 6-way mock simulations using the upstream experiment_plan.
+def _stable_seed(text: str) -> int:
+    import hashlib
 
-    Reads `experiment_plan.approved.md` (if present) for ablation names;
-    otherwise spawns 4 default experiments. Publishes per-experiment WS
-    events via the orchestrator's bus (if provided).
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:6], 16)
+
+
+def _base_ablations(run: RunHandle) -> list[dict[str, Any]]:
+    """Ablation seeds from the approved experiment_plan, else defaults."""
+    plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
+    out: list[dict[str, Any]] = []
+    if plan_path.exists():
+        try:
+            md = parse_fm(plan_path.read_text(encoding="utf-8")).metadata
+            ablations = md.get("ablations", []) or []
+            if isinstance(ablations, list):
+                for i, a in enumerate(ablations):
+                    if isinstance(a, dict):
+                        out.append(
+                            {
+                                "name": str(a.get("name") or f"ablation_{i}"),
+                                "config": dict(a.get("config", {}) or {}),
+                            }
+                        )
+        except Exception:
+            out = []
+    if not out:
+        out = [
+            {"name": "expert_count_8", "config": {"expert_count": 8}},
+            {"name": "expert_count_4", "config": {"expert_count": 4}},
+            {"name": "router_topk_1", "config": {"router_topk": 1}},
+            {"name": "snr_30db", "config": {"snr_db": 30}},
+        ]
+    return out
+
+
+def write_planned_experiments(run: RunHandle) -> list[dict[str, Any]]:
+    """Expand the ablation matrix into ~`planned_experiments` concrete jobs and
+    persist them so the UI can show "what will run" before the human approves."""
+    import json
+
+    from app.execution.config import get_execution_config
+
+    target = max(1, get_execution_config().planned_experiments)
+    base = _base_ablations(run)
+    templates = ("exponential_decay", "noisy_decay", "plateau")
+    experiments: list[dict[str, Any]] = []
+    idx = 0
+    while len(experiments) < target:
+        a = base[idx % len(base)]
+        variant = idx // len(base)
+        exp_id = a["name"] if variant == 0 else f"{a['name']}_s{variant}"
+        cfg = dict(a["config"])
+        cfg["label"] = exp_id
+        experiments.append(
+            {
+                "experiment_id": exp_id,
+                "label": exp_id,
+                "config": cfg,
+                "template": templates[len(experiments) % len(templates)],
+                "seed": _stable_seed(exp_id),
+            }
+        )
+        idx += 1
+    payload = {"experiments": experiments, "count": len(experiments)}
+    (run.subdir("execution") / "planned_experiments.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return experiments
+
+
+async def run_execution_batch(*, run: RunHandle, bus: Any | None = None) -> None:
+    """Run the planned experiment grid (≤ max_concurrency) with live streaming.
+
+    Reads `execution/planned_experiments.json` (written at draft time). Streams
+    per-experiment events to `run.<id>.experiment.<exp>` AND an aggregated
+    `run.<id>.execution` channel so a single run-socket can drive the curve wall.
     """
     import json
 
     from app.execution.batch_runner import BatchConfig, run_batch
+    from app.execution.config import get_execution_config
     from app.execution.curve_parser import write_curve
     from app.execution.metrics_collector import (
         write_metrics_json,
         write_run_log,
     )
     from app.execution.simulation_runner import JobSpec
-    from app.harness.schema.frontmatter_parser import parse as parse_fm
 
-    plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
-    abl_names: list[str] = []
-    if plan_path.exists():
-        try:
-            md = parse_fm(plan_path.read_text(encoding="utf-8")).metadata
-            ablations = md.get("ablations", []) or []
-            if isinstance(ablations, list):
-                abl_names = [
-                    str(a.get("name") or f"ablation_{i}")
-                    for i, a in enumerate(ablations)
-                    if isinstance(a, dict)
-                ]
-        except Exception:
-            abl_names = []
-    if not abl_names:
-        abl_names = ["ablation_a", "ablation_b", "ablation_c", "ablation_d"]
-    abl_names = abl_names[:6]  # max concurrency cap
-
-    async def _publish(channel: str, payload: dict[str, Any]) -> None:
-        if bus is not None:
-            await bus.publish(channel, payload)
-        run.write_event("websocket_events", {"channel": channel, **payload})
+    exec_cfg = get_execution_config()
+    planned_path = run.subdir("execution") / "planned_experiments.json"
+    if planned_path.exists():
+        plan = json.loads(planned_path.read_text(encoding="utf-8")).get("experiments", [])
+    else:
+        plan = write_planned_experiments(run)
 
     specs = [
         JobSpec(
             run_id=run.run_id,
-            experiment_id=name,
+            experiment_id=str(e["experiment_id"]),
             project=run.project,
-            config={"label": name},
-            template=("exponential_decay" if i % 2 == 0 else "noisy_decay"),
-            seed=hash(name) & 0xFFFFFF,
+            config=dict(e.get("config", {})),
+            template=str(e.get("template", "exponential_decay")),
+            seed=int(e["seed"]) if e.get("seed") is not None else None,
         )
-        for i, name in enumerate(abl_names)
+        for e in plan
     ]
+
+    async def _publish(channel: str, payload: dict[str, Any]) -> None:
+        if bus is not None:
+            await bus.publish(channel, payload)
+            # Mirror per-experiment events onto one aggregated channel so the
+            # run detail page only needs a single socket for all 16 panels.
+            if channel.startswith(f"run.{run.run_id}.experiment."):
+                await bus.publish(f"run.{run.run_id}.execution", payload)
+        run.write_event("websocket_events", {"channel": channel, **payload})
+
+    if bus is not None:
+        await bus.publish(
+            f"run.{run.run_id}.execution",
+            {
+                "event": "execution.batch_started",
+                "total": len(specs),
+                "experiments": [s.experiment_id for s in specs],
+            },
+        )
 
     outcome = await run_batch(
         specs,
-        config=BatchConfig(max_concurrency=6, steps=20),
+        config=BatchConfig(
+            max_concurrency=exec_cfg.max_concurrency,
+            steps=exec_cfg.agent_batch_steps,
+            tick_seconds=exec_cfg.tick_seconds,
+        ),
         bus_publish=_publish,
     )
 
     for r in outcome.results:
         write_run_log(run_root=run.root, result=r, project=run.project)
-        # Persist a fake curve as well — mock_simulation publishes ticks via WS,
-        # we don't keep them in memory, so re-derive a synthetic curve.
         write_curve(
             run_root=run.root,
             experiment_id=r.experiment_id,
@@ -269,6 +375,16 @@ async def _run_execution_batch(*, run: RunHandle, bus: Any | None = None) -> Non
         json.dumps(summary, indent=2), encoding="utf-8"
     )
 
+    if bus is not None:
+        await bus.publish(
+            f"run.{run.run_id}.execution",
+            {
+                "event": "execution.batch_done",
+                "total": len(outcome.results),
+                "failures": outcome.failures,
+            },
+        )
+
 
 def _metrics_to_curve(result: Any) -> list[float]:
     # Re-derive a deterministic curve from the result's seed so the file
@@ -279,7 +395,7 @@ def _metrics_to_curve(result: Any) -> list[float]:
     return _loss_curve(20, template="exponential_decay", seed=seed)
 
 
-__all__ = ["run_agent_node"]
+__all__ = ["run_agent_node", "run_execution_batch", "write_planned_experiments"]
 
 
 # Side-effect free helpers used by tests

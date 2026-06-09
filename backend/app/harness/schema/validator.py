@@ -50,6 +50,7 @@ SUPPORTED_SCHEMAS: tuple[str, ...] = (
     "code_spec.v1",
     "run_log.v1",
     "report.v1",
+    "diagnosis.v1",
 )
 
 

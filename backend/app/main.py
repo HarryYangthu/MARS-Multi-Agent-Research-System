@@ -73,6 +73,12 @@ def create_app() -> FastAPI:
 
     register_default_agents()
 
+    # Rehydrate any runs persisted to disk so a restart doesn't lose state.
+    from app.api.dependencies import get_orchestrator
+    from app.bridge.run_recovery import recover_runs
+
+    recover_runs(get_orchestrator())
+
     logger.info("MARS V0 backend ready (port={})", settings.backend_port)
     return app
 

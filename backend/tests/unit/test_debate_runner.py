@@ -1,5 +1,13 @@
-"""Verify debate auto-degrade across the three modes."""
+"""Verify debate auto-degrade across the three modes.
+
+These use a synthetic debate-enabled AgentConfig so they exercise the
+_auto_mode logic independent of the live agents.yaml (which may have debate
+disabled for demo pacing). The conftest fixture clears all provider env.
+"""
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import pytest
 
@@ -9,54 +17,70 @@ from app.agents.debate.debate_runner import (
     _auto_mode,
     run_debate,
 )
-from app.harness.llm.model_registry import get_agent_config
+from app.harness.llm.model_registry import AgentConfig
 
 
-def test_auto_mode_no_keys_returns_mock(monkeypatch: pytest.MonkeyPatch) -> None:
-    for env in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "QWEN_API_KEY", "GEMINI_API_KEY"):
-        monkeypatch.delenv(env, raising=False)
+def _debate_cfg(participants: Sequence[Mapping[str, Any]]) -> AgentConfig:
+    return AgentConfig(
+        name="idea",
+        enabled=True,
+        output_schema="proposal.v1",
+        model_provider="deepseek",
+        model_name="deepseek-reasoner",
+        temperature=0.7,
+        max_tokens=4096,
+        debate_enabled=True,
+        debate_rounds=1,
+        debate_participants=tuple(participants),
+        tools=(),
+        raw={},
+    )
+
+
+_DEEPSEEK_PARTICIPANTS = [
+    {"role": "proposer", "provider": "deepseek", "model": "deepseek-reasoner"},
+    {"role": "critic", "provider": "deepseek", "model": "deepseek-reasoner"},
+    {"role": "judge", "provider": "deepseek", "model": "deepseek-reasoner"},
+]
+
+
+def _reset_settings() -> None:
     import app.settings as settings_mod
 
     settings_mod._settings = None
-    cfg = get_agent_config("idea")
-    mode = _auto_mode(cfg)
-    assert mode == DebateMode.MOCK_DEBATE
+
+
+def test_auto_mode_no_keys_returns_mock() -> None:
+    _reset_settings()
+    assert _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS)) == DebateMode.MOCK_DEBATE
 
 
 def test_auto_mode_partial_keys_simulates(monkeypatch: pytest.MonkeyPatch) -> None:
-    for env in ("OPENAI_API_KEY", "QWEN_API_KEY", "GEMINI_API_KEY"):
-        monkeypatch.delenv(env, raising=False)
+    # A key exists, but not for the deepseek participants → simulate.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    cfg = get_agent_config("idea")  # demands anthropic + openai + gemini
-    mode = _auto_mode(cfg)
+    _reset_settings()
+    mode = _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS))
     assert mode == DebateMode.SINGLE_MODEL_SIMULATED
 
 
 def test_auto_mode_all_keys_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    monkeypatch.setenv("GEMINI_API_KEY", "k")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    cfg = get_agent_config("idea")
-    mode = _auto_mode(cfg)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    _reset_settings()
+    mode = _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS))
     assert mode == DebateMode.REAL_MULTI_MODEL
 
 
-@pytest.mark.asyncio
-async def test_run_debate_mock_mode_produces_valid_artifact(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    for env in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "QWEN_API_KEY", "GEMINI_API_KEY"):
-        monkeypatch.delenv(env, raising=False)
-    import app.settings as settings_mod
+def test_auto_mode_debate_disabled_is_mock() -> None:
+    cfg = _debate_cfg(_DEEPSEEK_PARTICIPANTS)
+    disabled = AgentConfig(**{**cfg.__dict__, "debate_enabled": False})
+    _reset_settings()
+    assert _auto_mode(disabled) == DebateMode.MOCK_DEBATE
 
-    settings_mod._settings = None
-    cfg = get_agent_config("idea")
+
+@pytest.mark.asyncio
+async def test_run_debate_mock_mode_produces_valid_artifact() -> None:
+    _reset_settings()
+    cfg = _debate_cfg(_DEEPSEEK_PARTICIPANTS)
     request = RunRequest(project="moe-pimc", user_request="test")
     context = ContextPack(
         system="system text", project="project text", task="task text"
@@ -70,10 +94,7 @@ async def test_run_debate_mock_mode_produces_valid_artifact(
     )
     assert result.mode == DebateMode.MOCK_DEBATE
     assert result.final_artifact is not None
-    # validate the synthesized artifact
     from app.harness.schema.validator import validate_document
 
-    res = validate_document(
-        result.final_artifact.text, expected_schema="proposal.v1"
-    )
+    res = validate_document(result.final_artifact.text, expected_schema="proposal.v1")
     assert res.valid, res.errors

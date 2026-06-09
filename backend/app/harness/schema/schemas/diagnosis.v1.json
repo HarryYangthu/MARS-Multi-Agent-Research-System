@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/diagnosis.v1.json",
+  "title": "Self-heal diagnosis frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "failed_node",
+    "root_cause",
+    "recommended_action",
+    "target_node"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "diagnosis.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "diagnosis" },
+    "created": { "type": "string" },
+    "failed_node": { "type": "string", "minLength": 1 },
+    "root_cause": { "type": "string", "minLength": 8 },
+    "recommended_action": {
+      "enum": ["retry", "revise_coding", "revise_experiment", "manual"]
+    },
+    "target_node": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

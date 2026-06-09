@@ -134,6 +134,14 @@ class RunGraph:
         assert_transition(node.state, new_state)
         node.state = new_state
 
+    def reset_to_pending(self, key: str) -> None:
+        """Force a node back to PENDING for re-route / self-heal reruns.
+
+        Bypasses the transition table on purpose: re-routing must reset even
+        terminal (DONE) upstream nodes so the scheduler reruns them.
+        """
+        self._nodes[key].state = NodeState.PENDING
+
     # --------------------------------------------------------- scheduling
 
     def topological_order(self) -> list[str]:
@@ -189,6 +197,28 @@ class RunGraph:
             "edges": [{"src": e.src, "dst": e.dst} for e in self.edges],
             "entrypoints": list(self._entrypoints),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunGraph:
+        """Rebuild a graph (including per-node states) from ``to_dict()``.
+
+        Used by run recovery to rehydrate an in-flight run after a restart.
+        Node states are restored verbatim — this bypasses transition
+        validation on purpose, because we're loading an already-valid state.
+        """
+        g = cls()
+        for raw in data.get("nodes", []):
+            node = g.add_node(
+                str(raw["key"]),
+                kind=str(raw.get("kind", "agent")),
+                metadata=dict(raw.get("metadata", {})),
+            )
+            node.state = NodeState(str(raw.get("state", NodeState.PENDING.value)))
+        for raw_edge in data.get("edges", []):
+            g.add_edge(str(raw_edge["src"]), str(raw_edge["dst"]))
+        for ep in data.get("entrypoints", []):
+            g.set_entrypoint(str(ep))
+        return g
 
     # --------------------------------------------------------------- private
 

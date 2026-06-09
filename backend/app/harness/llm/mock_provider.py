@@ -151,6 +151,20 @@ def _fake_report(seed: str, debate_role: str | None) -> dict[str, Any]:
     }
 
 
+def _fake_diagnosis(seed: str, debate_role: str | None) -> dict[str, Any]:
+    return {
+        "schema": "diagnosis.v1",
+        "project": "moe-pimc",
+        "agent": "diagnosis",
+        "failed_node": "execution",
+        "root_cause": "Execution diverged: loss became NaN after a bad config.",
+        "recommended_action": "revise_coding",
+        "target_node": "coding",
+        "attempt": 1,
+        "confidence": 0.6,
+    }
+
+
 def _fake_experiment_plan_w(seed: str, role: str | None = None) -> dict[str, Any]:
     return _fake_experiment_plan(seed)
 
@@ -171,6 +185,7 @@ _FAKE_BUILDERS: dict[str, _FakeBuilder] = {
     "code_spec.v1": _fake_code_spec_w,
     "run_log.v1": _fake_run_log_w,
     "report.v1": _fake_report,
+    "diagnosis.v1": _fake_diagnosis,
 }
 
 
