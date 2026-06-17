@@ -8,6 +8,11 @@ from app.agents.debate.debate_runner import run_debate
 class WritingAgent(BaseAgent):
     name = "writing"
     output_schema = "report.v1"
+    agent_brief = (
+        "你负责把完整研究链路汇总成研究报告。用 knowledge.run_archive 回顾执行结果、"
+        "knowledge.methodology 对齐写作规范,串联 proposal/plan/code/runs 的 chain_refs,"
+        "面向 phd_advisor 给出可复现、有据可依的中文报告。"
+    )
 
     async def draft(
         self, request: RunRequest, context: ContextPack

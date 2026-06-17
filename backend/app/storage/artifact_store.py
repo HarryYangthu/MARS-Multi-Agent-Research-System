@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
+from app.harness.evaluation.artifacts import (
+    write_reports_for_artifact,
+)
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.schema.validator import (
     ValidationResult,
@@ -24,6 +29,8 @@ SCHEMA_TO_AGENT: dict[str, tuple[str, str]] = {
     "experiment_plan.v1": ("experiment", "experiment_plan"),
     "code_spec.v1": ("coding", "code_spec"),
     "run_log.v1": ("execution", "run_log"),
+    "diagnosis.v1": ("diagnosis", "diagnosis"),
+    "feedback_packet.v1": ("diagnosis", "feedback_packet"),
     "report.v1": ("writing", "research_report"),
 }
 
@@ -138,13 +145,15 @@ class ArtifactStore:
         ver = version or self._next_version(agent_dir=agent_dir, stem=stem)
         path = d / f"{stem}.{ver}.md"
         path.write_text(text, encoding="utf-8")
-        return ArtifactRef(
+        ref = ArtifactRef(
             run_id=self.run.run_id,
             agent_dir=agent_dir,
             stem=stem,
             version=ver,
             path=path,
         )
+        self._write_eval_reports(ref=ref, expected_schema=result.schema_id)
+        return ref
 
     def write_metadata(
         self,
@@ -172,14 +181,43 @@ class ArtifactStore:
     def approve(self, ref: ArtifactRef) -> ArtifactRef:
         """Promote ``ref`` to ``<stem>.approved.md`` (copy contents)."""
         approved_path = ref.path.parent / f"{ref.stem}.approved.md"
-        approved_path.write_text(ref.path.read_text(encoding="utf-8"), encoding="utf-8")
-        return ArtifactRef(
+        text = ref.path.read_text(encoding="utf-8")
+        approved_path.write_text(text, encoding="utf-8")
+        approved = ArtifactRef(
             run_id=ref.run_id,
             agent_dir=ref.agent_dir,
             stem=ref.stem,
             version="approved",
             path=approved_path,
         )
+        result = validate_document(text)
+        self._write_eval_reports(
+            ref=approved,
+            expected_schema=result.schema_id if result.valid else None,
+        )
+        return approved
+
+    def write_eval_reports(self, ref: ArtifactRef, *, expected_schema: str | None) -> list[Path]:
+        return self._write_eval_reports(ref=ref, expected_schema=expected_schema)
+
+    def _write_eval_reports(self, *, ref: ArtifactRef, expected_schema: str | None) -> list[Path]:
+        try:
+            return write_reports_for_artifact(
+                project=self.run.project,
+                artifact_path=ref.path,
+                run_root=self.run.root,
+                stem=ref.stem,
+                version=ref.version,
+                expected_schema=expected_schema,
+            )
+        except Exception as exc:  # pragma: no cover - eval must not block artifact writes
+            logger.warning(
+                "artifact evaluation failed: run={} artifact={} error={}",
+                self.run.run_id,
+                ref.path.name,
+                exc,
+            )
+            return []
 
 
 def _version_sort_key(v: str) -> int:

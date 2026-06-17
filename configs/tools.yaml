@@ -1,33 +1,448 @@
 tools:
   search.local_docs:
     enabled: true
+    description: Search local literature KB and uploaded documents.
+    mutation_level: read
+    allowed_agents: [idea]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        q: {type: string}
+        query: {type: string}
+        top_k: {type: integer, minimum: 1, maximum: 20}
+    output_schema:
+      type: object
+      required: [query, hits]
+      additionalProperties: true
+
   search.arxiv_search:
-    enabled: false   # V0 placeholder; needs network
+    enabled: true
+    description: Search arXiv and cache results into literature KB.
+    mutation_level: read
+    allowed_agents: [idea]
+    timeout_seconds: 15
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        q: {type: string}
+        query: {type: string}
+        top_k: {type: integer, minimum: 1, maximum: 20}
+        date_from: {type: string}
+        categories:
+          type: array
+          items: {type: string}
+    output_schema:
+      type: object
+      required: [query, hits, cached]
+      additionalProperties: true
+
+  search.web_search:
+    enabled: false
+    description: Provider-backed web search with domain allowlist.
+    mutation_level: read
+    allowed_agents: [idea]
+    timeout_seconds: 15
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        q: {type: string}
+        query: {type: string}
+        domains:
+          type: array
+          items: {type: string}
+        top_k: {type: integer, minimum: 1, maximum: 10}
+    output_schema:
+      type: object
+      required: [provider, query, domains, hits]
+      additionalProperties: true
+
   knowledge.kb_query:
     enabled: true
+    description: Query one KB zone.
+    mutation_level: read
+    allowed_agents: [idea, experiment]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        q: {type: string}
+        query: {type: string}
+        zone: {type: string}
+        top_k: {type: integer, minimum: 1, maximum: 20}
+    output_schema: &knowledge_hits_schema
+      type: object
+      required: [zone, query, hits]
+      additionalProperties: true
+
   knowledge.baseline_match:
     enabled: true
+    description: Match a candidate experiment plan against run_archive.
+    mutation_level: read
+    allowed_agents: [idea, experiment]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [plan]
+      additionalProperties: true
+      properties:
+        plan: {type: object}
+        threshold: {type: number}
+    output_schema:
+      type: object
+      required: [matched_run_id, match_score, reuse_recommended, matched_artifacts, recommended_action]
+      additionalProperties: true
+
   knowledge.experiment_memory:
     enabled: true
+    description: Query historical experiment memory from run_archive.
+    mutation_level: read
+    allowed_agents: [experiment]
+    timeout_seconds: 10
+    output_schema: *knowledge_hits_schema
+
   knowledge.code_assets:
     enabled: true
+    description: Query code asset memory.
+    mutation_level: read
+    allowed_agents: [coding]
+    timeout_seconds: 10
+    output_schema: *knowledge_hits_schema
+
   knowledge.methodology:
     enabled: true
+    description: Query methodology memory.
+    mutation_level: read
+    allowed_agents: [writing]
+    timeout_seconds: 10
+    output_schema: *knowledge_hits_schema
+
   knowledge.run_archive:
     enabled: true
+    description: Query run archive memory.
+    mutation_level: read
+    allowed_agents: [writing]
+    timeout_seconds: 10
+    output_schema: *knowledge_hits_schema
+
+  knowledge.ingest_document:
+    enabled: true
+    description: Ingest text into one of the four KB zones.
+    mutation_level: write
+    allowed_agents: [system, bridge]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [zone, text]
+      additionalProperties: true
+      properties:
+        zone: {type: string}
+        text: {type: string, minLength: 1}
+        metadata: {type: object}
+    output_schema:
+      type: object
+      required: [zone, records_written]
+      additionalProperties: true
+
   code.repo_reader:
     enabled: true
+    description: Read bounded text files from project repo allowed paths.
+    mutation_level: read
+    allowed_agents: [idea, coding]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [path]
+      additionalProperties: true
+      properties:
+        path: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      required: [repo_root, path, content]
+      additionalProperties: true
+
   code.patch_generator:
     enabled: true
+    description: Generate or normalize unified diffs.
+    mutation_level: write
+    allowed_agents: [coding]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: true
+      anyOf:
+        - required: [diff]
+        - required: [path, content]
+      properties:
+        path: {type: string, minLength: 1}
+        content: {type: string}
+        diff: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      required: [diff, files]
+      additionalProperties: true
+
+  code.apply_patch:
+    enabled: true
+    description: Apply a unified diff to the project repo.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 30
+    input_schema:
+      type: object
+      additionalProperties: true
+      anyOf:
+        - required: [diff]
+        - required: [patch_path]
+      properties:
+        version: {type: string}
+        diff: {type: string, minLength: 1}
+        patch_path: {type: string, minLength: 1}
+        files:
+          type: array
+          items:
+            anyOf:
+              - type: string
+              - type: object
+                required: [path]
+                properties:
+                  path: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      required: [applied, files]
+      additionalProperties: true
+
+  code.write_file:
+    enabled: true
+    description: Write a project-repo text file under allowed_paths.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [path, content]
+      additionalProperties: true
+      properties:
+        path: {type: string, minLength: 1}
+        content: {type: string}
+    output_schema:
+      type: object
+      required: [path, sha256, bytes]
+      additionalProperties: true
+
+  code.delete_file:
+    enabled: true
+    description: Delete a project-repo file after human approval.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [path]
+      additionalProperties: true
+      properties:
+        path: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      required: [deleted]
+      additionalProperties: true
+
+  code.rollback_patch:
+    enabled: true
+    description: Restore files from a tool rollback snapshot.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [rollback_ref]
+      additionalProperties: true
+      properties:
+        rollback_ref: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      required: [rolled_back]
+      additionalProperties: true
+
   code.test_runner:
     enabled: true
+    description: Run configured project test commands.
+    mutation_level: read
+    allowed_agents: [coding]
+    timeout_seconds: 120
+    command_allowlist:
+      - ["uv", "run", "pytest"]
+      - ["python", "-m", "pytest"]
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        command_id: {type: string}
+    output_schema:
+      type: object
+      required: [kind, results]
+      additionalProperties: true
+
   code.lint:
     enabled: true
+    description: Run configured project lint commands.
+    mutation_level: read
+    allowed_agents: [coding]
+    timeout_seconds: 120
+    command_allowlist:
+      - ["uv", "run", "mypy"]
+      - ["uv", "run", "lint-imports"]
+      - ["python", "-m", "compileall"]
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        command_id: {type: string}
+    output_schema:
+      type: object
+      required: [kind, results]
+      additionalProperties: true
+
   execution.simulation_runner:
     enabled: true
+    description: Run one mock/pim_cpu/local simulation.
+    mutation_level: write
+    allowed_agents: [execution, system, bridge]
+    timeout_seconds: 180
+    command_allowlist:
+      - ["python", "-c"]
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id: {type: string}
+        backend: {type: string}
+        command_id: {type: string}
+        experiment_id: {type: string}
+        config: {type: object}
+        steps: {type: integer, minimum: 1}
+    output_schema:
+      type: object
+      required: [backend, run_id, experiment_id, status, metrics, fingerprint_hash]
+      additionalProperties: true
+
   execution.batch_runner:
     enabled: true
+    description: Run a batch of mock/pim_cpu/local simulations.
+    mutation_level: write
+    allowed_agents: [execution, system, bridge]
+    timeout_seconds: 600
+    command_allowlist:
+      - ["python", "-c"]
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id: {type: string}
+        backend: {type: string}
+        command_id: {type: string}
+        steps: {type: integer, minimum: 1}
+        experiments:
+          type: array
+          items:
+            anyOf:
+              - type: string
+              - type: object
+    output_schema:
+      type: object
+      required: [backend, run_id, max_concurrency, results, failures]
+      additionalProperties: true
+
   execution.log_streamer:
     enabled: true
+    description: Read execution log tails.
+    mutation_level: read
+    allowed_agents: [execution]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id: {type: string}
+        tail: {type: integer, minimum: 1}
+    output_schema:
+      type: object
+      required: [run_id, lines]
+      additionalProperties: true
+
   execution.metrics_collector:
     enabled: true
+    description: Read execution metrics.json.
+    mutation_level: read
+    allowed_agents: [execution, writing]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id: {type: string}
+        experiment_id: {type: string}
+    output_schema:
+      type: object
+      required: [run_id, metrics]
+      additionalProperties: true
+
+  run.create:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  run.start:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  run.status:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  run.feedback_loop:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  artifact.read:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  artifact.review:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  metrics.evaluate:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  diagnosis.failure_analysis:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  user.approval:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]

@@ -20,6 +20,15 @@ def test_build_fake_metadata_validates(schema_id: str) -> None:
     assert result.valid, f"{schema_id} fake invalid: {result.errors}"
 
 
+def test_fake_proposal_has_v1_idea_fields() -> None:
+    md = build_fake_metadata("proposal.v1", seed="abc123")
+    assert md["testable_predictions"]
+    assert md["experiment_hint"]
+    assert md["evidence_refs"]
+    assert md["risk_register"]
+    assert md["downstream_requirements"]
+
+
 @pytest.mark.parametrize("schema_id", SUPPORTED_SCHEMAS)
 def test_full_doc_through_provider_validates(schema_id: str) -> None:
     md = build_fake_metadata(schema_id, seed="seed")

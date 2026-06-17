@@ -36,11 +36,103 @@
         }
       }
     },
+    "testable_predictions": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["prediction"],
+            "additionalProperties": true,
+            "properties": {
+              "prediction": { "type": "string", "minLength": 1 },
+              "metric": { "type": "string" },
+              "expected_direction": { "type": "string" },
+              "success_threshold": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "experiment_hint": {
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "variables": { "type": "array", "items": { "type": "string" } },
+            "metrics": { "type": "array", "items": { "type": "string" } },
+            "minimal_ablations": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  { "type": "string" },
+                  { "type": "object", "additionalProperties": true }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["ref"],
+            "additionalProperties": true,
+            "properties": {
+              "ref": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string" },
+              "summary": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "risk_register": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["risk"],
+            "additionalProperties": true,
+            "properties": {
+              "risk": { "type": "string", "minLength": 1 },
+              "severity": { "enum": ["low", "medium", "high"] },
+              "mitigation": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "downstream_requirements": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "research_artifacts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "quality_warnings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "debate_summary": {
       "type": "object",
       "properties": {
         "rounds": { "type": "integer", "minimum": 0 },
-        "consensus": { "type": "string" }
+        "consensus": { "type": "string" },
+        "disagreements": { "type": "array", "items": { "type": "string" } },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "evidence_gaps": { "type": "array", "items": { "type": "string" } }
       }
     }
   }

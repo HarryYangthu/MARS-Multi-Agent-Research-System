@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
+from app.harness.schema.validator import validate_document
+from app.harness.evaluation.aggregation import write_scorecard
+from app.harness.evaluation.artifacts import read_reports_for_artifact
 from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 from app.storage.run_store import RunStore
 
@@ -52,6 +55,48 @@ def test_approve_creates_approved_md(tmp_path: Path) -> None:
     approved = art.approve(ref)
     assert approved.path.name == "idea_proposal.approved.md"
     assert approved.path.read_text() == ref.path.read_text()
+
+
+def test_write_and_approve_create_evaluation_reports(tmp_path: Path) -> None:
+    store = RunStore(tmp_path)
+    run = store.create(task="t", project="moe-pimc")
+    art = ArtifactStore(run)
+
+    ref = art.write(text=_proposal_text())
+    reports = read_reports_for_artifact(
+        run_root=run.root,
+        agent_dir="idea",
+        stem="idea_proposal",
+        version="v1",
+    )
+    assert {r["metadata"]["evaluator"] for r in reports} == {
+        "contract.schema_validity",
+        "contract.provenance",
+        "artifact_quality.rubric",
+    }
+    for report in reports:
+        result = validate_document(report["text"], expected_schema="evaluation_report.v1")
+        assert result.valid, result.errors
+
+    approved = art.approve(ref)
+    approved_reports = read_reports_for_artifact(
+        run_root=run.root,
+        agent_dir="idea",
+        stem="idea_proposal",
+        version="approved",
+    )
+    assert len(approved_reports) == 3
+    assert all(
+        r["metadata"]["target_ref"] == "idea/idea_proposal.approved.md"
+        for r in approved_reports
+    )
+
+    scorecard_path = write_scorecard(
+        run_root=run.root,
+        run_id=run.run_id,
+        project=run.project,
+    )
+    assert scorecard_path.name == "evaluation_scorecard.json"
 
 
 def test_latest_prefers_approved(tmp_path: Path) -> None:

@@ -130,6 +130,15 @@ mars_claude/
 | Reverse-dependency for agents | `bridge/agent_registry.py` Protocol-based registry |
 | Layered architecture enforced | `.importlinter` 4 contracts |
 | Dev E2E (zero deps) | `scripts/run_demo.py --mock-mode` + `scripts/acceptance.sh` |
+| Context Engineering V1 | `backend/app/harness/context/{engine,compiler,manifest_v2,raw_store,budget_policy}.py` + `backend/app/api/context.py` |
+| Context Workbench | `frontend/src/app/context/page.tsx` + `frontend/src/lib/contextWorkbench.ts` |
+
+Context Engineering V1 addendum:
+
+- Pre-call `context_manifest.v2.*.json` is written before provider calls while keeping legacy context pack outputs.
+- Tool raw output is externalized under `runs/<id>/context/raw/`; prompts carry compact observations plus `raw_ref`.
+- `/context` provides manifest filtering, segment sorting, manifest diff, raw ref preview, budget bars, and actionable pollution diagnostics.
+- `pnpm --dir frontend test:context` covers the pure Workbench interaction logic without adding a frontend test framework dependency.
 
 ## 5. Demo flow
 
@@ -157,11 +166,11 @@ mars_claude/
 
 ## 6. Tests run
 
-`bash scripts/acceptance.sh` (final run, full output captured at `/tmp/mars-acceptance-final.log`):
+`bash scripts/acceptance.sh` (P4 final run):
 
 ```
 ===== 1. mypy --strict =====
-Success: no issues found in 132 source files
+Success: no issues found in 227 source files
 
 ===== 2. import-linter =====
 harness/ must not import bridge/ or agents/ KEPT
@@ -171,24 +180,30 @@ layered architecture KEPT
 Contracts: 4 kept, 0 broken.
 
 ===== 3. unit + integration tests =====
-..................................................................       [100%]
-................                                                         [100%]
+backend unit + integration passed
+external web search smoke skipped unless explicitly opted in
 
 ===== 4. schema compliance ≥95% =====
-........................................................................ [ 64%]
-........................................                                 [100%]
+passed
 
 ===== 5. gate tests =====
-............                                                             [100%]
+passed
 
-===== 6. baseline matcher recall/precision =====
-...                                                                      [100%]
+===== 6. tools v1 hardening smoke =====
+passed
 
-===== 7. e2e demo (zero external deps) =====
-[Step 1]–[Step 11] all passed
+===== 7. frontend typecheck + lint + context workbench smoke =====
+typecheck passed; lint passed with existing warnings; test:context passed
+
+===== 8. baseline matcher recall/precision =====
+passed
+
+===== 9. e2e demo (zero external deps) =====
+in-process FastAPI demo passed without binding a localhost port
+run_id = 2026-06-17T0843_acceptance_demo
 states = { idea: done, experiment: done, coding: done, execution: done, writing: done }
 
-===== 8. runs/ completeness =====
+===== 10. runs/ completeness =====
   ✓ input populated
   ✓ context populated
   ✓ idea populated
@@ -199,22 +214,33 @@ states = { idea: done, experiment: done, coding: done, execution: done, writing:
   ✓ hitl populated
   ✓ events populated
 
-===== ✅ V0 acceptance passed =====
+===== 11. tools v1 demo audit =====
+local registry/config, /api/tools, tool audit filters, trace span, execution artifacts passed
+
+===== 12. context manifest v2 coverage =====
+context v2 manifests: 8
+context workbench API manifests: 8
+
+===== ✅ V0 + Tools V1 + Context Workbench acceptance passed =====
 ```
 
 Quantitative summary:
 
 | Metric | Target | Actual |
 |---|---|---|
-| Total tests | n/a | **209 passed** |
-| mypy --strict | clean | clean (132 source files) |
+| Full acceptance | clean | `bash scripts/acceptance.sh` passed on run `2026-06-17T0843_acceptance_demo` |
+| mypy --strict | clean | clean (227 source files) |
 | import-linter contracts | 4 KEPT | 4 KEPT |
+| Frontend typecheck / lint | clean | typecheck passed; lint passed with existing warnings only |
+| Context Workbench smoke | runnable | `pnpm --dir frontend test:context` validates filters, sorting, diff, raw formatting |
 | Schema compliance | ≥95% | 100% on the in-suite valid samples; 95.x% target asserted by `test_compliance_rate_above_95_percent` |
 | Baseline matcher recall | ≥80% | 100% on the synthetic 10+5 set; recall asserted in `test_recall_and_precision_targets` |
 | Baseline matcher precision | ≥90% | 100% on the synthetic 10+5 set |
 | Multi-experiment cap | 6 | unit-tested in `test_six_jobs_run_concurrently` (6 distinct WS channels, no cross-talk) |
-| Pipeline e2e in mock mode | runnable | `run_demo.py` 11 steps in <30 s |
+| Pipeline e2e in mock mode | runnable | `run_demo_inprocess.py` 11 steps in <30 s without local socket binding |
 | `runs/` completeness | 9/9 subdirs | 9/9 |
+| Context Manifest V2 | ≥5 manifests | 8 pre-call manifests plus `context_manifest.v2.json` index |
+| Context Workbench API | runnable | `/api/context/runs/{run_id}` returned 8 manifest summaries in acceptance |
 | Backend Python LOC | n/a | ~5.7k |
 | Frontend TS LOC | n/a | ~890 |
 

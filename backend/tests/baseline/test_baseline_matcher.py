@@ -11,6 +11,7 @@ import pytest
 
 from app.harness.kb.baseline_matcher import find_match
 from app.harness.kb.embedder import embed
+from app.harness.kb.profiles import write_baseline_current
 from app.harness.kb.stores import KBRecord, KBStores, reset_for_tests
 
 
@@ -58,6 +59,42 @@ def test_low_similarity_no_match(tmp_path: Path) -> None:
     match = find_match(plan=plan, threshold=0.85, stores=stores)
     # We may still get the closest record by id, but score must be below threshold.
     assert match.match_score < 0.85
+    assert match.record is None
+
+
+def test_baseline_current_profile_takes_priority(tmp_path: Path) -> None:
+    stores = reset_for_tests(base=tmp_path)
+    write_baseline_current(
+        "moe-pimc",
+        {
+            "run_id": "profile_baseline",
+            "signature": (
+                "project=moe-pimc | variables={'independent': ['profile_axis']} "
+                "| metrics={'primary': 'RES_profile'} | ablations=[7]"
+            ),
+        },
+        base=tmp_path,
+    )
+    zone = stores.zone("run_archive")
+    zone.add(
+        KBRecord(
+            id="archive-baseline",
+            zone="run_archive",
+            text="project=moe-pimc | variables={'independent': ['profile_axis']} | metrics={'primary': 'RES_profile'} | ablations=[7]",
+            metadata={"run_id": "archive_should_not_win"},
+            embedding=embed("profile_axis RES_profile"),
+        )
+    )
+    plan = {
+        "project": "moe-pimc",
+        "variables": {"independent": ["profile_axis"]},
+        "metrics": {"primary": "RES_profile"},
+        "ablations": [7],
+    }
+
+    match = find_match(plan=plan, threshold=0.1, stores=stores)
+
+    assert match.matched_run_id == "profile_baseline"
     assert match.record is None
 
 

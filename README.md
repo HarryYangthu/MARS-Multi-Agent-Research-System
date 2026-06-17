@@ -57,6 +57,9 @@ The first concrete project living on top of MARS is `projects/moe-pimc/` —
 - **Full sedimentation.** Each task writes nine subdirectories under
   `runs/<timestamp>_<task>/` — input / context / per-agent artifacts /
   HITL / events — making every run replayable and auditable.
+- **Tools V1 platform.** Agents and Commander share one registry-backed tool
+  catalogue with schema validation, config gating, Gate 5 protection,
+  audit events, approval records, and rollback snapshots.
 
 ## Architecture at a glance
 
@@ -119,7 +122,8 @@ Run the canonical 11-step end-to-end demo (mock-mode):
 python scripts/run_demo.py --port 8000 --mock-mode
 ```
 
-Full acceptance gate (mypy --strict + import-linter + 209 tests + e2e):
+Full acceptance gate (mypy --strict + import-linter + backend/frontend checks +
+Tools V1 audit + e2e):
 
 ```bash
 bash scripts/acceptance.sh
@@ -178,7 +182,7 @@ mars/
 ├─ runs/                     # per-task sedimentation (gitignored)
 ├─ templates/                # artifact templates · code_rules
 ├─ scripts/                  # dev.sh · run_demo.py · acceptance.sh · ingest_repo.py · ingest_pdfs.py
-└─ docs/                     # architecture · agent_io_schema · run_lifecycle · phase status
+└─ docs/                     # architecture · agent_io_schema · run_lifecycle · evaluation · phase status
 ```
 
 ## Project status
@@ -189,8 +193,10 @@ audit. Highlights:
 
 | | |
 |---|---|
-| Tests | **209 passed** |
-| `mypy --strict` | clean (132 source files) |
+| Backend tests | unit / integration / gate passing |
+| Frontend checks | typecheck / lint / context smoke passing |
+| Tools V1 audit | catalogue / API filters / trace / execution artifacts verified |
+| `mypy --strict` | clean |
 | `import-linter` contracts | 4 kept, 0 broken |
 | Schema compliance | ≥ 95% |
 | Baseline matcher recall / precision | 100% / 100% on synthetic set |
@@ -198,6 +204,9 @@ audit. Highlights:
 | `runs/<id>/` completeness | 9/9 subdirs populated |
 
 ## Roadmap (V1 themes)
+
+V0 remains the stable release line (`v0.1.0`). V1 work should be treated as
+development until [`ACCEPTANCE_V1.md`](ACCEPTANCE_V1.md) is green.
 
 - **Post-training pipeline** — GRPO trainer, preference-pair construction
   from `runs/<id>/hitl/*`, composite reward (schema validity ×
@@ -216,10 +225,16 @@ audit. Highlights:
 - [`PRODUCT.md`](PRODUCT.md) — product definition (5 agents, dual-form, KB zones, decision log)
 - [`DESIGN.md`](DESIGN.md) — architecture (tiers, schemas, harness internals, runtime, frontend)
 - [`ACCEPTANCE.md`](ACCEPTANCE.md) — V0 acceptance bar (Dev E2E + Hardware E2E)
-- [`CLAUDE.md`](CLAUDE.md) — hard constraints, layout, style rules (auto-loaded by Claude Code / Codex)
+- [`ACCEPTANCE_V1.md`](ACCEPTANCE_V1.md) — V1 development gate before stable version bump
+- [`docs/V1_RELEASE_STATUS.md`](docs/V1_RELEASE_STATUS.md) — latest P3 release-gate result and command
+- [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) — hard constraints, layout, style rules for coding agents
 - [`docs/architecture.md`](docs/architecture.md) — companion diagrams
-- [`docs/agent_io_schema.md`](docs/agent_io_schema.md) — 5 schemas, fields, examples
+- [`docs/agent_io_schema.md`](docs/agent_io_schema.md) — artifact/system schemas, fields, examples
 - [`docs/run_lifecycle.md`](docs/run_lifecycle.md) — sequence diagram of one task end-to-end
+- [`docs/evaluation_system.md`](docs/evaluation_system.md) — systematic evaluation layer design
+- [`docs/tools_catalog.md`](docs/tools_catalog.md) — Tools V1 catalogue, APIs, audit records, external smoke
+- [`docs/tool_security.md`](docs/tool_security.md) — dispatch order, Gate 5, rollback, redaction, network policy
+- [`docs/V1_AGENT_TODO.md`](docs/V1_AGENT_TODO.md) — V1 cleanup and implementation queue
 - [`docs/frontend_ux.md`](docs/frontend_ux.md) — P0 UI contract
 
 ## License

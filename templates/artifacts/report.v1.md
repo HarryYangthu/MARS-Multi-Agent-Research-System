@@ -12,10 +12,10 @@ chain_refs:
 debate_summary:
   rounds: 1
   reviewer_critiques:
-    - "Discuss ASIC area implications more concretely."
-    - "Add ablation against soft router baseline."
+    - "需要更具体地讨论 ASIC 面积与功耗影响。"
+    - "建议补充与 soft router baseline 的消融对比。"
 ---
 
-# Research report
+# 研究报告
 
-Body of report.
+正文使用中文撰写，面向导师或项目负责人总结研究问题、方法、实验结果、失败分析、指标是否达标、风险与下一步建议。技术名词、指标名、代码路径和模型名保持原样。

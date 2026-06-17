@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest
+from app.bridge.run_observability import build_run_observability
+from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -41,6 +43,13 @@ class RunDetail(RunSummary):
 
 @router.post("", response_model=RunDetail)
 async def create_run(payload: CreateRunPayload) -> RunDetail:
+    try:
+        assert_ready_for_run(project=payload.project)
+    except ProductionReadinessError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=exc.report.to_dict(),
+        ) from exc
     orch = get_orchestrator()
     request = RunRequest(
         task=payload.task,
@@ -49,7 +58,12 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         standalone=payload.standalone,
         user_request=payload.user_request,
     )
-    session = orch.create_session(request)
+    try:
+        session = orch.create_session(request)
+    except ProductionReadinessError as exc:
+        raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # If the caller supplied a seed artifact, validate + persist it under the
     # entrypoint Agent's directory as v1.md. The orchestrator's agent_runner
@@ -95,8 +109,9 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
 
 
 @router.get("", response_model=list[RunSummary])
-async def list_runs() -> list[RunSummary]:
+async def list_runs(project: str = "") -> list[RunSummary]:
     store = get_run_store()
+    project_filter = project.strip()
     return [
         RunSummary(
             run_id=r.run_id,
@@ -106,6 +121,7 @@ async def list_runs() -> list[RunSummary]:
             created_at=r.created_at,
         )
         for r in store.list()
+        if not project_filter or r.project == project_filter
     ]
 
 
@@ -127,13 +143,39 @@ async def get_run(run_id: str) -> RunDetail:
     )
 
 
+@router.get("/{run_id}/observability")
+async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return build_run_observability(run, limit=max(1, min(limit, 500)))
+
+
+@router.get("/{run_id}/health")
+async def get_run_health(run_id: str) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    view = build_run_observability(run, limit=20)
+    return {
+        "run_id": run_id,
+        "status": view["status"],
+        "health": view["health"],
+        "latest_event_at": view["latest_event_at"],
+    }
+
+
 @router.post("/{run_id}/start", status_code=202)
 async def start_run(run_id: str) -> dict[str, str]:
     orch = get_orchestrator()
     try:
-        orch.session(run_id)
+        session = orch.session(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+    try:
+        assert_ready_for_run(project=session.run.project)
+    except ProductionReadinessError as exc:
+        raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
     asyncio.create_task(orch.run(run_id), name=f"run:{run_id}")
     return {"status": "started", "run_id": run_id}
 

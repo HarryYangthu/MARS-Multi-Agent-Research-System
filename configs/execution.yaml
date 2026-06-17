@@ -1,0 +1,32 @@
+execution:
+  backend: mock
+  max_concurrency: 16
+  batch_steps: 120
+  command_timeout_seconds: 60
+  allow_real_patch_apply: true
+  # Used only when a tool call requests backend=local_command. Commands are
+  # executed without a shell and must also match configs/tools.yaml allowlists.
+  local_commands:
+    - id: python_metric_echo
+      label: Python metric echo
+      argv:
+        - python
+        - -c
+        - 'import json; print(json.dumps({"metrics": {"loss": 0.0, "RES": -42.0}}))'
+  remote_gpu:
+    enabled: false
+    endpoint: ""
+
+code_checks:
+  lint:
+    enabled: true
+    commands:
+      - id: python_compile
+        label: Python compile check
+        argv: ["python", "-m", "compileall", "-q", "."]
+  test:
+    enabled: true
+    commands:
+      - id: pytest_quick
+        label: Pytest quick suite
+        argv: ["python", "-m", "pytest", "-q"]

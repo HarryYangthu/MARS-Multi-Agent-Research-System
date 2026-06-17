@@ -1,0 +1,55 @@
+write_gates:
+  dev_e2e:
+    require_schema_approved: true
+    require_eval_pass: false
+    require_provenance: false
+    allow_mock_to_main: false
+    min_salience: 0.0
+  research:
+    require_schema_approved: true
+    require_eval_pass: true
+    require_provenance: true
+    allow_mock_to_main: false
+    min_salience: 0.3
+  hardware:
+    require_schema_approved: true
+    require_eval_pass: true
+    require_provenance: true
+    require_real_execution: true
+    allow_mock_to_main: false
+    min_salience: 0.3
+
+mock_policy:
+  zone: quarantine
+  exclude_from_recall:
+    - research
+    - hardware
+  exclude_from_baseline_match: true
+  ttl_days: 3
+
+lifecycle:
+  default_ttl_days: 180
+  run_archive_ttl_days: 365
+  decay_half_life_days: 90
+  prune_below_salience: 0.15
+
+selector:
+  hybrid: true
+  weights:
+    similarity: 0.4
+    recency: 0.2
+    confidence: 0.2
+    eval_status: 0.1
+    salience: 0.1
+  rerank: true
+  exclude_superseded: true
+  inject: summary
+
+profiles_vs_collections:
+  baseline_current: profile
+  active_constraints: profile
+  findings: collection
+  episodes: collection
+
+backend:
+  store: file

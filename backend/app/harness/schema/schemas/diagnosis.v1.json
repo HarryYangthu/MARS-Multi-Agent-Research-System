@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/diagnosis.v1.json",
+  "title": "Bridge diagnosis frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "run_id",
+    "attempt",
+    "passed",
+    "failed_metrics",
+    "suspected_causes",
+    "recommended_target",
+    "recommended_action",
+    "evidence_refs",
+    "budget_status"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "diagnosis.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "enum": ["bridge", "commander"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "passed": { "type": "boolean" },
+    "failed_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric", "observed", "target", "direction"],
+        "properties": {
+          "metric": { "type": "string", "minLength": 1 },
+          "observed": { "type": "number" },
+          "target": { "type": "number" },
+          "direction": {
+            "enum": ["gte", "lte", "maximize", "minimize"]
+          },
+          "gap": { "type": "number" },
+          "aggregation": { "type": "string" }
+        }
+      }
+    },
+    "suspected_causes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "summary"],
+        "properties": {
+          "kind": {
+            "enum": ["metrics_gap", "config_sanity", "code_change_risk", "budget", "unknown"]
+          },
+          "summary": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["low", "medium", "high"] },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "recommended_target": {
+      "enum": ["coding", "experiment", "idea", "writing", "none"]
+    },
+    "recommended_action": { "type": "string", "minLength": 1 },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "budget_status": {
+      "enum": ["within_budget", "exhausted", "not_applicable"]
+    },
+    "attribution": {
+      "type": "object"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rejected_alternatives": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "feedback_packet_ref": {
+      "type": "string"
+    },
+    "attempt_ledger_ref": {
+      "type": "string"
+    },
+    "memory_candidates": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  }
+}

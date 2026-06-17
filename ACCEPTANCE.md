@@ -45,6 +45,36 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 - ❌ 多用户 / 权限隔离
 - ❌ 云端部署
 
+### 1.2 Context Engineering V1 验收补充
+
+- ✅ 每次 LLM provider 调用前写入 `runs/<id>/context/context_manifest.v2.*.json`
+- ✅ 兼容保留 V0 `*_context_pack.vN.json` / `*_context_snapshot.vN.md`
+- ✅ V2 manifest 记录 ContextSegment、token budget、render_order、messages_preview、diagnostics、raw_refs
+- ✅ 大块 tool output 写入 `runs/<id>/context/raw/`,prompt 只注入 compact observation + `raw_ref`
+- ✅ Agent handoff 默认传蒸馏摘要,原始 approved artifact 仍保留在 `runs/`
+- ✅ `/api/context/runs/{run_id}` / manifest / raw / preview API 可用
+- ✅ 前端 `/context` 工作台可查看 manifest、segment、预算、raw ref 与污染诊断
+- ✅ 前端 `/context` 工作台支持 manifest agent/purpose/risk/over-budget 过滤、segment 过滤排序、manifest diff、raw ref 快速打开与 JSON pretty preview
+- ✅ `diagnostics.compression` / `diagnostics.packing` 记录压缩、截断、丢弃、over-budget 的审计决策
+- ✅ 污染诊断在工作台展示可执行建议,而不是只展示风险标签
+- ✅ draft / schema repair / debate / tool gather 都必须走 pre-call manifest 或 message-capture manifest
+- ✅ Context V1 配置可通过 `MARS_CONTEXT_MAX_TOKENS` / `MARS_CONTEXT_TARGET_TOKENS` / `MARS_CONTEXT_AUTO_COMPRESS` / `MARS_CONTEXT_TOOL_RAW_EXTERNALIZE` / `MARS_CONTEXT_WORKBENCH_ENABLED` 控制
+- ✅ Context Workbench 纯逻辑回归通过 `pnpm --dir frontend test:context` 覆盖 manifest filter、segment sort、manifest diff、raw formatting
+
+### 1.3 Tools V1 验收补充
+
+- ✅ `configs/tools.yaml` 是唯一工具开关与权限控制面,所有注册工具都有 `enabled` / `mutation_level` / `allowed_agents` / `timeout_seconds` / schema 配置
+- ✅ `configs/agents.yaml` 中每个工具名必须已注册,或在 `configs/tools.yaml` 中显式标记 `bridge_only: true`
+- ✅ `ToolRegistry.dispatch()` 对未知工具、禁用工具、越权 agent、schema invalid、large refactor、Gate 5 block 返回结构化 `ToolResult`
+- ✅ 每次 dispatch 写 `events/tool_events.jsonl`、`events/tool_calls.jsonl` 和 trace span
+- ✅ Mutating code tools 只允许写 `repo_link.yaml.allowed_paths`,并保存 rollback snapshot
+- ✅ `code.delete_file` 和 large refactor 默认 `requires_approval`;Gate 5 baseline 保护始终 `blocked`,不能人工审批绕过
+- ✅ `search.arxiv_search` 默认 config-enabled,但运行时必须由 `MARS_ENABLE_NETWORK_TOOLS=true` 才能联网
+- ✅ `search.web_search` 默认 config-disabled,只允许 allowlisted domains 和已配置 provider
+- ✅ `execution.batch_runner` 在 mock demo 中通过 registry dispatch 启动,并产生 `metrics.json` / `curves/` / `run_log_*.v1.md`
+- ✅ Run Detail Commander 面板可按 tool/status/event/call_id/limit 查询工具审计,并支持 pending approval 与 rollback 操作
+- ✅ `scripts/verify_tools_v1_acceptance.py` 能对完成的 demo run 验证 catalogue、API filter、tool audit、trace span、execution artifacts
+
 ## 2. Demo 主脚本(MOE-PIMC 全链路)
 
 这个 demo 必须 e2e 跑通才算 V0 完成。
@@ -440,22 +470,43 @@ import-linter --config .importlinter
 pytest backend/tests/unit/
 pytest backend/tests/schema/ --cov-fail-under=95   # schema 合规率
 pytest backend/tests/gate/
+pytest backend/tests/unit/test_tools_hardening.py \
+  backend/tests/unit/test_search_tools_v1.py \
+  backend/tests/unit/test_execution_tools_v1.py
 pytest backend/tests/baseline/
 
 # 3. 集成测试
 pytest backend/tests/integration/
 
-# 4. e2e demo(零外部依赖)
-docker compose up -d
-sleep 10
-python scripts/run_demo.py --mock-mode
-docker compose down
+# 4. 前端 / Context Workbench
+pnpm --dir frontend typecheck
+pnpm --dir frontend lint
+pnpm --dir frontend test:context
 
-# 5. 检查 runs/ 完整性
+# 5. e2e demo(零外部依赖)
+python scripts/run_demo_inprocess.py \
+  --mock-mode \
+  --task acceptance_demo \
+  --run-id-file /tmp/mars-acceptance-run-id
+RUN_ID="$(cat /tmp/mars-acceptance-run-id)"
+
+# 6. 检查 runs/ 完整性 + tools/context 审计
 ls runs/*/idea/ runs/*/experiment/ runs/*/coding/ \
    runs/*/execution/ runs/*/writing/ runs/*/hitl/ runs/*/events/
+python scripts/verify_tools_v1_acceptance.py --run-id "$RUN_ID" --in-process
+test -f "runs/$RUN_ID/context/context_manifest.v2.json"
+find "runs/$RUN_ID/context" -name 'context_manifest.v2.*.json' | wc -l
+python - "$RUN_ID" <<'PY'
+import sys
+from fastapi.testclient import TestClient
+from app.main import create_app
 
-echo "✅ V0 acceptance passed"
+response = TestClient(create_app()).get(f"/api/context/runs/{sys.argv[1]}")
+assert response.status_code == 200
+assert response.json()["budget_summary"]["manifest_count"] >= 5
+PY
+
+echo "✅ V0 + Tools V1 + Context Workbench acceptance passed"
 ```
 
 CI 必须每次 PR 跑这个脚本,全绿才能 merge。

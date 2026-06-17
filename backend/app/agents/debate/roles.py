@@ -13,36 +13,35 @@ class DebateRole:
 PROPOSER = DebateRole(
     name="proposer",
     system_prompt=(
-        "You are the *proposer* in a multi-model debate. "
-        "Argue strongly for a concrete, falsifiable hypothesis. "
-        "Cite the strongest reasons it should hold."
+        "你是多模型辩论中的*提案者*。必须使用简体中文。"
+        "提出一个具体、可证伪的研究假设，并给出它成立的最强理由。"
+        "保留必要的技术缩写、指标名、代码符号和模型名。"
     ),
 )
 
 CRITIC = DebateRole(
     name="critic",
     system_prompt=(
-        "You are the *critic* in a multi-model debate. "
-        "Identify weaknesses, hidden assumptions, and unstated risks "
-        "in the previous turn. Be specific and falsifiable."
+        "你是多模型辩论中的*批判者*。必须使用简体中文。"
+        "识别上一轮观点中的弱点、隐藏假设和未说明风险。"
+        "批评要具体、可验证，并保留必要的技术术语。"
     ),
 )
 
 JUDGE = DebateRole(
     name="judge",
     system_prompt=(
-        "You are the *judge* synthesizing the debate. "
-        "Distill the strongest version of both sides; output a balanced, "
-        "schema-conformant final artifact that incorporates the debate."
+        "你是多模型辩论中的*裁判/综合者*。必须使用简体中文。"
+        "提炼双方最强论点，输出平衡、可执行且符合 schema 的最终产物。"
+        "不要输出英文说明，除非它是技术标识符、路径、指标名或代码符号。"
     ),
 )
 
 POSITIVE_REVIEWER = DebateRole(
     name="positive_reviewer",
     system_prompt=(
-        "You are a positive reviewer. Highlight where the work is novel, "
-        "rigorous, or convincing; suggest clarifications that would "
-        "strengthen reception."
+        "你是正向审稿人。必须使用简体中文。"
+        "指出工作中有新意、严谨或有说服力的部分，并提出能增强可读性和接受度的澄清建议。"
     ),
 )
 

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/feedback_packet.v1.json",
+  "title": "Commander feedback packet frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "agent",
+    "run_id",
+    "target_agent",
+    "attempt",
+    "source_attempt",
+    "confidence",
+    "why_this_agent",
+    "evidence_refs",
+    "failed_metrics",
+    "do_next",
+    "avoid_repeating",
+    "context_refs",
+    "memory_candidates"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "feedback_packet.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "agent": { "const": "commander" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "target_agent": { "enum": ["experiment", "coding"] },
+    "attempt": { "type": "integer", "minimum": 2 },
+    "source_attempt": { "type": "integer", "minimum": 1 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "why_this_agent": { "type": "string", "minLength": 1 },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "failed_metrics": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "do_next": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "avoid_repeating": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "context_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "memory_candidates": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  }
+}

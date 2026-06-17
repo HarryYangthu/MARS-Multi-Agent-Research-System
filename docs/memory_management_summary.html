@@ -1,0 +1,1189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MARS Memory System v2</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #182230;
+      --muted: #617084;
+      --line: #d7dfeb;
+      --blue: #1f5fbf;
+      --green: #087455;
+      --amber: #a15c07;
+      --red: #b4234a;
+      --violet: #6d3cb5;
+      --cyan: #096a88;
+      --soft-blue: #eaf2ff;
+      --soft-green: #e8f6ef;
+      --soft-amber: #fff4dd;
+      --soft-red: #ffedf2;
+      --soft-violet: #f3efff;
+      --soft-cyan: #e6f7fb;
+      --shadow: 0 12px 34px rgba(24, 34, 48, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.55;
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wrap {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.9fr);
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-copy {
+      padding: 10px 0 0;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .badge.strong {
+      border-color: #b7dac8;
+      background: var(--soft-green);
+      color: var(--green);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(34px, 5vw, 60px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    code {
+      padding: 2px 6px;
+      border: 1px solid #dbe2ec;
+      border-radius: 6px;
+      background: #f8fafc;
+      color: #253247;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      overflow-x: auto;
+      border: 1px solid #dbe2ec;
+      border-radius: 8px;
+      background: #101827;
+      color: #ecf3ff;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .hero-card {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 320px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      min-height: 96px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 31px;
+      line-height: 1;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stamp {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    section {
+      margin-top: 28px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .section-title p {
+      max-width: 660px;
+      color: var(--muted);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .block {
+      padding: 18px;
+    }
+
+    .block p {
+      color: var(--muted);
+    }
+
+    .surface {
+      min-height: 180px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .surface b {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: var(--ink);
+    }
+
+    .surface p {
+      color: var(--muted);
+    }
+
+    .surface.short {
+      border-top: 5px solid var(--cyan);
+      background: var(--soft-cyan);
+    }
+
+    .surface.long {
+      border-top: 5px solid var(--violet);
+      background: var(--soft-violet);
+    }
+
+    .zone {
+      min-height: 210px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .zone p {
+      color: var(--muted);
+    }
+
+    .zone.literature {
+      border-top: 5px solid var(--blue);
+      background: var(--soft-blue);
+    }
+
+    .zone.methodology {
+      border-top: 5px solid var(--green);
+      background: var(--soft-green);
+    }
+
+    .zone.code {
+      border-top: 5px solid var(--amber);
+      background: var(--soft-amber);
+    }
+
+    .zone.archive {
+      border-top: 5px solid var(--red);
+      background: var(--soft-red);
+    }
+
+    .count {
+      display: inline-block;
+      margin: 10px 0 8px;
+      padding: 5px 10px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.74);
+      font-weight: 800;
+    }
+
+    .flow {
+      padding: 22px;
+      overflow-x: auto;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(150px, 1fr));
+      gap: 12px;
+      min-width: 1020px;
+    }
+
+    .flow-node {
+      position: relative;
+      min-height: 130px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .flow-node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      width: 12px;
+      height: 2px;
+      background: #536176;
+    }
+
+    .flow-node b {
+      display: block;
+      margin-bottom: 8px;
+      color: #263247;
+    }
+
+    .flow-node span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 820px;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef2f7;
+      color: #273344;
+      font-size: 14px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .matrix td:first-child,
+    .matrix th:first-child {
+      width: 120px;
+      font-weight: 800;
+      color: #263247;
+    }
+
+    .callout {
+      padding: 18px;
+      border-left: 5px solid var(--blue);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: var(--shadow);
+    }
+
+    .callout.warning {
+      border-left-color: var(--amber);
+    }
+
+    .callout.danger {
+      border-left-color: var(--red);
+    }
+
+    .callout.good {
+      border-left-color: var(--green);
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fbfcfe;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    ol,
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 7px;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr);
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .phase:last-child {
+      border-bottom: 0;
+    }
+
+    .phase-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px;
+      height: 34px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: #273344;
+      font-weight: 800;
+    }
+
+    .phase p {
+      color: var(--muted);
+    }
+
+    footer {
+      margin-top: 34px;
+      padding: 22px 0 34px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .grid-2,
+      .grid-3,
+      .grid-4 {
+        grid-template-columns: 1fr;
+      }
+
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-title {
+        display: block;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .wrap {
+        padding: 24px 18px;
+      }
+
+      .phase {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div class="hero-copy">
+        <div class="badge-row">
+          <span class="badge strong"><span class="dot"></span>四库知识分区已包含</span>
+          <span class="badge">Memory System v2</span>
+          <span class="badge">862 条 KB 记录</span>
+        </div>
+        <h1>MARS Memory System v2</h1>
+        <p class="lead">
+          当前实现已经从“四库 + sediment”扩展成多表面的记忆系统：四库 KB、Run 落盘、ContextPack/Manifest、Commander 会话、Agent 自上下文、Coding workspace items。v2 的目标不是先换向量库，而是先补上让“知识堆”成为“记忆系统”的三块肌肉：门控写入、冲突消解、遗忘治理。
+        </p>
+      </div>
+
+      <aside class="panel hero-card">
+        <div>
+          <h2>长期四库现状</h2>
+          <div class="metric-grid">
+            <div class="metric">
+              <strong>519</strong>
+              <span>literature 文献库</span>
+            </div>
+            <div class="metric">
+              <strong>154</strong>
+              <span>methodology 方法库</span>
+            </div>
+            <div class="metric">
+              <strong>140</strong>
+              <span>code_assets 代码资产库</span>
+            </div>
+            <div class="metric">
+              <strong>49</strong>
+              <span>run_archive 实验运行档案</span>
+            </div>
+          </div>
+        </div>
+        <p class="stamp">扫描日期：2026-06-17。来源：<code>knowledge/*/_index.json</code>。</p>
+      </aside>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="grid-3">
+      <article class="callout good">
+        <h2>保留什么</h2>
+        <p>保留 mock-first 可降级、per-run 落盘可 replay/audit、四库分区清晰、KB API 可替换这些强项。</p>
+      </article>
+      <article class="callout warning">
+        <h2>先补什么</h2>
+        <p>先补 eval 门控写入、mock 隔离、冲突消解和遗忘治理。它们是正确性问题，不是后端性能问题。</p>
+      </article>
+      <article class="callout danger">
+        <h2>为什么急</h2>
+        <p>未门控、混 mock 的长期记忆会成为跨会话投毒通道；embedding 只会让污染库搜得更快。</p>
+      </article>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>当前 Memory 表面</h2>
+        <p>系统没有单一 MemoryManager，而是由短期上下文、长期 KB、会话、Agent 自上下文和工作台记忆共同组成。</p>
+      </div>
+      <div class="grid-3">
+        <article class="surface short">
+          <b>短期：Run / ContextPack</b>
+          <p><code>runs/&lt;id&gt;/</code> 保存 input、context、Agent 产物、HITL、events。<code>BaseAgent.ContextPack</code> 是实际喂给 LLM 的 working memory。</p>
+        </article>
+        <article class="surface short">
+          <b>短期：Commander 会话</b>
+          <p><code>conversations/&lt;conv_id&gt;/</code> 保存 session 状态、关联 run、messages 和工具结果。当前主要是全量 replay。</p>
+        </article>
+        <article class="surface long">
+          <b>长期：四库 KB</b>
+          <p><code>literature</code>、<code>methodology</code>、<code>code_assets</code>、<code>run_archive</code> 是跨会话长期知识区。</p>
+        </article>
+        <article class="surface long">
+          <b>长期：Agent 自上下文</b>
+          <p><code>docs/prompts/examples/evals/uploads</code> 目前作为 Agent 长期自上下文。v2 将它们识别为程序/情景记忆。</p>
+        </article>
+        <article class="surface long">
+          <b>长期：Coding workspace items</b>
+          <p>Coding workspace 维护手工 memory items 和 KB memory items。v2 建议收编进统一 MemoryRecord。</p>
+        </article>
+        <article class="surface short">
+          <b>审计：Context Manifest</b>
+          <p><code>context_pack.vN.json</code> 与 <code>context_snapshot.vN.md</code> 记录上下文审计。v2 要求与实际 LLM messages 同源。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>四库保留，但不再等同认知类型</h2>
+        <p>四库是 storage zone；v2 额外横切 <code>memory_type</code>，区分 semantic、episodic、procedural。</p>
+      </div>
+      <div class="grid-4">
+        <article class="zone literature">
+          <h3>literature</h3>
+          <p>文献库。保存研究背景、文献线索、已验证发现。</p>
+          <span class="count">519 条</span>
+          <p>v2：通常偏 semantic，也可以包含情景化 evidence。</p>
+        </article>
+
+        <article class="zone methodology">
+          <h3>methodology</h3>
+          <p>方法库。保存可复用方法、实验设计原则、写作规范。</p>
+          <span class="count">154 条</span>
+          <p>v2：常见为 procedural，也可保存 semantic finding。</p>
+        </article>
+
+        <article class="zone code">
+          <h3>code_assets</h3>
+          <p>代码资产库。保存 code_spec、补丁思路、接口兼容约束。</p>
+          <span class="count">140 条</span>
+          <p>v2：多为 procedural，召回给 Coding Agent。</p>
+        </article>
+
+        <article class="zone archive">
+          <h3>run_archive</h3>
+          <p>实验运行档案。保存 run_log、metrics、fingerprint 和失败经验。</p>
+          <span class="count">49 条</span>
+          <p>v2：结构化成可召回 episode，baseline-current 改用 profile。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel flow">
+      <h2>v2 门控 Sedimentation 流程</h2>
+      <div class="flow-grid" aria-label="gated sedimentation flow">
+        <div class="flow-node">
+          <b>1. Artifact 完成</b>
+          <span>Agent 输出 markdown + YAML frontmatter。</span>
+        </div>
+        <div class="flow-node">
+          <b>2. Schema approved?</b>
+          <span>现有 schema 校验与 HITL approval。</span>
+        </div>
+        <div class="flow-node">
+          <b>3. Eval passed?</b>
+          <span>faithfulness、显著性、引用、provenance gate。</span>
+        </div>
+        <div class="flow-node">
+          <b>4. Mock quarantine</b>
+          <span><code>is_mock=true</code> 写隔离区，主召回与 baseline match 默认排除。</span>
+        </div>
+        <div class="flow-node">
+          <b>5. Conflict check</b>
+          <span>content hash 去重、source upsert、语义 supersede/merge。</span>
+        </div>
+        <div class="flow-node">
+          <b>6. Write memory</b>
+          <span>写入 zone + memory_type，带完整 provenance 和生命周期字段。</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>v2 变更摘要</h2>
+        <p>相对当前实现和已规划优化，v2 把正确性治理放在后端替换之前。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>变更</th>
+              <th>状态</th>
+              <th>类别</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>统一记忆模型：短期/长期 × 语义/情景/程序，四库保留为 storage zone，横切 <code>memory_type</code>。</td>
+              <td>v2 新增</td>
+              <td>模型</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>写入门控建立在 eval-pass + provenance，而不只是 schema-approved。</td>
+              <td>v2 新增 P0</td>
+              <td>正确性</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>冲突消解：content hash 之外，增加语义 supersede/merge；baseline-current 建模成 profile。</td>
+              <td>v2 新增 P0</td>
+              <td>正确性</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>遗忘治理：TTL、衰减、低 salience 剪枝，mock 隔离区强 TTL。</td>
+              <td>v2 新增 P0</td>
+              <td>正确性</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>MemoryRecord v2 厚 schema：加入 <code>is_mock</code>、<code>confidence</code>、<code>eval_status</code>、<code>supersedes</code>、<code>ttl</code>。</td>
+              <td>扩展 Step 2</td>
+              <td>schema</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>Context Compiler 同源：一次 compile 同时产出真实 LLM messages 与 manifest。</td>
+              <td>强化 Step 1/5</td>
+              <td>上下文</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>MemorySelector 加 confidence/eval_status 加权、type-aware、rerank 和 JIT 召回。</td>
+              <td>扩展 Step 4</td>
+              <td>检索</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>Agent 自上下文识别为程序/情景记忆，接 prompt 优化和 few-shot 自进化。</td>
+              <td>v2 新增</td>
+              <td>自进化</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>选择性 sediment：只长期沉淀值得记的意外、失败、新颖发现和 eval scorecard。</td>
+              <td>v2 新增</td>
+              <td>治理</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>eval ↔ memory 连接：eval 是写入 gate，scorecard 反过来成为情景/程序记忆。</td>
+              <td>v2 新增</td>
+              <td>自进化</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>统一记忆模型</h2>
+        <p>存多久和是哪类认知要分开建模。四库解决存储分区，<code>memory_type</code> 解决召回和自进化 lever。</p>
+      </div>
+      <div class="table-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th></th>
+              <th>语义 Semantic</th>
+              <th>情景 Episodic</th>
+              <th>程序 Procedural</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>短期</td>
+              <td>ContextPack 中注入的事实和发现。</td>
+              <td>当前 run 轨迹、事件、HITL 反馈。</td>
+              <td>任务约束、当前 prompt、工具观察。</td>
+            </tr>
+            <tr>
+              <td>长期</td>
+              <td>四库里已验证 findings、baseline profile。</td>
+              <td>结构化 run episode、Agent examples、失败案例。</td>
+              <td>methodology、code assets、Agent prompts、eval scorecard。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel block">
+        <h2>MemoryRecord v2</h2>
+        <p>v2 的关键是让每条记录自带治理信息，而不是只有 text + embedding。</p>
+        <div class="pill-list">
+          <span class="pill">memory_type</span>
+          <span class="pill">is_mock</span>
+          <span class="pill">confidence</span>
+          <span class="pill">eval_status</span>
+          <span class="pill">source_path</span>
+          <span class="pill">content_hash</span>
+          <span class="pill">supersedes</span>
+          <span class="pill">salience</span>
+          <span class="pill">ttl_days</span>
+        </div>
+      </article>
+
+      <article class="panel block">
+        <h2>记录角色</h2>
+        <ul>
+          <li>门控类：<code>eval_status.passed</code>、<code>is_mock</code>、<code>approved</code>。</li>
+          <li>召回类：<code>memory_type</code>、<code>summary</code>、<code>confidence</code>。</li>
+          <li>生命周期类：<code>supersedes</code>、<code>salience</code>、<code>ttl_days</code>。</li>
+          <li>溯源类：<code>source_path</code>、<code>run_id</code>、<code>agent</code>、<code>content_hash</code>。</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="panel block">
+      <h2>MemoryRecord v2 示例</h2>
+      <pre><code>{
+  "schema": "memory_record.v2",
+  "record_id": "rec_7f3a",
+  "zone": "run_archive",
+  "memory_type": "semantic",
+  "text": "8L hard-topk: RES +3.1% over baseline (5 seeds).",
+  "summary": "8L hard-topk 在 RES 上显著优于 baseline(+3.1%, 5 seeds)。",
+  "source_path": "runs/2026-06-16_pimc/execution/metrics.json",
+  "run_id": "2026-06-16T000000_pimc",
+  "agent": "execution",
+  "content_hash": "sha256:9c1e...",
+  "is_mock": false,
+  "confidence": 0.9,
+  "eval_status": {
+    "passed": true,
+    "checks": {
+      "faithfulness": true,
+      "significance": true,
+      "citation": true
+    },
+    "scorecard": "runs/2026-06-16_pimc/evaluation/research_scorecard.v1.json"
+  },
+  "supersedes": ["rec_4b20"],
+  "superseded_by": null,
+  "salience": 0.72,
+  "valid_from": "2026-06-16T00:00:00Z",
+  "ttl_days": 180,
+  "approved": true
+}</code></pre>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel block">
+        <h2>冲突消解与版本</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>手段</th>
+                <th>处理</th>
+                <th>实现</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>去重</td>
+                <td>精确重复</td>
+                <td><code>content_hash</code></td>
+              </tr>
+              <tr>
+                <td>Upsert</td>
+                <td>同 source 重写</td>
+                <td><code>delete_by_source</code> + write</td>
+              </tr>
+              <tr>
+                <td>Supersede</td>
+                <td>同实体新结论取代旧结论</td>
+                <td>新记录置 <code>supersedes</code>，旧记录置 <code>superseded_by</code></td>
+              </tr>
+              <tr>
+                <td>Merge</td>
+                <td>互补近重复合并</td>
+                <td>后台 consolidation job 保留并集证据</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel block">
+        <h2>遗忘与生命周期</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>手段</th>
+                <th>对象</th>
+                <th>规则</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>TTL</td>
+                <td>时效 run metrics / fingerprint</td>
+                <td><code>ttl_days</code> 到期失效或归档</td>
+              </tr>
+              <tr>
+                <td>衰减</td>
+                <td>久未召回或确认的记录</td>
+                <td><code>confidence</code> / <code>salience</code> 随时间下降</td>
+              </tr>
+              <tr>
+                <td>剪枝</td>
+                <td>低价值记录</td>
+                <td>低于 salience 阈值进入剪枝候选</td>
+              </tr>
+              <tr>
+                <td>Mock 强 TTL</td>
+                <td>quarantine 区</td>
+                <td>短 TTL，demo 后清理，排除主召回</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="callout good">
+        <h2>MemorySelector v2</h2>
+        <p>召回不只看 similarity。v2 先 filter，再综合相似度、recency、confidence、eval_status、salience，加 rerank，最后注入 <code>summary</code> 而非全文。</p>
+        <pre><code>filter(zone, project, memory_type, not superseded, not mock)
+  -> score(similarity, recency, confidence, eval_status, salience)
+  -> rerank
+  -> top-k
+  -> inject summary</code></pre>
+      </article>
+
+      <article class="callout good">
+        <h2>Context Compiler 同源</h2>
+        <p>一次 compile 同时生成真实 LLM messages 和 manifest，解决当前“manifest 不完全等于实际输入”的偏差。上游 artifact 不再整篇 dump，而是蒸馏为关键结论 + 引用指针。</p>
+        <pre><code>ContextPack.compile()
+  -> messages  # 真正发给模型
+  -> manifest  # 同一结构投影出的审计记录</code></pre>
+      </article>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>Agent 自上下文接自进化</h2>
+        <p><code>prompts/examples/evals/uploads</code> 不再只是文件夹，而是可治理、可召回、可优化的程序/情景记忆。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>自上下文</th>
+              <th>认知类型</th>
+              <th>自进化用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>prompts</code></td>
+              <td>程序记忆</td>
+              <td>prompt 优化对象，从 eval 反馈迭代。</td>
+            </tr>
+            <tr>
+              <td><code>examples</code></td>
+              <td>情景记忆</td>
+              <td>few-shot 来源，从高分且 coherent 的 run 中挑选。</td>
+            </tr>
+            <tr>
+              <td><code>evals</code></td>
+              <td>情景/程序</td>
+              <td>Agent 校准和自进化信号。</td>
+            </tr>
+            <tr>
+              <td>Coding workspace items</td>
+              <td>混合</td>
+              <td>收编进 MemoryRecord，消除平行表面。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="callout danger">
+        <h2>Mock 隔离纪律</h2>
+        <ul>
+          <li><code>is_mock=true</code> 写入 quarantine zone，不进四库主区。</li>
+          <li>research / hardware profile 默认排除 mock。</li>
+          <li>baseline match 绝不使用 mock fingerprint 作为 current baseline。</li>
+          <li>quarantine 强 TTL，demo 后清理。</li>
+        </ul>
+      </article>
+
+      <article class="callout warning">
+        <h2>Eval ↔ Memory</h2>
+        <ul>
+          <li>eval 是记忆写入 gate：不过 faithfulness / 显著性 / 引用，不进主语义库。</li>
+          <li>eval scorecard 沉淀为情景/程序记忆。</li>
+          <li>自进化从 prompt、few-shot、KB findings 三个 lever 学习。</li>
+          <li>记忆的鲁棒性直接影响自进化安全性。</li>
+        </ul>
+      </article>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>代码边界与新增模块</h2>
+        <p>调用方向保持 <code>bridge -> harness/*</code>。Memory 属于 Harness，不能反向 import 具体 Agent。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>机制</th>
+              <th>文件</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Agent 实际上下文 / ContextPack</td>
+              <td><code>backend/app/agents/base.py</code></td>
+              <td>现有，改为同源 compile</td>
+            </tr>
+            <tr>
+              <td>上游 handoff 蒸馏</td>
+              <td><code>backend/app/bridge/agent_runner.py</code></td>
+              <td>现有，改为蒸馏包</td>
+            </tr>
+            <tr>
+              <td>Context Manifest</td>
+              <td><code>backend/app/harness/context/manifest.py</code></td>
+              <td>现有，由 ContextPack 投影</td>
+            </tr>
+            <tr>
+              <td>Context Compiler</td>
+              <td><code>backend/app/harness/context/compiler.py</code></td>
+              <td>v2 新增</td>
+            </tr>
+            <tr>
+              <td>四库 KB Store</td>
+              <td><code>backend/app/harness/kb/stores.py</code></td>
+              <td>现有，加 upsert/delete/filter/quarantine</td>
+            </tr>
+            <tr>
+              <td>MemoryRecord 模型</td>
+              <td><code>backend/app/harness/kb/models.py</code></td>
+              <td>v2 新增</td>
+            </tr>
+            <tr>
+              <td>MemorySelector</td>
+              <td><code>backend/app/harness/kb/selector.py</code></td>
+              <td>v2 新增</td>
+            </tr>
+            <tr>
+              <td>Conflict resolver</td>
+              <td><code>backend/app/harness/kb/resolver.py</code></td>
+              <td>v2 新增</td>
+            </tr>
+            <tr>
+              <td>Consolidation job</td>
+              <td><code>backend/app/harness/kb/consolidate.py</code></td>
+              <td>v2 新增</td>
+            </tr>
+            <tr>
+              <td>Memory 配置</td>
+              <td><code>configs/memory.yaml</code></td>
+              <td>v2 新增</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel block">
+      <h2>configs/memory.yaml 草案</h2>
+      <pre><code>write_gates:
+  dev_e2e:
+    require_schema_approved: true
+    require_eval_pass: false
+    allow_mock_to_main: false
+  research:
+    require_schema_approved: true
+    require_eval_pass: true
+    require_provenance: true
+    min_salience: 0.3
+  hardware:
+    require_eval_pass: true
+    require_real_execution: true
+
+mock_policy:
+  zone: quarantine
+  exclude_from_recall: [research, hardware]
+  exclude_from_baseline_match: true
+  ttl_days: 3
+
+lifecycle:
+  default_ttl_days: 180
+  run_archive_ttl_days: 365
+  decay_half_life_days: 90
+  prune_below_salience: 0.15
+
+selector:
+  hybrid: true
+  weights:
+    similarity: 0.4
+    recency: 0.2
+    confidence: 0.2
+    eval_status: 0.1
+    salience: 0.1
+  rerank: true
+  exclude_superseded: true
+  inject: summary
+
+profiles_vs_collections:
+  baseline_current: profile
+  active_constraints: profile
+  findings: collection
+  episodes: collection
+
+backend:
+  store: file</code></pre>
+    </section>
+
+    <section class="panel block">
+      <h2>分阶段落地</h2>
+      <div class="phase">
+        <span class="phase-num">Phase 1</span>
+        <div>
+          <h3>同源 Manifest</h3>
+          <p>ContextPack 一次 compile 产出 messages + manifest，解决审计不等于实际输入。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 2</span>
+        <div>
+          <h3>MemoryRecord v2 Schema</h3>
+          <p>新增 memory_type、is_mock、confidence、eval_status、supersedes、salience、ttl，兼容旧 KBRecord 读取。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 3</span>
+        <div>
+          <h3>门控 Sediment + Mock 隔离</h3>
+          <p>schema -> eval-pass -> mock -> salience -> conflict。mock 进 quarantine，排除主召回和 baseline。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 4</span>
+        <div>
+          <h3>冲突消解 + 遗忘</h3>
+          <p>resolver 做 supersede/merge，consolidate 做去重、衰减、TTL、清 mock；baseline-current 改 profile。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 5</span>
+        <div>
+          <h3>MemorySelector + Context Compiler</h3>
+          <p>加权、type-aware、rerank、JIT 召回；上游 handoff 变蒸馏包；Commander 加滚动摘要和 budget。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 6</span>
+        <div>
+          <h3>后端替换</h3>
+          <p>file store 迁移到 ChromaDB 或 sqlite-vss。前提是库已门控、已去 mock、已会遗忘。</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="phase-num">Phase 7</span>
+        <div>
+          <h3>接自进化</h3>
+          <p>prompts、examples、findings 接成 prompt / few-shot / KB 三个 lever，eval 门控写入作为反投毒边界。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="callout good">
+        <h2>成功标准</h2>
+        <ul>
+          <li>每条 MemoryRecord 带 <code>memory_type</code>、<code>is_mock</code>、<code>confidence</code>、<code>eval_status</code>、<code>source_path</code>。</li>
+          <li>manifest 与真实 LLM messages 同源，可据 manifest 精确重建模型输入。</li>
+          <li>research/hardware 下 eval 不过的发现不进主库，mock 永不进入主召回和 baseline match。</li>
+          <li>矛盾结论被 supersede，主召回只返回未被取代记录。</li>
+        </ul>
+      </article>
+
+      <article class="callout good">
+        <h2>一句话</h2>
+        <p>
+          当前 MARS 记忆是干净、可追溯、可降级的 append-only 知识堆；v2 补上 eval 门控写入、冲突消解、遗忘治理，并用统一模型把分散表面收编。先装这三块，再上 ChromaDB。
+        </p>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    MARS Memory System v2 - 单文件 HTML。内容基于当前仓库实现、本地四库扫描结果和 v2 记忆治理规划。
+  </footer>
+</body>
+</html>

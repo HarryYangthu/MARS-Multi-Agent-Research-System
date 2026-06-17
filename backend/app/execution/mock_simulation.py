@@ -38,6 +38,7 @@ class MockResult:
     metrics: dict[str, float]
     fingerprint_hash: str
     is_mock: bool = True
+    loss_curve: list[float] = field(default_factory=list)
 
 
 def _loss_curve(steps: int, *, template: str, seed: int | None) -> list[float]:
@@ -125,4 +126,5 @@ async def run_mock_simulation(
         status="completed",
         metrics=metrics,
         fingerprint_hash=fingerprint_hash,
+        loss_curve=[float(v) for v in curve],
     )

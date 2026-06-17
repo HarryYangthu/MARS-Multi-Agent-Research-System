@@ -31,31 +31,71 @@ from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 
 def _fake_proposal(seed: str, debate_role: str | None) -> dict[str, Any]:
     angles = {
-        "proposer": "argues a hard top-2 router achieves the goal cleanly",
-        "critic": "raises router robustness under stream switching",
-        "judge": "synthesizes proposer + critic into a hybrid recommendation",
-        None: "balanced",
+        "proposer": "主张 hard top-2 路由可以以较低复杂度达成目标",
+        "critic": "强调波束/层切换时路由鲁棒性风险",
+        "judge": "综合提案者与批判者意见，给出混合方案建议",
+        None: "平衡视角",
     }
-    angle = angles.get(debate_role or "", "balanced")
+    angle = angles.get(debate_role or "", "平衡视角")
     return {
         "schema": "proposal.v1",
         "project": "moe-pimc",
         "agent": "idea",
         "created": datetime.now(tz=timezone.utc).isoformat(),
-        "research_question": f"How to simplify ATK-MoE routing while preserving RES? (seed:{seed[:8]})",
+        "research_question": f"如何在保持 RES 性能的同时简化 ATK-MoE 路由？（seed:{seed[:8]}）",
         "hypothesis": (
-            f"A hard top-2 router preserves RES within 1.5 dB. "
-            f"[{angle}]"
+            f"采用 hard top-2 路由后，RES 退化可控制在 1.5 dB 以内。"
+            f"【{angle}】"
         ),
         "novelty": (
-            f"Combines stream-aware gating with hard routing — angle: {angle}."
+            f"将 stream-aware gating 与硬路由结合，形成可解释、低计算量的专家选择策略；视角：{angle}。"
         ),
-        "theoretical_basis": "Sparse expert activation theory.",
-        "constraints": ["baseline_compat: required", "ASIC_resource: ≤40% reduction"],
+        "theoretical_basis": "稀疏专家激活理论与 PIM-aware 路由约束。",
+        "constraints": ["baseline_compat: 必须保持", "ASIC_resource: 目标降低 ≥40%"],
         "related_literature": [
-            {"title": "MoE Routing Survey 2024", "url": "https://arxiv.org/abs/2404.00000"},
+            {"title": "MoE 路由综述 2024", "url": "https://arxiv.org/abs/2404.00000"},
         ],
-        "debate_summary": {"rounds": 0, "consensus": ""},
+        "testable_predictions": [
+            {
+                "prediction": "hard top-2 路由在 8L 配置下的 RES 退化不超过 1.5 dB。",
+                "metric": "RES",
+                "expected_direction": "lte_degradation",
+                "success_threshold": "≤1.5 dB degradation",
+            }
+        ],
+        "experiment_hint": {
+            "variables": ["router_type", "expert_count"],
+            "metrics": ["RES", "PIM", "APE", "loss"],
+            "minimal_ablations": [
+                {"name": "soft_router_baseline", "config": {"router_type": "soft"}},
+                {"name": "hard_top2_router", "config": {"router_type": "hard-top2"}},
+            ],
+        },
+        "evidence_refs": [
+            {
+                "ref": "self_context_1",
+                "kind": "self_context",
+                "summary": "Idea Agent V1 要求先调研再提出可证伪假设。",
+            }
+        ],
+        "risk_register": [
+            {
+                "risk": "hard routing 在波束/层切换时可能降低鲁棒性。",
+                "severity": "medium",
+                "mitigation": "在 Experiment 阶段加入 router_type × expert_count 消融。",
+            }
+        ],
+        "downstream_requirements": [
+            "Experiment Agent 需要把 router_type 和 expert_count 转成消融矩阵。",
+            "Coding Agent 必须保持 forward(x, stream_label) 接口兼容。",
+        ],
+        "debate_summary": {
+            "rounds": 0,
+            "consensus": "",
+            "disagreements": [],
+            "risks": [],
+            "evidence_gaps": ["外部网络调研默认关闭。"],
+        },
     }
 
 
@@ -96,8 +136,8 @@ def _fake_code_spec(seed: str) -> dict[str, Any]:
         "baseline_compat": {
             "preserved": True,
             "rationale": (
-                "forward(x, stream_label) signature unchanged; new "
-                "Paper_Router_v2 added alongside existing Paper_Total_0327."
+                "保持 forward(x, stream_label) 接口不变；新增 "
+                "Paper_Router_v2，并与现有 Paper_Total_0327 并行保留。"
             ),
         },
         "files_changed": [
@@ -128,7 +168,7 @@ def _fake_run_log(seed: str) -> dict[str, Any]:
 
 
 def _fake_report(seed: str, debate_role: str | None) -> dict[str, Any]:
-    role = debate_role or "balanced"
+    role = debate_role or "平衡视角"
     return {
         "schema": "report.v1",
         "project": "moe-pimc",
@@ -144,10 +184,109 @@ def _fake_report(seed: str, debate_role: str | None) -> dict[str, Any]:
         "debate_summary": {
             "rounds": 1,
             "reviewer_critiques": [
-                f"({role}) discuss ASIC area implications more concretely.",
-                f"({role}) add ablation against soft router baseline.",
+                f"（{role}）需要更具体地讨论 ASIC 面积与功耗影响。",
+                f"（{role}）建议补充与 soft router baseline 的消融对比。",
             ],
         },
+    }
+
+
+def _fake_diagnosis(seed: str, debate_role: str | None) -> dict[str, Any]:
+    return {
+        "schema": "diagnosis.v1",
+        "project": "moe-pimc",
+        "agent": "bridge",
+        "run_id": f"mock_{seed[:8]}",
+        "attempt": 1,
+        "passed": False,
+        "failed_metrics": [
+            {
+                "metric": "loss",
+                "observed": 0.12,
+                "target": 0.02,
+                "direction": "lte",
+                "gap": 0.1,
+                "aggregation": "max",
+            }
+        ],
+        "suspected_causes": [
+            {
+                "kind": "metrics_gap",
+                "summary": "Mock 诊断发现指标与目标之间仍有差距。",
+                "severity": "high",
+                "evidence": ["execution/metrics.json"],
+            }
+        ],
+        "recommended_target": "coding",
+        "recommended_action": "生成补丁 diff，并提交人工审核。",
+        "evidence_refs": ["execution/metrics.json"],
+        "budget_status": "within_budget",
+    }
+
+
+def _fake_feedback_packet(seed: str, debate_role: str | None) -> dict[str, Any]:
+    return {
+        "schema": "feedback_packet.v1",
+        "project": "moe-pimc",
+        "agent": "commander",
+        "run_id": f"mock_{seed[:8]}",
+        "target_agent": "coding",
+        "attempt": 2,
+        "source_attempt": 1,
+        "confidence": 0.82,
+        "why_this_agent": "Mock 反馈包建议 Coding Agent 修复指标缺口相关实现。",
+        "evidence_refs": ["execution/metrics.json", "diagnosis/diagnosis.v1.md"],
+        "failed_metrics": [
+            {
+                "metric": "loss",
+                "observed": 0.12,
+                "target": 0.02,
+                "direction": "lte",
+            }
+        ],
+        "do_next": [
+            "检查 router stability clamp。",
+            "生成最小补丁并保持 baseline 兼容。",
+        ],
+        "avoid_repeating": ["不要修改 protected baseline 接口。"],
+        "context_refs": ["coding/code_spec.v1.md"],
+        "memory_candidates": [
+            {
+                "kind": "lesson",
+                "summary": "失败诊断应优先回传给能直接修复的 Agent。",
+            }
+        ],
+    }
+
+
+def _fake_evaluation_report(seed: str, debate_role: str | None) -> dict[str, Any]:
+    return {
+        "schema": "evaluation_report.v1",
+        "project": "moe-pimc",
+        "scope": "artifact",
+        "target_ref": "writing/research_report.v1.md",
+        "target_schema": "report.v1",
+        "evaluator": "mock_evaluator",
+        "evaluator_version": 1,
+        "decision": "warn",
+        "overall_score": 0.78,
+        "blocking": False,
+        "scores": {
+            "schema_compliance": 1.0,
+            "evidence_quality": 0.72,
+            "baseline_compatibility": 0.86,
+        },
+        "findings": [
+            {
+                "id": "mock-eval-1",
+                "severity": "medium",
+                "category": "evidence",
+                "message": "报告需要补充更多真实实验引用。",
+                "evidence_refs": ["execution/run_log.approved.md"],
+            }
+        ],
+        "recommended_actions": ["补充真实硬件实验后再作为最终论文材料。"],
+        "created": datetime.now(tz=timezone.utc).isoformat(),
     }
 
 
@@ -170,6 +309,9 @@ _FAKE_BUILDERS: dict[str, _FakeBuilder] = {
     "experiment_plan.v1": _fake_experiment_plan_w,
     "code_spec.v1": _fake_code_spec_w,
     "run_log.v1": _fake_run_log_w,
+    "diagnosis.v1": _fake_diagnosis,
+    "feedback_packet.v1": _fake_feedback_packet,
+    "evaluation_report.v1": _fake_evaluation_report,
     "report.v1": _fake_report,
 }
 
@@ -193,11 +335,11 @@ def _seed_from_messages(messages: list[Message]) -> str:
 
 
 def _render_body(schema_id: str, debate_role: str | None) -> str:
-    role = debate_role or "default"
+    role = debate_role or "默认"
     return (
-        f"# Mock {schema_id} (role={role})\n\n"
-        f"This artifact was generated by mock_provider.\n"
-        f"Contents are placeholder but schema-valid.\n"
+        f"# 模拟产物 {schema_id}（角色={role}）\n\n"
+        "该产物由 mock_provider 生成。\n"
+        "内容为占位示例，但已经满足对应 schema，可用于端到端流程验证。\n"
     )
 
 

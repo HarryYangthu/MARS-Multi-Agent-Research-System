@@ -124,6 +124,9 @@ class RunGraph:
     def state(self, key: str) -> NodeState:
         return self._nodes[key].state
 
+    def metadata(self, key: str) -> dict[str, Any]:
+        return dict(self._nodes[key].metadata)
+
     def all_states(self) -> dict[str, NodeState]:
         return {k: n.state for k, n in self._nodes.items()}
 
@@ -133,6 +136,12 @@ class RunGraph:
         node = self._nodes[key]
         assert_transition(node.state, new_state)
         node.state = new_state
+
+    def restore_state(self, key: str, state: NodeState) -> None:
+        """Set a node state while rebuilding a graph from durable storage."""
+        if key not in self._nodes:
+            raise GraphError(f"unknown node '{key}'")
+        self._nodes[key].state = state
 
     # --------------------------------------------------------- scheduling
 
@@ -189,6 +198,46 @@ class RunGraph:
             "edges": [{"src": e.src, "dst": e.dst} for e in self.edges],
             "entrypoints": list(self._entrypoints),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RunGraph":
+        graph = cls()
+        for raw_node in data.get("nodes", []):
+            if not isinstance(raw_node, dict):
+                continue
+            key = str(raw_node.get("key", ""))
+            if not key:
+                continue
+            metadata_raw = raw_node.get("metadata", {})
+            metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+            graph.add_node(
+                key,
+                kind=str(raw_node.get("kind", "agent")),
+                metadata=metadata,
+            )
+        for raw_edge in data.get("edges", []):
+            if not isinstance(raw_edge, dict):
+                continue
+            src = str(raw_edge.get("src", ""))
+            dst = str(raw_edge.get("dst", ""))
+            if src and dst and src in graph._nodes and dst in graph._nodes:
+                graph.add_edge(src, dst)
+        for entry in data.get("entrypoints", []):
+            key = str(entry)
+            if key in graph._nodes:
+                graph.set_entrypoint(key)
+        for raw_node in data.get("nodes", []):
+            if not isinstance(raw_node, dict):
+                continue
+            key = str(raw_node.get("key", ""))
+            if key not in graph._nodes:
+                continue
+            state_raw = str(raw_node.get("state", NodeState.PENDING.value))
+            try:
+                graph.restore_state(key, NodeState(state_raw))
+            except ValueError:
+                graph.restore_state(key, NodeState.PENDING)
+        return graph
 
     # --------------------------------------------------------------- private
 

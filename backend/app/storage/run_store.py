@@ -21,9 +21,11 @@ RUN_SUBDIRS: tuple[str, ...] = (
     "experiment",
     "coding",
     "execution",
+    "diagnosis",
     "writing",
     "hitl",
     "events",
+    "memory",
 )
 
 _TASK_SLUG_RE = re.compile(r"[^a-z0-9_]+")

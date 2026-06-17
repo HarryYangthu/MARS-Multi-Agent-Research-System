@@ -1,0 +1,168 @@
+version: 1
+project: moe-pimc
+cases:
+  - id: experiment_config_high
+    description: High config sanity signal should route to Experiment.
+    expected_target: experiment
+    expected_should_continue: true
+    expected_requires_human: false
+    attempt: 1
+    config:
+      max_iterations: 2
+      allowed_targets: [coding, experiment]
+      default_target: coding
+    analysis:
+      passed: false
+      failed_metrics:
+        - metric: loss
+          observed: 0.5
+          target: 0.04
+          direction: lte
+          gap: 0.46
+          aggregation: max
+      suspected_causes:
+        - kind: metrics_gap
+          summary: Configured metric missed threshold.
+          severity: high
+          evidence: [metric:loss]
+        - kind: config_sanity
+          summary: Experiment plan has no ablations.
+          severity: high
+          evidence: [experiment_plan.ablations]
+      evidence_refs:
+        - execution/metrics.json
+        - experiment/experiment_plan.approved.md
+
+  - id: coding_risk_high
+    description: High code risk should route to Coding.
+    expected_target: coding
+    expected_should_continue: true
+    expected_requires_human: false
+    attempt: 1
+    config:
+      max_iterations: 2
+      allowed_targets: [coding, experiment]
+      default_target: coding
+    analysis:
+      passed: false
+      failed_metrics:
+        - metric: loss
+          observed: 0.5
+          target: 0.04
+          direction: lte
+          gap: 0.46
+          aggregation: max
+      suspected_causes:
+        - kind: metrics_gap
+          summary: Configured metric missed threshold.
+          severity: high
+          evidence: [metric:loss]
+        - kind: code_change_risk
+          summary: Code spec includes high-risk file changes.
+          severity: high
+          evidence: [libs/router_v2.py]
+      evidence_refs:
+        - execution/metrics.json
+        - coding/code_spec.approved.md
+
+  - id: metrics_gap_default
+    description: Ambiguous metric miss should use default Coding target.
+    expected_target: coding
+    expected_should_continue: true
+    expected_requires_human: false
+    attempt: 1
+    config:
+      max_iterations: 2
+      allowed_targets: [coding, experiment]
+      default_target: coding
+    analysis:
+      passed: false
+      failed_metrics:
+        - metric: loss
+          observed: 0.5
+          target: 0.04
+          direction: lte
+          gap: 0.46
+          aggregation: max
+      suspected_causes:
+        - kind: metrics_gap
+          summary: Configured metric missed threshold.
+          severity: high
+          evidence: [metric:loss]
+      evidence_refs:
+        - execution/metrics.json
+
+  - id: low_confidence_flip_hitl
+    description: Low confidence target flip should pause for human review.
+    expected_target: none
+    expected_should_continue: false
+    expected_requires_human: true
+    attempt: 1
+    config:
+      max_iterations: 2
+      allowed_targets: []
+      default_target: coding
+    attempt_history:
+      - attempt: 1
+        target_agent: experiment
+        confidence: 0.4
+    analysis:
+      passed: false
+      failed_metrics:
+        - metric: loss
+          observed: 0.5
+          target: 0.04
+          direction: lte
+          gap: 0.46
+          aggregation: max
+      suspected_causes:
+        - kind: metrics_gap
+          summary: Configured metric missed threshold.
+          severity: high
+          evidence: [metric:loss]
+      evidence_refs:
+        - execution/metrics.json
+
+  - id: budget_exhausted
+    description: Exhausted loop budget should stop repair and route to Writing.
+    expected_target: writing
+    expected_should_continue: false
+    expected_requires_human: false
+    attempt: 2
+    config:
+      max_iterations: 2
+      allowed_targets: [coding, experiment]
+      default_target: coding
+    analysis:
+      passed: false
+      failed_metrics:
+        - metric: loss
+          observed: 0.5
+          target: 0.04
+          direction: lte
+          gap: 0.46
+          aggregation: max
+      suspected_causes:
+        - kind: metrics_gap
+          summary: Configured metric missed threshold.
+          severity: high
+          evidence: [metric:loss]
+      evidence_refs:
+        - execution/metrics.json
+
+  - id: metrics_passed
+    description: Passing metrics should proceed to Writing.
+    expected_target: writing
+    expected_should_continue: false
+    expected_requires_human: false
+    attempt: 1
+    config:
+      max_iterations: 2
+      allowed_targets: [coding, experiment]
+      default_target: coding
+    analysis:
+      passed: true
+      failed_metrics: []
+      suspected_causes: []
+      evidence_refs:
+        - execution/metrics.json

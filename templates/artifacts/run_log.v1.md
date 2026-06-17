@@ -16,6 +16,6 @@ fingerprint_hash: "sha256:abcd1234deadbeef0000aaaa"
 is_mock: false
 ---
 
-# Run log
+# 执行日志
 
-Output summary, error counts, etc.
+正文使用中文总结执行批次、关键指标、错误数量、异常实验、资源占用和是否达到目标。run_id、metric、fingerprint_hash、文件路径等技术字段保持原样。

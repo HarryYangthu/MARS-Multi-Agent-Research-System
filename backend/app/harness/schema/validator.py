@@ -49,6 +49,9 @@ SUPPORTED_SCHEMAS: tuple[str, ...] = (
     "experiment_plan.v1",
     "code_spec.v1",
     "run_log.v1",
+    "diagnosis.v1",
+    "feedback_packet.v1",
+    "evaluation_report.v1",
     "report.v1",
 )
 
@@ -93,6 +96,10 @@ def get_schema(schema_id: str) -> dict[str, Any]:
 
 
 def _format_path(error: jsonschema.ValidationError) -> str:
+    if error.validator == "required":
+        parts = str(error.message).split("'")
+        if len(parts) >= 2 and parts[1]:
+            return f"/{parts[1]}"
     if not error.absolute_path:
         return "/"
     return "/" + "/".join(str(p) for p in error.absolute_path)

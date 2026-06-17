@@ -1,0 +1,8 @@
+feedback:
+  max_tokens: 1500
+  chars_per_token: 4
+  recent_packet_count: 2
+  ledger_summary_ref: diagnosis/attempt_ledger_summary.md
+  drop_full_diagnosis: true
+  drop_full_logs: true
+  drop_full_curves: true

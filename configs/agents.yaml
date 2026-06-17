@@ -1,4 +1,4 @@
-# MARS V0 — Agent configuration.
+# MARS V1 — Agent configuration.
 # All agents use DeepSeek (per user setup). Each agent picks its own model.
 # Multi-model debate uses different DeepSeek model versions per role so the
 # auto-degrade logic stays in REAL_MULTI_MODEL mode (all participants share
@@ -9,7 +9,29 @@
 #   deepseek-reasoner   → DeepSeek-R1 long chain-of-thought reasoning
 #   deepseek-coder      → DeepSeek-Coder for code generation
 #
-# Missing API keys auto-fall back to mock_provider.
+# Missing API keys fall back to mock_provider only outside production mode.
+
+commander:
+  enabled: true
+  output_schema: ""
+  model:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.2
+    max_tokens: 4096
+  debate:
+    enabled: false
+  role: supervisor_react
+  tools:
+    - run.create
+    - run.start
+    - run.status
+    - run.feedback_loop
+    - artifact.read
+    - artifact.review
+    - metrics.evaluate
+    - diagnosis.failure_analysis
+    - user.approval
 
 idea:
   enabled: true
@@ -32,6 +54,11 @@ idea:
       - role: judge
         provider: deepseek
         model: deepseek-chat        # V4 chat — synthesizer
+  research:
+    enable_network: false             # V1 keeps arXiv/web research optional, not required for demo
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
     - search.local_docs
     - search.arxiv_search
@@ -49,6 +76,9 @@ experiment:
     max_tokens: 4096
   debate:
     enabled: false
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
     - knowledge.kb_query
     - knowledge.baseline_match
@@ -63,18 +93,28 @@ coding:
     temperature: 0.1
     max_tokens: 8192
   post_training:
-    enabled: false
-    mode: load_only
+    enabled: true
+    mode: endpoint
+    endpoint_provider: local_vllm
     adapter_path: ""
-    custom_endpoint: ""
+    custom_endpoint: "http://127.0.0.1:8001/v1"
+    model: mars-coding-posttrain
+    api_key_env: LOCAL_VLLM_API_KEY
     fine_tuned_model_id: ""
     live_checkpoint_path: ""
   language_tracks:
     - python_research
     - c_production
+  loop:
+    max_validation_repairs: 2
+    max_tool_steps: 4
   tools:
     - code.repo_reader
     - code.patch_generator
+    - code.apply_patch
+    - code.write_file
+    - code.delete_file
+    - code.rollback_patch
     - code.test_runner
     - code.lint
     - knowledge.code_assets
@@ -89,6 +129,9 @@ execution:
     max_tokens: 2048
   debate:
     enabled: false
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 2
   tools:
     - execution.simulation_runner
     - execution.batch_runner
@@ -113,6 +156,9 @@ writing:
       - role: positive_reviewer
         provider: deepseek
         model: deepseek-chat        # V4 chat — encouraging
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
     - knowledge.methodology
     - knowledge.run_archive

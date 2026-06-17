@@ -1,7 +1,8 @@
 # Agent I/O Schema reference
 
-> All 5 schemas live under `backend/app/harness/schema/schemas/` and are
-> validated by `harness/schema/validator.py`. JSON Schema draft 2020-12.
+> Agent-facing and system schemas live under
+> `backend/app/harness/schema/schemas/` and are validated by
+> `harness/schema/validator.py`. JSON Schema draft 2020-12.
 
 ## Common rules
 
@@ -175,6 +176,76 @@ debate_summary:
     - "Add ablation against soft router baseline."
 ---
 ```
+
+---
+
+## 6. `diagnosis.v1` (Bridge outcome diagnosis)
+
+**Required**: `schema, project, agent, run_id, attempt, passed, failed_metrics, suspected_causes, recommended_target, recommended_action, evidence_refs, budget_status`
+
+`recommended_target ∈ {coding, experiment, idea, writing, none}`.
+`budget_status ∈ {within_budget, exhausted, not_applicable}`.
+
+```yaml
+---
+schema: diagnosis.v1
+project: moe-pimc
+agent: bridge
+run_id: example_run
+attempt: 1
+passed: false
+failed_metrics:
+  - metric: loss
+    observed: 0.12
+    target: 0.04
+    direction: lte
+    gap: 0.08
+    aggregation: max
+suspected_causes:
+  - kind: metrics_gap
+    summary: Loss exceeded the configured threshold.
+    severity: high
+    evidence: ["execution/metrics.json"]
+recommended_target: coding
+recommended_action: Generate a focused code patch for human review.
+evidence_refs: ["execution/metrics.json"]
+budget_status: within_budget
+---
+```
+
+---
+
+## 7. `evaluation_report.v1` (Evaluation layer)
+
+**Required**: `schema, project, scope, target_ref, evaluator, evaluator_version, decision, blocking, findings, created`
+
+`scope ∈ {artifact, run, benchmark, model_backend}`.
+`decision ∈ {pass, warn, revise, block, fail}`. If `decision: block`, then
+`blocking` must be `true`.
+
+```yaml
+---
+schema: evaluation_report.v1
+project: moe-pimc
+scope: artifact
+target_ref: idea/idea_proposal.v1.md
+target_schema: proposal.v1
+evaluator: contract.schema_validity
+evaluator_version: 1
+decision: pass
+overall_score: 1.0
+blocking: false
+scores:
+  schema_validity: 1.0
+findings: []
+recommended_actions: []
+created: 2026-06-17T00:00:00Z
+---
+```
+
+Evaluation reports are system artifacts. They should cite concrete
+`evidence_refs` for every finding and are designed to feed HITL review,
+feedback-loop routing, benchmark reporting, and future post-training exports.
 
 ---
 

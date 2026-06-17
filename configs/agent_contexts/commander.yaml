@@ -1,0 +1,12 @@
+agent: commander
+research_sites:
+  - id: local_project_docs
+    label: Local Project Docs
+    url: file://PRODUCT.md
+    enabled: true
+    source: default
+  - id: local_acceptance_docs
+    label: Local Acceptance Docs
+    url: file://ACCEPTANCE.md
+    enabled: true
+    source: default

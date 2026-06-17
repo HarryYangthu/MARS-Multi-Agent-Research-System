@@ -23,6 +23,6 @@ estimated_runs: 8
 estimated_gpu_hours: 24
 ---
 
-# Experiment plan
+# 实验计划
 
-Body describes hypothesis testing strategy.
+本计划用于描述假设验证策略、实验变量、消融组合、基线复用决策与资源估算。正文必须使用中文说明实验目的、变量控制方式、指标判定标准、风险与预期结果；技术标识如 schema、metric、文件路径和模型名保持原样。

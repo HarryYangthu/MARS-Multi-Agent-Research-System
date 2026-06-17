@@ -1,0 +1,13 @@
+agent: experiment
+research_sites:
+  - id: arxiv
+    label: arXiv
+    url: https://arxiv.org
+    enabled: true
+    source: default
+  - id: papers_with_code
+    label: Papers with Code
+    url: https://paperswithcode.com
+    enabled: true
+    source: default
+

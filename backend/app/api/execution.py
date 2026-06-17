@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.api.dependencies import get_run_store
 
@@ -63,3 +64,40 @@ async def get_summary(run_id: str) -> dict[str, Any]:
     if isinstance(parsed, dict):
         return parsed
     return {}
+
+
+@router.get("/{run_id}/plots")
+async def list_plots(run_id: str) -> list[dict[str, Any]]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    d = run.subdir("execution") / "live_plots"
+    if not d.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for p in sorted(d.glob("*.png")):
+        stat = p.stat()
+        out.append(
+            {
+                "filename": p.name,
+                "experiment_id": p.stem.removesuffix("_loss"),
+                "metric": "loss",
+                "url": f"/api/execution/{run_id}/plots/{p.name}",
+                "updated_at": stat.st_mtime,
+                "size_bytes": stat.st_size,
+            }
+        )
+    return out
+
+
+@router.get("/{run_id}/plots/{name}")
+async def get_plot(run_id: str, name: str) -> FileResponse:
+    if "/" in name or "\\" in name or not name.endswith(".png"):
+        raise HTTPException(status_code=400, detail="invalid plot name")
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    p = run.subdir("execution") / "live_plots" / name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"plot {name} not found")
+    return FileResponse(p, media_type="image/png")

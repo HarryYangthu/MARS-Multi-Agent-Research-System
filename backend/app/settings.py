@@ -1,6 +1,8 @@
 """Centralized settings loaded from environment.
 
-All LLM keys are optional. Missing keys trigger fallback to mock_provider.
+Development keeps the V0 mock-first defaults. Production mode is fail-closed:
+missing LLM or execution configuration must stop a run instead of silently
+falling back to demo behavior.
 """
 from __future__ import annotations
 
@@ -44,9 +46,45 @@ class Settings(BaseSettings):
     frontend_port: int = 3000
 
     # === Mode flags ===
+    mars_runtime_mode: Literal["development", "staging", "production"] = "development"
     mars_mock_mode: Literal["auto", "always", "never"] = "auto"
+    mars_execution_backend: Literal[
+        "mock",
+        "pim_cpu",
+        "local_command",
+        "docker_command",
+        "remote_gpu",
+    ] = "mock"
     mars_log_level: str = "INFO"
     mars_default_project: str = "moe-pimc"
+    mars_llm_timeout_seconds: float = 15.0
+    mars_enable_network_tools: bool = False
+    mars_web_search_allowlist: str = ""
+    mars_web_search_provider: Literal["", "brave", "tavily", "serper"] = ""
+    brave_search_api_key: str = ""
+    tavily_api_key: str = ""
+    serper_api_key: str = ""
+    mars_context_max_tokens: int = 32_000
+    mars_context_target_tokens: int = 24_000
+    mars_context_auto_compress: bool = True
+    mars_context_tool_raw_externalize: bool = True
+    mars_context_workbench_enabled: bool = True
+
+    # === Optional observability sinks ===
+    # LangSmith is an external mirror only; file-backed traces remain mandatory.
+    mars_langsmith_enabled: bool = False
+    langsmith_api_key: str = ""
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "mars-dev"
+    mars_langsmith_timeout_ms: int = 1000
+
+    @property
+    def is_production(self) -> bool:
+        return self.mars_runtime_mode == "production"
+
+    @property
+    def mock_allowed(self) -> bool:
+        return not self.is_production and self.mars_mock_mode != "never"
 
 
 _settings: Settings | None = None

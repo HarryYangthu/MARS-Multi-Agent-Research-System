@@ -30,6 +30,8 @@ SCHEMA_TO_AGENT_AND_STEM: dict[str, tuple[str, str]] = {
     "experiment_plan.v1": ("experiment", "experiment_plan"),
     "code_spec.v1": ("coding", "code_spec"),
     "run_log.v1": ("execution", "run_log"),
+    "diagnosis.v1": ("diagnosis", "diagnosis"),
+    "feedback_packet.v1": ("diagnosis", "feedback_packet"),
     "report.v1": ("writing", "research_report"),
 }
 

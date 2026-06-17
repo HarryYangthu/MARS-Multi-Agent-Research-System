@@ -23,6 +23,7 @@ from typing import Any
 from urllib import error, request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_NO_PROXY_OPENER = request.build_opener(request.ProxyHandler({}))
 
 
 def _http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
@@ -30,7 +31,7 @@ def _http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> 
     headers = {"Content-Type": "application/json"} if data else {}
     req = request.Request(url, data=data, method=method, headers=headers)
     try:
-        with request.urlopen(req, timeout=60) as resp:
+        with _NO_PROXY_OPENER.open(req, timeout=60) as resp:
             body = resp.read().decode("utf-8")
             return json.loads(body) if body else {}
     except error.HTTPError as exc:
@@ -90,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         default="pimc_demo",
         help="task slug for the demo run (becomes the runs/<...> directory name)",
     )
+    parser.add_argument(
+        "--run-id-file",
+        default=None,
+        help="optional file path where the created run_id is written",
+    )
     args = parser.parse_args(argv)
     base = f"http://127.0.0.1:{args.port}" if args.port else args.base.rstrip("/")
 
@@ -115,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_id = detail["run_id"]
     print(f"        run_id = {run_id}")
+    if args.run_id_file:
+        Path(args.run_id_file).write_text(f"{run_id}\n", encoding="utf-8")
     _http_json("POST", f"{base}/api/runs/{run_id}/start")
 
     _step(5, "Idea Agent runs (multi-model debate auto-degrades to mock_debate)")
@@ -137,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     _wait_until_state(base, run_id, "coding", "waiting_review")
     _approve(base, run_id, "coding", "code_spec")
 
-    _step(9, "Execution Agent runs → mock simulations (≤6 concurrent) + curves")
+    _step(9, "Execution Agent runs → mock simulations (≤16 concurrent) + curves")
     _wait_until_state(base, run_id, "execution", "waiting_review", timeout=120.0)
     _approve(base, run_id, "execution", "run_log")
 

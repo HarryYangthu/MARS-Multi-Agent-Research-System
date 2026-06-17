@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app.harness.context.loader import build_context
@@ -35,5 +36,9 @@ def test_manifest_writes_to_runs_dir(tmp_path: Path) -> None:
     assert p.exists()
     assert p.parent.name == "context"
     assert p.suffix == ".json"
+    payload = json.loads(p.read_text(encoding="utf-8"))
+    assert payload["summary"]["source"] == "compiler"
+    assert payload["compiled_manifest"]["schema"] == "context_compile_manifest.v1"
+    assert payload["compiled_manifest"]["messages"]
     snap = p.parent / p.name.replace("_pack", "_snapshot").replace(".json", ".md")
     assert snap.exists()

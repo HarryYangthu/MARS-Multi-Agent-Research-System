@@ -12,6 +12,9 @@ build/
 dist/
 out/
 *.log
+*.egg-info/
+*.tsbuildinfo
+.ruff_cache/
 
 # IDE
 .vscode/
@@ -20,15 +23,24 @@ out/
 
 # Claude Code per-developer config
 .claude/settings.local.json
+.claude/worktrees/
 .import_linter_cache/
 
 knowledge/.chromadb/
 knowledge/.chromadb-server/
-knowledge/literature/_index.json
-knowledge/methodology/_index.json
-knowledge/code_assets/_index.json
-knowledge/run_archive/_index.json
-runs/
+# Runtime KB indexes are local run state. This also catches Finder-created
+# duplicate files such as "_index 2.json" so V1 memory work does not get noisy.
+knowledge/*/_index*.json
+/runs/
+conversations/
+posttrain/adapters/
+posttrain/checkpoints/
+posttrain/data/
+posttrain/profiles/
+posttrain/ray/
+posttrain/reports/
+posttrain/tensorboard/
+posttrain/wandb/
 workspace/uploads/
 workspace/repos/*
 !workspace/repos/pimc-stub/

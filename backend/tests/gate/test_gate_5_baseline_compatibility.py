@@ -42,6 +42,49 @@ def test_writing_to_allowed_path_passes() -> None:
     assert not out.triggered
 
 
+def test_apply_patch_to_baseline_path_blocked() -> None:
+    out = static_check(
+        project="moe-pimc",
+        tool_name="code.apply_patch",
+        args={"files": [{"path": "baseline/x.py"}], "diff": "+x"},
+    )
+    assert out.triggered and out.blocking
+
+
+def test_apply_patch_diff_only_to_baseline_path_blocked() -> None:
+    diff = """diff --git a/baseline/x.py b/baseline/x.py
+--- a/baseline/x.py
++++ b/baseline/x.py
+@@ -1 +1 @@
+-old
++new
+"""
+    out = static_check(
+        project="moe-pimc",
+        tool_name="code.apply_patch",
+        args={"diff": diff},
+    )
+    assert out.triggered and out.blocking
+    assert "baseline/" in out.reason
+
+
+def test_apply_patch_diff_only_to_protected_class_blocked() -> None:
+    diff = """diff --git a/model.py b/model.py
+--- a/model.py
++++ b/model.py
+@@ -1 +1 @@
+-class Paper_Total_0327: pass
++class Paper_Total_0327: ...
+"""
+    out = static_check(
+        project="moe-pimc",
+        tool_name="code.apply_patch",
+        args={"diff": diff},
+    )
+    assert out.triggered and out.blocking
+    assert "Paper_Total_0327" in out.reason
+
+
 def test_forward_signature_break_blocked() -> None:
     bad_diff = """
 @@
@@ -91,7 +134,7 @@ async def test_gate_runs_inside_dispatch_and_blocks() -> None:
         called = True
         return ToolResult(ok=True, output="should not run")
 
-    reg.register("code.patch_generator", fake_tool)
+    reg.register("code.patch_generator", fake_tool, override=True)
 
     res = await reg.dispatch(
         "code.patch_generator",
@@ -110,7 +153,7 @@ async def test_dispatch_lets_safe_tools_through() -> None:
     async def fake_tool(args: dict[str, object], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=True, output="ran")
 
-    reg.register("code.patch_generator", fake_tool)
+    reg.register("code.patch_generator", fake_tool, override=True)
     res = await reg.dispatch(
         "code.patch_generator",
         {"path": "libs/x.py", "diff": "x"},

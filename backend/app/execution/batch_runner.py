@@ -1,4 +1,4 @@
-"""Concurrent batch runner with a configurable cap (V0 default = 6)."""
+"""Concurrent batch runner with a configurable cap (V0 default = 16)."""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,7 @@ from app.execution.simulation_runner import JobSpec, run_one
 
 @dataclass
 class BatchConfig:
-    max_concurrency: int = 6
+    max_concurrency: int = 16
     steps: int = 30
 
 

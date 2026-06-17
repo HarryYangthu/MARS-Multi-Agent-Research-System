@@ -1,0 +1,22 @@
+agent: idea
+research_sites:
+  - id: arxiv
+    label: arXiv
+    url: https://arxiv.org
+    enabled: true
+    source: default
+  - id: google_scholar
+    label: Google Scholar
+    url: https://scholar.google.com
+    enabled: true
+    source: default
+  - id: ieee_xplore
+    label: IEEE Xplore
+    url: https://ieeexplore.ieee.org
+    enabled: true
+    source: default
+  - id: openreview
+    label: OpenReview
+    url: https://openreview.net
+    enabled: true
+    source: default

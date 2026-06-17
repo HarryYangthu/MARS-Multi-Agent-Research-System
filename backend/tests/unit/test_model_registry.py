@@ -28,8 +28,14 @@ def test_select_provider_falls_back_to_mock_without_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Force absence of all keys.
-    for env in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "QWEN_API_KEY", "GEMINI_API_KEY"):
-        monkeypatch.delenv(env, raising=False)
+    for env in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "QWEN_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ):
+        monkeypatch.setenv(env, "")
     from app.settings import _settings  # noqa
     import app.settings as settings_mod
 
@@ -42,3 +48,27 @@ def test_select_provider_falls_back_to_mock_without_keys(
 
 def test_available_providers_always_includes_mock() -> None:
     assert "mock" in available_providers()
+
+
+def test_select_provider_rejects_mock_fallback_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for env in (
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "QWEN_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "LOCAL_VLLM_BASE_URL",
+    ):
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
+    monkeypatch.setenv("MARS_MOCK_MODE", "never")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = get_agent_config("idea")
+    with pytest.raises(RuntimeError, match="not configured"):
+        select_provider(cfg)
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    settings_mod._settings = None

@@ -30,6 +30,7 @@ from app.harness.llm.model_registry import (
     select_provider,
 )
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
+from app.settings import get_settings
 
 
 class DebateMode(str, Enum):
@@ -57,11 +58,15 @@ class DebateResult:
     def consensus_summary(self) -> str:
         if not self.turns:
             return ""
-        return f"{self.mode.value} debate over {self.rounds} round(s) with {len(self.turns)} turns"
+        return f"{self.mode.value} 模式辩论完成：{self.rounds} 轮，{len(self.turns)} 次发言"
 
 
 def _auto_mode(agent_config: AgentConfig) -> DebateMode:
     """Replicates the auto-degrade logic from DESIGN §16.3."""
+    from app.settings import get_settings
+
+    if get_settings().mars_mock_mode == "always":
+        return DebateMode.MOCK_DEBATE
     avail = available_providers()
     if not agent_config.debate_enabled:
         return DebateMode.MOCK_DEBATE
@@ -153,7 +158,7 @@ async def run_debate(
     total_turns = rounds * len(roles)
 
     turns: list[Turn] = []
-    last_text = context.task or "Begin the debate."
+    last_text = context.task or "开始辩论。"
 
     def _flush_progress(running: bool) -> None:
         if not progress_path:
@@ -162,12 +167,12 @@ async def run_debate(
             from pathlib import Path
 
             header = (
-                f"# Debate transcript ({mode.value}, rounds={rounds}, roles={len(roles)})\n"
-                f"_{('Running…' if running else 'Done')}_  "
-                f"({len(turns)}/{total_turns} turns)\n\n"
+                f"# 多模型辩论转录（模式={mode.value}，轮数={rounds}，角色数={len(roles)}）\n"
+                f"_{('运行中…' if running else '已完成')}_  "
+                f"（{len(turns)}/{total_turns} 次发言）\n\n"
             )
             body = "\n".join(
-                f"## {i}. {t.role} ({t.provider}/{t.model})\n\n{t.text}\n"
+                f"## {i}. {_role_label(t.role)}（{t.provider}/{t.model}）\n\n{t.text}\n"
                 for i, t in enumerate(turns, 1)
             )
             Path(progress_path).write_text(header + body, encoding="utf-8")
@@ -193,10 +198,22 @@ async def run_debate(
             )
             if last_text and role != roles[0]:
                 messages.append(
-                    Message(role="assistant", content=f"Previous turn:\n{last_text}")
+                    Message(role="assistant", content=f"上一轮发言：\n{last_text}")
                 )
+            _write_debate_manifest(
+                request=request,
+                agent_name=agent_name,
+                output_schema=output_schema,
+                messages=messages,
+                purpose=f"debate_{role}_round_{r + 1}",
+                role=role,
+                mode=mode.value,
+            )
             try:
-                completion = await provider.complete(messages, cfg)
+                completion = await asyncio.wait_for(
+                    provider.complete(messages, cfg),
+                    timeout=get_settings().mars_llm_timeout_seconds,
+                )
             except Exception as exc:
                 logger.warning(
                     "debate role {} provider {} failed ({}); falling back to mock",
@@ -230,13 +247,23 @@ async def run_debate(
 
 
 def _format_transcript(mode: DebateMode, rounds: int, turns: list[Turn]) -> str:
-    lines = [f"# Debate transcript ({mode.value}, rounds={rounds})", ""]
+    lines = [f"# 多模型辩论转录（模式={mode.value}，轮数={rounds}）", ""]
     for i, t in enumerate(turns, 1):
-        lines.append(f"## {i}. {t.role} ({t.provider}/{t.model})")
+        lines.append(f"## {i}. {_role_label(t.role)}（{t.provider}/{t.model}）")
         lines.append("")
         lines.append(t.text)
         lines.append("")
     return "\n".join(lines)
+
+
+def _role_label(role: str) -> str:
+    labels = {
+        "proposer": "提案者",
+        "critic": "批判者",
+        "judge": "裁判",
+        "positive_reviewer": "正向审稿人",
+    }
+    return labels.get(role, role)
 
 
 def _artifact_from_text(text: str, output_schema: str) -> Artifact:
@@ -255,6 +282,39 @@ def _artifact_from_text(text: str, output_schema: str) -> Artifact:
         metadata=metadata,
         body=body,
     )
+
+
+def _write_debate_manifest(
+    *,
+    request: RunRequest,
+    agent_name: str,
+    output_schema: str,
+    messages: list[Message],
+    purpose: str,
+    role: str,
+    mode: str,
+) -> None:
+    raw_root = request.extra.get("run_root")
+    if not raw_root:
+        return
+    try:
+        from pathlib import Path
+
+        from app.harness.context.engine import write_messages_manifest
+
+        write_messages_manifest(
+            run_root=Path(str(raw_root)),
+            run_id=str(request.extra.get("run_id", "")),
+            agent=agent_name,
+            node_key=str(request.extra.get("node_key", agent_name)),
+            project=request.project,
+            output_schema=output_schema,
+            purpose=purpose,
+            messages=messages,
+            diagnostics_extra={"debate_role": role, "debate_mode": mode},
+        )
+    except Exception as exc:
+        logger.warning("debate context manifest write failed: {}", exc)
 
 
 # convenience for asyncio.run() in CLIs

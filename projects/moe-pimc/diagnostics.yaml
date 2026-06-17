@@ -1,0 +1,28 @@
+version: 1
+project: moe-pimc
+
+loop:
+  max_iterations: 2
+  default_budget: 2
+  allowed_targets:
+    - coding
+    - experiment
+  default_target: coding
+  enable_idea_loop: false
+
+diagnostic_analyzers:
+  metrics_gap: true
+  config_sanity: true
+  code_change_risk: true
+
+metrics:
+  loss:
+    target: 0.04
+    direction: lte
+    tolerance: 0.0
+    aggregation: max
+  RES:
+    target: -43.5
+    direction: gte
+    tolerance: 0.0
+    aggregation: mean

@@ -93,7 +93,7 @@ def _settings_value(settings: Any, attr: str) -> str:
     return str(val or "")
 
 
-def available_providers() -> set[str]:
+def available_providers(*, include_mock: bool = True) -> set[str]:
     """Set of providers whose API key (or endpoint) is configured."""
     settings = get_settings()
     out: set[str] = set()
@@ -113,7 +113,8 @@ def available_providers() -> set[str]:
         out.add("custom")
     if _settings_value(settings, "deepseek_api_key"):
         out.add("deepseek")
-    out.add("mock")  # always available
+    if include_mock:
+        out.add("mock")  # always available outside production admission checks
     return out
 
 
@@ -183,11 +184,18 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
     )
 
     if settings.mars_mock_mode == "always":
+        if settings.is_production:
+            raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
         logger.info("MARS_MOCK_MODE=always — agent {} uses mock", agent_config.name)
         return MockProvider(default_schema=agent_config.output_schema), cfg
 
     avail = available_providers()
     if agent_config.model_provider not in avail:
+        if settings.is_production or settings.mars_mock_mode == "never":
+            raise RuntimeError(
+                f"provider '{agent_config.model_provider}' is not configured "
+                f"for agent '{agent_config.name}'"
+            )
         logger.warning(
             "provider '{}' not configured (agent={}) — falling back to mock_provider",
             agent_config.model_provider,
@@ -197,6 +205,11 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
 
     real = _build_real_provider(agent_config.model_provider)
     if real is None:
+        if settings.is_production or settings.mars_mock_mode == "never":
+            raise RuntimeError(
+                f"provider '{agent_config.model_provider}' failed to initialize "
+                f"for agent '{agent_config.name}'"
+            )
         return MockProvider(default_schema=agent_config.output_schema), cfg
     return real, cfg
 

@@ -19,10 +19,12 @@ def _clear_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         "OPENAI_API_KEY",
         "QWEN_API_KEY",
         "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
         "CUSTOM_ENDPOINT_URL",
         "CUSTOM_ENDPOINT_API_KEY",
     ):
         monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("MARS_MOCK_MODE", "always")
     monkeypatch.setenv("LOCAL_VLLM_BASE_URL", "")
     import app.settings as settings_mod
 

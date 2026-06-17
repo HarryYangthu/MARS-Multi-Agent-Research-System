@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from app.harness.kb.fingerprint import compute as compute_fingerprint
-from app.harness.kb.memory_writer import write_to_zone
 from app.harness.sedimentation.asset_metadata import make as make_metadata
 
 ExtractorResult = list[tuple[str, str, dict[str, Any]]]
@@ -52,6 +51,8 @@ REGISTRY: dict[str, Extractor] = {
 def run_extractor(
     *, agent: str, project: str, run_id: str, schema: str, text: str, metadata: dict[str, Any]
 ) -> int:
+    from app.harness.kb.memory_writer import write_to_zone
+
     extractor = REGISTRY.get(agent)
     if extractor is None:
         return 0

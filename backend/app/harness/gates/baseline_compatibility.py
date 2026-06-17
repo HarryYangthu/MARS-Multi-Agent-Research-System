@@ -28,6 +28,7 @@ GATE_ID = "baseline_compatibility"
 # Tool names whose dispatch we care about.
 MONITORED_TOOLS: tuple[str, ...] = (
     "code.patch_generator",
+    "code.apply_patch",
     "code.write_file",
     "code.delete_file",
 )
@@ -93,6 +94,24 @@ def _check_forward_signature(diff_or_code: str) -> str | None:
     return "patch modifies forward(self, x, ?, ...) — third positional arg must be 'stream_label' (AGENTS.md rule #2)"
 
 
+def _extract_diff_paths(diff: str) -> list[str]:
+    """Extract touched paths from a unified diff without trusting caller metadata."""
+    out: list[str] = []
+    patterns = (
+        r"^diff --git\s+a/(.+?)\s+b/(.+)$",
+        r"^\+\+\+\s+b/(.+)$",
+        r"^---\s+a/(.+)$",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, diff, flags=re.MULTILINE):
+            groups = match.groups()
+            for raw in groups:
+                path = raw.strip()
+                if path and path != "/dev/null" and path not in out:
+                    out.append(path)
+    return out
+
+
 def static_check(
     *,
     project: str,
@@ -117,6 +136,9 @@ def static_check(
         target_paths.extend(str(f.get("path", f)) for f in args["files"])
 
     diff = str(args.get("diff", "")) + "\n" + str(args.get("content", ""))
+    for path in _extract_diff_paths(diff):
+        if path not in target_paths:
+            target_paths.append(path)
 
     for tp in target_paths:
         hit = _matches_protected_path(tp, protected, diff_or_code=diff)

@@ -3,6 +3,7 @@ walks the full Idea→Writing pipeline, validates each artifact, persists into
 ``runs/<id>/<agent>/*.approved.md``."""
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from app.bridge.agent_registry import get_registry, reset_registry_for_tests
 from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.harness.runtime.event_bus import InProcessEventBus
+from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.harness.schema.validator import validate_document
 from app.storage.run_store import RunStore
 
@@ -22,8 +24,10 @@ def _clear_keys_and_register(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "OPENAI_API_KEY",
         "QWEN_API_KEY",
         "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
     ):
         monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("MARS_MOCK_MODE", "always")
     monkeypatch.setenv("LOCAL_VLLM_BASE_URL", "")
     import app.settings as settings_mod
 
@@ -76,3 +80,46 @@ async def test_full_pipeline_under_mock(tmp_path: Path) -> None:
         text = approved[0].read_text(encoding="utf-8")
         res = validate_document(text, expected_schema=schema)
         assert res.valid, f"{agent_dir}: {res.errors}"
+
+    diagnoses = sorted(session.run.subdir("diagnosis").glob("diagnosis.v*.md"))
+    diagnosis_docs: list[str] = []
+    for path in diagnoses:
+        suffix = path.stem.removeprefix("diagnosis.v")
+        if not suffix.isdigit():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if parse_fm(text).metadata.get("schema") == "diagnosis.v1":
+            diagnosis_docs.append(text)
+    assert diagnosis_docs
+    for text in diagnosis_docs:
+        diagnosis = validate_document(text, expected_schema="diagnosis.v1")
+        assert diagnosis.valid
+    assert parse_fm(diagnosis_docs[-1]).metadata["passed"] is True
+    feedback_packet = session.run.subdir("diagnosis") / "feedback_packet.attempt_2.md"
+    if len(diagnosis_docs) > 1:
+        assert feedback_packet.exists()
+        assert (session.run.subdir("coding") / "patch.v2.diff").exists()
+    assert (session.run.root / "run_state.json").exists()
+    assert (session.run.subdir("context") / "trace_manifest.v1.json").exists()
+    assert (session.run.subdir("context") / "context_manifest.v2.json").exists()
+    manifests = sorted(session.run.subdir("context").glob("context_manifest.v2.*.json"))
+    assert len(manifests) >= 5
+
+    evaluation_events_path = session.run.subdir("events") / "evaluation_events.jsonl"
+    assert evaluation_events_path.exists()
+    evaluation_events = [
+        json.loads(line)
+        for line in evaluation_events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    artifact_events = [
+        event
+        for event in evaluation_events
+        if event["event"] == "evaluation.artifact_evaluated"
+    ]
+    assert len(artifact_events) >= 5
+    assert {event["agent"] for event in artifact_events}.issuperset(schema_by_agent)
+    assert all(event["report_count"] >= 1 for event in artifact_events)
+    assert all("policy" in event for event in artifact_events)
+    assert evaluation_events[-1]["event"] == "evaluation.scorecard_written"
+    assert "quality_gate" in evaluation_events[-1]
+    assert (session.run.subdir("events") / "evaluation_quality_gate.json").exists()
