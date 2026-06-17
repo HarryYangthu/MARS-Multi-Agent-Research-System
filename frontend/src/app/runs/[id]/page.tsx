@@ -2,8 +2,9 @@
 
 /* eslint-disable react/jsx-no-undef */
 
-import { use, useEffect, useState } from "react";
+import { Suspense, use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import { AgentContextPanel } from "@/components/AgentContextPanel";
 import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
@@ -99,12 +100,21 @@ function splitFrontmatter(text: string): { frontmatter: string; body: string } {
   return { frontmatter: match[1], body: match[2] };
 }
 
-export default function RunDetailPage({ params }: { params: Promise<{ id: string }> }): JSX.Element {
+function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JSX.Element {
   const { id: runId } = use(params);
   const { t } = useI18n();
+  // Deep-link support: /runs/<id>?agent=<stage> opens straight to that agent.
+  // Clicking an agent card on the dashboard now lands on THAT agent, not always
+  // the Commander; an explicit ?agent=commander opens the Commander.
+  const searchParams = useSearchParams();
+  const agentParam = searchParams?.get("agent");
+  const initialAgent =
+    agentParam && (AGENT_NAV as readonly string[]).includes(agentParam)
+      ? agentParam
+      : "commander";
   const [run, setRun] = useState<RunDetail | null>(null);
   const [events, setEvents] = useState<WSMessage[]>([]);
-  const [activeAgent, setActiveAgent] = useState<string>("commander");
+  const [activeAgent, setActiveAgent] = useState<string>(initialAgent);
   const [artifact, setArtifact] = useState<ArtifactView | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [debate, setDebate] = useState<DebateTranscript | null>(null);
@@ -627,14 +637,38 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
         </h2>
         <p className="mt-1 text-xs text-slate-500">{runId}</p>
 
-        <ul className="mt-6 space-y-1">
-          {AGENT_NAV.map((s) => {
-            const state = s === "commander" ? "configured" : run?.states[s] ?? "pending";
+        {/* Commander gets the C位: a prominent hub card above the 5-stage list. */}
+        <button
+          onClick={() => selectAgent("commander")}
+          className={`mt-6 flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition ${
+            activeAgent === "commander"
+              ? "border-cyan-400/70 bg-cyan-500/15 shadow-[0_0_18px_-4px_rgba(34,211,238,0.6)]"
+              : "border-cyan-500/30 bg-cyan-500/5 hover:border-cyan-400/60 hover:bg-cyan-500/10"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-base">🛰️</span>
+            <span className="flex flex-col">
+              <span className="text-sm font-semibold text-cyan-50">{agentLabel("commander")}</span>
+              <span className="text-[10px] text-cyan-200/70">主控调度 · 诊断 · 反馈回路</span>
+            </span>
+          </span>
+          <span className="rounded bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-cyan-200">
+            主控
+          </span>
+        </button>
+
+        <div className="mb-1 mt-4 flex items-center gap-2 px-1">
+          <span className="h-px flex-1 bg-mars-border" />
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">流水线 · 5 Agent</span>
+          <span className="h-px flex-1 bg-mars-border" />
+        </div>
+
+        <ul className="space-y-1">
+          {PIPELINE_STAGES.map((s) => {
+            const state = run?.states[s] ?? "pending";
             const isActive = activeAgent === s;
-            const stageEvaluation =
-              s === "commander"
-                ? null
-                : stageEvaluationBadge(s, scorecard, liveEvaluationSummaries);
+            const stageEvaluation = stageEvaluationBadge(s, scorecard, liveEvaluationSummaries);
             return (
               <li key={s}>
                 <button
@@ -1058,6 +1092,9 @@ function CommanderFeedbackPanel({
   const [mutationDrafts, setMutationDrafts] = useState<
     Record<string, { proposedContent: string; rationale: string }>
   >({});
+  // Default view stays minimal (status + 启动反馈回路); all the dense
+  // observability/governance detail lives behind this disclosure.
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const latest = diagnoses.length > 0 ? diagnoses[diagnoses.length - 1] : null;
   const latestMeta = latest?.metadata ?? {};
   const latestPassed = latestMeta.passed === true;
@@ -1105,22 +1142,58 @@ function CommanderFeedbackPanel({
 
   return (
     <section className="rounded border border-cyan-500/30 bg-cyan-500/5 p-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-cyan-100">主控反馈回路</h3>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-cyan-100">主控反馈回路</h3>
+            <span
+              className={`rounded px-2 py-0.5 text-[10px] uppercase ${
+                !latest
+                  ? "bg-slate-500/20 text-slate-300"
+                  : latestPassed
+                    ? "bg-emerald-500/20 text-emerald-200"
+                    : "bg-amber-500/20 text-amber-200"
+              }`}
+            >
+              {!latest ? "待运行" : latestPassed ? "已通过" : "需要回路"}
+            </span>
+          </div>
           <p className="mt-0.5 font-mono text-[11px] text-slate-500">
-            诊断={latest?.version ?? "无"} 目标={target} 置信度={confidence}
+            诊断={latest?.version ?? "无"} · 目标={target} · 置信度={confidence}
           </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+            {latest
+              ? metaText(latestMeta, "recommended_action", "暂无诊断结论。")
+              : "尚未触发回路。执行批次未达标时,主控会自动诊断、定位责任 Agent 并给出修复建议;点击「启动反馈回路」即可回溯到该 Agent 重跑。"}
+          </p>
+          {feedbackRef ? (
+            <p className="mt-1.5 break-all font-mono text-[10px] text-cyan-200">反馈包: {feedbackRef}</p>
+          ) : null}
+          {actionResult ? (
+            <p className="mt-1 font-mono text-[10px] text-slate-400">
+              状态={actionResult.status} · 目标={actionResult.target ?? "-"} · 轮次={actionResult.attempt ?? "-"}
+            </p>
+          ) : null}
         </div>
         <button
           onClick={() => void onStartFeedback()}
           disabled={!canStart}
-          className="rounded bg-cyan-500/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded bg-cyan-500/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           启动反馈回路
         </button>
       </div>
 
+      <button
+        onClick={() => setShowAdvanced((v) => !v)}
+        className="flex w-full items-center justify-between rounded border border-mars-border bg-mars-bg/40 px-3 py-2 text-xs text-slate-400 transition hover:text-slate-200"
+      >
+        <span>高级与审计 · 归因详情 / 反馈包 / 记忆候选 / 自进化杠杆 / 回路审计 / 工具调用</span>
+        <span className="font-mono">{showAdvanced ? "收起 ▴" : "展开 ▾"}</span>
+      </button>
+
+      {showAdvanced ? (
+      <div className="mt-3 space-y-3">
       <div className="grid gap-3 lg:grid-cols-3">
         <div className="rounded border border-mars-border bg-mars-bg/50 p-3">
           <div className="mb-2 flex items-center justify-between">
@@ -1444,6 +1517,8 @@ function CommanderFeedbackPanel({
         onToolCallIdFilterChange={onToolCallIdFilterChange}
         onToolLimitChange={onToolLimitChange}
       />
+      </div>
+      ) : null}
     </section>
   );
 }
@@ -2838,5 +2913,17 @@ function MiniCurve({ curve, featured = false }: { curve: Curve; featured?: boole
         <span>{max.toFixed(3)}</span>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() (read in RunDetailPageInner for ?agent= deep-linking) must
+// sit under a Suspense boundary in the Next.js 15 App Router.
+export default function RunDetailPage(props: {
+  params: Promise<{ id: string }>;
+}): JSX.Element {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-slate-400">加载中…</div>}>
+      <RunDetailPageInner {...props} />
+    </Suspense>
   );
 }

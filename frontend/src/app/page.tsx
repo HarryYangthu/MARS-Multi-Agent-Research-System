@@ -19,16 +19,22 @@ export default function LabDashboard(): JSX.Element {
   return (
     <div className="grid h-screen grid-rows-[auto_1fr_auto] overflow-hidden bg-mars-bg">
       <TopBar />
-      <main className="grid min-h-0 grid-cols-1 overflow-auto min-[1180px]:grid-cols-[300px_minmax(0,1fr)_330px]">
+      {/*
+        Left (主控对话/项目) + center pipeline stay side-by-side from `md` up so a
+        running pipeline never pushes the left panel below the fold; the right
+        rail (events/KB) joins as a third column once there's room (>=1120px).
+        Each column scrolls internally instead of forcing the page taller.
+      */}
+      <main className="grid min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)] min-[1120px]:grid-cols-[300px_minmax(0,1fr)_330px]">
         <ProjectsPanel onSelectRun={setSelectedRunId} />
-        <section className="flex min-h-[720px] flex-col overflow-hidden border-x border-mars-border/80 min-[1180px]:min-h-0">
+        <section className="flex min-h-[60vh] flex-col overflow-hidden border-x border-mars-border/80 md:min-h-0">
           <PipelineOverview
             selectedRunId={selectedRunId}
             stats={runtime.stats}
             readiness={runtime.readiness}
           />
         </section>
-        <aside className="grid min-h-[720px] grid-rows-[minmax(0,1fr)_minmax(280px,42%)] bg-mars-panel/40 min-[1180px]:min-h-0">
+        <aside className="hidden min-h-0 grid-rows-[minmax(0,1fr)_minmax(280px,42%)] bg-mars-panel/40 min-[1120px]:grid">
           <div className="min-h-0 overflow-hidden">
             <EventLog />
           </div>

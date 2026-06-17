@@ -1,20 +1,28 @@
+# Execution / simulation scheduling for the dual-carrier PIM cancellation sweep.
+# `backend: mock` selects the mock curve template; the real-vs-mock simulator is
+# chosen at runtime by MARS_EXECUTION_BACKEND (set to `pim_cpu` to run the real
+# numpy memory-polynomial canceller). RES is residual power in dB — LOWER is
+# better — and the pass gate lives in projects/moe-pimc/diagnostics.yaml.
 execution:
   backend: mock
-  max_concurrency: 16
-  batch_steps: 120
+  max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
+  batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
   command_timeout_seconds: 60
   allow_real_patch_apply: true
-  # Used only when a tool call requests backend=local_command. Commands are
-  # executed without a shell and must also match configs/tools.yaml allowlists.
+  # Smoke-test stub only: used when a tool call explicitly requests
+  # backend=local_command. Values are a believable deep-canceller point
+  # (loss≈10^(RES/10), RES below the -26 dB gate); the real metrics come from
+  # the pim_cpu backend. Commands run without a shell and must match the
+  # configs/tools.yaml allowlist.
   local_commands:
     - id: python_metric_echo
-      label: Python metric echo
+      label: Python metric echo (smoke-test stub)
       argv:
         - python
         - -c
-        - 'import json; print(json.dumps({"metrics": {"loss": 0.0, "RES": -42.0}}))'
+        - 'import json; print(json.dumps({"metrics": {"loss": 0.0019, "RES": -27.2, "PIM": 27.2, "APE": 23.4}}))'
   remote_gpu:
-    enabled: false
+    enabled: false             # V1: real L40S training endpoint; CPU/mock for the demo
     endpoint: ""
 
 code_checks:

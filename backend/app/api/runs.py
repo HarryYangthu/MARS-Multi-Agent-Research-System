@@ -21,6 +21,10 @@ class CreateRunPayload(BaseModel):
     entrypoint: str = Field(default="pipeline")
     standalone: bool = False
     user_request: str = ""
+    # When true, every agent auto-approves and the Commander self-heal loop
+    # auto-appends repair attempts — the run executes end-to-end without HITL
+    # clicks. Used for demos / autonomous runs; the UI default stays human-gated.
+    auto_approve: bool = False
     # Optional: pre-written markdown for the entrypoint Agent's first artifact.
     # When provided, the API validates it against the matching schema, drops
     # it as <agent>/<stem>.v1.md, and the orchestrator skips the LLM draft for
@@ -57,6 +61,7 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         entrypoint=payload.entrypoint,  # type: ignore[arg-type]
         standalone=payload.standalone,
         user_request=payload.user_request,
+        auto_approve=payload.auto_approve,
     )
     try:
         session = orch.create_session(request)

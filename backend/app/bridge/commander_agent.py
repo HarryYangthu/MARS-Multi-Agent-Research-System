@@ -526,9 +526,15 @@ class CommanderAgent:
 
     def _expected_fix(self, target: str) -> str:
         if target == "experiment":
-            return "Revise the experiment plan using the Commander feedback packet, then rerun execution."
+            return (
+                "Deepen the canceller memory-depth ablation (expert_count / memory taps) "
+                "per the feedback packet, then rerun execution."
+            )
         if target == "coding":
-            return "Generate a focused code_spec revision and patch diff using the Commander feedback packet."
+            return (
+                "Increase the memory-polynomial canceller depth in a focused code_spec "
+                "revision (keep Paper_Total_0327 / forward(x, stream_label) frozen), then rerun."
+            )
         return "Pause for human review before deciding the next feedback target."
 
     def _do_next(
@@ -536,14 +542,14 @@ class CommanderAgent:
     ) -> list[str]:
         if target == "experiment":
             return [
-                "Re-check ablation coverage against the failed metrics.",
-                "Adjust only the experiment variables needed to explain the gap.",
-                "Keep GPU/run budget explicit and bounded.",
+                "RES (residual) missed target: the ablation grid under-provisioned canceller memory depth.",
+                "Expand the memory-depth axis (expert_count / memory taps) toward the true 12-tap PIM memory.",
+                "Keep the sweep bounded (<=16 ablations) and state the expected RES (dB) improvement.",
             ]
         return [
-            "Inspect the code paths named by code risk evidence before drafting a patch.",
-            "Keep baseline compatibility preserved and avoid protected surfaces.",
-            "Propose the smallest patch that targets the failed metric pattern.",
+            "RES (residual) missed target: the memory-polynomial canceller has too few taps to cancel the PIM memory.",
+            "Increase canceller memory depth (more taps); keep Paper_Total_0327 and forward(x, stream_label) frozen.",
+            "Propose the smallest patch that lowers RES; do not touch protected baseline/ surfaces (Gate 5).",
         ]
 
     def _avoid_repeating(self, target: str) -> list[str]:

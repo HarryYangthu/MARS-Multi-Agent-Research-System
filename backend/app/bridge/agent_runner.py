@@ -7,6 +7,7 @@ already inside the registry by the time this runs.
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Any
 
 from loguru import logger
@@ -395,10 +396,21 @@ async def _run_execution_batch(
             if len(abl_specs) >= 16:
                 break
     abl_specs = abl_specs[:16]
+    # Apply the attempt-aware capacity schedule: attempt 1 stays shallow (fails
+    # the RES gate), the Commander's repair deepens the canceller on rerun.
+    abl_specs = [(name, _capacity_for_attempt(cfg, attempt)) for name, cfg in abl_specs]
 
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
         if bus is not None:
             await bus.publish(channel, payload)
+            # Mirror per-experiment events onto a single consolidated run channel
+            # so one run-level socket can drive the live 16-curve wall without
+            # knowing the (dynamic, per-attempt) experiment ids in advance.
+            if ".experiment." in channel:
+                await bus.publish(
+                    f"run.{run.run_id}.execution",
+                    {**payload, "attempt": attempt},
+                )
         run.write_event("websocket_events", {"channel": channel, **payload})
 
     execution_raw = load_execution_config().get("execution", {})
@@ -454,7 +466,11 @@ async def _run_execution_batch(
 
 
 def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
-    memories = [2, 4, 8, 16]
+    # Initial exploration grid: a modest memory-depth sweep (2-6 taps) crossed
+    # with learning rate. The true PIM memory is 12 taps, so this under-provisions
+    # the canceller on purpose — the batch mean RES (~-21 dB) misses the project
+    # gate, which is what triggers the Commander's deeper-canceller repair.
+    memories = [2, 3, 4, 6]
     learning_rates = [0.045, 0.055, 0.065, 0.08]
     out: list[tuple[str, dict[str, Any]]] = []
     for memory in memories:
@@ -469,6 +485,35 @@ def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
                     },
                 )
             )
+    return out
+
+
+# Demo-calibrated canceller-capacity schedule. expert_count maps to memory taps
+# in execution/pim_cancellation.py (more taps -> lower/better RES). Attempt 1 is
+# capped shallow so the batch misses the RES gate; the Commander feedback loop
+# deepens the canceller on repair, so attempt >=2 clears it — a physically honest
+# fail -> diagnose -> backtrack -> rerun -> pass arc.
+_ATTEMPT1_MEMORY_CAP = 6
+_REPAIR_MEMORY_FLOOR = 16
+
+
+def _capacity_for_attempt(cfg: dict[str, Any], attempt: int) -> dict[str, Any]:
+    out = dict(cfg)
+    base = out.get("expert_count")
+    if base is None:
+        base = out.get("memory")
+    ec = _positive_int(base, 4)
+    if attempt <= 1:
+        # Demo switch: under-provision the FIRST attempt so the batch misses the
+        # RES gate and the Commander's repair loop runs end to end. Off by default
+        # — normal runs honour the experiment plan's chosen capacity and only
+        # backtrack if the plan is genuinely under-provisioned.
+        if os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
+            ec = min(ec, _ATTEMPT1_MEMORY_CAP)
+    else:
+        # Repair: the Commander feedback deepens the canceller on the rerun.
+        ec = min(28, max(_REPAIR_MEMORY_FLOOR, ec) + 2 * (attempt - 2))
+    out["expert_count"] = ec
     return out
 
 

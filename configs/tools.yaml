@@ -64,7 +64,7 @@ tools:
 
   knowledge.kb_query:
     enabled: true
-    description: Query one KB zone.
+    description: Query one KB zone (literature/methodology/code_assets/run_archive) for PIM-cancellation evidence.
     mutation_level: read
     allowed_agents: [idea, experiment]
     timeout_seconds: 10
@@ -83,7 +83,7 @@ tools:
 
   knowledge.baseline_match:
     enabled: true
-    description: Match a candidate experiment plan against run_archive.
+    description: Match a candidate PIM ablation plan against prior runs (run_archive) to reuse a baseline.
     mutation_level: read
     allowed_agents: [idea, experiment]
     timeout_seconds: 10
@@ -101,7 +101,7 @@ tools:
 
   knowledge.experiment_memory:
     enabled: true
-    description: Query historical experiment memory from run_archive.
+    description: Query prior PIM ablation runs (RES/loss per memory-depth/router config) from run_archive.
     mutation_level: read
     allowed_agents: [experiment]
     timeout_seconds: 10
@@ -109,7 +109,7 @@ tools:
 
   knowledge.code_assets:
     enabled: true
-    description: Query code asset memory.
+    description: Query reusable canceller / MoE-router code assets (kept Gate-5-safe, additive-only).
     mutation_level: read
     allowed_agents: [coding]
     timeout_seconds: 10
@@ -117,7 +117,7 @@ tools:
 
   knowledge.methodology:
     enabled: true
-    description: Query methodology memory.
+    description: Query methodology memory (RES/PIM/APE measurement + ablation-design protocol).
     mutation_level: read
     allowed_agents: [writing]
     timeout_seconds: 10
@@ -125,7 +125,7 @@ tools:
 
   knowledge.run_archive:
     enabled: true
-    description: Query run archive memory.
+    description: Query the run archive (prior run_log.v1 results — RES/loss per ablation) for the report.
     mutation_level: read
     allowed_agents: [writing]
     timeout_seconds: 10
@@ -311,7 +311,11 @@ tools:
 
   execution.simulation_runner:
     enabled: true
-    description: Run one mock/pim_cpu/local simulation.
+    description: >-
+      Run one dual-carrier PIM cancellation ablation (memory-polynomial canceller)
+      and emit RES (residual dB, lower=better) / PIM suppression dB / APE deg / loss.
+      config knobs: expert_count (→memory taps), order, router_type, snr_db, learning_rate.
+      backend ∈ {mock, pim_cpu, local}.
     mutation_level: write
     allowed_agents: [execution, system, bridge]
     timeout_seconds: 180
@@ -334,7 +338,10 @@ tools:
 
   execution.batch_runner:
     enabled: true
-    description: Run a batch of mock/pim_cpu/local simulations.
+    description: >-
+      Run the PIM-cancellation ablation grid concurrently (up to 16 cells, one
+      asyncio semaphore), streaming each cell's loss curve live and collecting
+      RES/PIM/APE/loss per ablation for the diagnostics gate.
     mutation_level: write
     allowed_agents: [execution, system, bridge]
     timeout_seconds: 600
@@ -378,7 +385,7 @@ tools:
 
   execution.metrics_collector:
     enabled: true
-    description: Read execution metrics.json.
+    description: Read per-ablation RES (dB) / PIM suppression (dB) / APE (deg) / loss from metrics.json.
     mutation_level: read
     allowed_agents: [execution, writing]
     timeout_seconds: 10

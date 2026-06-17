@@ -1,14 +1,12 @@
-# MARS V1 — Agent configuration.
-# All agents use DeepSeek (per user setup). Each agent picks its own model.
-# Multi-model debate uses different DeepSeek model versions per role so the
-# auto-degrade logic stays in REAL_MULTI_MODEL mode (all participants share
-# the deepseek provider).
-#
-# Model alias map (V0):
-#   deepseek-chat       → DeepSeek's strongest general chat model (current "V4")
-#   deepseek-reasoner   → DeepSeek-R1 long chain-of-thought reasoning
-#   deepseek-coder      → DeepSeek-Coder for code generation
-#
+# MARS — Agent configuration (project: moe-pimc — PIM cancellation + MoE router).
+# Every agent runs on DeepSeek. Only two models are actually used:
+#   deepseek-chat      — fast general model; used where determinism / throughput
+#                        matter (coding patches, execution run-logs, synthesis).
+#   deepseek-reasoner  — DeepSeek-R1 long chain-of-thought; used where the task is
+#                        design / critique heavy (ablation-matrix planning, the
+#                        debate critic, report review).
+# Multi-model debate mixes chat + reasoner across roles so the auto-degrade logic
+# stays in REAL_MULTI_MODEL mode (all roles share the deepseek provider).
 # Missing API keys fall back to mock_provider only outside production mode.
 
 commander:
@@ -38,7 +36,7 @@ idea:
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-chat            # strongest general — "V4" alias
+    model: deepseek-chat            # bold, fast hypothesis generation for PIM/MoE proposals
     temperature: 0.7
     max_tokens: 4096
   debate:
@@ -47,13 +45,13 @@ idea:
     participants:
       - role: proposer
         provider: deepseek
-        model: deepseek-chat        # V4 chat — bold proposer
+        model: deepseek-chat        # bold proposer
       - role: critic
         provider: deepseek
-        model: deepseek-reasoner    # R1 — long-CoT critique
+        model: deepseek-reasoner    # R1 long-CoT critic (probes the RES vs memory-depth tradeoff)
       - role: judge
         provider: deepseek
-        model: deepseek-chat        # V4 chat — synthesizer
+        model: deepseek-chat        # synthesizer
   research:
     enable_network: false             # V1 keeps arXiv/web research optional, not required for demo
   loop:
@@ -71,7 +69,7 @@ experiment:
   output_schema: experiment_plan.v1
   model:
     provider: deepseek
-    model: deepseek-reasoner        # R1 — good for ablation matrix design
+    model: deepseek-reasoner        # R1 — designs the order × memory-taps × router_type ablation matrix
     temperature: 0.3
     max_tokens: 4096
   debate:
@@ -89,9 +87,14 @@ coding:
   output_schema: code_spec.v1
   model:
     provider: deepseek
-    model: deepseek-chat            # DeepSeek-Coder is merged into deepseek-chat now
+    model: deepseek-chat            # temp 0.1 → deterministic, additive patches (Paper_Total_0327 stays frozen)
     temperature: 0.1
     max_tokens: 8192
+  # V0 only LOADS a post-trained coding backend; the GRPO training pipeline is V1
+  # (CLAUDE.md constraint 5). mode: endpoint references a `vllm serve` at
+  # custom_endpoint; if that server isn't running the Coding Agent gracefully
+  # degrades to the public model (and to mock with no key), so the demo never
+  # breaks. Switch to mode: adapter + adapter_path to load a LoRA instead.
   post_training:
     enabled: true
     mode: endpoint
@@ -152,10 +155,10 @@ writing:
     participants:
       - role: critic
         provider: deepseek
-        model: deepseek-reasoner    # R1 — careful reviewer
+        model: deepseek-reasoner    # R1 — checks RES/PIM claims against the run evidence
       - role: positive_reviewer
         provider: deepseek
-        model: deepseek-chat        # V4 chat — encouraging
+        model: deepseek-chat        # frames the contribution for the target audience
   loop:
     max_validation_repairs: 1
     max_tool_steps: 3

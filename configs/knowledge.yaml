@@ -6,19 +6,27 @@ embedding:
   dim: 256
 
 zones:
+  # literature: PIM / passive-intermodulation cancellation papers, memory
+  # polynomial & Volterra references, MoE-routing surveys.
   literature:
     chunk_size: 1500
     overlap: 200
+  # methodology: RES/PIM/APE measurement protocol, the ablation design
+  # (order × memory-taps × router_type), dual-carrier signal-gen recipe.
   methodology:
     chunk_size: 2000
     overlap: 200
+  # code_assets: reusable canceller modules / router implementations, kept
+  # small-chunked so individual functions retrieve cleanly.
   code_assets:
     chunk_size: 800
     overlap: 50
+  # run_archive: prior run_log.v1 results (RES/loss per ablation) for baseline
+  # reuse and the Commander's failure-memory lookups.
   run_archive:
     chunk_size: 1000
     overlap: 100
 
 baseline:
-  match_threshold: 0.85
+  match_threshold: 0.85        # cosine similarity to treat a prior run as a reusable baseline
   top_k: 3

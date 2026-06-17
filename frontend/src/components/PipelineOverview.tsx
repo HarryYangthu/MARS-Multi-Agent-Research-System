@@ -293,26 +293,41 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
       </div>
 
       <div className="mb-3 flex flex-col items-center">
-        <div
-          className={`mars-node-card w-full max-w-sm rounded border px-3 py-2 ${
-            run
-              ? "mars-node-active border-cyan-400/60 bg-cyan-500/10"
-              : "border-mars-border bg-mars-bg/45"
-          }`}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-mono text-[11px] text-slate-100">
-              Commander Agent
-            </span>
-            <span className={`h-2 w-2 rounded-full ${stateDotClass(commanderState, Boolean(run))}`} />
-          </div>
-          <p className="mt-1 truncate text-[10px] text-slate-400">
-            主控调度 / 状态监督 / 反馈闭环
-          </p>
-          <p className="mt-1 truncate text-[9px] text-slate-600">
-            entry · routing · gate orchestration
-          </p>
-        </div>
+        {(() => {
+          const commanderCard = (
+            <div
+              className={`mars-node-card w-full max-w-md rounded-lg border-2 px-4 py-3 transition ${
+                run
+                  ? "mars-node-active border-cyan-400/80 bg-cyan-500/15 shadow-[0_0_26px_-6px_rgba(34,211,238,0.65)] hover:border-cyan-300"
+                  : "border-cyan-500/30 bg-cyan-500/5"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <span className="text-base leading-none">🛰️</span>
+                  <span className="font-semibold text-cyan-50">Commander Agent</span>
+                  <span className="rounded bg-cyan-500/25 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-cyan-100">
+                    主控 · C位
+                  </span>
+                </span>
+                <span className={`h-2.5 w-2.5 rounded-full ${stateDotClass(commanderState, Boolean(run))}`} />
+              </div>
+              <p className="mt-1.5 truncate text-[11px] text-cyan-100/80">
+                主控调度 · 状态监督 · 诊断与反馈回路
+              </p>
+              <p className="mt-0.5 truncate text-[9px] text-cyan-200/50">
+                {run ? "点击进入主控页 · entry / routing / gate orchestration" : "entry · routing · gate orchestration"}
+              </p>
+            </div>
+          );
+          return run ? (
+            <Link href={`/runs/${run.run_id}?agent=commander`} className="w-full max-w-md">
+              {commanderCard}
+            </Link>
+          ) : (
+            commanderCard
+          );
+        })()}
         <div className={`h-4 w-px ${run ? "bg-cyan-400/50" : "bg-mars-subtle"}`} />
         <div className={`h-px w-full max-w-3xl ${run ? "bg-cyan-400/25" : "bg-mars-subtle"}`} />
       </div>
@@ -522,7 +537,7 @@ function AgentCard({
 
   return (
     <Link
-      href={`/runs/${runId}`}
+      href={`/runs/${runId}?agent=${stage}`}
       className={`relative block rounded border bg-mars-panel2 p-2 transition hover:border-mars-accent ${
         selected ? "border-mars-accent" : "border-mars-border"
       }`}
