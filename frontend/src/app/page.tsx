@@ -25,7 +25,7 @@ export default function LabDashboard(): JSX.Element {
         rail (events/KB) joins as a third column once there's room (>=1120px).
         Each column scrolls internally instead of forcing the page taller.
       */}
-      <main className="grid min-h-0 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)] min-[1120px]:grid-cols-[300px_minmax(0,1fr)_330px]">
+      <main className="grid min-h-0 grid-cols-1 overflow-y-auto md:grid-cols-[260px_minmax(0,1fr)] min-[1120px]:grid-cols-[300px_minmax(0,1fr)_330px]">
         <ProjectsPanel onSelectRun={setSelectedRunId} />
         <section className="flex min-h-[60vh] flex-col overflow-hidden border-x border-mars-border/80 md:min-h-0">
           <PipelineOverview
