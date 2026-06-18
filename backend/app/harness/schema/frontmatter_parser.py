@@ -41,3 +41,24 @@ def dumps(metadata: dict[str, Any], body: str) -> str:
     if isinstance(rendered, bytes):
         return rendered.decode("utf-8")
     return str(rendered)
+
+
+def close_unclosed_frontmatter(text: str) -> str:
+    """Repair a narrow LLM formatting error: missing closing frontmatter fence.
+
+    This does not change the parser's behavior for user-authored files. It is
+    meant for provider output cleanup before validation, where models sometimes
+    emit ``---`` + YAML + markdown body but forget the second ``---``.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("---\n"):
+        return text
+    if "\n---\n" in stripped[4:] or stripped.endswith("\n---"):
+        return text
+
+    lines = stripped.splitlines()
+    for index, line in enumerate(lines[1:], start=1):
+        if line.startswith("# ") or line.startswith("## ") or line.startswith("<!--"):
+            repaired = "\n".join([*lines[:index], "---", *lines[index:]])
+            return repaired + ("\n" if text.endswith("\n") else "")
+    return text

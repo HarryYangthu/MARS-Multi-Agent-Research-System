@@ -63,14 +63,23 @@ class DebateResult:
 
 def _auto_mode(agent_config: AgentConfig) -> DebateMode:
     """Replicates the auto-degrade logic from DESIGN §16.3."""
-    from app.settings import get_settings
-
-    if get_settings().mars_mock_mode == "always":
+    settings = get_settings()
+    if settings.mars_mock_mode == "always":
+        if settings.is_production:
+            raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
         return DebateMode.MOCK_DEBATE
     avail = available_providers()
     if not agent_config.debate_enabled:
         return DebateMode.MOCK_DEBATE
-    required = {p.get("provider") for p in agent_config.debate_participants}
+    required = {
+        str(p.get("provider")) for p in agent_config.debate_participants if p.get("provider")
+    }
+    missing = required - avail
+    if missing and (settings.is_production or settings.mars_mock_mode == "never"):
+        raise RuntimeError(
+            f"debate provider(s) not configured for agent '{agent_config.name}': "
+            + ", ".join(sorted(missing))
+        )
     if required.issubset(avail) and required - {"mock"}:
         return DebateMode.REAL_MULTI_MODEL
     if avail - {"mock"}:
@@ -92,7 +101,10 @@ def _select_role_provider(
     In single_model_simulated mode the fallback (the agent's primary) is
     used for every role. In mock_debate mode MockProvider is forced.
     """
+    settings = get_settings()
     if mode == DebateMode.MOCK_DEBATE:
+        if settings.is_production or settings.mars_mock_mode == "never":
+            raise RuntimeError("mock debate is disabled by runtime settings")
         return (
             MockProvider(),
             LLMConfig(provider="mock", model="mock-1", response_schema=fallback[1].response_schema),
@@ -108,13 +120,20 @@ def _select_role_provider(
         if p.get("role") == role:
             from app.harness.llm.model_registry import _build_real_provider
 
-            real = _build_real_provider(str(p.get("provider"))) or MockProvider()
             cfg = LLMConfig(
                 provider=str(p.get("provider")),
                 model=str(p.get("model", "default")),
                 temperature=0.7,
                 response_schema=fallback[1].response_schema,
             )
+            real = _build_real_provider(cfg.provider)
+            if real is None:
+                if settings.is_production or settings.mars_mock_mode == "never":
+                    raise RuntimeError(
+                        f"debate provider '{cfg.provider}' failed to initialize "
+                        f"for role '{role}'"
+                    )
+                real = MockProvider()
             return real, cfg, cfg.provider, cfg.model
     return fallback[0], fallback[1], fallback[1].provider, fallback[1].model
 
@@ -215,6 +234,11 @@ async def run_debate(
                     timeout=get_settings().mars_llm_timeout_seconds,
                 )
             except Exception as exc:
+                settings = get_settings()
+                if settings.is_production or settings.mars_mock_mode == "never":
+                    raise RuntimeError(
+                        f"debate role '{role}' provider '{p_name}' failed"
+                    ) from exc
                 logger.warning(
                     "debate role {} provider {} failed ({}); falling back to mock",
                     role,
@@ -267,17 +291,19 @@ def _role_label(role: str) -> str:
 
 
 def _artifact_from_text(text: str, output_schema: str) -> Artifact:
+    from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
     from app.harness.schema.frontmatter_parser import parse as parse_fm
 
+    cleaned = close_unclosed_frontmatter(text.strip())
     try:
-        parsed = parse_fm(text)
+        parsed = parse_fm(cleaned)
         metadata = parsed.metadata
         body = parsed.body
     except Exception:
         metadata = {}
-        body = text
+        body = cleaned
     return Artifact(
-        text=text,
+        text=cleaned,
         schema_id=str(metadata.get("schema", output_schema)),
         metadata=metadata,
         body=body,

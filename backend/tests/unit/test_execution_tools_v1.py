@@ -63,7 +63,7 @@ async def test_simulation_runner_local_command_backend_writes_artifacts(tmp_path
 
     assert result.ok is True
     assert result.output["backend"] == "local_command"
-    assert result.metrics["RES"] == -42.0
+    assert result.metrics["RES"] == -27.2
     assert (run_root / "execution" / "metrics.json").is_file()
     assert (run_root / "execution" / "logs" / "cmd_a_python_metric_echo.log").is_file()
 

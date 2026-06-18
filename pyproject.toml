@@ -26,6 +26,7 @@ dependencies = [
   "openai>=1.40",
   "langgraph>=0.2.0",
   "pypdf>=4.0",
+  "socksio>=1.0.0",
 ]
 
 [project.optional-dependencies]

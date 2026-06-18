@@ -15,6 +15,7 @@ anthropic>=0.34
 openai>=1.40
 langgraph>=0.2.0
 pypdf>=4.0
+socksio>=1.0.0
 
 [dev]
 pytest>=8.0

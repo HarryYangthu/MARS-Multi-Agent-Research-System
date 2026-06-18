@@ -7,7 +7,8 @@
 #                        debate critic, report review).
 # Multi-model debate mixes chat + reasoner across roles so the auto-degrade logic
 # stays in REAL_MULTI_MODEL mode (all roles share the deepseek provider).
-# Missing API keys fall back to mock_provider only outside production mode.
+# Missing API keys fall back to mock_provider only when MARS_MOCK_MODE allows it.
+# Set MARS_MOCK_MODE=never to force every Agent onto the real configured API.
 
 commander:
   enabled: true
@@ -90,14 +91,12 @@ coding:
     model: deepseek-chat            # temp 0.1 → deterministic, additive patches (Paper_Total_0327 stays frozen)
     temperature: 0.1
     max_tokens: 8192
-  # V0 only LOADS a post-trained coding backend; the GRPO training pipeline is V1
-  # (CLAUDE.md constraint 5). mode: endpoint references a `vllm serve` at
-  # custom_endpoint; if that server isn't running the Coding Agent gracefully
-  # degrades to the public model (and to mock with no key), so the demo never
-  # breaks. Switch to mode: adapter + adapter_path to load a LoRA instead.
+  # V0 only LOADS a post-trained coding backend; the GRPO training pipeline is V1.
+  # Keep this disabled unless a real local vLLM endpoint is running; otherwise
+  # Coding Agent uses the configured DeepSeek remote API like the other Agents.
   post_training:
-    enabled: true
-    mode: endpoint
+    enabled: false
+    mode: load_only
     endpoint_provider: local_vllm
     adapter_path: ""
     custom_endpoint: "http://127.0.0.1:8001/v1"

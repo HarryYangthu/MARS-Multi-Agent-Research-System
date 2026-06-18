@@ -24,6 +24,7 @@ class ZoneSummary(BaseModel):
 class KBItem(BaseModel):
     id: str
     zone: str
+    text: str
     text_excerpt: str
     metadata: dict[str, Any]
 
@@ -45,6 +46,7 @@ def _to_item(rec: Any) -> KBItem:
     return KBItem(
         id=rec.id,
         zone=rec.zone,
+        text=rec.text,
         text_excerpt=rec.text[:280],
         metadata=rec.metadata,
     )

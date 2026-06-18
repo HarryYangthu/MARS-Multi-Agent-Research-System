@@ -22,6 +22,7 @@ from loguru import logger
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
+from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
 from app.harness.schema.validator import (
     ValidationResult,
     validate_document,
@@ -628,7 +629,7 @@ class BaseAgent(ABC):
                 idx = s.find("\n---")
             if idx > 0:
                 s = s[idx + 1 :]
-        return s
+        return close_unclosed_frontmatter(s)
 
 
 def _parse_tool_calls(text: str) -> list[dict[str, Any]]:

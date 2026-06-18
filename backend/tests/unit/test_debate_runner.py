@@ -27,6 +27,8 @@ ALL_LLM_KEY_ENVS = (
 def test_auto_mode_no_keys_returns_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     for env in ALL_LLM_KEY_ENVS:
         monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -35,10 +37,27 @@ def test_auto_mode_no_keys_returns_mock(monkeypatch: pytest.MonkeyPatch) -> None
     assert mode == DebateMode.MOCK_DEBATE
 
 
+def test_auto_mode_never_rejects_missing_debate_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "staging")
+    monkeypatch.setenv("MARS_MOCK_MODE", "never")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = get_agent_config("idea")
+    with pytest.raises(RuntimeError, match="debate provider"):
+        _auto_mode(cfg)
+
+
 def test_auto_mode_partial_keys_simulates(monkeypatch: pytest.MonkeyPatch) -> None:
     for env in ALL_LLM_KEY_ENVS:
         monkeypatch.setenv(env, "")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -58,6 +77,8 @@ def test_auto_mode_all_keys_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -72,6 +93,8 @@ async def test_run_debate_mock_mode_produces_valid_artifact(
 ) -> None:
     for env in ALL_LLM_KEY_ENVS:
         monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -105,6 +128,8 @@ async def test_run_debate_writes_precall_manifests(
 ) -> None:
     for env in ALL_LLM_KEY_ENVS:
         monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None

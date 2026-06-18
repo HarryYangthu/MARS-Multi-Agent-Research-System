@@ -450,6 +450,22 @@ async def _run_execution_batch(
             metric_name="loss",
             values=curve_values,
         )
+    if outcome.results:
+        from app.execution.pim_cancellation import plot_loss_curves
+
+        batch_plot_curves = {
+            r.experiment_id: (
+                [float(v) for v in r.loss_curve]
+                if getattr(r, "loss_curve", None)
+                else _metrics_to_curve(r)
+            )
+            for r in outcome.results
+        }
+        plot_loss_curves(
+            batch_plot_curves,
+            run.subdir("execution") / "loss_curves_16.png",
+            title="16-way PIM Cancellation Loss Sweep",
+        )
     write_metrics_json(run_root=run.root, results=outcome.results)
 
     # Hand-summary for the front-end log panel.

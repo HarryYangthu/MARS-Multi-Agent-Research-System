@@ -121,7 +121,7 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
   const [debateOpen, setDebateOpen] = useState(false);
   const [patch, setPatch] = useState<PatchView | null>(null);
   const [trace, setTrace] = useState<TraceManifest | null>(null);
-  const [viewMode, setViewMode] = useState<"artifact" | "context" | "workspace">("context");
+  const [viewMode, setViewMode] = useState<"artifact" | "context" | "workspace">("artifact");
   const [artifactEvaluations, setArtifactEvaluations] = useState<ArtifactEvaluationReport[]>([]);
   const [scorecard, setScorecard] = useState<EvaluationScorecard | null>(null);
   const [postTrainingExport, setPostTrainingExport] =
@@ -608,7 +608,7 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
 
   function selectAgent(agent: string): void {
     setActiveAgent(agent);
-    setViewMode(agent === "coding" ? "workspace" : "context");
+    setViewMode("artifact");
   }
 
   const isContextView = viewMode === "context";
@@ -735,14 +735,14 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
                   </div>
                 </div>
               ) : null}
-              <header className="flex items-center justify-between border-b border-mars-border p-4">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h1 className="text-xl font-semibold">
+              <header className="flex flex-wrap items-start justify-between gap-3 border-b border-mars-border p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-3">
+                    <h1 className="min-w-0 break-words text-xl font-semibold leading-tight">
                       {agentLabel(activeAgent)}
                     </h1>
                     {STAGE_TO_STEM[activeAgent] ? (
-                      <div className="flex rounded border border-mars-border bg-mars-bg p-0.5 text-xs">
+                      <div className="flex shrink-0 rounded border border-mars-border bg-mars-bg p-0.5 text-xs">
                         {activeAgent === "coding" ? (
                           <button
                             onClick={() => setViewMode("workspace")}
@@ -772,7 +772,7 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
                       </div>
                     ) : null}
                   </div>
-                  <p className="text-xs text-slate-500">
+                  <p className="mt-1 max-w-full truncate text-xs text-slate-500">
                     {isWorkspaceView
                       ? "编码工作台"
                       : isContextView
@@ -782,7 +782,7 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
                           : "尚无产物"}
                   </p>
                 </div>
-                <div className={`gap-2 ${isContextView || isWorkspaceView ? "hidden" : "flex"}`}>
+                <div className={`shrink-0 gap-2 ${isContextView || isWorkspaceView ? "hidden" : "flex"}`}>
                   <button
                     onClick={save}
                     disabled={!artifact}
@@ -873,7 +873,6 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
               {activeAgent === "execution" ? (
                 <ExecutionLivePanel runId={runId} />
               ) : null}
-              <TraceView trace={trace} />
               {artifact ? (
                 <>
                   <ValidationBadge view={artifact} />
@@ -904,6 +903,13 @@ function RunDetailPageInner({ params }: { params: Promise<{ id: string }> }): JS
               )}
             </>
           )}
+          <AgentReActTracePanel
+            trace={trace}
+            toolCalls={toolCalls}
+            activeAgent={activeAgent}
+            agentState={run?.states[activeAgent] ?? "pending"}
+            events={events}
+          />
         </div>
       </section>
     </main>
@@ -1529,11 +1535,12 @@ function statusClass(status: string): string {
     normalized === "success" ||
     normalized === "ok" ||
     normalized === "ready" ||
-    normalized === "available"
+    normalized === "available" ||
+    normalized === "tool.completed"
   ) {
     return "rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-200";
   }
-  if (normalized === "error" || normalized === "failed" || normalized === "blocked") {
+  if (normalized === "error" || normalized === "failed" || normalized === "blocked" || normalized === "tool.failed" || normalized === "tool.blocked") {
     return "rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] text-red-200";
   }
   if (normalized === "disabled" || normalized === "missing" || normalized === "fallback") {
@@ -1549,9 +1556,16 @@ function statusLabel(status: string): string {
     ok: "正常",
     ready: "就绪",
     available: "可用",
+    running: "运行中",
     error: "错误",
     failed: "失败",
     blocked: "阻塞",
+    "tool.started": "调用中",
+    "tool.completed": "已返回",
+    "tool.failed": "失败",
+    "tool.blocked": "阻塞",
+    "tool.requires_approval": "需审批",
+    "tool.rolled_back": "已回滚",
     disabled: "关闭",
     missing: "缺失",
     fallback: "降级",
@@ -1991,6 +2005,129 @@ function shortJson(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function spanBelongsToAgent(span: TraceSpan, activeAgent: string): boolean {
+  const attrs = span.attributes;
+  const stage = metaText(attrs, "stage");
+  const agent = metaText(attrs, "agent");
+  const toolName = metaText(attrs, "tool_name");
+  if (activeAgent === "commander") {
+    return agent === "commander" || agent === "bridge" || span.kind === "agent";
+  }
+  if (stage === activeAgent || agent === activeAgent) return true;
+  if (activeAgent === "execution" && toolName.startsWith("execution.")) return true;
+  if (activeAgent === "coding" && toolName.startsWith("code.")) return true;
+  return false;
+}
+
+function toolCallBelongsToAgent(entry: ToolAuditEntry, activeAgent: string): boolean {
+  const agent = metaText(entry, "agent");
+  const tool = metaText(entry, "tool", metaText(entry, "tool_name"));
+  if (activeAgent === "commander") {
+    return agent === "commander" || agent === "bridge";
+  }
+  if (agent === activeAgent) return true;
+  if (activeAgent === "execution" && tool.startsWith("execution.")) return true;
+  if (activeAgent === "coding" && tool.startsWith("code.")) return true;
+  return false;
+}
+
+function buildReactToolSteps(toolCalls: ToolAuditEntry[], activeAgent: string): ReactToolStep[] {
+  const grouped = new Map<string, ReactToolStep>();
+  toolCalls.forEach((entry, index) => {
+    if (!toolCallBelongsToAgent(entry, activeAgent)) return;
+    const metadata = asRecord(entry["metadata"]);
+    const callId = metaText(entry, "call_id", metaText(metadata, "tool_call_id"));
+    const tool = metaText(entry, "tool", metaText(entry, "tool_name", "tool"));
+    const timestamp = metaText(entry, "timestamp");
+    const id = callId || `${tool}-${timestamp}-${index}`;
+    const previous = grouped.get(id);
+    const result = toolResultPayload(entry);
+    grouped.set(id, {
+      id,
+      callId,
+      tool,
+      agent: metaText(entry, "agent", activeAgent),
+      status: metaText(entry, "status", previous?.status || metaText(entry, "event", "running")),
+      event: metaText(entry, "event", previous?.event || ""),
+      timestamp: timestamp || previous?.timestamp || "",
+      durationMs: metaText(entry, "duration_ms", previous?.durationMs || "-"),
+      args: entry["args"] ?? previous?.args ?? {},
+      result: Object.keys(result).length > 0 ? result : previous?.result ?? {},
+    });
+  });
+  return [...grouped.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+function toolResultPayload(entry: ToolAuditEntry): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({
+      ok: entry["ok"],
+      status: entry["status"],
+      event: entry["event"],
+      error: entry["error"],
+      blocked_by_gate: entry["blocked_by_gate"],
+      requires_approval: entry["requires_approval"],
+      rollback_ref: entry["rollback_ref"],
+      evidence_refs: entry["evidence_refs"],
+      metadata: entry["metadata"],
+      duration_ms: entry["duration_ms"],
+    }).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  );
+}
+
+function toolObservationSummary(step: ReactToolStep): string {
+  const error = metaText(step.result, "error");
+  if (error) return `错误：${error}`;
+  const evidence = metaListText(step.result["evidence_refs"]);
+  if (evidence.length > 0) return `返回 ${statusLabel(step.status)} · 证据 ${evidence.slice(0, 2).join(", ")}`;
+  const metadata = asRecord(step.result["metadata"]);
+  const metadataKeys = Object.keys(metadata);
+  if (metadataKeys.length > 0) return `返回 ${statusLabel(step.status)} · metadata ${metadataKeys.slice(0, 3).join(", ")}`;
+  return `返回 ${statusLabel(step.status)} · ${step.durationMs}ms`;
+}
+
+function spanDuration(span: TraceSpan): string {
+  const start = Date.parse(span.started_at);
+  const end = span.ended_at ? Date.parse(span.ended_at) : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "-";
+  return `${Math.max(0, end - start)}ms`;
+}
+
+function traceSpanLabel(span: TraceSpan): string {
+  return span.name.startsWith(`${span.kind}:`) ? span.name : `${span.kind}:${span.name}`;
+}
+
+function reactCurrentWork(
+  activeAgent: string,
+  agentState: string,
+  latestSpan: TraceSpan | null,
+  latestTool: ReactToolStep | null,
+  latestEvent: WSMessage | undefined,
+): string {
+  if (latestTool && ["running", "tool.started"].includes(latestTool.status)) {
+    return `正在调用工具 ${latestTool.tool}`;
+  }
+  if (agentState === "running") {
+    return latestSpan
+      ? `正在执行 ${latestSpan.name}`
+      : "正在读取上下文、推理下一步动作或等待工具返回。";
+  }
+  if (agentState === "waiting_review") return "产物已生成，等待人工审核。";
+  if (agentState === "done" || agentState === "approved") return "当前 Agent 已完成，正在沉淀产物、Trace 与记忆。";
+  if (agentState === "failed") return "当前 Agent 失败，等待诊断与反馈回路。";
+  const eventPayload = asRecord(latestEvent?.payload);
+  const toState = metaText(eventPayload, "to_state");
+  return toState ? `最近状态跳转到 ${toState}` : `${agentLabel(activeAgent)} 等待状态机调度。`;
 }
 
 function parseEvaluationSummary(value: unknown): ArtifactEvaluationSummary | null {
@@ -2434,17 +2571,22 @@ function RunEvaluationScorecard({
   exportMessage: string;
   onExportPostTraining: () => Promise<void>;
 }): JSX.Element {
+  const [open, setOpen] = useState(false);
   const qualityGate = scorecard.quality_gate;
   const counts = ["pass", "warn", "revise", "block", "fail"].map((decision) => ({
     decision,
     count: scorecard.counts[decision] ?? 0,
   }));
   return (
-    <section className="rounded border border-mars-border bg-mars-panel/45 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="rounded border border-mars-border bg-mars-panel/45">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full flex-wrap items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-mars-bg/35"
+      >
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase text-slate-400">
-            评价记分卡
+            质量评估总览
           </span>
           <EvaluationDecisionBadge
             decision={scorecard.overall_decision}
@@ -2477,16 +2619,23 @@ function RunEvaluationScorecard({
               导出:{postTrainingExport.eligible_count}/{postTrainingExport.record_count}
             </span>
           ) : null}
+          <span className="rounded bg-mars-bg px-2 py-0.5 font-mono text-[10px] text-slate-400">
+            {open ? "收起" : "展开"}
+          </span>
+        </div>
+      </button>
+      {open ? (
+      <div className="border-t border-mars-border px-3 pb-3 pt-3">
+        <div className="mb-3 flex flex-wrap justify-end gap-2">
           <button
             onClick={() => void onExportPostTraining()}
-            className="rounded border border-mars-border bg-mars-bg px-2 py-0.5 text-[10px] font-medium uppercase text-slate-300 hover:bg-mars-panel"
+            className="rounded border border-mars-border bg-mars-bg px-2 py-1 text-[10px] font-medium uppercase text-slate-300 hover:bg-mars-panel"
           >
             导出 JSONL
           </button>
         </div>
-      </div>
-      {qualityGate ? <PolicyDecisionStrip policy={qualityGate} /> : null}
-      {postTrainingExport || exportMessage ? (
+        {qualityGate ? <PolicyDecisionStrip policy={qualityGate} /> : null}
+        {postTrainingExport || exportMessage ? (
         <div className="mt-3 rounded border border-mars-border bg-mars-bg/50 px-2 py-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-[10px] text-slate-300">
@@ -2514,9 +2663,11 @@ function RunEvaluationScorecard({
             </p>
           ) : null}
         </div>
-      ) : null}
-      {scorecard.top_findings.length > 0 ? (
-        <EvaluationFindingList findings={scorecard.top_findings.slice(0, 3)} compact />
+        ) : null}
+        {scorecard.top_findings.length > 0 ? (
+          <EvaluationFindingList findings={scorecard.top_findings.slice(0, 3)} compact />
+        ) : null}
+      </div>
       ) : null}
     </section>
   );
@@ -2562,9 +2713,9 @@ function ArtifactEvaluationPanel({
 
       {reportItems.length > 0 ? (
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {reportItems.map((report) => (
+          {reportItems.map((report, index) => (
             <div
-              key={`${report.path ?? report.evaluator ?? "report"}`}
+              key={`${report.path ?? report.evaluator ?? "report"}-${index}`}
               className="min-w-0 rounded border border-mars-border bg-mars-bg/50 px-2 py-1.5"
             >
               <div className="flex items-center justify-between gap-2">
@@ -2691,6 +2842,228 @@ function EvaluationDecisionBadge({
     >
       {compact ? decisionLabel(decision).slice(0, 4) : decisionLabel(decision)}
     </span>
+  );
+}
+
+type ReactToolStep = {
+  id: string;
+  callId: string;
+  tool: string;
+  agent: string;
+  status: string;
+  event: string;
+  timestamp: string;
+  durationMs: string;
+  args: unknown;
+  result: Record<string, unknown>;
+};
+
+function AgentReActTracePanel({
+  trace,
+  toolCalls,
+  activeAgent,
+  agentState,
+  events,
+}: {
+  trace: TraceManifest | null;
+  toolCalls: ToolAuditEntry[];
+  activeAgent: string;
+  agentState: string;
+  events: WSMessage[];
+}): JSX.Element {
+  const [open, setOpen] = useState(true);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const spans = trace?.spans.filter((span) => spanBelongsToAgent(span, activeAgent)).slice(-8) ?? [];
+  const tools = buildReactToolSteps(toolCalls, activeAgent).slice(-6);
+  const latestSpan = spans.at(-1) ?? null;
+  const latestAgentSpan = spans.filter((span) => span.kind === "agent").at(-1) ?? latestSpan;
+  const latestTool = tools.at(-1) ?? null;
+  const latestEvent = [...events]
+    .reverse()
+    .find((event) => metaText(asRecord(event.payload), "agent") === activeAgent);
+  const currentWork = reactCurrentWork(activeAgent, agentState, latestAgentSpan, latestTool, latestEvent);
+  const latestObservation = latestTool
+    ? toolObservationSummary(latestTool)
+    : latestSpan
+      ? `${latestSpan.name} · ${spanDuration(latestSpan)}`
+      : "等待 Trace、工具返回或状态机事件。";
+
+  const toggleStep = (id: string): void => {
+    setExpanded((current) => ({ ...current, [id]: !current[id] }));
+  };
+
+  return (
+    <section className="rounded border border-cyan-500/25 bg-mars-panel/45">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-cyan-500/5"
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">ReAct 执行循环</h3>
+            <span className="rounded bg-cyan-500/15 px-2 py-0.5 font-mono text-[10px] text-cyan-200">
+              {agentLabel(activeAgent)}
+            </span>
+            <StateBadge state={agentState} />
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-400">{currentWork}</p>
+        </div>
+        <span className="shrink-0 font-mono text-[11px] text-slate-500">
+          {open ? "收起 ▴" : "展开 ▾"}
+        </span>
+      </button>
+
+      {open ? (
+        <div className="border-t border-mars-border p-3">
+          <div className="grid gap-3 xl:grid-cols-[310px,1fr]">
+            <div className="rounded border border-mars-border bg-mars-bg/45 p-3">
+              <div className="grid gap-2">
+                <ReactLoopCard
+                  label="Think"
+                  title="当前思考"
+                  value={latestAgentSpan ? latestAgentSpan.name : currentWork}
+                  tone="cyan"
+                />
+                <ReactLoopArrow />
+                <ReactLoopCard
+                  label="Act"
+                  title="工具调用"
+                  value={latestTool ? `${latestTool.tool} · ${statusLabel(latestTool.status)}` : "暂无工具调用"}
+                  tone="amber"
+                />
+                <ReactLoopArrow />
+                <ReactLoopCard
+                  label="Observe"
+                  title="返回结果"
+                  value={latestObservation}
+                  tone="emerald"
+                />
+              </div>
+            </div>
+
+            <div className="min-w-0 rounded border border-mars-border bg-mars-bg/45 p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-200">工具调用与返回</h4>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    展示当前 Agent 相关的最近调用；参数和返回可逐条展开。
+                  </p>
+                </div>
+                <span className="font-mono text-[10px] text-slate-500">
+                  Trace {spans.length} · Tool {tools.length}
+                </span>
+              </div>
+
+              {tools.length > 0 ? (
+                <div className="space-y-2">
+                  {tools.map((step) => {
+                    const isOpen = expanded[step.id] ?? false;
+                    return (
+                      <div key={step.id} className="rounded border border-mars-border bg-mars-panel/35">
+                        <button
+                          type="button"
+                          onClick={() => toggleStep(step.id)}
+                          className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left hover:bg-mars-bg/45"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-mono text-[11px] text-cyan-100">
+                              {step.tool}
+                            </span>
+                            <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-500">
+                              {step.callId ? `call=${step.callId.slice(0, 10)}` : "call=unknown"} · {step.durationMs}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <span className={statusClass(step.status)}>{statusLabel(step.status)}</span>
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {isOpen ? "收起" : "展开"}
+                            </span>
+                          </span>
+                        </button>
+                        {isOpen ? (
+                          <div className="grid gap-2 border-t border-mars-border p-3 lg:grid-cols-2">
+                            <TraceJsonBlock title="调用参数" value={step.args} />
+                            <TraceJsonBlock title="返回结果" value={step.result} />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded border border-dashed border-mars-border px-3 py-6 text-center text-xs text-slate-500">
+                  当前 Agent 暂无工具调用；可继续观察 Trace span 和状态机事件。
+                </div>
+              )}
+
+              {spans.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {spans.map((span, index) => (
+                    <span
+                      key={`${span.span_id}-${index}`}
+                      className="rounded border border-mars-border bg-mars-bg px-2 py-1 font-mono text-[10px] text-slate-400"
+                    >
+                      {traceSpanLabel(span)} · {spanDuration(span)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ReactLoopCard({
+  label,
+  title,
+  value,
+  tone,
+}: {
+  label: string;
+  title: string;
+  value: string;
+  tone: "cyan" | "amber" | "emerald";
+}): JSX.Element {
+  const toneClass =
+    tone === "cyan"
+      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-100"
+      : tone === "amber"
+        ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100";
+  return (
+    <div className={`rounded border px-3 py-2 ${toneClass}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-wider opacity-80">{label}</span>
+        <span className="text-[10px] opacity-70">{title}</span>
+      </div>
+      <p className="mt-1 line-clamp-2 text-xs leading-relaxed">{value}</p>
+    </div>
+  );
+}
+
+function ReactLoopArrow(): JSX.Element {
+  return (
+    <div className="flex items-center justify-center text-cyan-300/45">
+      <span className="h-5 w-px rounded bg-cyan-400/25" />
+      <span className="ml-1 text-[10px]">↓</span>
+    </div>
+  );
+}
+
+function TraceJsonBlock({ title, value }: { title: string; value: unknown }): JSX.Element {
+  return (
+    <div className="min-w-0 rounded border border-mars-border bg-mars-bg/70">
+      <div className="border-b border-mars-border px-2 py-1 text-[10px] font-semibold text-slate-400">
+        {title}
+      </div>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-relaxed text-slate-300">
+        {prettyJson(value)}
+      </pre>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -100,8 +100,12 @@ export function PipelineOverview({
         if (!alive) return;
         // Newest first; cap at 12 so the panel stays readable.
         const ids = runs.reverse().map((r) => r.run_id).slice(0, 12);
+        const fetchIds =
+          selectedRunId && !ids.includes(selectedRunId)
+            ? [selectedRunId, ...ids]
+            : ids;
         setRunIds(ids);
-        const fetched = await Promise.all(ids.map((id) => getRun(id).catch(() => null)));
+        const fetched = await Promise.all(fetchIds.map((id) => getRun(id).catch(() => null)));
         if (!alive) return;
         const next: Record<string, RunDetail> = {};
         for (const d of fetched) {
@@ -118,7 +122,7 @@ export function PipelineOverview({
       alive = false;
       clearInterval(iv);
     };
-  }, [selectedProject]);
+  }, [selectedProject, selectedRunId]);
 
   const focusRun = useMemo(() => {
     const id = selectedRunId && details[selectedRunId] ? selectedRunId : runIds[0];
@@ -134,7 +138,11 @@ export function PipelineOverview({
       4: [],
       5: [],
     };
-    for (const id of runIds) {
+    const visibleRunIds =
+      selectedRunId && !runIds.includes(selectedRunId)
+        ? [selectedRunId, ...runIds]
+        : runIds;
+    for (const id of visibleRunIds) {
       const d = details[id];
       if (!d) continue;
       for (const node of d.graph.nodes) {
@@ -167,7 +175,7 @@ export function PipelineOverview({
   }, [details, runIds, selectedRunId]);
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto bg-mars-bg/40 p-4">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-auto bg-mars-bg/40 p-4">
       <StateMachineRibbon run={focusRun} />
       <SystemBar stats={stats ?? null} readiness={readiness ?? null} />
       {TIERS.map((tier, i) => {
@@ -239,7 +247,7 @@ export function PipelineOverview({
           </div>
         );
       })}
-    </main>
+    </div>
   );
 }
 
@@ -247,6 +255,7 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
   const activeNode = run ? currentGraphNode(run) : null;
   const activeStage = activeNode ? stageFromNode(activeNode) : null;
   const activeState = activeNode && run ? stateForNode(run, activeNode) : "pending";
+  const communication = activeNode ? commanderCommunicationForNode(activeNode, activeState) : null;
   const nextNode = run && activeNode ? nextGraphNode(run, activeNode) : null;
   const previousNode = run && activeNode ? previousGraphNode(run, activeNode) : null;
   const retryNodes = run
@@ -284,6 +293,12 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
             </span>
           </p>
           <p>
+            通信对象：
+            <span className="font-mono text-cyan-200">
+              {communication ? communication.routeLabel : "无"}
+            </span>
+          </p>
+          <p>
             观测细节：
             <span className="text-slate-200">
               {activeStage ? thinkingText(activeStage, activeState) : "等待事件、Trace、上下文清单"}
@@ -304,19 +319,18 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2">
-                  <span className="text-base leading-none">🛰️</span>
                   <span className="font-semibold text-cyan-50">Commander Agent</span>
                   <span className="rounded bg-cyan-500/25 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-cyan-100">
-                    主控 · C位
+                    主控
                   </span>
                 </span>
                 <span className={`h-2.5 w-2.5 rounded-full ${stateDotClass(commanderState, Boolean(run))}`} />
               </div>
               <p className="mt-1.5 truncate text-[11px] text-cyan-100/80">
-                主控调度 · 状态监督 · 诊断与反馈回路
+                {communication ? `正在通信：${nodeAgentLabel(communication.targetNode)}` : "主控调度 · 状态监督 · 诊断与反馈回路"}
               </p>
               <p className="mt-0.5 truncate text-[9px] text-cyan-200/50">
-                {run ? "点击进入主控页 · entry / routing / gate orchestration" : "entry · routing · gate orchestration"}
+                {communication ? communication.detail : run ? "点击进入主控页 · entry / routing / gate orchestration" : "entry · routing · gate orchestration"}
               </p>
             </div>
           );
@@ -328,55 +342,59 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
             commanderCard
           );
         })()}
-        <div className={`h-4 w-px ${run ? "bg-cyan-400/50" : "bg-mars-subtle"}`} />
-        <div className={`h-px w-full max-w-3xl ${run ? "bg-cyan-400/25" : "bg-mars-subtle"}`} />
+        <CommanderConnectionField communication={communication} />
       </div>
 
-      <div className="grid grid-cols-5 gap-2">
-        {STAGE_ORDER.map((stage, index) => {
-          const node = run ? latestNodeForStage(run, stage) : null;
-          const state = run && node ? stateForNode(run, node) : "pending";
-          const isActive = activeNode?.key === node?.key;
-          const isDone = state === "done" || state === "approved";
-          const connectorActive = activeStage
-            ? index === STAGE_ORDER.indexOf(activeStage) || index === STAGE_ORDER.indexOf(activeStage) - 1
-            : false;
-          return (
-            <div key={stage} className="min-w-0">
-              <div
-                className={`mars-node-card ${isActive ? "mars-node-active" : ""} rounded border px-2 py-2 ${
-                  isActive
-                    ? "border-cyan-400/60 bg-cyan-500/10"
-                    : isDone
-                      ? "border-emerald-500/35 bg-emerald-500/10"
-                      : state === "failed"
-                        ? "border-red-500/40 bg-red-500/10"
-                        : "border-mars-border bg-mars-bg/45"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-[11px] text-slate-100">
-                    {agentName(stage)}
-                  </span>
-                  <span className={`h-2 w-2 rounded-full ${stateDotClass(state, isActive)}`} />
-                </div>
-                <p className="mt-1 truncate text-[10px] text-slate-400">
-                  {stateShortLabel(state)}
-                </p>
-                <p className="mt-1 truncate text-[9px] text-slate-600">
-                  {node ? node.key : stage}
-                </p>
-              </div>
-              {index < STAGE_ORDER.length - 1 ? (
+      <div className="mars-agent-map">
+        <AgentConnectionField run={run} activeNode={activeNode} previousNode={previousNode} />
+        <div className="mars-agent-grid grid grid-cols-5 gap-4">
+          {STAGE_ORDER.map((stage) => {
+            const node = run ? latestNodeForStage(run, stage) : null;
+            const state = run && node ? stateForNode(run, node) : "pending";
+            const isActive = activeNode?.key === node?.key;
+            const isCommunicationTarget = Boolean(
+              communication && node && communication.targetNode.key === node.key,
+            );
+            const isWorking = isActive || isCommunicationTarget || state === "running";
+            const isDone = state === "done" || state === "approved";
+            return (
+              <div key={stage} className="min-w-0">
                 <div
-                  className={`mars-flow-line mt-2 h-1 rounded bg-mars-subtle ${
-                    connectorActive ? "mars-flow-active" : ""
+                  className={`mars-node-card ${isActive ? "mars-node-active" : ""} ${isWorking ? "mars-node-working" : ""} ${isCommunicationTarget ? "mars-node-comm-target" : ""} rounded border px-2 py-2 ${
+                    isActive
+                      ? "border-cyan-400/60 bg-cyan-500/10"
+                      : isDone
+                        ? "border-emerald-500/35 bg-emerald-500/10"
+                        : state === "failed"
+                          ? "border-red-500/40 bg-red-500/10"
+                          : "border-mars-border bg-mars-bg/45"
                   }`}
-                />
-              ) : null}
-            </div>
-          );
-        })}
+                >
+                  {isWorking ? <NodeBorderFlow /> : null}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono text-[11px] text-slate-100">
+                      {agentName(stage)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      {isCommunicationTarget ? (
+                        <span className="rounded bg-cyan-500/20 px-1 py-0.5 text-[8px] text-cyan-100">
+                          通信中
+                        </span>
+                      ) : null}
+                      <span className={`h-2 w-2 rounded-full ${stateDotClass(state, isActive || isCommunicationTarget)}`} />
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-[10px] text-slate-400">
+                    {stateShortLabel(state)}
+                  </p>
+                  <p className="mt-1 truncate text-[9px] text-slate-600">
+                    {node ? node.key : stage}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {retryNodes.length > 0 ? (
@@ -390,8 +408,8 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
             </span>
           </div>
           <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-            {retryNodes.map((node) => (
-              <div key={node.key} className="min-w-0 rounded border border-amber-500/20 bg-mars-bg/50 px-2 py-1.5">
+            {retryNodes.map((node, index) => (
+              <div key={`${node.key}-${index}`} className="min-w-0 rounded border border-amber-500/20 bg-mars-bg/50 px-2 py-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-mono text-[10px] text-amber-100">
                     {nodeAgentLabel(node)}
@@ -413,6 +431,156 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
         <DetailPill label="下一步" value={nextNode && run ? `${nodeAgentLabel(nextNode)} · ${stateShortLabel(stateForNode(run, nextNode))}` : "沉淀归档"} />
       </div>
     </section>
+  );
+}
+
+function NodeBorderFlow(): JSX.Element {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [box, setBox] = useState({ width: 100, height: 64 });
+
+  useEffect(() => {
+    const parent = svgRef.current?.parentElement;
+    if (!parent) return;
+
+    const syncBox = (): void => {
+      const rect = parent.getBoundingClientRect();
+      setBox({
+        width: Math.max(1, rect.width),
+        height: Math.max(1, rect.height),
+      });
+    };
+
+    syncBox();
+    const observer = new ResizeObserver(syncBox);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
+
+  const inset = 1;
+  const width = Math.max(inset * 2, box.width);
+  const height = Math.max(inset * 2, box.height);
+  const radius = 4;
+
+  return (
+    <svg
+      ref={svgRef}
+      className="mars-node-border-flow"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <rect
+        className="mars-node-border-flow-base"
+        x={inset}
+        y={inset}
+        width={width - inset * 2}
+        height={height - inset * 2}
+        rx={radius}
+        ry={radius}
+        pathLength={100}
+      />
+      <rect
+        className="mars-node-border-flow-tail"
+        x={inset}
+        y={inset}
+        width={width - inset * 2}
+        height={height - inset * 2}
+        rx={radius}
+        ry={radius}
+        pathLength={100}
+      />
+      <rect
+        className="mars-node-border-flow-mid"
+        x={inset}
+        y={inset}
+        width={width - inset * 2}
+        height={height - inset * 2}
+        rx={radius}
+        ry={radius}
+        pathLength={100}
+      />
+      <rect
+        className="mars-node-border-flow-head"
+        x={inset}
+        y={inset}
+        width={width - inset * 2}
+        height={height - inset * 2}
+        rx={radius}
+        ry={radius}
+        pathLength={100}
+      />
+    </svg>
+  );
+}
+
+type AgentEdge = {
+  source: Stage;
+  target: Stage;
+};
+
+type CommanderCommunication = {
+  targetNode: GraphNode;
+  targetStage: Stage;
+  routeLabel: string;
+  detail: string;
+};
+
+function CommanderConnectionField({
+  communication,
+}: {
+  communication: CommanderCommunication | null;
+}): JSX.Element {
+  return (
+    <div className="mars-comm-links w-full" aria-hidden="true">
+      <svg className="mars-comm-links-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+      {STAGE_ORDER.map((stage, index) => {
+        const isActive = communication?.targetStage === stage;
+        return (
+          <g
+            key={stage}
+            className={`mars-comm-link ${isActive ? "mars-comm-link-active" : ""}`}
+          >
+            <path className="mars-comm-link-base" d={commanderConnectionPath(index)} pathLength={100} />
+            {isActive ? (
+              <path className="mars-comm-link-flow" d={commanderConnectionPath(index)} pathLength={100} />
+            ) : null}
+          </g>
+        );
+      })}
+      </svg>
+    </div>
+  );
+}
+
+function AgentConnectionField({
+  run,
+  activeNode,
+  previousNode,
+}: {
+  run: RunDetail | null;
+  activeNode: GraphNode | null;
+  previousNode: GraphNode | null;
+}): JSX.Element {
+  const edges = agentConnectionEdges(run);
+  const activeSource = previousNode ? stageFromNode(previousNode) : null;
+  const activeTarget = activeNode ? stageFromNode(activeNode) : null;
+  return (
+    <div className="mars-agent-links" aria-hidden="true">
+      <svg className="mars-agent-links-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+        {edges.map((edge) => {
+          const active = activeSource === edge.source && activeTarget === edge.target;
+          const key = `${edge.source}-${edge.target}`;
+          return (
+            <g key={key} className={`mars-agent-link ${active ? "mars-agent-link-active" : ""}`}>
+              <path className="mars-agent-link-base" d={agentConnectionPath(edge)} pathLength={100} />
+              {active ? (
+                <path className="mars-agent-link-flow" d={agentConnectionPath(edge)} pathLength={100} />
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -649,7 +817,14 @@ function currentGraphNode(run: RunDetail): GraphNode | null {
     const found = run.graph.nodes.find((node) => stateForNode(run, node) === targetState);
     if (found && stageFromNode(found)) return found;
   }
-  return run.graph.nodes.filter((node) => stageFromNode(node)).at(-1) ?? null;
+  const terminalKeys = new Set(run.graph.nodes.map((node) => node.key));
+  for (const edge of run.graph.edges) {
+    terminalKeys.delete(edge.src);
+  }
+  const terminalNode = run.graph.nodes.find(
+    (node) => terminalKeys.has(node.key) && stageFromNode(node) !== null,
+  );
+  return terminalNode ?? run.graph.nodes.filter((node) => stageFromNode(node)).at(-1) ?? null;
 }
 
 function previousGraphNode(run: RunDetail, node: GraphNode): GraphNode | null {
@@ -674,6 +849,74 @@ function nodeAgentLabel(node: GraphNode): string {
   if (!stage) return node.key;
   const attempt = attemptFromNode(node);
   return attempt > 1 ? `${agentName(stage)} · 第 ${attempt} 轮` : agentName(stage);
+}
+
+function agentConnectionEdges(run: RunDetail | null): AgentEdge[] {
+  const edges = new Map<string, AgentEdge>();
+  for (let i = 0; i < STAGE_ORDER.length - 1; i += 1) {
+    const edge = { source: STAGE_ORDER[i], target: STAGE_ORDER[i + 1] };
+    edges.set(`${edge.source}-${edge.target}`, edge);
+  }
+  if (!run) return [...edges.values()];
+  for (const graphEdge of run.graph.edges) {
+    const sourceNode = run.graph.nodes.find((node) => node.key === graphEdge.src);
+    const targetNode = run.graph.nodes.find((node) => node.key === graphEdge.dst);
+    if (!sourceNode || !targetNode) continue;
+    const source = stageFromNode(sourceNode);
+    const target = stageFromNode(targetNode);
+    if (!source || !target || source === target) continue;
+    edges.set(`${source}-${target}`, { source, target });
+  }
+  return [...edges.values()].sort((a, b) => {
+    const ai = STAGE_ORDER.indexOf(a.source);
+    const bi = STAGE_ORDER.indexOf(b.source);
+    if (ai !== bi) return ai - bi;
+    return STAGE_ORDER.indexOf(a.target) - STAGE_ORDER.indexOf(b.target);
+  });
+}
+
+function agentConnectionPath(edge: AgentEdge): string {
+  const sourceIndex = STAGE_ORDER.indexOf(edge.source);
+  const targetIndex = STAGE_ORDER.indexOf(edge.target);
+  const forward = targetIndex > sourceIndex;
+  const sourceX = agentCardEdgeX(sourceIndex, forward ? "right" : "left");
+  const targetX = agentCardEdgeX(targetIndex, forward ? "left" : "right");
+  if (Math.abs(targetIndex - sourceIndex) === 1) {
+    return `M ${sourceX} 50 L ${targetX} 50`;
+  }
+  const controlY = forward ? 14 : 86;
+  return `M ${sourceX} 50 C ${sourceX} ${controlY} ${targetX} ${controlY} ${targetX} 50`;
+}
+
+function agentCardEdgeX(index: number, side: "left" | "right"): number {
+  const slot = 100 / STAGE_ORDER.length;
+  const gapInset = 1.35;
+  return side === "left" ? index * slot + gapInset : (index + 1) * slot - gapInset;
+}
+
+function commanderCommunicationForNode(node: GraphNode, state: string): CommanderCommunication | null {
+  const stage = stageFromNode(node);
+  if (!stage) return null;
+  return {
+    targetNode: node,
+    targetStage: stage,
+    routeLabel: `Commander Agent → ${nodeAgentLabel(node)}`,
+    detail: commanderCommunicationDetail(stage, state),
+  };
+}
+
+function commanderConnectionPath(index: number): string {
+  const targetX = ((index + 0.5) / STAGE_ORDER.length) * 100;
+  const midY = targetX === 50 ? 54 : 42;
+  return `M 50 0 C 50 24 ${targetX} ${midY} ${targetX} 100`;
+}
+
+function commanderCommunicationDetail(stage: Stage, state: string): string {
+  if (state === "running") return `下发任务 · 接收 ${agentName(stage)} 事件流`;
+  if (state === "waiting_review") return `等待人工审核 · 同步 ${agentName(stage)} 草稿`;
+  if (state === "failed") return `拉取失败证据 · 准备反馈给 ${agentName(stage)}`;
+  if (state === "done" || state === "approved") return `同步完成状态 · 沉淀 ${agentName(stage)} 产物`;
+  return `等待 ${agentName(stage)} 接入状态机`;
 }
 
 function currentWorkText(stage: Stage, state: string): string {

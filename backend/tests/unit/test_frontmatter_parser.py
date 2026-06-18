@@ -4,6 +4,7 @@ import pytest
 
 from app.harness.schema.frontmatter_parser import (
     FrontmatterError,
+    close_unclosed_frontmatter,
     dumps,
     parse,
 )
@@ -35,3 +36,13 @@ def test_parse_invalid_yaml_raises() -> None:
     text = "---\n: : :\n---\n"
     with pytest.raises(FrontmatterError):
         parse(text)
+
+
+def test_close_unclosed_frontmatter_from_llm_output() -> None:
+    text = "---\nschema: proposal.v1\nproject: moe-pimc\n# Body\n"
+    repaired = close_unclosed_frontmatter(text)
+    doc = parse(repaired)
+
+    assert doc.metadata["schema"] == "proposal.v1"
+    assert doc.metadata["project"] == "moe-pimc"
+    assert doc.body.startswith("# Body")

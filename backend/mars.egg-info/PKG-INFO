@@ -22,6 +22,7 @@ Requires-Dist: anthropic>=0.34
 Requires-Dist: openai>=1.40
 Requires-Dist: langgraph>=0.2.0
 Requires-Dist: pypdf>=4.0
+Requires-Dist: socksio>=1.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"

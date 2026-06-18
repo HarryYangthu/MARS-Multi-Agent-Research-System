@@ -56,7 +56,7 @@ export default function MultiExperimentView({
 
   // Live, per-(attempt,experiment) curves accumulated from the WS stream.
   const liveRef = useRef<Map<string, LiveCurve>>(new Map());
-  const [, setTick] = useState(0);
+  const [liveCurves, setLiveCurves] = useState<LiveCurve[]>([]);
 
   // --- live stream over the consolidated run.{id}.execution channel ---
   useEffect(() => {
@@ -81,7 +81,9 @@ export default function MultiExperimentView({
       }
     });
     // Throttle re-renders to ~7fps regardless of message rate.
-    const flush = setInterval(() => setTick((n) => n + 1), 140);
+    const flush = setInterval(() => {
+      setLiveCurves(Array.from(liveRef.current.values()));
+    }, 140);
     return () => {
       close();
       clearInterval(flush);
@@ -121,7 +123,7 @@ export default function MultiExperimentView({
   // stream has arrived yet (e.g. opening the page after the batch finished).
   const attempts = useMemo(() => {
     const byAttempt = new Map<number, LiveCurve[]>();
-    for (const c of liveRef.current.values()) {
+    for (const c of liveCurves) {
       const list = byAttempt.get(c.attempt) ?? [];
       list.push(c);
       byAttempt.set(c.attempt, list);
@@ -147,7 +149,7 @@ export default function MultiExperimentView({
         const settled = sorted.every((c) => c.done) && sorted.length > 0;
         return { attempt, curves: sorted, meanRes, settled, count: sorted.length };
       });
-  }, [restCurves, summary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveCurves, restCurves, summary]);
 
   return (
     <main className="container mx-auto max-w-7xl px-6 py-8">

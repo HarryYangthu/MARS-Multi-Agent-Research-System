@@ -157,7 +157,7 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
     (lang === "zh" ? STATE_LABEL_ZH : STATE_LABEL_EN)[s] ?? s;
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded border border-mars-border bg-mars-bg/40">
+    <div className="flex max-h-[300px] min-h-[220px] flex-col rounded border border-mars-border bg-mars-bg/40">
       {/* header */}
       <div className="flex items-center justify-between gap-1 border-b border-mars-border px-2 py-1.5">
         <span className="text-xs font-semibold text-slate-200">🧭 {t("chat.title")}</span>
@@ -222,11 +222,16 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
       {err ? <p className="px-2 pt-1 text-[10px] text-red-300">{err}</p> : null}
 
       {/* messages / history below the input */}
-      <div ref={scrollRef} className="flex-1 min-h-0 space-y-2 overflow-auto p-2">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-auto p-2">
         {!conv ? (
           <p className="text-[11px] text-slate-500">{t("common.loading")}</p>
         ) : conv.messages.length === 0 ? (
-          <p className="text-[11px] leading-relaxed text-slate-500">{t("chat.hello")}</p>
+          <div className="rounded border border-dashed border-mars-border/80 bg-mars-panel/30 px-2 py-2 text-[11px] leading-relaxed text-slate-500">
+            <p>{t("chat.hello")}</p>
+            <p className="mt-1 text-[10px] text-slate-600">
+              这里会显示 Commander Agent 的对话、工具调用和任务链接。
+            </p>
+          </div>
         ) : (
           conv.messages.map((m, i) => <Bubble key={i} m={m} />)
         )}

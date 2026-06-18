@@ -36,6 +36,8 @@ def test_select_provider_falls_back_to_mock_without_keys(
         "DEEPSEEK_API_KEY",
     ):
         monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     from app.settings import _settings  # noqa
     import app.settings as settings_mod
 

@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time as wall_time
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -36,6 +36,7 @@ FS = 184.32               # MHz, matches configs/base.yaml
 DEFAULT_F1 = 30.0         # MHz carrier 1
 DEFAULT_F2 = 38.0         # MHz carrier 2
 StepCallback = Callable[[int, float, list[float]], None]
+_PLOT_LOCK = threading.Lock()
 
 
 @dataclass
@@ -311,55 +312,129 @@ def plot_loss_curve(
     experiment_id: str | None = None,
 ) -> None:
     """Save a polished training curve plot for local inspection."""
-    if threading.current_thread() is not threading.main_thread():
+    try:
+        plt = _load_pyplot()
+    except ImportError as exc:  # pragma: no cover - optional CLI utility
+        if threading.current_thread() is threading.main_thread():
+            raise RuntimeError("matplotlib is required to plot the loss curve") from exc
         _write_simple_loss_png(loss_curve=loss_curve, path=path)
         return
-    try:
-        if not os.environ.get("MPLCONFIGDIR"):
-            mpl_config_dir = Path(tempfile.gettempdir()) / "mars-matplotlib"
-            mpl_config_dir.mkdir(parents=True, exist_ok=True)
-            os.environ["MPLCONFIGDIR"] = str(mpl_config_dir)
-        import matplotlib
-
-        matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - optional CLI utility
-        raise RuntimeError("matplotlib is required to plot the loss curve") from exc
 
     steps = np.arange(len(loss_curve))
     loss = np.maximum(np.asarray(loss_curve, dtype=np.float64), 1e-12)
     loss_db = 10.0 * np.log10(loss)
     max_step = max(len(loss_curve), total_steps or len(loss_curve))
 
-    fig, ax = plt.subplots(figsize=(10.5, 5.8), dpi=180)
-    ax.plot(steps, loss_db, color="#2563eb", linewidth=1.8, label="Observed mini-batch loss")
-    ax.scatter(
-        steps[:: max(1, len(steps) // 14)],
-        loss_db[:: max(1, len(steps) // 14)],
-        s=14,
-        color="#1d4ed8",
-        alpha=0.9,
-    )
-    ax.fill_between(steps, loss_db, np.min(loss_db) - 1.5, color="#2563eb", alpha=0.08)
-    ax.set_title(title)
-    ax.set_xlabel("Iteration")
-    ax.set_ylabel("Residual Power Ratio (dB)")
-    ax.set_xlim(0, max(1, max_step - 1))
-    ax.set_ylim(min(-32.0, float(np.min(loss_db)) - 2.0), max(2.0, float(np.max(loss_db)) + 1.0))
-    ax.grid(True, which="major", alpha=0.28)
-    ax.grid(True, which="minor", alpha=0.12)
-    ax.minorticks_on()
-    ax.legend(loc="upper right", frameon=True)
-    if total_steps is not None:
-        ax.axvline(len(loss_curve) - 1, color="#0f172a", linestyle="--", linewidth=0.8, alpha=0.35)
-    ax.text(
-        0.02,
-        0.05,
-        f"{experiment_id + ' · ' if experiment_id else ''}iter {len(loss_curve)}/{max_step} · latest {loss_db[-1]:.2f} dB",
-        transform=ax.transAxes,
-        bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
-    )
-    fig.tight_layout()
+    with _PLOT_LOCK:
+        fig, ax = plt.subplots(figsize=(10.5, 5.8), dpi=180)
+        ax.plot(steps, loss_db, color="#2563eb", linewidth=1.8, label="Observed mini-batch loss")
+        ax.scatter(
+            steps[:: max(1, len(steps) // 14)],
+            loss_db[:: max(1, len(steps) // 14)],
+            s=14,
+            color="#1d4ed8",
+            alpha=0.9,
+        )
+        ax.fill_between(steps, loss_db, np.min(loss_db) - 1.5, color="#2563eb", alpha=0.08)
+        ax.set_title(title)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Residual Power Ratio (dB)")
+        ax.set_xlim(0, max(1, max_step - 1))
+        ax.set_ylim(min(-32.0, float(np.min(loss_db)) - 2.0), max(2.0, float(np.max(loss_db)) + 1.0))
+        ax.grid(True, which="major", alpha=0.28)
+        ax.grid(True, which="minor", alpha=0.12)
+        ax.minorticks_on()
+        ax.legend(loc="upper right", frameon=True)
+        if total_steps is not None:
+            ax.axvline(len(loss_curve) - 1, color="#0f172a", linestyle="--", linewidth=0.8, alpha=0.35)
+        ax.text(
+            0.02,
+            0.05,
+            f"{experiment_id + ' · ' if experiment_id else ''}iter {len(loss_curve)}/{max_step} · latest {loss_db[-1]:.2f} dB",
+            transform=ax.transAxes,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
+        )
+        fig.tight_layout()
+        _save_figure(fig, plt, path)
+
+
+def plot_loss_curves(
+    loss_curves: Mapping[str, Sequence[float]],
+    path: str | Path,
+    *,
+    title: str = "16-way PIM Cancellation Loss Sweep",
+) -> None:
+    """Save a detailed overlay plot for a batch of loss curves."""
+    if not loss_curves:
+        raise ValueError("loss_curves must not be empty")
+    plt = _load_pyplot()
+
+    with _PLOT_LOCK:
+        fig, ax = plt.subplots(figsize=(13.0, 7.2), dpi=220)
+        colors = plt.get_cmap("tab20")
+        all_db: list[float] = []
+        final_db: list[float] = []
+        max_len = 0
+        for index, (experiment_id, curve) in enumerate(sorted(loss_curves.items())):
+            if not curve:
+                continue
+            steps = np.arange(len(curve))
+            loss = np.maximum(np.asarray(curve, dtype=np.float64), 1e-12)
+            loss_db = 10.0 * np.log10(loss)
+            max_len = max(max_len, len(curve))
+            all_db.extend(float(v) for v in loss_db)
+            final_db.append(float(loss_db[-1]))
+            ax.plot(
+                steps,
+                loss_db,
+                linewidth=1.35,
+                alpha=0.9,
+                color=colors(index % 20),
+                label=experiment_id,
+            )
+        if not all_db:
+            raise ValueError("loss_curves contains no points")
+        ax.set_title(title)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Residual Power Ratio (dB)")
+        ax.set_xlim(0, max(1, max_len - 1))
+        ax.set_ylim(min(-34.0, min(all_db) - 2.0), max(2.0, max(all_db) + 1.0))
+        ax.grid(True, which="major", alpha=0.3)
+        ax.grid(True, which="minor", alpha=0.12)
+        ax.minorticks_on()
+        ax.legend(
+            loc="center left",
+            bbox_to_anchor=(1.01, 0.5),
+            frameon=True,
+            fontsize=7.5,
+            title="Experiment",
+        )
+        ax.text(
+            0.01,
+            0.02,
+            f"{len(loss_curves)} experiments · {max_len} iterations · final range {min(final_db):.2f} to {max(final_db):.2f} dB",
+            transform=ax.transAxes,
+            fontsize=8.5,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
+        )
+        fig.tight_layout()
+        _save_figure(fig, plt, path)
+
+
+def _load_pyplot() -> Any:
+    if not os.environ.get("MPLCONFIGDIR"):
+        mpl_config_dir = Path(tempfile.gettempdir()) / "mars-matplotlib"
+        mpl_config_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = str(mpl_config_dir)
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
+def _save_figure(fig: Any, plt: Any, path: str | Path) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     image_format = target.suffix.lstrip(".") or "png"

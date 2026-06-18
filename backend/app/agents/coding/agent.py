@@ -68,6 +68,8 @@ class CodingAgent(BaseAgent):
 
         settings = get_settings()
         if settings.mars_mock_mode == "always":
+            if settings.is_production:
+                raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
             logger.info(
                 "MARS_MOCK_MODE=always — coding post-training endpoint uses mock"
             )
@@ -89,6 +91,10 @@ class CodingAgent(BaseAgent):
                 cfg,
             )
         except Exception as exc:
+            if settings.is_production or settings.mars_mock_mode == "never":
+                raise RuntimeError(
+                    "coding post-training provider failed to initialize"
+                ) from exc
             logger.warning(
                 "coding post-training provider failed to load ({}); falling back to mock",
                 exc,

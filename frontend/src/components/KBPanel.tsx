@@ -51,6 +51,7 @@ export function KBPanel(): JSX.Element {
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [openZone, setOpenZone] = useState<string | null>(null);
   const [items, setItems] = useState<KBItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<KBItem | null>(null);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [selectedZone, setSelectedZone] = useState("");
@@ -86,7 +87,11 @@ export function KBPanel(): JSX.Element {
     }
     let alive = true;
     void listZoneItems(openZone, 8)
-      .then((it) => alive && setItems(it))
+      .then((it) => {
+        if (!alive) return;
+        setItems(it);
+        setSelectedItem((current) => (current?.zone === openZone ? current : it[0] ?? null));
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -105,7 +110,11 @@ export function KBPanel(): JSX.Element {
       includeMock: true,
       includeSuperseded: true,
     })
-      .then((it) => alive && setQuarantineItems(it))
+      .then((it) => {
+        if (!alive) return;
+        setQuarantineItems(it);
+        setSelectedItem((current) => (current?.zone === "quarantine" ? current : it[0] ?? null));
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -119,6 +128,7 @@ export function KBPanel(): JSX.Element {
     setError(null);
     if (!trimmed) {
       setSearchHits([]);
+      setSelectedItem(null);
       return;
     }
     setIsSearching(true);
@@ -141,6 +151,7 @@ export function KBPanel(): JSX.Element {
             profile,
           });
       setSearchHits(hits);
+      setSelectedItem(hits[0]?.item ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("common.error");
       setError(message);
@@ -160,6 +171,7 @@ export function KBPanel(): JSX.Element {
             setShowQuarantine((value) => !value);
             setSubmittedQuery("");
             setSearchHits([]);
+            setSelectedItem(null);
           }}
           className={`rounded border px-2 py-1 text-[10px] font-medium ${
             showQuarantine
@@ -253,7 +265,14 @@ export function KBPanel(): JSX.Element {
           {searchHits.length === 0 ? (
             <li className="italic text-slate-500">{t("kb.empty")}</li>
           ) : (
-            searchHits.map((hit) => renderMemoryItem(hit.item, hit.score))
+            searchHits.map((hit, index) =>
+              renderMemoryItem(hit.item, {
+                score: hit.score,
+                index,
+                onOpen: setSelectedItem,
+                selectedId: selectedItem?.id,
+              }),
+            )
           )}
         </ul>
       ) : showQuarantine ? (
@@ -261,7 +280,13 @@ export function KBPanel(): JSX.Element {
           {quarantineItems.length === 0 ? (
             <li className="italic text-slate-500">{t("kb.empty")}</li>
           ) : (
-            quarantineItems.map((it) => renderMemoryItem(it))
+            quarantineItems.map((it, index) =>
+              renderMemoryItem(it, {
+                index,
+                onOpen: setSelectedItem,
+                selectedId: selectedItem?.id,
+              }),
+            )
           )}
         </ul>
       ) : (
@@ -274,6 +299,7 @@ export function KBPanel(): JSX.Element {
                   onClick={() => {
                     setOpenZone(isOpen ? null : z.name);
                     setSelectedZone(z.name);
+                    setSelectedItem(null);
                   }}
                   className="flex w-full items-center justify-between rounded border border-mars-border bg-mars-bg/40 px-2 py-1.5 text-left text-xs hover:border-mars-accent"
                 >
@@ -294,7 +320,13 @@ export function KBPanel(): JSX.Element {
                     {items.length === 0 ? (
                       <li className="italic text-slate-500">{t("kb.empty")}</li>
                     ) : (
-                      items.slice(0, 8).map((it) => renderMemoryItem(it))
+                      items.slice(0, 8).map((it, index) =>
+                        renderMemoryItem(it, {
+                          index,
+                          onOpen: setSelectedItem,
+                          selectedId: selectedItem?.id,
+                        }),
+                      )
                     )}
                   </ul>
                 ) : null}
@@ -303,30 +335,94 @@ export function KBPanel(): JSX.Element {
           })}
         </ul>
       )}
+
+      {selectedItem ? <KnowledgeItemDetail item={selectedItem} /> : null}
     </section>
   );
 }
 
-function renderMemoryItem(item: KBItem, score?: number): JSX.Element {
+function renderMemoryItem(
+  item: KBItem,
+  options: {
+    score?: number;
+    index?: number;
+    onOpen: (item: KBItem) => void;
+    selectedId?: string;
+  },
+): JSX.Element {
   const meta = itemMeta(item);
   const decision = evalDecision(item);
   const supersededBy = metadataString(item, "superseded_by");
+  const selected = options.selectedId === item.id;
   return (
-    <li key={`${item.zone}-${item.id}`} className="rounded bg-mars-bg/60 px-2 py-1 text-slate-400">
-      <p className="flex items-center gap-1 font-mono text-[9px] text-slate-500">
-        <span className="truncate">
-          {score !== undefined ? `${score.toFixed(2)} · ` : ""}
-          {item.id}
-          {meta ? ` · ${meta}` : ""}
-        </span>
-      </p>
-      <p className="mt-0.5 truncate">{item.text_excerpt}</p>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {item.metadata.is_mock === true ? <Badge tone="amber" label="mock" /> : null}
-        {supersededBy ? <Badge tone="slate" label="old" /> : null}
-        {decision ? <Badge tone={decision === "pass" ? "green" : "rose"} label={decision} /> : null}
-      </div>
+    <li key={`${item.zone}-${item.id}-${options.index ?? 0}`}>
+      <button
+        type="button"
+        onClick={() => options.onOpen(item)}
+        className={`w-full rounded border px-2 py-1 text-left text-slate-400 transition ${
+          selected
+            ? "border-mars-accent bg-mars-accent/10"
+            : "border-transparent bg-mars-bg/60 hover:border-mars-accent/60"
+        }`}
+      >
+        <p className="flex items-center gap-1 font-mono text-[9px] text-slate-500">
+          <span className="truncate">
+            {options.score !== undefined ? `${options.score.toFixed(2)} · ` : ""}
+            {item.id}
+            {meta ? ` · ${meta}` : ""}
+          </span>
+          <span className="ml-auto shrink-0 text-[9px] text-cyan-300">打开</span>
+        </p>
+        <p className="mt-0.5 truncate">{item.text_excerpt}</p>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {item.metadata.is_mock === true ? <Badge tone="amber" label="mock" /> : null}
+          {supersededBy ? <Badge tone="slate" label="old" /> : null}
+          {decision ? <Badge tone={decision === "pass" ? "green" : "rose"} label={decision} /> : null}
+        </div>
+      </button>
     </li>
+  );
+}
+
+function KnowledgeItemDetail({ item }: { item: KBItem }): JSX.Element {
+  const source = metadataString(item, "source_path");
+  const runId = metadataString(item, "run_id");
+  const agent = metadataString(item, "agent");
+  return (
+    <article className="rounded border border-mars-accent/40 bg-mars-bg/70">
+      <div className="flex items-start justify-between gap-2 border-b border-mars-border px-2 py-1.5">
+        <div className="min-w-0">
+          <h3 className="truncate text-xs font-semibold text-cyan-100">记忆详情</h3>
+          <p className="mt-0.5 truncate font-mono text-[9px] text-slate-500">{item.id}</p>
+        </div>
+        <Badge tone="slate" label={item.zone} />
+      </div>
+      <div className="space-y-2 p-2 text-[10px]">
+        <div className="grid grid-cols-1 gap-1 text-slate-400">
+          {agent ? <MetaLine label="Agent" value={agent} /> : null}
+          {runId ? <MetaLine label="Run" value={runId} /> : null}
+          {source ? <MetaLine label="来源" value={source} /> : null}
+        </div>
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-mars-border bg-black/25 p-2 text-[10px] leading-relaxed text-slate-200">
+          {item.text || item.text_excerpt}
+        </pre>
+        <details className="rounded border border-mars-border bg-mars-panel/50">
+          <summary className="cursor-pointer px-2 py-1 text-[10px] text-slate-300">元数据</summary>
+          <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words border-t border-mars-border p-2 font-mono text-[9px] text-slate-500">
+            {JSON.stringify(item.metadata, null, 2)}
+          </pre>
+        </details>
+      </div>
+    </article>
+  );
+}
+
+function MetaLine({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <p className="grid grid-cols-[42px_minmax(0,1fr)] gap-1">
+      <span className="text-slate-500">{label}</span>
+      <span className="truncate text-slate-300">{value}</span>
+    </p>
   );
 }
 

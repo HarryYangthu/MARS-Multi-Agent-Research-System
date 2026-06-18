@@ -13,35 +13,11 @@ from typing import Any
 
 async def _main(args: argparse.Namespace) -> int:
     os.environ["MARS_MOCK_MODE"] = "always"
+    os.environ["MARS_DEMO_FORCE_BACKTRACK"] = "1"
     os.environ.setdefault("LOCAL_VLLM_BASE_URL", "")
 
     from app.main import register_default_agents
-    from app.bridge import commander_agent as commander_mod
-    from app.bridge.diagnostics import DiagnosticsConfig, MetricRule
     from app.bridge.orchestrator import Orchestrator, RunRequest
-
-    def demo_diagnostics(project: str) -> DiagnosticsConfig:
-        return DiagnosticsConfig(
-            project=project,
-            max_iterations=2,
-            allowed_targets=("coding", "experiment"),
-            default_target="coding",
-            analyzers={
-                "metrics_gap": True,
-                "config_sanity": True,
-                "code_change_risk": True,
-            },
-            metric_rules=(
-                MetricRule(
-                    name="loss",
-                    target=0.0,
-                    direction="lte",
-                    aggregation="max",
-                ),
-            ),
-        )
-
-    commander_mod.load_diagnostics_config = demo_diagnostics
 
     register_default_agents()
     orchestrator = Orchestrator()
@@ -86,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         "--user-request",
         default=(
             "请启动一个联合调试任务：同时运行 16 组 PIMC 仿真实验；"
-            "如果 loss/RES 指标不达标，由 Commander Agent 完成归因、回溯到目标 Agent，"
+            "如果 RES 指标不达标，由 Commander Agent 完成归因、回溯到目标 Agent，"
             "并追加第二轮执行链路。"
         ),
     )

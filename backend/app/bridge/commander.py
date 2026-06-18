@@ -128,6 +128,9 @@ class Commander:
             )
             return _parse_decision(completion.text)
         except Exception as exc:
+            settings = get_settings()
+            if settings.is_production or settings.mars_mock_mode == "never":
+                raise
             logger.warning("commander LLM decide failed ({}); using mock", exc)
             return self._decide_mock(session)
 

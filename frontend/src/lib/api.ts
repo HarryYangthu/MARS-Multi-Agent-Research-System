@@ -1,6 +1,15 @@
-// Thin REST client. Backend URL comes from NEXT_PUBLIC_BACKEND_URL.
+// Thin REST client. By default requests stay same-origin and Next rewrites
+// /api/* to the backend; NEXT_PUBLIC_BACKEND_URL remains available for
+// deployments that need a direct backend origin.
+const CONFIGURED_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
+const BASE = CONFIGURED_BACKEND_URL;
 
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+function apiUrl(path: string): URL {
+  const origin =
+    BASE ||
+    (typeof window === "undefined" ? "http://127.0.0.1:3001" : window.location.origin);
+  return new URL(path, origin);
+}
 
 export const STAGE_ORDER = ["idea", "experiment", "coding", "execution", "writing"] as const;
 export type Stage = (typeof STAGE_ORDER)[number];
@@ -485,7 +494,7 @@ export type CodingWorkspace = {
 };
 
 export async function getReadiness(project?: string): Promise<Readiness> {
-  const url = new URL(`${BASE}/api/readiness`);
+  const url = apiUrl(`${BASE}/api/readiness`);
   if (project) {
     url.searchParams.set("project", project);
   }
@@ -493,7 +502,7 @@ export async function getReadiness(project?: string): Promise<Readiness> {
 }
 
 export async function getRuntimeStatus(project?: string): Promise<RuntimeStatus> {
-  const url = new URL(`${BASE}/api/runtime/status`);
+  const url = apiUrl(`${BASE}/api/runtime/status`);
   if (project) {
     url.searchParams.set("project", project);
   }
@@ -513,6 +522,7 @@ export type ZoneSummary = { name: string; label_zh: string; count: number };
 export type KBItem = {
   id: string;
   zone: string;
+  text: string;
   text_excerpt: string;
   metadata: Record<string, unknown>;
 };
@@ -731,7 +741,7 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
 
 // ---------- runs ----------
 export async function listRuns(project?: string): Promise<RunSummary[]> {
-  const url = new URL(`${BASE}/api/runs`);
+  const url = apiUrl(`${BASE}/api/runs`);
   if (project) {
     url.searchParams.set("project", project);
   }
@@ -778,7 +788,7 @@ export async function listRunToolCalls(
   runId: string,
   filters: ToolAuditFilters = {},
 ): Promise<ToolAuditEntry[]> {
-  const url = new URL(`${BASE}/api/runs/${runId}/tools`);
+  const url = apiUrl(`${BASE}/api/runs/${runId}/tools`);
   if (filters.tool) url.searchParams.set("tool", filters.tool);
   if (filters.status) url.searchParams.set("status", filters.status);
   if (filters.callId) url.searchParams.set("call_id", filters.callId);
@@ -851,7 +861,7 @@ export async function diffVersions(
   from: string,
   to: string,
 ): Promise<{ diff: string }> {
-  const url = new URL(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/diff`);
+  const url = apiUrl(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/diff`);
   url.searchParams.set("from_", from);
   url.searchParams.set("to", to);
   return jsonOrThrow(await fetch(url));
@@ -1018,7 +1028,7 @@ export async function getCommanderObservability(
 export async function getCommanderAttributionEval(
   project = "moe-pimc",
 ): Promise<CommanderAttributionEvalView> {
-  const url = new URL(`${BASE}/api/evaluation/commander-attribution`);
+  const url = apiUrl(`${BASE}/api/evaluation/commander-attribution`);
   url.searchParams.set("project", project);
   return jsonOrThrow(await fetch(url));
 }
@@ -1037,7 +1047,7 @@ export async function createPostTrainingExport(
   runId: string,
   includeDrafts = false,
 ): Promise<PostTrainingExportManifest> {
-  const url = new URL(`${BASE}/api/evaluation/runs/${runId}/post-training-export`);
+  const url = apiUrl(`${BASE}/api/evaluation/runs/${runId}/post-training-export`);
   url.searchParams.set("include_drafts", includeDrafts ? "true" : "false");
   return jsonOrThrow(await fetch(url, { method: "POST" }));
 }
@@ -1068,7 +1078,7 @@ export async function getRunObservability(
   runId: string,
   limit = 120,
 ): Promise<RunObservabilityView> {
-  const url = new URL(`${BASE}/api/runs/${runId}/observability`);
+  const url = apiUrl(`${BASE}/api/runs/${runId}/observability`);
   url.searchParams.set("limit", String(limit));
   return jsonOrThrow(await fetch(url));
 }
@@ -1258,7 +1268,7 @@ export async function getCodingWorkspace(params: {
   runId?: string;
   source?: string;
 }): Promise<CodingWorkspace> {
-  const url = new URL(`${BASE}/api/agents/coding/workspace`);
+  const url = apiUrl(`${BASE}/api/agents/coding/workspace`);
   url.searchParams.set("project", params.project);
   url.searchParams.set("source", params.source ?? "auto");
   if (params.runId) {
@@ -1272,7 +1282,7 @@ export async function getCodingWorkspaceFile(params: {
   source: string;
   path: string;
 }): Promise<CodeFileContent> {
-  const url = new URL(`${BASE}/api/agents/coding/workspace/file`);
+  const url = apiUrl(`${BASE}/api/agents/coding/workspace/file`);
   url.searchParams.set("project", params.project);
   url.searchParams.set("source", params.source);
   url.searchParams.set("path", params.path);
@@ -1308,7 +1318,7 @@ export async function listQuarantineItems(params?: {
   includeMock?: boolean;
   includeSuperseded?: boolean;
 }): Promise<KBItem[]> {
-  const url = new URL(`${BASE}/api/knowledge/quarantine/items`);
+  const url = apiUrl(`${BASE}/api/knowledge/quarantine/items`);
   url.searchParams.set("limit", String(params?.limit ?? 20));
   addKnowledgeParams(url, {
     project: params?.project,
@@ -1319,14 +1329,14 @@ export async function listQuarantineItems(params?: {
   return jsonOrThrow(await fetch(url));
 }
 export async function searchKnowledge(params: KnowledgeSearchParams): Promise<KnowledgeSearchHit[]> {
-  const url = new URL(`${BASE}/api/knowledge/search`);
+  const url = apiUrl(`${BASE}/api/knowledge/search`);
   addKnowledgeParams(url, params);
   return jsonOrThrow(await fetch(url));
 }
 export async function searchQuarantine(
   params: Omit<KnowledgeSearchParams, "zone" | "zones" | "profile">,
 ): Promise<KnowledgeSearchHit[]> {
-  const url = new URL(`${BASE}/api/knowledge/quarantine/search`);
+  const url = apiUrl(`${BASE}/api/knowledge/quarantine/search`);
   addKnowledgeParams(url, params);
   return jsonOrThrow(await fetch(url));
 }
@@ -1335,7 +1345,7 @@ export async function searchZone(
   q: string,
   topK = 5,
 ): Promise<KnowledgeSearchHit[]> {
-  const url = new URL(`${BASE}/api/knowledge/${zone}/search`);
+  const url = apiUrl(`${BASE}/api/knowledge/${zone}/search`);
   url.searchParams.set("q", q);
   url.searchParams.set("top_k", String(topK));
   return jsonOrThrow(await fetch(url));
@@ -1452,4 +1462,7 @@ export async function setConversationAutoMode(
   );
 }
 
-export const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || BASE.replace(/^http/, "ws");
+const BROWSER_ORIGIN = typeof window === "undefined" ? "" : window.location.origin;
+export const WS_BASE =
+  process.env.NEXT_PUBLIC_WS_URL ||
+  (CONFIGURED_BACKEND_URL || BROWSER_ORIGIN).replace(/^http/, "ws");

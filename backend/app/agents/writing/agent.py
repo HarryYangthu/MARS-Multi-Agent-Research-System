@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.debate.debate_runner import run_debate
+from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 
 
 class WritingAgent(BaseAgent):
@@ -36,5 +37,7 @@ class WritingAgent(BaseAgent):
             ] = [t.text[:200] for t in result.turns if t.role != "judge"][:5]
             artifact.metadata["debate_mode"] = result.mode.value
             artifact.metadata["debate_transcript_full"] = result.transcript_md
+            artifact.schema_id = str(artifact.metadata.get("schema", self.output_schema))
+            artifact.text = fm_dumps(artifact.metadata, artifact.body)
             return artifact
         return await self._draft_via_llm(request, context)
