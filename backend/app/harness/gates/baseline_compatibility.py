@@ -6,7 +6,7 @@ calls ``gate_check`` on every dispatch. The check reads the project's
 ``AGENTS.md`` and ``repo_link.yaml::protected_paths`` to decide whether the
 tool's args would mutate a baseline-protected surface.
 
-For V0 we hard-code the rule set against the moe-pimc patterns; if a
+For V0 we hard-code the rule set against the pimc patterns; if a
 project supplies its own ``AGENTS.md`` we additionally pull file/path
 patterns from there (lightweight regex scan).
 """
@@ -34,7 +34,7 @@ MONITORED_TOOLS: tuple[str, ...] = (
 )
 
 # Forbidden regex against the third positional arg of forward(...) — pulled
-# straight from projects/moe-pimc/AGENTS.md rule #2.
+# straight from projects/pimc/AGENTS.md rule #2.
 _FORWARD_INTERFACE_RE = re.compile(
     r"def\s+forward\s*\(\s*self\s*,\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*[A-Za-z_][A-Za-z0-9_]*\s*,"
 )
@@ -84,7 +84,7 @@ def _check_forward_signature(diff_or_code: str) -> str | None:
     The check is intentionally conservative: it only fires when there's a
     forward(...) signature with three positional args **and** the third arg
     is *not* literally `stream_label`. False-positive risk is low because
-    the moe-pimc codebase declares stream_label by name everywhere.
+    the pimc codebase declares stream_label by name everywhere.
     """
     has_forward = _FORWARD_INTERFACE_RE.search(diff_or_code)
     if not has_forward:

@@ -1,14 +1,39 @@
 # Execution / simulation scheduling for the dual-carrier PIM cancellation sweep.
 # `backend: mock` selects the mock curve template; the real-vs-mock simulator is
-# chosen at runtime by MARS_EXECUTION_BACKEND (set to `pim_cpu` to run the real
-# numpy memory-polynomial canceller). RES is residual power in dB — LOWER is
-# better — and the pass gate lives in projects/moe-pimc/diagnostics.yaml.
+# chosen at runtime by MARS_EXECUTION_BACKEND (`pim_cpu` runs the in-repo numpy
+# memory-polynomial canceller; `paper_static` runs Harry's external static PIMC
+# training code against the real .pth capture). MARS-compatible RES is lower is
+# better and the pass gate lives in projects/pimc/diagnostics.yaml.
 execution:
   backend: mock
   max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
   batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
   command_timeout_seconds: 60
   allow_real_patch_apply: true
+  paper_static:
+    enabled: true
+    python: /opt/anaconda3/bin/python
+    repo_path: /Users/harry/Documents/20_paper/code
+    config_path: configs/static.yaml
+    data_path: /Users/harry/Documents/20_paper/data/static/pim_16t_221110_38dBm_fr4_rnd32_1.pth
+    # Minimum real-metric smoke: loads the 333MB capture, trains one epoch, writes
+    # summary.json, and maps paper_APE_db to MARS-compatible loss/RES. Increase
+    # max_iters or set dry_run=false in experiment config for longer training.
+    default_dry_run: false
+    default_max_iters: 1
+    batch_experiments: 1
+    max_concurrency: 1
+    timeout_seconds: 900
+    allowed_overrides:
+      - Etotal
+      - Epoch
+      - epoch
+      - lr_init
+      - if_scheduler
+      - step_size
+      - model.lut_n_spline
+      - model.lut_rmax
+      - model.lut_init
   # Smoke-test stub only: used when a tool call explicitly requests
   # backend=local_command. Values are a believable deep-canceller point
   # (loss≈10^(RES/10), RES below the -26 dB gate); the real metrics come from
@@ -22,7 +47,7 @@ execution:
         - -c
         - 'import json; print(json.dumps({"metrics": {"loss": 0.0019, "RES": -27.2, "PIM": 27.2, "APE": 23.4}}))'
   remote_gpu:
-    enabled: false             # V1: real L40S training endpoint; CPU/mock for the demo
+    enabled: false             # V2: real L40S training endpoint; CPU/mock for the demo
     endpoint: ""
 
 code_checks:

@@ -125,6 +125,21 @@ class AgentResearchSite:
 
 
 @dataclass(frozen=True)
+class AgentCodeRepository:
+    project: str
+    label: str
+    repo_mode: str
+    repo_path: str
+    exists: bool
+    read_only: bool
+    sync_strategy: str
+    allowed_paths: tuple[str, ...]
+    protected_paths: tuple[str, ...]
+    ignore_patterns: tuple[str, ...]
+    baseline_rules_file: str
+
+
+@dataclass(frozen=True)
 class AgentMemoryItem:
     id: str
     label: str
@@ -133,6 +148,41 @@ class AgentMemoryItem:
     status: str
     source: str
     evidence_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AgentContextBlueprintItem:
+    order: int
+    layer: str
+    content: str
+    storage: tuple[str, ...]
+    required: str
+    risk: str
+    strategy: str
+    packing_position: str
+
+
+@dataclass(frozen=True)
+class AgentContextStorageLayout:
+    long_term_root: str
+    run_root: str
+    agent_root: str
+    manifests: str
+    raw: str
+    packed: str
+    memory: str
+    research: str
+    debate: str
+    tool_results: str
+
+
+@dataclass(frozen=True)
+class AgentContextBlueprint:
+    agent: str
+    goal: str
+    storage_layout: AgentContextStorageLayout
+    items: tuple[AgentContextBlueprintItem, ...]
+    packing_order: tuple[str, ...]
 
 
 def list_agent_context_files(
@@ -176,6 +226,49 @@ def list_agent_context_files(
                     )
                 )
     return tuple(files)
+
+
+def load_agent_context_blueprint(agent: str) -> AgentContextBlueprint:
+    """Load the configured context engineering strategy for one Agent."""
+    if agent not in SUPPORTED_AGENTS:
+        raise ValueError(f"unsupported agent context '{agent}'")
+    cfg = _load_context_engineering_config()
+    root_cfg = cfg.get("storage_layout")
+    raw_blueprints = cfg.get("agent_blueprints")
+    if not isinstance(root_cfg, Mapping):
+        root_cfg = {}
+    if not isinstance(raw_blueprints, Mapping):
+        raw_blueprints = {}
+    raw = raw_blueprints.get(agent, {})
+    if not isinstance(raw, Mapping):
+        raw = {}
+
+    raw_items = raw.get("items")
+    items: list[AgentContextBlueprintItem] = []
+    if isinstance(raw_items, list):
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, Mapping):
+                continue
+            items.append(
+                AgentContextBlueprintItem(
+                    order=int(item.get("order", index + 1) or index + 1),
+                    layer=str(item.get("layer", "")).strip(),
+                    content=str(item.get("content", "")).strip(),
+                    storage=_string_tuple(item.get("storage")),
+                    required=str(item.get("required", "")).strip(),
+                    risk=str(item.get("risk", "")).strip(),
+                    strategy=str(item.get("strategy", "")).strip(),
+                    packing_position=str(item.get("packing_position", "")).strip(),
+                )
+            )
+
+    return AgentContextBlueprint(
+        agent=agent,
+        goal=str(raw.get("goal", "")).strip(),
+        storage_layout=_context_storage_layout(agent=agent, raw=root_cfg),
+        items=tuple(sorted(items, key=lambda item: item.order)),
+        packing_order=_string_tuple(raw.get("packing_order")),
+    )
 
 
 def load_agent_memory_items(agent: str) -> tuple[AgentMemoryItem, ...]:
@@ -447,7 +540,7 @@ def register_agent_context_memory(
             memory_type=memory_type,
             source_path=f"agents/{agent}/{item.path}",
             agent=agent,
-            schema="agent_context.v1",
+            schema="agent_context.v2",
             confidence=0.7,
             salience=0.45,
             approved=True,
@@ -482,7 +575,7 @@ def sync_agent_context_file_to_memory(
         memory_type=memory_type,
         source_path=_memory_source_path(agent, item.path),
         agent=agent,
-        schema="agent_context.v1",
+        schema="agent_context.v2",
         confidence=0.7,
         salience=0.45,
         approved=True,
@@ -584,6 +677,61 @@ def save_agent_research_sites(
     return tuple(normalized)
 
 
+def load_agent_code_repositories(agent: str, *, project: str) -> tuple[AgentCodeRepository, ...]:
+    if agent not in SUPPORTED_AGENTS:
+        raise ValueError(f"unsupported agent context '{agent}'")
+    cfg = _load_repo_link(project)
+    raw_path = str(cfg.get("repo_path") or cfg.get("local_path") or "").strip()
+    resolved = _resolve_project_repo_path(project, raw_path) if raw_path else Path("")
+    return (
+        AgentCodeRepository(
+            project=project,
+            label=str(cfg.get("label", "项目代码仓")).strip() or "项目代码仓",
+            repo_mode=str(cfg.get("repo_mode", "local_path")).strip() or "local_path",
+            repo_path=raw_path,
+            exists=bool(raw_path) and resolved.exists(),
+            read_only=bool(cfg.get("read_only", False)),
+            sync_strategy=str(cfg.get("sync_strategy", "live")).strip() or "live",
+            allowed_paths=_string_tuple(cfg.get("allowed_paths")),
+            protected_paths=_string_tuple(cfg.get("protected_paths")),
+            ignore_patterns=_string_tuple(cfg.get("ignore_patterns")),
+            baseline_rules_file=str(cfg.get("baseline_rules_file", "./AGENTS.md")).strip()
+            or "./AGENTS.md",
+        ),
+    )
+
+
+def save_agent_code_repositories(
+    agent: str,
+    repositories: Sequence[AgentCodeRepository | Mapping[str, object]],
+    *,
+    project: str,
+) -> tuple[AgentCodeRepository, ...]:
+    if agent not in SUPPORTED_AGENTS:
+        raise ValueError(f"unsupported agent context '{agent}'")
+    first = repositories[0] if repositories else {}
+    item = asdict(first) if isinstance(first, AgentCodeRepository) else dict(first)
+    repo_path = str(item.get("repo_path", "")).strip()
+    repo_mode = str(item.get("repo_mode", "local_path")).strip() or "local_path"
+    sync_strategy = str(item.get("sync_strategy", "live")).strip() or "live"
+    cfg = {
+        "project": project,
+        "repo_mode": repo_mode,
+        "repo_path": repo_path,
+        "read_only": bool(item.get("read_only", False)),
+        "sync_strategy": sync_strategy,
+        "allowed_paths": list(_string_tuple(item.get("allowed_paths"))),
+        "protected_paths": list(_string_tuple(item.get("protected_paths"))),
+        "baseline_rules_file": str(item.get("baseline_rules_file", "./AGENTS.md")).strip()
+        or "./AGENTS.md",
+        "ignore_patterns": list(_string_tuple(item.get("ignore_patterns"))),
+    }
+    path = _repo_link_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return load_agent_code_repositories(agent, project=project)
+
+
 def _agent_root(agent: str) -> Path:
     if agent not in SUPPORTED_AGENTS:
         raise ValueError(f"unsupported agent context '{agent}'")
@@ -628,6 +776,72 @@ def _save_config(agent: str, cfg: Mapping[str, Any]) -> None:
     path = _config_path(agent)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(dict(cfg), allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def _load_context_engineering_config() -> dict[str, Any]:
+    path = repo_root() / "configs" / "context.yaml"
+    if not path.exists():
+        return {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, Mapping):
+        return {}
+    cfg = raw.get("context_engineering", {})
+    return dict(cfg) if isinstance(cfg, Mapping) else {}
+
+
+def _context_storage_layout(
+    *,
+    agent: str,
+    raw: Mapping[str, object],
+) -> AgentContextStorageLayout:
+    def value(key: str, default: str) -> str:
+        text = str(raw.get(key, default)).strip() or default
+        return text.replace("{agent}", agent)
+
+    return AgentContextStorageLayout(
+        long_term_root=value("long_term_root", "configs/agent_contexts/{agent}.yaml"),
+        run_root=value("run_root", "runs/<run_id>/context/agents/{agent}/"),
+        agent_root=value("agent_root", "runs/<run_id>/context/agents/{agent}/"),
+        manifests=value("manifests", "runs/<run_id>/context/agents/{agent}/manifests/"),
+        raw=value("raw", "runs/<run_id>/context/agents/{agent}/raw/"),
+        packed=value("packed", "runs/<run_id>/context/agents/{agent}/packed/"),
+        memory=value("memory", "runs/<run_id>/context/agents/{agent}/memory/"),
+        research=value("research", "runs/<run_id>/context/agents/{agent}/research/"),
+        debate=value("debate", "runs/<run_id>/context/agents/{agent}/debate/"),
+        tool_results=value(
+            "tool_results", "runs/<run_id>/context/agents/{agent}/tool_results/"
+        ),
+    )
+
+
+def _repo_link_path(project: str) -> Path:
+    safe_project = project.strip() or "pimc"
+    if "/" in safe_project or "\\" in safe_project or safe_project.startswith("."):
+        raise ValueError("invalid project name")
+    return repo_root() / "projects" / safe_project / "repo_link.yaml"
+
+
+def _load_repo_link(project: str) -> dict[str, Any]:
+    path = _repo_link_path(project)
+    if not path.exists():
+        return {"project": project, "repo_mode": "local_path", "repo_path": ""}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _resolve_project_repo_path(project: str, raw_path: str) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate
+    return (repo_root() / "projects" / project / candidate).resolve()
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return tuple(line.strip() for line in value.splitlines() if line.strip())
+    if not isinstance(value, Sequence):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 def _has_two_consecutive_failures(history: object) -> bool:

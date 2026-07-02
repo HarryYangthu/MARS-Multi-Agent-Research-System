@@ -1,6 +1,6 @@
 ---
 schema: experiment_plan.v1
-project: moe-pimc
+project: pimc
 agent: experiment
 upstream_artifact: idea_proposal.approved.md
 variables:

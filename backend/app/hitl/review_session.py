@@ -29,6 +29,7 @@ class ReviewSession:
     rejection_event: asyncio.Event = field(default_factory=asyncio.Event)
     regenerate_event: asyncio.Event = field(default_factory=asyncio.Event)
     decision: str | None = None  # "approve" | "reject" | "regenerate"
+    revision_reason: str = ""
 
     @property
     def audit_path(self):  # type: ignore[no-untyped-def]
@@ -90,8 +91,9 @@ class ReviewSession:
         )
         self.rejection_event.set()
 
-    def request_regenerate(self, *, actor: str = "user") -> None:
+    def request_regenerate(self, *, reason: str = "", actor: str = "user") -> None:
         self.decision = "regenerate"
+        self.revision_reason = reason
         append_audit(
             self.audit_path,
             AuditEntry(
@@ -99,6 +101,7 @@ class ReviewSession:
                 agent=self.agent_name,
                 action="regenerate",
                 actor=actor,
+                detail={"reason": reason},
             ),
         )
         self.regenerate_event.set()

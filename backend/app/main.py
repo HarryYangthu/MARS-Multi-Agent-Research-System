@@ -15,6 +15,7 @@ from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
 from app.api import chat as chat_api
+from app.api import config as config_api
 from app.api import context as context_api
 from app.api import diagnoses as diagnoses_api
 from app.api import evaluation as evaluation_api
@@ -23,10 +24,12 @@ from app.api import execution as execution_api
 from app.api import knowledge as knowledge_api
 from app.api import projects as projects_api
 from app.api import readiness as readiness_api
+from app.api import reports as reports_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import stats as stats_api
 from app.api import templates as templates_api
+from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
@@ -54,10 +57,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
+    cors_origins = settings.cors_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials="*" not in cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -76,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_api.router)
     app.include_router(artifacts_api.router)
     app.include_router(evaluation_api.router)
+    app.include_router(timeline_api.router)
     app.include_router(traces_api.router)
     app.include_router(execution_api.router)
     app.include_router(knowledge_api.router)
@@ -85,6 +90,8 @@ def create_app() -> FastAPI:
     app.include_router(projects_api.router)
     app.include_router(readiness_api.router)
     app.include_router(runtime_api.router)
+    app.include_router(config_api.router)
+    app.include_router(reports_api.router)
     app.include_router(events_api.router)
     app.include_router(stats_api.router)
     app.include_router(chat_api.router)

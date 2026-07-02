@@ -1,6 +1,6 @@
 ---
 schema: feedback_packet.v1
-project: moe-pimc
+project: pimc
 agent: commander
 run_id: example_run
 target_agent: coding

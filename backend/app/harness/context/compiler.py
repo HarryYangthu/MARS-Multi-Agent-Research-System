@@ -1,9 +1,9 @@
 """Legacy context compiler used as a compatibility fallback.
 
-Context Engineering V1's authoritative pre-call path lives in
+Context Engineering V2's authoritative pre-call path lives in
 ``app.harness.context.engine``. This module is intentionally kept small because
-``ContextPack.to_messages()`` still uses it when the V1 engine is unavailable,
-and older tests/tools still read its ``context_compile_manifest.v1`` payload.
+``ContextPack.to_messages()`` still uses it when the V2 engine is unavailable,
+and older tests/tools still read its ``context_compile_manifest.v2`` payload.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def compile_agent_context(
     output_schema: str,
     schema_template: str = "",
 ) -> CompiledContext:
-    """Compile legacy messages and a v1 fallback manifest from the same inputs."""
+    """Compile legacy messages and a v2 fallback manifest from the same inputs."""
     sys_text = _system_prompt(
         base=system,
         agent_name=agent_name,
@@ -58,7 +58,7 @@ def compile_agent_context(
         source_refs.append(_source_ref(role="user", source="task", content=task))
 
     manifest = {
-        "schema": "context_compile_manifest.v1",
+        "schema": "context_compile_manifest.v2",
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "agent": agent_name,
         "output_schema": output_schema,

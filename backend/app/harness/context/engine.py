@@ -1,4 +1,4 @@
-"""Context Engineering V1 compiler.
+"""Context Engineering V2 compiler.
 
 The compiler turns the Agent-local ``ContextPack`` shape (plain strings and
 upstream blocks) into audited segments, applies conservative selection and

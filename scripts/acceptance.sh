@@ -56,10 +56,10 @@ PYTHONPATH=$PYTHONPATH pytest backend/tests/schema/ -q
 banner "5. gate tests"
 PYTHONPATH=$PYTHONPATH pytest backend/tests/gate/ -q
 
-banner "6. tools v1 hardening smoke"
+banner "6. tools v2 hardening smoke"
 PYTHONPATH=$PYTHONPATH pytest backend/tests/unit/test_tools_hardening.py \
-  backend/tests/unit/test_search_tools_v1.py \
-  backend/tests/unit/test_execution_tools_v1.py \
+  backend/tests/unit/test_search_tools_v2.py \
+  backend/tests/unit/test_execution_tools_v2.py \
   backend/tests/integration/test_api_runs.py::test_tools_catalogue_endpoints_include_harness_and_bridge_tools \
   -q
 
@@ -102,8 +102,8 @@ for sub in input context idea experiment coding execution writing hitl events; d
   fi
 done
 
-banner "11. tools v1 demo audit"
-PYTHONPATH=$PYTHONPATH python scripts/verify_tools_v1_acceptance.py \
+banner "11. tools v2 demo audit"
+PYTHONPATH=$PYTHONPATH python scripts/verify_tools_v2_acceptance.py \
   --run-id "$LATEST" \
   --in-process
 
@@ -176,4 +176,4 @@ print(f"  ✓ posttrain dry-run report: {data.get('report_path')}")
 print(f"  ✓ posttrain mock checkpoint: {data.get('checkpoint_path')}")
 PY
 
-banner "✅ V0 + Tools V1 + Context Workbench + Posttrain dry-run acceptance passed"
+banner "✅ V0 + Tools V2 + Context Workbench + Posttrain dry-run acceptance passed"

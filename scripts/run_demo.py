@@ -100,10 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     base = f"http://127.0.0.1:{args.port}" if args.port else args.base.rstrip("/")
 
     _step(1, "User clicks Pipeline card on the front-end (simulated by API call)")
-    _step(2, "Select project: moe-pimc")
+    _step(2, "Select project: pimc")
     _step(3, "Enter research question:")
     user_request = (
-        "How can ATK-MoE further reduce compute under 8L config while preserving "
+        "How can PIMC further reduce compute under 8L config while preserving "
         "RES performance?"
     )
     print(f"        {user_request}")
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{base}/api/runs",
         {
             "task": args.task,
-            "project": "moe-pimc",
+            "project": "pimc",
             "entrypoint": "pipeline",
             "user_request": user_request,
         },
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _step(
         6,
-        "HITL: review v1 → approve → idea_proposal.approved.md (Gate 1 plan_finalized passes)",
+        "HITL: review draft → approve → idea_proposal.approved.md (Gate 1 plan_finalized passes)",
     )
     _approve(base, run_id, "idea", "idea_proposal")
 

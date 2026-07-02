@@ -23,7 +23,7 @@ def write_raw_context(
     label: str,
     payload: Any,
 ) -> str:
-    raw_dir = run_root / "context" / "raw" / _safe_part(agent)
+    raw_dir = run_root / "context" / "agents" / _safe_part(agent) / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{_safe_part(label)}.{uuid.uuid4().hex[:8]}.json"
     path = raw_dir / filename
@@ -84,10 +84,19 @@ def _resolve_raw_ref(*, run_root: Path, raw_ref: str) -> Path:
     rel = Path(raw_ref)
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise ValueError("invalid raw_ref")
-    root = (run_root / "context" / "raw").resolve()
     path = (run_root / "context" / rel).resolve()
-    if path != root and root not in path.parents:
+    context_root = (run_root / "context").resolve()
+    if path != context_root and context_root not in path.parents:
         raise ValueError("raw_ref escapes context/raw")
+    legacy_root = (run_root / "context" / "raw").resolve()
+    agent_root = (run_root / "context" / "agents").resolve()
+    if (
+        path != legacy_root
+        and legacy_root not in path.parents
+        and path != agent_root
+        and agent_root not in path.parents
+    ):
+        raise ValueError("raw_ref escapes allowed context raw areas")
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(raw_ref)
     return path

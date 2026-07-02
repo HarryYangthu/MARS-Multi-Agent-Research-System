@@ -27,6 +27,7 @@ from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import (
     AgentConfig,
     available_providers,
+    provider_configured_for_agent,
     select_provider,
 )
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
@@ -74,6 +75,8 @@ def _auto_mode(agent_config: AgentConfig) -> DebateMode:
     required = {
         str(p.get("provider")) for p in agent_config.debate_participants if p.get("provider")
     }
+    if provider_configured_for_agent(agent_config):
+        avail.add(agent_config.model_provider)
     missing = required - avail
     if missing and (settings.is_production or settings.mars_mock_mode == "never"):
         raise RuntimeError(
@@ -91,6 +94,7 @@ def _select_role_provider(
     role: str,
     participants: tuple[Mapping[str, Any], ...],
     fallback: tuple[LLMProvider, LLMConfig],
+    agent_config: AgentConfig,
     *,
     mode: DebateMode,
 ) -> tuple[LLMProvider, LLMConfig, str, str]:
@@ -126,7 +130,13 @@ def _select_role_provider(
                 temperature=0.7,
                 response_schema=fallback[1].response_schema,
             )
-            real = _build_real_provider(cfg.provider)
+            real = _build_real_provider(
+                cfg.provider,
+                agent_config=agent_config,
+                api_key_env=str(p.get("api_key_env") or ""),
+                base_url=str(p.get("base_url") or ""),
+                base_url_env=str(p.get("base_url_env") or ""),
+            )
             if real is None:
                 if settings.is_production or settings.mars_mock_mode == "never":
                     raise RuntimeError(
@@ -203,7 +213,7 @@ async def run_debate(
     for r in range(rounds):
         for role in roles:
             provider, cfg, p_name, m_name = _select_role_provider(
-                role, participants, fallback, mode=mode
+                role, participants, fallback, agent_config, mode=mode
             )
             cfg.extra = dict(cfg.extra or {})
             cfg.extra["debate_role"] = role

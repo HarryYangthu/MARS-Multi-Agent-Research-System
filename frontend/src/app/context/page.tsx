@@ -251,7 +251,7 @@ export default function ContextWorkbench(): JSX.Element {
       const item = await previewContext({
         agent: previewAgent,
         project: selectedProject,
-        task: previewTask || "Investigate ATK-MoE routing under 8L config.",
+        task: previewTask || "Investigate PIMC routing under 8L config.",
       });
       setManifest(item);
       setManifestId("");

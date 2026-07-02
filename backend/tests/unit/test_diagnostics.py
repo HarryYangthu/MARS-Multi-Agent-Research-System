@@ -17,7 +17,7 @@ def _write_inputs(run_root: Path, *, loss: float) -> None:
     )
     experiment_meta = {
         "schema": "experiment_plan.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "experiment",
         "variables": {"independent": ["k"], "dependent": ["loss"]},
         "metrics": {"primary": "loss"},
@@ -30,7 +30,7 @@ def _write_inputs(run_root: Path, *, loss: float) -> None:
     )
     code_meta = {
         "schema": "code_spec.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "coding",
         "target_lang": "python",
         "baseline_compat": {"preserved": True},
@@ -43,17 +43,17 @@ def _write_inputs(run_root: Path, *, loss: float) -> None:
 
 
 def test_diagnostics_config_loads_project_yaml() -> None:
-    cfg = load_diagnostics_config("moe-pimc")
+    cfg = load_diagnostics_config("pimc")
     assert cfg.max_iterations == 2
     assert "coding" in cfg.allowed_targets
     assert any(rule.name == "loss" for rule in cfg.metric_rules)
 
 
 def test_metrics_gap_flags_failed_threshold(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="t", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="t", project="pimc")
     _write_inputs(run.root, loss=0.5)
     cfg = DiagnosticsConfig(
-        project="moe-pimc",
+        project="pimc",
         metric_rules=(MetricRule(name="loss", target=0.04, direction="lte", aggregation="max"),),
         analyzers={"metrics_gap": True, "config_sanity": True, "code_change_risk": True},
     )
@@ -64,7 +64,7 @@ def test_metrics_gap_flags_failed_threshold(tmp_path: Path) -> None:
 
 
 def test_bridge_agent_writes_schema_valid_diagnosis(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="t", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="t", project="pimc")
     _write_inputs(run.root, loss=0.5)
     decision = BridgeAgent().diagnose(run=run, attempt=1)
     assert decision.should_continue

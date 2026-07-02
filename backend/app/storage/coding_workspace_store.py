@@ -391,7 +391,7 @@ def _load_upstream_context(run_root: Path | None) -> tuple[UpstreamContextItem, 
             "system",
             "Coding context pack",
             "context",
-            ("context/coding_context_snapshot.v1.md", "context/coding_context_pack.v1.json"),
+            ("context/coding_context_snapshot.v2.md", "context/coding_context_pack.v2.json"),
         ),
     )
     out: list[UpstreamContextItem] = []

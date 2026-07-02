@@ -141,7 +141,7 @@ Durable evidence:
 
 ```text
 events/*.jsonl
-context/trace_manifest.v1.json
+context/trace_manifest.v2.json
 context/context_manifest.v2.*.json
 execution/metrics.json
 execution/logs/
@@ -166,7 +166,7 @@ backend/app/bridge/orchestrator.py          RunGraph driver
 backend/app/bridge/workflow_service.py      Pipeline/standalone topology
 backend/app/agents/base.py                  Agent loop
 backend/app/harness/tools/registry.py       Tool policy, Gate 5, audit
-backend/app/harness/context/engine.py       Context V1 compiler
+backend/app/harness/context/engine.py       Context V2 compiler
 backend/app/harness/evaluation/             Eval reports and scorecards
 backend/app/harness/kb/models.py            MemoryRecord v2
 backend/app/storage/self_evolution_store.py Manual-review self-evolution

@@ -1,7 +1,7 @@
-# Experiment Agent 工作原则 (moe-pimc)
+# Experiment Agent 工作原则 (pimc)
 
 Experiment Agent 把 PIMC proposal 转成可执行、可对比、可预算的消融方案:
-对象是 **双载波 odd-order PIM 的 memory-polynomial canceller + MoE router**,
+对象是 **双载波 odd-order PIM 的 memory-polynomial canceller + router**,
 目标是把 receive 链路里的无源互调残差压到噪声底。
 
 ## 硬性原则

@@ -35,7 +35,7 @@ class CommanderEvalCase:
 
 def run_commander_attribution_eval(
     *,
-    project: str = "moe-pimc",
+    project: str = "pimc",
     cases_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run deterministic replay cases against ``CommanderAgent.diagnose_failure``."""
@@ -157,7 +157,7 @@ def _config_from_raw(project: str, raw: dict[str, Any]) -> DiagnosticsConfig:
         max_iterations=int(raw.get("max_iterations", 2) or 2),
         default_budget=int(raw.get("default_budget", 2) or 2),
         allowed_targets=tuple(str(item) for item in allowed_raw) if isinstance(allowed_raw, list) else ("coding", "experiment"),
-        default_target=str(raw.get("default_target", "coding")),
+        default_target=str(raw.get("default_target", "experiment")),
         enable_idea_loop=bool(raw.get("enable_idea_loop", False)),
         analyzers={str(k): bool(v) for k, v in analyzers_raw.items()} if isinstance(analyzers_raw, dict) else {},
         metric_rules=tuple(
@@ -216,7 +216,7 @@ def _default_cases(project: str) -> tuple[CommanderEvalCase, ...]:
         project=project,
         max_iterations=2,
         allowed_targets=("coding", "experiment"),
-        default_target="coding",
+        default_target="experiment",
     )
     loss = MetricFailure(
         metric="loss",
@@ -281,8 +281,8 @@ def _default_cases(project: str) -> tuple[CommanderEvalCase, ...]:
         ),
         CommanderEvalCase(
             id="metrics_gap_default",
-            description="Ambiguous metric miss should use default Coding target.",
-            expected_target="coding",
+            description="Ambiguous metric miss should use the project diagnostics default target.",
+            expected_target="experiment",
             expected_should_continue=True,
             expected_requires_human=False,
             attempt=1,
@@ -305,7 +305,7 @@ def _default_cases(project: str) -> tuple[CommanderEvalCase, ...]:
             config=DiagnosticsConfig(
                 project=project,
                 allowed_targets=(),
-                default_target="coding",
+                default_target="experiment",
             ),
             analysis=DiagnosisAnalysis(
                 passed=False,

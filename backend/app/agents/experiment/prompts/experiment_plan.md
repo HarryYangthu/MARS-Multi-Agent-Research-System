@@ -1,7 +1,7 @@
-# Experiment Plan Prompt (moe-pimc)
+# Experiment Plan Prompt (pimc)
 
 你在为 **PIMC**(FDD Massive MIMO under beam/layer switching 下的无源互调消除)设计实验。
-被测对象是 **memory-polynomial canceller + MoE router**:消除双载波 odd-order PIM,
+被测对象是 **memory-polynomial canceller + router**:消除双载波 odd-order PIM,
 3 阶交调落在 2f1−f2 / 2f2−f1。先读 proposal 的 hypothesis / 证据 / 风险,再产出
 `experiment_plan.v1`(YAML frontmatter + markdown body),供 Coding / Execution Agent 直接消费。
 
@@ -17,7 +17,7 @@
   - 禁止把 RES 描述成"越高越好"。
 - **最小消融**:先一条 falsifiable 主轴(通常是 `expert_count` → canceller memory taps),
   再扩 grid。真实 PIM memory ≈ 12 taps,taps 不足必然 RES 偏高。
-- **预算**:GPU / CPU / mock。CPU mock 用 `projects/moe-pimc/data_gen.py` 合成双载波数据,
+- **预算**:GPU / CPU / mock。CPU mock 用 `projects/pimc/data_gen.py` 合成双载波数据,
   ~30k complex points,单 ablation 亚秒级。
 - **baseline 兼容检查**:实验不得要求改 `Paper_Total_0327` / `forward(x, stream_label)`;
   ablation 只读 `baseline/`、`production_interface/` 作参考(Gate 5 保护)。

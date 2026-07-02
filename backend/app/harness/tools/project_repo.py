@@ -115,7 +115,8 @@ def _allowed(path: str, patterns: tuple[str, ...]) -> bool:
         if not normalized:
             return True
         if normalized.endswith("/"):
-            if path.startswith(normalized):
+            directory = normalized.rstrip("/")
+            if path == directory or path.startswith(normalized):
                 return True
             continue
         if path == normalized or fnmatch.fnmatch(path, normalized):

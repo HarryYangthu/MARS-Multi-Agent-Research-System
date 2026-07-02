@@ -1,18 +1,22 @@
 """Coding Agent — experiment_plan → code_spec + patch."""
 from __future__ import annotations
 
-import os
+import socket
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
+from app.agents.coding.opencode_adapter import OpenCodeAdapter
+from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.openai_provider import CustomEndpointProvider, LocalVllmProvider
 from app.harness.llm.post_training_loader import PostTrainingHandle, load_handle
 from app.harness.llm.provider_base import LLMConfig, LLMProvider
-from app.settings import get_settings
+from app.settings import env_or_local, get_settings
 
 
 class CodingAgent(BaseAgent):
@@ -44,6 +48,86 @@ class CodingAgent(BaseAgent):
     async def draft(
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:
+        settings = get_settings()
+        if settings.mars_coding_backend == "opencode":
+            adapter = OpenCodeAdapter()
+            if not adapter.is_available():
+                if settings.is_production:
+                    raise RuntimeError(
+                        "MARS_CODING_BACKEND=opencode but opencode is not installed"
+                    )
+                message = (
+                    "MARS_CODING_BACKEND=opencode, but opencode is not installed. "
+                    "Falling back to the governed native LLM Coding Agent; no mock "
+                    "coding artifact is generated."
+                )
+                logger.warning(message)
+                _write_backend_note(request, message)
+                context.upstream["coding_backend_fallback"] = message
+                context.metadata["coding_backend_fallback"] = "opencode_unavailable"
+                return await self._draft_via_llm(request, context)
+
+            result = await adapter.run(request, context)
+            acceptable_statuses = {"completed", "completed_with_warnings"}
+            if result.status not in acceptable_statuses:
+                message = (
+                    f"OpenCode backend failed with status={result.status}; "
+                    f"transcript={result.transcript_path}; error={result.error[:500]}"
+                )
+                raise RuntimeError(message)
+            files_changed = result.files_changed
+            metadata: dict[str, Any] = {
+                "schema": "code_spec.v1",
+                "project": request.project,
+                "agent": "coding",
+                "upstream_artifact": _first_upstream_ref(request.upstream_artifacts),
+                "target_lang": "python",
+                "baseline_compat": {
+                    "preserved": True,
+                    "rationale": "External coding backend is sandboxed by a MARS task packet; patches still require code.apply_patch through ToolRegistry Gate 5.",
+                },
+                "files_changed": files_changed,
+                "new_dependencies": [],
+                "test_coverage": {
+                    "unit_tests_added": 0,
+                    "baseline_smoke_test": "skipped",
+                },
+                "coding_backend": {
+                    "name": result.backend,
+                    "status": result.status,
+                    "task_packet": result.task_packet_path,
+                    "transcript": result.transcript_path,
+                    "diff": result.diff_path,
+                    "checks": result.checks,
+                    "diff_stats": result.diff_stats,
+                    "error": result.error,
+                },
+            }
+            if result.status == "completed_with_warnings":
+                metadata["quality_warnings"] = [
+                    "OpenCode changed files but did not finish cleanly; inspect transcript and patch before approval."
+                ]
+            stats = result.diff_stats
+            changed = int(stats.get("files_changed", len(files_changed)) or 0)
+            insertions = int(stats.get("insertions", 0) or 0)
+            deletions = int(stats.get("deletions", 0) or 0)
+            body = (
+                "# Code Spec\n\n"
+                f"- Backend: {result.backend}\n"
+                f"- Status: {result.status}\n"
+                f"- Code changes: {changed} files changed, +{insertions} -{deletions}\n"
+                f"- Task packet: `{result.task_packet_path}`\n"
+                f"- Transcript: `{result.transcript_path}`\n"
+                f"- Diff: `{result.diff_path or 'none'}`\n\n"
+                "Patch application remains blocked until HITL approval and "
+                "`code.apply_patch` dispatch.\n"
+            )
+            return Artifact(
+                text=fm_dumps(metadata, body),
+                schema_id=self.output_schema,
+                metadata=metadata,
+                body=body,
+            )
         return await self._draft_via_llm(request, context)
 
     def _select_provider(self) -> tuple[LLMProvider, LLMConfig]:
@@ -76,9 +160,21 @@ class CodingAgent(BaseAgent):
             return MockProvider(default_schema=self.output_schema), cfg
 
         try:
-            api_key = os.environ.get(handle.api_key_env or "", "")
+            api_key = env_or_local(handle.api_key_env or "")
             endpoint = handle.custom_endpoint or ""
             if handle.endpoint_provider == "local_vllm":
+                if not _endpoint_reachable(endpoint):
+                    if settings.is_production:
+                        raise RuntimeError(
+                            f"coding post-training endpoint is unreachable: {endpoint}"
+                        )
+                    logger.warning(
+                        "coding post-training endpoint {} is unreachable; "
+                        "falling back to configured provider {}",
+                        endpoint,
+                        self._config.model_provider,
+                    )
+                    return super()._select_provider()
                 return (
                     LocalVllmProvider(
                         base_url=endpoint,
@@ -106,3 +202,42 @@ class CodingAgent(BaseAgent):
         if not isinstance(raw, Mapping):
             return {}
         return {str(k): v for k, v in raw.items()}
+
+
+def _first_upstream_ref(upstream: dict[str, str]) -> str:
+    if not upstream:
+        return ""
+    return next(iter(upstream.keys()))
+
+
+def _endpoint_reachable(endpoint: str) -> bool:
+    parsed = urlparse(endpoint)
+    host = parsed.hostname
+    if not host:
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=0.25):
+            return True
+    except OSError:
+        return False
+
+
+def _write_backend_note(request: RunRequest, message: str) -> None:
+    agent_dir = str(request.extra.get("agent_dir") or "")
+    run_root = str(request.extra.get("run_root") or "")
+    if agent_dir:
+        target_dir = Path(agent_dir)
+    elif run_root:
+        target_dir = Path(run_root) / "coding"
+    else:
+        return
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "coding_backend_fallback.md").write_text(
+            "# Coding backend fallback\n\n"
+            f"{message}\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("failed to write coding backend fallback note: {}", exc)

@@ -141,7 +141,7 @@ Bridge._publish_state(channel="run.lifecycle", payload={event: "run.completed"})
 
 ```
 input/        ← user_request.md
-context/      ← <agent>_context_pack.v1.json + <agent>_context_snapshot.v1.md  (×5)
+context/      ← <agent>_context_pack.v2.json + <agent>_context_snapshot.v2.md  (×5)
 idea/         ← idea_proposal.{v1, approved}.md
 experiment/   ← experiment_plan.{v1, approved}.md
 coding/       ← code_spec.{v1, approved}.md

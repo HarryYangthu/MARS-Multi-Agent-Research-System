@@ -201,6 +201,22 @@ class CommanderAgent:
             target=target,
             confidence=confidence,
         )
+        if target not in TARGET_AGENTS:
+            return CommanderAttribution(
+                passed=False,
+                should_continue=False,
+                target_agent="none",
+                confidence=confidence,
+                reason=reason,
+                expected_fix="Review the diagnosis and choose a valid feedback target.",
+                failed_metrics=failed_metrics,
+                suspected_causes=suspected,
+                evidence_refs=evidence_refs,
+                rejected_alternatives=rejected,
+                budget_status="within_budget",
+                next_attempt=observation.attempt + 1,
+                requires_human=True,
+            )
         if requires_human:
             return CommanderAttribution(
                 passed=False,
@@ -476,7 +492,7 @@ class CommanderAgent:
     def _select_target(self, observation: RunObservation) -> tuple[str, float, str]:
         allowed = set(observation.config.allowed_targets) & TARGET_AGENTS
         if not allowed:
-            return "coding", 0.4, "No configured feedback target was available; using coding fallback."
+            return "none", 0.0, "No configured feedback target was available."
 
         high_config = any(
             cause.kind == "config_sanity" and cause.severity == "high"
@@ -496,9 +512,13 @@ class CommanderAgent:
             return "coding", 0.85, "Coding change risk is the strongest failure signal."
         default = observation.config.default_target
         if default in allowed:
-            return default, 0.65, "Metrics missed thresholds; no higher-confidence upstream cause dominated."
+            return (
+                default,
+                0.65,
+                "Metrics missed thresholds; project diagnostics default selected because no stronger cause dominated.",
+            )
         target = sorted(allowed)[0]
-        return target, 0.6, "Metrics missed thresholds; selected the first allowed feedback target."
+        return target, 0.6, "Metrics missed thresholds; selected the first configured feedback target."
 
     def _rejected_alternatives(
         self, *, target: str, observation: RunObservation
@@ -527,13 +547,13 @@ class CommanderAgent:
     def _expected_fix(self, target: str) -> str:
         if target == "experiment":
             return (
-                "Deepen the canceller memory-depth ablation (expert_count / memory taps) "
-                "per the feedback packet, then rerun execution."
+                "Revise the experiment plan or execution config using the failed metrics, "
+                "logs, and project context, then rerun execution."
             )
         if target == "coding":
             return (
-                "Increase the memory-polynomial canceller depth in a focused code_spec "
-                "revision (keep Paper_Total_0327 / forward(x, stream_label) frozen), then rerun."
+                "Draft a focused code_spec only for evidence-backed implementation or "
+                "interface issues; preserve protected baseline surfaces, then rerun."
             )
         return "Pause for human review before deciding the next feedback target."
 
@@ -542,14 +562,14 @@ class CommanderAgent:
     ) -> list[str]:
         if target == "experiment":
             return [
-                "RES (residual) missed target: the ablation grid under-provisioned canceller memory depth.",
-                "Expand the memory-depth axis (expert_count / memory taps) toward the true 12-tap PIM memory.",
-                "Keep the sweep bounded (<=16 ablations) and state the expected RES (dB) improvement.",
+                "Read failed_metrics and suspected_causes before changing the plan.",
+                "Check data selection, config values, ablation axes, metric direction, aggregation, and run limits against the real code.",
+                "Propose the smallest rerun plan that tests the suspected cause and keeps evidence auditable.",
             ]
         return [
-            "RES (residual) missed target: the memory-polynomial canceller has too few taps to cancel the PIM memory.",
-            "Increase canceller memory depth (more taps); keep Paper_Total_0327 and forward(x, stream_label) frozen.",
-            "Propose the smallest patch that lowers RES; do not touch protected baseline/ surfaces (Gate 5).",
+            "Inspect evidence_refs for implementation, interface, metric-collection, or path-handling defects before proposing code.",
+            "Keep Paper_Total_0327 and forward(x, stream_label) frozen unless Gate 5 explicitly allows otherwise.",
+            "Propose the smallest verifiable patch; do not use code changes to mask an experiment/config issue.",
         ]
 
     def _avoid_repeating(self, target: str) -> list[str]:

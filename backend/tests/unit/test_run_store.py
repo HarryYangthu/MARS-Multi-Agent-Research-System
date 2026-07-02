@@ -10,8 +10,8 @@ from app.storage.run_store import RUN_SUBDIRS, RunStore
 def test_create_run_makes_9_subdirs(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
     handle = store.create(
-        task="pimc moe ablation!",
-        project="moe-pimc",
+        task="pimc ablation!",
+        project="pimc",
         entrypoint="cli",
         user_request="research question text",
         now=datetime(2026, 5, 4, 23, 10, tzinfo=timezone.utc),
@@ -21,8 +21,8 @@ def test_create_run_makes_9_subdirs(tmp_path: Path) -> None:
     for sub in RUN_SUBDIRS:
         assert (handle.root / sub).is_dir(), sub
     meta = json.loads((handle.root / "run_meta.json").read_text())
-    assert meta["project"] == "moe-pimc"
-    assert meta["task"] == "pimc moe ablation!"
+    assert meta["project"] == "pimc"
+    assert meta["task"] == "pimc ablation!"
     assert (handle.root / "input" / "user_request.md").read_text() == "research question text"
 
 

@@ -61,7 +61,7 @@ class FakeLangSmithClient:
 def _run(tmp_path: Path) -> Any:
     return RunStore(tmp_path).create(
         task="observability",
-        project="moe-pimc",
+        project="pimc",
         now=datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc),
     )
 
@@ -77,7 +77,7 @@ def test_trace_recorder_keeps_file_only_behavior_when_langsmith_disabled(
     with recorder.start_span(name="node:idea", kind="idea", attributes={"node": "idea"}):
         pass
 
-    manifest = json.loads((run.subdir("context") / "trace_manifest.v1.json").read_text())
+    manifest = json.loads((run.subdir("context") / "trace_manifest.v2.json").read_text())
     span = manifest["spans"][0]
     assert span["status"] == "ok"
     assert span["attributes"] == {"node": "idea"}

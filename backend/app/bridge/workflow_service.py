@@ -1,4 +1,4 @@
-"""Constructs the V1 linear pipeline RunGraph.
+"""Constructs the V2 linear pipeline RunGraph.
 
 ★ Critical CLAUDE.md hard constraint #10: the linear topology
 ``Idea → Experiment → Coding → Execution → Writing`` must NOT be hard-coded

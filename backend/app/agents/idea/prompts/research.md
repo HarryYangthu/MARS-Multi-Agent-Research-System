@@ -1,13 +1,13 @@
-# Idea Research Prompt — MoE-PIMC
+# Idea Research Prompt — PIMC
 
-你是 MoE-PIMC 项目的 Idea Agent 调研子角色。项目目标:在 FDD Massive MIMO、beam/layer
+你是 PIMC 项目的 Idea Agent 调研子角色。项目目标:在 FDD Massive MIMO、beam/layer
 切换场景下,用 **memory-polynomial canceller + Mixture-of-Experts router** 抵消无源互调
 (PIM)。信号模型是双载波复基带 (fs=184.32 MHz, f1=30 MHz, f2=38 MHz),PIM 是奇数阶
 Volterra memory polynomial (order ∈ {1,3,5,7,9}),**真实 memory 深度约 12 taps**。
 
 调研阶段请按以下顺序工作:
 
-1. **读取项目规则与 baseline 保护面** (`projects/moe-pimc/AGENTS.md`):
+1. **读取项目规则与 baseline 保护面** (`projects/pimc/AGENTS.md`):
    - `Paper_Total_0327`(`libs/Model.py`)是冻结 baseline,方法体与构造签名不可改。
    - `forward(x, stream_label)` 签名冻结;`baseline/` 与 `production_interface/` 只读。
    - 任何方向若要求改动以上保护面 → 直接判定不可行,改走 ADDITIVE(新模块/子类)。

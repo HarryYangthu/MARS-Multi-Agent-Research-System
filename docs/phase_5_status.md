@@ -22,7 +22,7 @@
 | ★ `harness/tools/registry.py` (Gate 5 hook) | ✓ | `dispatch()` runs registered gates **before** the tool fn; `Gate 5 → block` short-circuits |
 | `harness/gates/{plan_finalized,large_refactor,experiment_launch,conclusion_output}.py` | ✓ | All four flow gates implemented |
 | ★ `harness/gates/baseline_compatibility.py` (Gate 5) | ✓ | Reads `projects/<name>/repo_link.yaml::protected_paths` + `forward(x, stream_label)` regex; supports class-level `path:Class` patterns |
-| `projects/moe-pimc/{project.yaml, repo_link.yaml, AGENTS.md, data_gen.py}` | ✓ | All present |
+| `projects/pimc/{project.yaml, repo_link.yaml, AGENTS.md, data_gen.py}` | ✓ | All present |
 | `templates/code_rules/pimc_python.md` | ✓ | Tensor shape comments / mypy strict / loguru / no hardcoded magic numbers |
 | `workspace/repos/pimc-stub/` | ✓ | `libs/Model.py` (Paper_Total_0327 + Paper_Router_v2) + main.py + baseline/ + production_interface/ |
 | `configs/{knowledge,gates}.yaml` | ✓ | thresholds + zone chunk config + monitored_tools |
@@ -56,7 +56,7 @@ PYTHONPATH=backend lint-imports           # → 4 kept, 0 broken
 PYTHONPATH=backend pytest backend/tests/ -q
 PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8765 &
 # trigger a HITL run, approve through, then:
-ls runs/<RID>/context/                    # → idea/exp/coding/exec/writing context_pack.v1
+ls runs/<RID>/context/                    # → idea/exp/coding/exec/writing context_pack.v2
 cat knowledge/methodology/_index.json     # → ≥3 sedimented chunks
 cat knowledge/run_archive/_index.json     # → 1 chunk with fingerprint_hash
 ```
@@ -76,6 +76,6 @@ returns `blocked_by_gate=GATE_ID` before the tool fn runs.
 - **Gate 5 hook position**: `harness/tools/registry.py::ToolRegistry.dispatch()` calls registered gate checks BEFORE the tool fn — exactly as DESIGN §6 / §3 specifies. Gate is wired automatically when `get_registry()` is first called.
 - **Class-level protected paths**: patterns like `libs/Model.py:Paper_Total_0327` only fire when the diff *also references the class name*. Plain path patterns (`baseline/`, `production_interface/`) fire on file-touch alone.
 - **forward(x, stream_label) check**: regex pair — fires on `def forward(self, x, X, ...)` *unless* X is literally `stream_label`. False-positive risk minimal because the project uses the literal name everywhere.
-- **KB store provider**: V0 ships a deterministic-hash embedder + JSON-persisted store. Hardware E2E can swap to ChromaDB by extending `stores.py` (V1).
+- **KB store provider**: V0 ships a deterministic-hash embedder + JSON-persisted store. Hardware E2E can swap to ChromaDB by extending `stores.py` (V2).
 - **Layered fix**: gates / context were initially using `RunHandle` from storage, breaking the layered contract (harness must not depend on storage). Switched to plain `Path` arguments; the orchestrator does the `RunHandle.root → Path` adapt.
 - **Sedimentation runs after each agent**: the `agent_runner.py` post-write hook calls `on_agent_completed()` which dispatches via the per-agent extractor. KB writes are best-effort (failures are logged, not fatal).

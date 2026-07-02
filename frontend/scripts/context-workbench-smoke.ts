@@ -38,7 +38,7 @@ const sharedSegment: ContextSegment = {
 const addedSegment: ContextSegment = {
   id: "kb:atk",
   kind: "kb",
-  title: "ATK-MoE Note",
+  title: "PIMC Note",
   source_ref: "knowledge/methodology",
   content_hash: "hash-kb",
   tokens_estimated: 18,
@@ -78,7 +78,7 @@ const currentManifest: ContextManifestV2 = {
   run_id: "run-1",
   agent: "idea",
   node_key: "idea",
-  project: "moe-pimc",
+  project: "pimc",
   output_schema: "proposal.v1",
   purpose: "draft",
   created_at: "2026-06-17T00:00:00Z",

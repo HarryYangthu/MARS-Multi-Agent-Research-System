@@ -1,4 +1,4 @@
-"""BridgeAgent for V1 diagnosis and feedback-loop routing.
+"""BridgeAgent for V2 diagnosis and feedback-loop routing.
 
 It is deliberately not registered as a normal Agent. The bridge uses it as a
 product-level controller that combines hard rules with model-ready natural
@@ -113,6 +113,10 @@ class BridgeAgent:
             for cause in analysis.suspected_causes:
                 if cause.kind == "config_sanity" and cause.severity == "high":
                     return "experiment"
+        if "coding" in allowed:
+            for cause in analysis.suspected_causes:
+                if cause.kind == "code_change_risk" and cause.severity == "high":
+                    return "coding"
         default = config.default_target
         if default in allowed:
             return default

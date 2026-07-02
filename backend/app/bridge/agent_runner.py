@@ -16,6 +16,7 @@ from app.bridge.agent_registry import get_registry
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.harness.schema.frontmatter_parser import parse as parse_fm
+from app.settings import get_settings
 from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 from app.storage.run_store import RunHandle
 
@@ -25,6 +26,7 @@ async def run_agent_node(
     node_key: str,
     *,
     bus: Any | None = None,
+    revision_reason: str = "",
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
@@ -53,7 +55,11 @@ async def run_agent_node(
     for _schema, (dir_name, stem) in SCHEMA_TO_AGENT.items():
         if dir_name != stage:
             continue
-        if attempt == 1 and (run.subdir(stage) / f"{stem}.v1.md").exists():
+        if (
+            attempt == 1
+            and not revision_reason
+            and (run.subdir(stage) / f"{stem}.v1.md").exists()
+        ):
             logger.info(
                 "agent {} has seed artifact on disk; skipping LLM draft", node_key
             )
@@ -98,6 +104,20 @@ async def run_agent_node(
                 text=latest_diagnosis.read_text(encoding="utf-8"),
                 source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
             )
+    if revision_reason:
+        upstream["human_revision_request"] = (
+            "Human reviewer rejected the current draft and requested a revised "
+            f"version. Feedback: {revision_reason}"
+        )
+        run.write_event(
+            "agent_events",
+            {
+                "event": "agent.revision_started",
+                "agent": stage,
+                "node": node_key,
+                "reason": revision_reason,
+            },
+        )
 
     # Construct request + context via the agent's own builders.
     from app.agents.base import RunRequest as AgentRunRequest
@@ -123,6 +143,7 @@ async def run_agent_node(
             "run_id": run.run_id,
             "run_root": str(run.root),
             "agent_dir": str(run.subdir(stage)),
+            "revision_reason": revision_reason,
         },
     )
     context = await agent.build_context(request)
@@ -296,6 +317,32 @@ async def run_agent_node(
     except Exception as exc:  # pragma: no cover (manifest is best-effort)
         logger.warning("manifest write failed: {}", exc)
 
+    if stage == "idea":
+        try:
+            from app.agents.idea.acceptance import write_idea_acceptance_report
+
+            report_path = write_idea_acceptance_report(
+                run=run,
+                artifact_ref=ref,
+                node_key=node_key,
+            )
+            run.write_event(
+                "agent_events",
+                {
+                    "event": "idea.acceptance_report_written",
+                    "agent": stage,
+                    "node": node_key,
+                    "path": report_path.relative_to(run.root).as_posix(),
+                },
+            )
+        except Exception as exc:  # pragma: no cover (acceptance report is audit-only)
+            logger.warning(
+                "idea acceptance report write failed: run={} node={} error={}",
+                run.run_id,
+                node_key,
+                exc,
+            )
+
     # Long-term Memory writes happen only after HITL/auto approval. Drafts stay
     # in the run directory and review queue until promoted to *.approved.md.
 
@@ -308,7 +355,7 @@ def _write_patch_diff(*, run: RunHandle, version: str, attempt: int) -> None:
         "--- a/libs/router_v2.py\n"
         "+++ b/libs/router_v2.py\n"
         "@@ -1,3 +1,8 @@\n"
-        "+# V1 feedback-loop patch proposal.\n"
+        "+# V2 feedback-loop patch proposal.\n"
         f"+DIAGNOSIS_ATTEMPT = {attempt}\n"
         "+ROUTER_STABILITY_CLAMP = 0.02\n"
         "+\n"
@@ -334,8 +381,8 @@ async def _run_execution_batch(
 
     Reads `execution/run_log.approved.md` for the human-approved execution
     plan. If the plan is absent, falls back to experiment-plan ablations and
-    then to a 16-way default sweep. Publishes per-experiment WS events via the
-    orchestrator's bus (if provided).
+    then to a bounded default sweep. Publishes per-experiment WS events via the
+    orchestrator's bus when provided.
     """
     from app.execution.batch_runner import BatchConfig, run_batch
     from app.execution.curve_parser import write_curve
@@ -352,7 +399,7 @@ async def _run_execution_batch(
     attempt = parse_node_key(node_key).attempt
     approved_execution_path = run.subdir("execution") / "run_log.approved.md"
     plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
-    # Parse ablations as (name, config) so the real PIM sim gets expert_count etc.
+    # Parse ablations as (name, config) so the execution backend gets supported knobs.
     abl_specs: list[tuple[str, dict[str, Any]]] = []
     if approved_execution_path.exists():
         try:
@@ -396,9 +443,12 @@ async def _run_execution_batch(
             if len(abl_specs) >= 16:
                 break
     abl_specs = abl_specs[:16]
-    # Apply the attempt-aware capacity schedule: attempt 1 stays shallow (fails
-    # the RES gate), the Commander's repair deepens the canceller on rerun.
-    abl_specs = [(name, _capacity_for_attempt(cfg, attempt)) for name, cfg in abl_specs]
+    execution_raw = load_execution_config().get("execution", {})
+    execution_cfg = execution_raw if isinstance(execution_raw, dict) else {}
+    backend = str(execution_cfg.get("backend", "mock") or "mock")
+    if backend == "mock" or os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
+        # Mock/demo-only shaping. Real backends consume the approved run config unchanged.
+        abl_specs = [(name, _capacity_for_attempt(cfg, attempt)) for name, cfg in abl_specs]
 
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
         if bus is not None:
@@ -413,11 +463,18 @@ async def _run_execution_batch(
                 )
         run.write_event("websocket_events", {"channel": channel, **payload})
 
-    execution_raw = load_execution_config().get("execution", {})
-    execution_cfg = execution_raw if isinstance(execution_raw, dict) else {}
     max_concurrency = _positive_int(execution_cfg.get("max_concurrency"), 16)
     batch_steps = _positive_int(execution_cfg.get("batch_steps"), 120)
-    backend = str(execution_cfg.get("backend", "mock") or "mock")
+    if backend == "paper_static":
+        paper_cfg_raw = execution_cfg.get("paper_static", {})
+        paper_cfg = paper_cfg_raw if isinstance(paper_cfg_raw, dict) else {}
+        max_concurrency = min(
+            max_concurrency,
+            _positive_int(paper_cfg.get("max_concurrency"), 1),
+        )
+        batch_steps = _positive_int(paper_cfg.get("default_max_iters"), 1)
+        experiment_limit = _positive_int(paper_cfg.get("batch_experiments"), 1)
+        abl_specs = abl_specs[:experiment_limit]
 
     specs = [
         JobSpec(
@@ -482,10 +539,8 @@ async def _run_execution_batch(
 
 
 def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
-    # Initial exploration grid: a modest memory-depth sweep (2-6 taps) crossed
-    # with learning rate. The true PIM memory is 12 taps, so this under-provisions
-    # the canceller on purpose — the batch mean RES (~-21 dB) misses the project
-    # gate, which is what triggers the Commander's deeper-canceller repair.
+    # Generic mock/demo exploration grid. Real-project capacity, channel count,
+    # and file format come from the approved config and the connected code.
     memories = [2, 3, 4, 6]
     learning_rates = [0.045, 0.055, 0.065, 0.08]
     out: list[tuple[str, dict[str, Any]]] = []
@@ -504,11 +559,8 @@ def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
-# Demo-calibrated canceller-capacity schedule. expert_count maps to memory taps
-# in execution/pim_cancellation.py (more taps -> lower/better RES). Attempt 1 is
-# capped shallow so the batch misses the RES gate; the Commander feedback loop
-# deepens the canceller on repair, so attempt >=2 clears it — a physically honest
-# fail -> diagnose -> backtrack -> rerun -> pass arc.
+# Mock/demo capacity schedule used only for synthetic runs. Real backends should
+# not inherit these values or use them as project facts.
 _ATTEMPT1_MEMORY_CAP = 6
 _REPAIR_MEMORY_FLOOR = 16
 
@@ -520,14 +572,11 @@ def _capacity_for_attempt(cfg: dict[str, Any], attempt: int) -> dict[str, Any]:
         base = out.get("memory")
     ec = _positive_int(base, 4)
     if attempt <= 1:
-        # Demo switch: under-provision the FIRST attempt so the batch misses the
-        # RES gate and the Commander's repair loop runs end to end. Off by default
-        # — normal runs honour the experiment plan's chosen capacity and only
-        # backtrack if the plan is genuinely under-provisioned.
         if os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
             ec = min(ec, _ATTEMPT1_MEMORY_CAP)
+        elif get_settings().mars_execution_backend == "mock":
+            ec = max(12, ec)
     else:
-        # Repair: the Commander feedback deepens the canceller on the rerun.
         ec = min(28, max(_REPAIR_MEMORY_FLOOR, ec) + 2 * (attempt - 2))
     out["expert_count"] = ec
     return out

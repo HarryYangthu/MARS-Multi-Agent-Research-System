@@ -1,6 +1,6 @@
 ---
 schema: diagnosis.v1
-project: moe-pimc
+project: pimc
 agent: bridge
 run_id: example_run
 attempt: 1

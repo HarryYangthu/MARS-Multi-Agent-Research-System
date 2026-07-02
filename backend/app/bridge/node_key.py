@@ -1,4 +1,4 @@
-"""Helpers for V1 dynamic attempt node keys.
+"""Helpers for V2 dynamic attempt node keys.
 
 Bridge owns product topology, so attempt naming also lives here rather than
 inside the generic DAG runtime.

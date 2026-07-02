@@ -12,7 +12,7 @@ import { openRunSocket } from "@/lib/socket";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-// RES (residual, dB) gate from projects/moe-pimc/diagnostics.yaml — lower is
+// RES (residual, dB) gate from projects/pimc/diagnostics.yaml — lower is
 // better. A batch whose mean RES is above this missed the target.
 const RES_GATE_DB = -26.0;
 

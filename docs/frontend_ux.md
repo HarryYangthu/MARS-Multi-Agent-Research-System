@@ -65,7 +65,7 @@ SKIPPED      slate-800
 | `run.<id>.hitl` | Highlight the relevant agent (review_required) |
 | `run.lifecycle` | Show "completed" toast (planned — V0 just appends to events list) |
 
-`runs/[id]/multi/page.tsx` polls `/api/execution/<id>/curves` every 2 s. WS streaming hooks for per-experiment ticks are wired but the panel itself is poll-based for simplicity in V0; switching to WS streaming is straight-line work in V1.
+`runs/[id]/multi/page.tsx` polls `/api/execution/<id>/curves` every 2 s. WS streaming hooks for per-experiment ticks are wired but the panel itself is poll-based for simplicity in V0; switching to WS streaming is straight-line work in V2.
 
 ## Validation badge contract
 
@@ -76,7 +76,7 @@ SKIPPED      slate-800
    - /metrics/primary: required
 ```
 
-The error list is exactly the structured `ValidationError(path, message)` from the backend's `validator.py`. Click a path → editor scrolls to the offending key (planned V1).
+The error list is exactly the structured `ValidationError(path, message)` from the backend's `validator.py`. Click a path → editor scrolls to the offending key (planned V2).
 
 ## Frontend not in V0 (P1 items)
 

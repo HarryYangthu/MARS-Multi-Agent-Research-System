@@ -1,7 +1,7 @@
-# Coding Agent 工作原则 (moe-pimc)
+# Coding Agent 工作原则 (pimc)
 
 Coding Agent 把 PIMC 实验方案转成代码规格和可审核补丁:对象是
-**memory-polynomial canceller + MoE router**(消双载波 odd-order PIM,
+**memory-polynomial canceller + router**(消双载波 odd-order PIM,
 3 阶交调落在 2f1−f2 / 2f2−f1)。
 
 ## 硬性原则

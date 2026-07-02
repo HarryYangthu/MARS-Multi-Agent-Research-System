@@ -1,126 +1,125 @@
-# MARS — Agent configuration (project: moe-pimc — PIM cancellation + MoE router).
-# Every agent runs on DeepSeek. Only two models are actually used:
-#   deepseek-chat      — fast general model; used where determinism / throughput
-#                        matter (coding patches, execution run-logs, synthesis).
-#   deepseek-reasoner  — DeepSeek-R1 long chain-of-thought; used where the task is
-#                        design / critique heavy (ablation-matrix planning, the
-#                        debate critic, report review).
-# Multi-model debate mixes chat + reasoner across roles so the auto-degrade logic
-# stays in REAL_MULTI_MODEL mode (all roles share the deepseek provider).
-# Missing API keys fall back to mock_provider only when MARS_MOCK_MODE allows it.
-# Set MARS_MOCK_MODE=never to force every Agent onto the real configured API.
-
 commander:
   enabled: true
-  output_schema: ""
+  output_schema: ''
   model:
     provider: deepseek
     model: deepseek-chat
     temperature: 0.2
     max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false
   role: supervisor_react
   tools:
-    - run.create
-    - run.start
-    - run.status
-    - run.feedback_loop
-    - artifact.read
-    - artifact.review
-    - metrics.evaluate
-    - diagnosis.failure_analysis
-    - user.approval
-
+  - run.create
+  - run.start
+  - run.status
+  - run.feedback_loop
+  - artifact.read
+  - artifact.review
+  - metrics.evaluate
+  - diagnosis.failure_analysis
+  - user.approval
 idea:
   enabled: true
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-chat            # bold, fast hypothesis generation for PIM/MoE proposals
+    model: deepseek-chat
     temperature: 0.7
     max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: true
-    rounds: 1                         # 1 round × 3 roles = 3 DeepSeek calls (was 6 with rounds=2)
+    rounds: 1
     participants:
-      - role: proposer
-        provider: deepseek
-        model: deepseek-chat        # bold proposer
-      - role: critic
-        provider: deepseek
-        model: deepseek-reasoner    # R1 long-CoT critic (probes the RES vs memory-depth tradeoff)
-      - role: judge
-        provider: deepseek
-        model: deepseek-chat        # synthesizer
+    - role: proposer
+      provider: deepseek
+      model: deepseek-chat
+    - role: critic
+      provider: deepseek
+      model: deepseek-reasoner
+    - role: judge
+      provider: deepseek
+      model: deepseek-chat
   research:
-    enable_network: false             # V1 keeps arXiv/web research optional, not required for demo
+    required_tools: true
+    enable_network: true
+    source_downloads: true
+    source_download_limit: 1
+    web_search: true
   loop:
     max_validation_repairs: 1
     max_tool_steps: 3
   tools:
-    - search.local_docs
-    - search.arxiv_search
-    - knowledge.kb_query
-    - knowledge.baseline_match
-    - code.repo_reader
-
+  - search.local_docs
+  - search.arxiv_search
+  - search.web_search
+  - search.fetch_sources
+  - knowledge.kb_query
+  - knowledge.baseline_match
+  - code.repo_reader
 experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
     provider: deepseek
-    model: deepseek-reasoner        # R1 — designs the order × memory-taps × router_type ablation matrix
+    model: deepseek-reasoner
     temperature: 0.3
     max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false
   loop:
     max_validation_repairs: 1
     max_tool_steps: 3
   tools:
-    - knowledge.kb_query
-    - knowledge.baseline_match
-    - knowledge.experiment_memory
-
+  - knowledge.kb_query
+  - knowledge.baseline_match
+  - knowledge.experiment_memory
 coding:
   enabled: true
   output_schema: code_spec.v1
   model:
     provider: deepseek
-    model: deepseek-chat            # temp 0.1 → deterministic, additive patches (Paper_Total_0327 stays frozen)
+    model: deepseek-chat
     temperature: 0.1
     max_tokens: 8192
-  # V0 only LOADS a post-trained coding backend; the GRPO training pipeline is V1.
-  # Keep this disabled unless a real local vLLM endpoint is running; otherwise
-  # Coding Agent uses the configured DeepSeek remote API like the other Agents.
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   post_training:
-    enabled: false
-    mode: load_only
+    enabled: true
+    mode: endpoint
     endpoint_provider: local_vllm
-    adapter_path: ""
-    custom_endpoint: "http://127.0.0.1:8001/v1"
+    adapter_path: ''
+    custom_endpoint: http://127.0.0.1:8001/v1
     model: mars-coding-posttrain
     api_key_env: LOCAL_VLLM_API_KEY
-    fine_tuned_model_id: ""
-    live_checkpoint_path: ""
+    fine_tuned_model_id: ''
+    live_checkpoint_path: ''
   language_tracks:
-    - python_research
-    - c_production
+  - python_research
+  - c_production
   loop:
     max_validation_repairs: 2
     max_tool_steps: 4
   tools:
-    - code.repo_reader
-    - code.patch_generator
-    - code.apply_patch
-    - code.write_file
-    - code.delete_file
-    - code.rollback_patch
-    - code.test_runner
-    - code.lint
-    - knowledge.code_assets
-
+  - code.repo_reader
+  - code.patch_generator
+  - code.apply_patch
+  - code.write_file
+  - code.delete_file
+  - code.rollback_patch
+  - code.test_runner
+  - code.lint
+  - knowledge.code_assets
 execution:
   enabled: true
   output_schema: run_log.v1
@@ -129,17 +128,19 @@ execution:
     model: deepseek-chat
     temperature: 0.1
     max_tokens: 2048
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false
   loop:
     max_validation_repairs: 1
     max_tool_steps: 2
   tools:
-    - execution.simulation_runner
-    - execution.batch_runner
-    - execution.log_streamer
-    - execution.metrics_collector
-
+  - execution.simulation_runner
+  - execution.batch_runner
+  - execution.log_streamer
+  - execution.metrics_collector
 writing:
   enabled: true
   output_schema: report.v1
@@ -148,19 +149,22 @@ writing:
     model: deepseek-chat
     temperature: 0.4
     max_tokens: 8192
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: true
     rounds: 1
     participants:
-      - role: critic
-        provider: deepseek
-        model: deepseek-reasoner    # R1 — checks RES/PIM claims against the run evidence
-      - role: positive_reviewer
-        provider: deepseek
-        model: deepseek-chat        # frames the contribution for the target audience
+    - role: critic
+      provider: deepseek
+      model: deepseek-reasoner
+    - role: positive_reviewer
+      provider: deepseek
+      model: deepseek-chat
   loop:
     max_validation_repairs: 1
     max_tool_steps: 3
   tools:
-    - knowledge.methodology
-    - knowledge.run_archive
+  - knowledge.methodology
+  - knowledge.run_archive

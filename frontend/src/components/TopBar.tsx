@@ -75,6 +75,13 @@ export function TopBar(): JSX.Element {
         >
           上下文
         </Link>
+        <Link
+          href="/config/agents"
+          className="rounded border border-mars-border bg-mars-panel2 px-2.5 py-1 text-xs text-slate-200 hover:bg-mars-subtle hover:text-white"
+          title="Agent 模型与 Key"
+        >
+          配置
+        </Link>
         <RuntimeOpsPanel project={selectedProject} />
         <button
           onClick={toggle}
@@ -96,8 +103,16 @@ function ReadinessBadge({
   const blockers =
     readiness?.checks.filter((c) => c.severity === "blocker" && !c.ready) ?? [];
   const ready = readiness?.ready ?? false;
+  const llmMode =
+    readiness?.mock_mode === "never"
+      ? "llm:real"
+      : readiness?.mock_mode === "always"
+        ? "llm:mock"
+        : readiness?.mock_mode
+          ? `llm:${readiness.mock_mode}`
+          : "";
   const label = readiness
-    ? `${readiness.runtime_mode}/${readiness.execution_backend}`
+    ? `${readiness.runtime_mode} · ${llmMode} · exec:${readiness.execution_backend}`
     : "检查中";
   const cls = ready
     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"

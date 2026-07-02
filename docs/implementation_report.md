@@ -60,7 +60,7 @@ mars_claude/
 │  ├─ tools.yaml              # tool enable flags
 │  ├─ gates.yaml              # 5-Gate thresholds + monitored_tools
 │  ├─ knowledge.yaml          # 4-zone embedding/chunk
-│  └─ execution.yaml          # GPU policy + mock_simulation toggles  (left for V1; not loaded in V0)
+│  └─ execution.yaml          # GPU policy + mock_simulation toggles  (left for V2; not loaded in V0)
 ├─ backend/
 │  ├─ Dockerfile
 │  └─ app/
@@ -90,13 +90,13 @@ mars_claude/
 │     ├─ lib/                 # api / socket / utils
 │     └─ stores/              # run-store
 ├─ workspace/repos/pimc-stub/ # libs/Model.py + main.py + baseline/ + production_interface/ — lets MARS exercise Coding/Execution against a stand-in
-├─ projects/moe-pimc/         # project.yaml + repo_link.yaml + AGENTS.md + data_gen.py
+├─ projects/pimc/         # project.yaml + repo_link.yaml + AGENTS.md + data_gen.py
 ├─ knowledge/                 # 4 zones; populated at runtime
 ├─ runs/                      # per-task sedimentation; populated at runtime
 ├─ templates/
 │  ├─ artifacts/              # 5 schema-valid skeleton mds (one per schema)
 │  └─ code_rules/pimc_python.md
-├─ posttrain/README.md        # V1 placeholder; explains V0 boundary
+├─ posttrain/README.md        # V2 placeholder; explains V0 boundary
 ├─ scripts/                   # dev.sh / cli_validate.py / run_demo.py / acceptance.sh
 └─ docs/
    ├─ phase_0_status.md … phase_7_status.md (this delivery has 0–6; 7 is implicit in the report below)
@@ -121,7 +121,7 @@ mars_claude/
 | Mock simulation | `execution/mock_simulation.py` |
 | Frontend P0 | `frontend/src/app/{page,runs/page,runs/new/page,runs/[id]/page,runs/[id]/multi/page}.tsx` |
 | `runs/<id>/` 9 subdirs | `storage/run_store.py::RUN_SUBDIRS` |
-| Project repo via repo_link | `projects/moe-pimc/repo_link.yaml` + `workspace/repos/pimc-stub/` |
+| Project repo via repo_link | `projects/pimc/repo_link.yaml` + `workspace/repos/pimc-stub/` |
 | Per-Agent LLM config | `configs/agents.yaml` parsed by `harness/llm/model_registry.py` |
 | Coding 3 backends (V0: 2) | `harness/llm/post_training_loader.py` + `harness/llm/local_vllm_provider.py` |
 | Concurrent execution (≤6) | `execution/batch_runner.py::BatchConfig.max_concurrency=6` |
@@ -130,10 +130,10 @@ mars_claude/
 | Reverse-dependency for agents | `bridge/agent_registry.py` Protocol-based registry |
 | Layered architecture enforced | `.importlinter` 4 contracts |
 | Dev E2E (zero deps) | `scripts/run_demo.py --mock-mode` + `scripts/acceptance.sh` |
-| Context Engineering V1 | `backend/app/harness/context/{engine,compiler,manifest_v2,raw_store,budget_policy}.py` + `backend/app/api/context.py` |
+| Context Engineering V2 | `backend/app/harness/context/{engine,compiler,manifest_v2,raw_store,budget_policy}.py` + `backend/app/api/context.py` |
 | Context Workbench | `frontend/src/app/context/page.tsx` + `frontend/src/lib/contextWorkbench.ts` |
 
-Context Engineering V1 addendum:
+Context Engineering V2 addendum:
 
 - Pre-call `context_manifest.v2.*.json` is written before provider calls while keeping legacy context pack outputs.
 - Tool raw output is externalized under `runs/<id>/context/raw/`; prompts carry compact observations plus `raw_ref`.
@@ -146,13 +146,13 @@ Context Engineering V1 addendum:
 
 ```
 [Step 1] User clicks Pipeline card on the front-end (simulated by API call)
-[Step 2] Select project: moe-pimc
+[Step 2] Select project: pimc
 [Step 3] Enter research question:
-        How can ATK-MoE further reduce compute under 8L config while preserving RES performance?
+        How can PIMC further reduce compute under 8L config while preserving RES performance?
 [Step 4] Click Start Run
         run_id = 2026-05-05T0332_acceptance_demo_<ms>
 [Step 5] Idea Agent runs (multi-model debate auto-degrades to mock_debate)
-[Step 6] HITL: review v1 → approve → idea_proposal.approved.md (Gate 1 passes)
+[Step 6] HITL: review draft → approve → idea_proposal.approved.md (Gate 1 passes)
 [Step 7] Experiment Agent runs → baseline_match → ablation matrix
 [Step 8] Coding Agent runs → patch_generator → Gate 5 baseline_compatibility check
 [Step 9] Execution Agent runs → mock simulations (≤6 concurrent) + curves
@@ -189,7 +189,7 @@ passed
 ===== 5. gate tests =====
 passed
 
-===== 6. tools v1 hardening smoke =====
+===== 6. tools v2 hardening smoke =====
 passed
 
 ===== 7. frontend typecheck + lint + context workbench smoke =====
@@ -214,14 +214,14 @@ states = { idea: done, experiment: done, coding: done, execution: done, writing:
   ✓ hitl populated
   ✓ events populated
 
-===== 11. tools v1 demo audit =====
+===== 11. tools v2 demo audit =====
 local registry/config, /api/tools, tool audit filters, trace span, execution artifacts passed
 
 ===== 12. context manifest v2 coverage =====
 context v2 manifests: 8
 context workbench API manifests: 8
 
-===== ✅ V0 + Tools V1 + Context Workbench acceptance passed =====
+===== ✅ V0 + Tools V2 + Context Workbench acceptance passed =====
 ```
 
 Quantitative summary:
@@ -255,10 +255,10 @@ Quantitative summary:
 
 ### What is skeleton (waiting for real input)
 
-- **`workspace/repos/pimc-stub/`** — minimal `libs/Model.py` + `main.py` + `baseline/`. Real research code stays in your private repo and is wired in via `projects/moe-pimc/repo_link.yaml` (`local_path` mode).
-- **`harness/context/compressor.py`** — three strategies are stubbed (hier_summary / reference / relevance_prune). V0 only writes manifests; manual triggers exist but no automatic compression policy is wired into the orchestrator. ACCEPTANCE.md §1 explicitly defers automatic compression to V1.
+- **`workspace/repos/pimc-stub/`** — minimal `libs/Model.py` + `main.py` + `baseline/`. Real research code stays in your private repo and is wired in via `projects/pimc/repo_link.yaml` (`local_path` mode).
+- **`harness/context/compressor.py`** — three strategies are stubbed (hier_summary / reference / relevance_prune). V0 only writes manifests; manual triggers exist but no automatic compression policy is wired into the orchestrator. ACCEPTANCE.md §1 explicitly defers automatic compression to V2.
 - **`backend/app/workers/`** — V0 uses asyncio inline; the dedicated worker package is empty placeholders.
-- **`harness/llm/post_training_loader.py`** — load-only (4 modes recognized: load_only / adapter / endpoint / fine_tuned_id). V0 doesn't validate adapter weights or live_checkpoint_path beyond requiring the field for the chosen mode. V1 ships GRPO + checkpoint reload.
+- **`harness/llm/post_training_loader.py`** — load-only (4 modes recognized: load_only / adapter / endpoint / fine_tuned_id). V0 doesn't validate adapter weights or live_checkpoint_path beyond requiring the field for the chosen mode. V2 ships GRPO + checkpoint reload.
 - **Some debate `agents.yaml` participants** declare `provider: gemini` with model `gemini-2.0-pro` — those are mock-mode placeholders, not real model IDs that exist at runtime.
 
 ### What is partial / placeholder schema fields
@@ -277,13 +277,13 @@ Quantitative summary:
 
 ### Performance
 
-- **Polling-based HITL wait** in `orchestrator._await_hitl_or_auto`: 50 ms tick. For Dev E2E it's invisible; for human-in-the-loop production runs it's fine because human reaction times dominate. V1 should switch to `event_loop.add_reader` style.
+- **Polling-based HITL wait** in `orchestrator._await_hitl_or_auto`: 50 ms tick. For Dev E2E it's invisible; for human-in-the-loop production runs it's fine because human reaction times dominate. V2 should switch to `event_loop.add_reader` style.
 - **In-memory event bus**: `InProcessEventBus` is the V0 default. Multiple uvicorn workers would not share state. Production should run a single uvicorn worker (the docker-compose default) or migrate to the `RedisEventBus` once Redis is mandatory.
-- **JSON-persisted KB**: `_index.json` per zone is loaded once, kept in memory, and rewritten in full on every add. Fine for V0 demo scale (≤ a few hundred records); V1 must move to ChromaDB or sqlite-vss.
+- **JSON-persisted KB**: `_index.json` per zone is loaded once, kept in memory, and rewritten in full on every add. Fine for V0 demo scale (≤ a few hundred records); V2 must move to ChromaDB or sqlite-vss.
 
 ### Security / safety
 
-- **No authn/authz**: every API endpoint is open. Acceptable for V0 single-user CLAUDE.md scope; flag for V1.
+- **No authn/authz**: every API endpoint is open. Acceptable for V0 single-user CLAUDE.md scope; flag for V2.
 - **Patch application is not exercised**: `code.patch_generator` is not actually wired to a tool that mutates `workspace/repos/`. Gate 5 is fully exercised on the dispatch path, but the patches it would block are synthetic. Once the real Coding Agent gets a `patch_apply` tool, re-validate Gate 5 end-to-end on that path.
 - **Frontend is unauthenticated** and CORS is `*`. Lock down before any non-localhost deployment.
 
@@ -294,14 +294,14 @@ While reading the spec I noticed two minor inconsistencies — flagged here, not
 1. **`PRODUCT.md §11.1 idea.tools` lists `search.local_docs` and `search.arxiv_search`**, while **`DESIGN.md §3 harness/tools/`** uses the path `harness/tools/search/`. The runtime treats these names as opaque strings; nothing is broken. If we later codify "namespace = directory", we should pick one.
 2. **`PRODUCT.md §7.1 idea` debate participants** mention "gpt-5.5", "gemini-2.5-pro" — those are forward-looking model ids. Real environment uses whatever `gemini-2.0-pro` / `gpt-4o` etc. is current. `configs/agents.yaml` ships current-as-of-2026-05 model ids; the spec example is left as-is.
 
-## 9. Suggested next X (V1 prep)
+## 9. Suggested next X (V2 prep)
 
 - **Posttrain pipeline document** (`posttrain/README.md` is just a placeholder today): focus on (a) preference-pair construction from `runs/<id>/hitl/review_log.jsonl`, (b) reward composition (schema-validity × baseline-preservation × downstream metric), (c) GRPO trainer surface, (d) live_checkpoint reload protocol.
 - **Compression policy**: pick when each of the three strategies in `harness/context/compressor.py` should auto-fire. The 70% token-budget trigger from DESIGN §7.4 needs an actual budget implementation — V0 stops at the manual hook.
 - **Real Chroma embedding**: swap `harness/kb/embedder.py` for sentence-transformers when the host has it cached, keep the deterministic-hash embedder as the test-time backend. The `KBStores` API doesn't change.
 - **Tool surface**: V0 ships the registry + Gate 5 path but no real tools for `code.patch_generator` / `code.test_runner` / `execution.simulation_runner`. The registry is ready — wire actual subprocess-spawning tools next.
 - **WS-based MultiExperimentView**: V0 polls /curves; switch to streaming via per-experiment WS channel for sub-second updates.
-- **Multi-project support**: `bridge/project_isolation.py` is a placeholder. V1 adds (a) per-project `runs/` and `knowledge/` segregation, (b) project switcher in the UI.
+- **Multi-project support**: `bridge/project_isolation.py` is a placeholder. V2 adds (a) per-project `runs/` and `knowledge/` segregation, (b) project switcher in the UI.
 - **End-to-end on real hardware**: with API keys + a GPU, exercise the full Hardware E2E lane (ACCEPTANCE §1.1). The V0 Dev E2E lane already passes; the diff to Hardware E2E is solely (1) populating `.env` with real keys and (2) replacing `execution/simulation_runner.run_one` with subprocess to the real research repo.
 
 ---

@@ -1,4 +1,4 @@
-# Debate Synthesis Prompt — MoE-PIMC
+# Debate Synthesis Prompt — PIMC
 
 Judge 角色把 proposer 与 critic 关于 PIM 抵消方向的观点综合成最终 proposal。
 辩论的真正目的:挤掉无法在双载波 PIM simulator 上验证、或会触碰 baseline 保护面的假设,

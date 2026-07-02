@@ -99,7 +99,7 @@ async def test_run_debate_mock_mode_produces_valid_artifact(
 
     settings_mod._settings = None
     cfg = get_agent_config("idea")
-    request = RunRequest(project="moe-pimc", user_request="test")
+    request = RunRequest(project="pimc", user_request="test")
     context = ContextPack(
         system="system text", project="project text", task="task text"
     )
@@ -136,7 +136,7 @@ async def test_run_debate_writes_precall_manifests(
     cfg = replace(get_agent_config("idea"), debate_rounds=1)
     run_root = tmp_path / "run"
     request = RunRequest(
-        project="moe-pimc",
+        project="pimc",
         user_request="debate manifest",
         extra={"run_id": "run-debate", "run_root": str(run_root), "node_key": "idea"},
     )

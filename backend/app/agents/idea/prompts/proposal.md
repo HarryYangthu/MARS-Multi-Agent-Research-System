@@ -1,4 +1,4 @@
-# Idea Proposal Prompt — MoE-PIMC
+# Idea Proposal Prompt — PIMC
 
 基于 `research_summary.v1.md` 和 `evidence_index.v1.json` 生成 PIM 抵消方向的
 proposal。proposal 必须服务于一件事:让下游 Experiment Agent 能直接把它变成一组
@@ -7,7 +7,7 @@ ablation,在双载波 PIM simulator 上跑出可比的 RES / loss 曲线。
 proposal 至少要表达:
 
 - **研究问题**:针对 FDD Massive MIMO + beam/layer 切换下的 PIM 抵消,通常落在
-  "在切换瞬态/跨 stream 复用时如何用 MoE router 分配 canceller 容量"。
+  "在切换瞬态/跨 stream 复用时如何用 router 分配 canceller 容量"。
 - **可证伪假设**:必须能映射到 simulator 旋钮与指标。例:
   "在 12-tap 真实 memory 下,将 `expert_count` 从 8 提到 16(等效更深 memory taps),
   RES 从约 -21 dB(mean)降到 ≤ -26 dB(gate),loss ≤ 0.04"。

@@ -1,4 +1,4 @@
-# Idea 输出质量评估 Rubric — MoE-PIMC
+# Idea 输出质量评估 Rubric — PIMC
 
 评估一个 PIM 抵消 proposal 是否合格。每个维度给 0/1/2 分,任一维度为 0 直接判不合格。
 

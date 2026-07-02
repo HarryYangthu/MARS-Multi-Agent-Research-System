@@ -44,7 +44,7 @@ def _clear_keys(monkeypatch: pytest.MonkeyPatch) -> None:
 )
 async def test_each_agent_drafts_valid_artifact(agent_cls: type, schema: str) -> None:
     agent = agent_cls()
-    request = RunRequest(project="moe-pimc", user_request="standalone test prompt")
+    request = RunRequest(project="pimc", user_request="standalone test prompt")
     context = await agent.build_context(request)
     artifact = await agent.draft(request, context)
     res = validate_document(artifact.text, expected_schema=schema)

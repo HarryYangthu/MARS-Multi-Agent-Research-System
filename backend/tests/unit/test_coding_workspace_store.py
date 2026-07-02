@@ -20,10 +20,10 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(store, "repo_root", fake_repo_root)
     monkeypatch.setattr(store, "_load_kb_memory_items", fake_kb_memory)
 
-    project_dir = tmp_path / "projects" / "moe-pimc"
+    project_dir = tmp_path / "projects" / "pimc"
     project_dir.mkdir(parents=True)
     (project_dir / "repo_link.yaml").write_text(
-        "project: moe-pimc\n"
+        "project: pimc\n"
         "repo_path: ../../workspace/repos/pimc-current\n"
         "ignore_patterns:\n"
         "  - data/\n"
@@ -46,7 +46,7 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_workspace_falls_back_to_stub_when_project_repo_missing(fake_repo: Path) -> None:
     del fake_repo
-    workspace = store.build_coding_workspace(project="moe-pimc", source="auto")
+    workspace = store.build_coding_workspace(project="pimc", source="auto")
     assert workspace.selected_source == "pimc_stub"
     paths = {item.path for item in workspace.files}
     assert "main.py" in paths
@@ -57,7 +57,7 @@ def test_workspace_falls_back_to_stub_when_project_repo_missing(fake_repo: Path)
 def test_workspace_reads_selected_code_file(fake_repo: Path) -> None:
     del fake_repo
     content = store.read_code_file(
-        project="moe-pimc",
+        project="pimc",
         source="pimc_stub",
         path="libs/Model.py",
     )

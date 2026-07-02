@@ -1,6 +1,6 @@
 # MARS System Observability Design
 
-> Scope: V0/V1 observability for the MARS multi-agent research system.
+> Scope: V0/V2 observability for the MARS multi-agent research system.
 > Goal: make every run understandable, replayable, auditable, and debuggable
 > without breaking the mock-first end-to-end demo path.
 
@@ -40,11 +40,11 @@ observability must connect runtime behavior to research artifacts:
 | Run directories | `RunStore` creates run subdirs and writes JSONL events. | Event payloads are not normalized. |
 | Event bus | In-process pub/sub exists; Redis implementation exists. | API dependency currently wires in-process bus only. |
 | WebSocket | Per-run and per-experiment endpoints exist. | Per-run endpoint does not subscribe to all useful run channels such as HITL and feedback loop. |
-| Trace | `trace_manifest.v1.json` with node-level spans and event index exists. | LLM/tool/context spans are not yet captured. |
+| Trace | `trace_manifest.v2.json` with node-level spans and event index exists. | LLM/tool/context spans are not yet captured. |
 | Execution | Logs, curves, metrics, plots, per-experiment `run_log` are persisted. | UI mostly polls persisted curves; live experiment WS is not fully used. |
 | HITL audit | `hitl/review_log.jsonl` records human actions. | HITL approve/reject bus events are not consistently persisted as websocket events. |
 | Health/stats | `/health`, `/api/readiness`, `/api/stats` exist. | No SLO-style stuck-run or missing-heartbeat checks. |
-| External telemetry | None required for V0. | OpenTelemetry/Prometheus/LangSmith should stay optional V1 sinks. |
+| External telemetry | None required for V0. | OpenTelemetry/Prometheus/LangSmith should stay optional V2 sinks. |
 
 ## 4. Observability Signals
 
@@ -53,7 +53,7 @@ MARS uses six signals. Each signal has a live path and a durable path.
 | Signal | Purpose | Durable path | Live path |
 | --- | --- | --- | --- |
 | Event | Immutable state/action fact | `runs/<id>/events/*.jsonl` | EventBus -> WebSocket |
-| Trace | Causal timeline across agents/tools | `runs/<id>/context/trace_manifest.v1.json` | REST polling, future WS diff |
+| Trace | Causal timeline across agents/tools | `runs/<id>/context/trace_manifest.v2.json` | REST polling, future WS diff |
 | Metric | Numeric run/system/outcome measurements | `execution/metrics.json`, `events/metrics.jsonl` | Execution WS, stats API |
 | Log | Human-readable process output | `execution/logs/*.log`, app stderr | Execution WS |
 | Audit | Human/gate decisions | `hitl/review_log.jsonl`, `events/gate_events.jsonl` | Run WS, global event log |
@@ -70,7 +70,7 @@ incrementally by wrapping old payloads under `payload`.
   "event_id": "evt_01HY...",
   "timestamp": "2026-06-17T10:12:13.123456+00:00",
   "run_id": "2026-06-17T1012_pimc_demo",
-  "project": "moe-pimc",
+  "project": "pimc",
   "channel": "run.<run_id>.agent_state",
   "kind": "agent.state_changed",
   "severity": "info",
@@ -86,7 +86,7 @@ incrementally by wrapping old payloads under `payload`.
   },
   "evidence": [
     "coding/code_spec.v1.md",
-    "context/trace_manifest.v1.json#/spans/def456"
+    "context/trace_manifest.v2.json#/spans/def456"
   ],
   "payload": {
     "from_state": "running",
@@ -165,7 +165,7 @@ Keep existing files and add more specific streams as needed:
 ```text
 runs/<run_id>/
 ├─ context/
-│  ├─ trace_manifest.v1.json
+│  ├─ trace_manifest.v2.json
 │  └─ observability_manifest.v1.json
 ├─ execution/
 │  ├─ logs/<experiment_id>.log
@@ -195,7 +195,7 @@ runs/<run_id>/
 {
   "schema": "observability_manifest.v1",
   "run_id": "2026-06-17T1012_pimc_demo",
-  "trace_path": "context/trace_manifest.v1.json",
+  "trace_path": "context/trace_manifest.v2.json",
   "event_streams": {
     "agent": "events/agent_events.jsonl",
     "hitl": "events/hitl_events.jsonl",
@@ -255,7 +255,7 @@ Metrics are split into product, runtime, and research outcome metrics.
 | System | active runs, event bus backend, WS subscribers, queue depth | Top bar, readiness |
 | Outcome | metric pass/fail, diagnosis target, report consistency score | Evaluation layer |
 
-V0 stores metrics as JSON files. V1 can export selected counters/histograms to
+V0 stores metrics as JSON files. V2 can export selected counters/histograms to
 Prometheus or OpenTelemetry without changing run-scoped files.
 
 ## 11. API And UI
@@ -433,7 +433,7 @@ Integration tests:
 Acceptance script additions:
 
 ```text
-assert runs/<id>/context/trace_manifest.v1.json exists
+assert runs/<id>/context/trace_manifest.v2.json exists
 assert runs/<id>/events/run_events.jsonl has run.started and run.completed
 assert runs/<id>/events/hitl_events.jsonl has hitl.approved for every reviewed agent
 assert runs/<id>/events/execution_events.jsonl has execution.curve_point

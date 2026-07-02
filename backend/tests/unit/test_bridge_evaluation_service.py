@@ -19,7 +19,7 @@ from app.storage.run_store import RunStore
 def _proposal_text() -> str:
     metadata = {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "research_question": "How to simplify the router?",
         "hypothesis": "Hard top-2 keeps RES within 1.5 dB.",
@@ -29,7 +29,7 @@ def _proposal_text() -> str:
 
 
 def test_build_artifact_evaluation_summary_compacts_reports(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="eval-bridge", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="eval-bridge", project="pimc")
     ref = ArtifactStore(run).write(text=_proposal_text())
 
     summary = build_artifact_evaluation_summary(
@@ -62,7 +62,7 @@ def test_build_artifact_evaluation_summary_compacts_reports(tmp_path: Path) -> N
 async def test_emit_artifact_evaluation_event_writes_file_and_publishes(
     tmp_path: Path,
 ) -> None:
-    run = RunStore(tmp_path).create(task="eval-bridge", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="eval-bridge", project="pimc")
     ref = ArtifactStore(run).write(text=_proposal_text())
     bus = InProcessEventBus()
 

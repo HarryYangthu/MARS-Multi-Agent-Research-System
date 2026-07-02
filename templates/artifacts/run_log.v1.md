@@ -1,9 +1,9 @@
 ---
 schema: run_log.v1
-project: moe-pimc
+project: pimc
 agent: execution
 upstream_artifact: code_spec.approved.md
-run_id: "2026-05-04T2310_pimc_moe_ablation_run3"
+run_id: "2026-05-04T2310_pimc_ablation_run3"
 batch_size: 512
 gpu_used: ["L40S:1", "L40S:2"]
 duration_seconds: 3420

@@ -6,8 +6,8 @@ into an Agent's expected ``output_schema``, validation succeeds 100% of the
 time. This is what lets the Dev E2E demo (ACCEPTANCE §1.1) run with zero
 external dependencies.
 
-The fake metadata + bodies are *domain-real* for project ``moe-pimc``
-(dual-carrier PIM cancellation with a MoE memory-polynomial canceller) and
+The fake metadata + bodies are *domain-real* for project ``pimc``
+(dual-carrier PIM cancellation with a routing memory-polynomial canceller) and
 mutually consistent across the artifact chain:
 
 * RES = residual power ratio in dB, **lower is better**; project gate is
@@ -61,10 +61,10 @@ _PASS_N_BASIS = 64               # memory-polynomial basis columns
 
 # Failing first attempt (shallow memory): RES misses the -26 dB gate.
 _FAIL_RES_OBSERVED = -20.8
-_RES_TARGET = -26.0              # projects/moe-pimc/diagnostics.yaml
+_RES_TARGET = -26.0              # projects/pimc/diagnostics.yaml
 _RES_GAP = round(_RES_TARGET - _FAIL_RES_OBSERVED, 3)   # 5.2 dB short
 
-# Project metric gates (projects/moe-pimc/diagnostics.yaml).
+# Project metric gates (projects/pimc/diagnostics.yaml).
 _LOSS_TARGET = 0.04
 
 # True PIM memory depth in execution/pim_cancellation.py (canceller must match).
@@ -81,12 +81,12 @@ def _fake_proposal(seed: str, debate_role: str | None) -> dict[str, Any]:
     # No visible seed hash / debate-role tag leaks into the prose.
     return {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "created": datetime.now(tz=timezone.utc).isoformat(),
         "research_question": (
             "在双载波 PIM 对消中，能否用 hard top-2 路由替代 soft gating，"
-            "在保持 RES ≤ -26 dB 的同时显著降低 MoE canceller 的有效计算量？"
+            "在保持 RES ≤ -26 dB 的同时显著降低 routing canceller 的有效计算量？"
         ),
         "hypothesis": (
             "若专家记忆深度匹配真实 PIM 记忆效应（~12 taps），hard top-2 路由相比 "
@@ -148,10 +148,10 @@ def _fake_proposal(seed: str, debate_role: str | None) -> dict[str, Any]:
             {
                 "ref": "self_context_1",
                 "kind": "self_context",
-                "summary": "Idea Agent V1 要求先调研再提出可证伪假设，并保持 baseline 兼容。",
+                "summary": "Idea Agent V2 要求先调研再提出可证伪假设，并保持 baseline 兼容。",
             },
             {
-                "ref": "projects/moe-pimc/diagnostics.yaml",
+                "ref": "projects/pimc/diagnostics.yaml",
                 "kind": "project_rule",
                 "summary": "RES 门限 -26 dB(mean)、loss 门限 0.04(max) 为主判据。",
             },
@@ -192,7 +192,7 @@ def _fake_proposal(seed: str, debate_role: str | None) -> dict[str, Any]:
             ],
             "evidence_gaps": [
                 "缺少真实硬件 RES 测量，目前仅有 CPU 仿真残差。",
-                "外部文献调研为 mock，需联网核验记忆多项式与 MoE 路由的最新结果。",
+                "外部文献调研为 mock，需联网核验记忆多项式与 路由的最新结果。",
             ],
         },
     }
@@ -227,7 +227,7 @@ def _fake_experiment_plan(seed: str) -> dict[str, Any]:
 
     return {
         "schema": "experiment_plan.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "experiment",
         "upstream_artifact": "idea_proposal.approved.md",
         "variables": {
@@ -252,7 +252,7 @@ def _fake_experiment_plan(seed: str) -> dict[str, Any]:
 def _fake_code_spec(seed: str) -> dict[str, Any]:
     return {
         "schema": "code_spec.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "coding",
         "upstream_artifact": "experiment_plan.approved.md",
         "target_lang": "python",
@@ -286,7 +286,7 @@ def _fake_run_log(seed: str) -> dict[str, Any]:
     batch_size = 512 if (int(digest[4:6], 16) & 1) else 256
     return {
         "schema": "run_log.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "execution",
         "upstream_artifact": "code_spec.approved.md",
         "run_id": f"mock_deep_{digest}",
@@ -310,7 +310,7 @@ def _fake_run_log(seed: str) -> dict[str, Any]:
 def _fake_report(seed: str, debate_role: str | None) -> dict[str, Any]:
     return {
         "schema": "report.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "writing",
         "deliverable_type": "research_report",
         "target_audience": "phd_advisor",
@@ -352,12 +352,75 @@ def _fake_report(seed: str, debate_role: str | None) -> dict[str, Any]:
     }
 
 
+def _fake_report_bundle(seed: str, debate_role: str | None) -> dict[str, Any]:
+    return {
+        "schema": "report_bundle.v1",
+        "project": "pimc",
+        "agent": "writing",
+        "run_id": f"mock_{seed[:8] or 'report'}",
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "data_pack": "writing/report_data_pack.v1.json",
+        "deliverables": [
+            {
+                "kind": "markdown",
+                "path": "writing/research_report.approved.md",
+                "status": "completed",
+                "bytes": 1024,
+            },
+            {
+                "kind": "excel",
+                "path": "writing/deliverables/results_workbook.xlsx",
+                "status": "completed",
+                "bytes": 2048,
+            },
+            {
+                "kind": "word",
+                "path": "writing/deliverables/research_report.docx",
+                "status": "completed",
+                "bytes": 4096,
+            },
+            {
+                "kind": "powerpoint",
+                "path": "writing/deliverables/research_deck.pptx",
+                "status": "completed",
+                "bytes": 4096,
+            },
+        ],
+        "source_refs": [
+            "execution/metrics.json",
+            "events/evaluation_scorecard.json",
+            "writing/research_report.approved.md",
+        ],
+        "qa_status": {
+            "status": "passed",
+            "checks": [
+                {
+                    "name": "excel.zip_structure",
+                    "status": "passed",
+                    "detail": "results_workbook.xlsx",
+                },
+                {
+                    "name": "word.zip_structure",
+                    "status": "passed",
+                    "detail": "research_report.docx",
+                },
+                {
+                    "name": "powerpoint.zip_structure",
+                    "status": "passed",
+                    "detail": "research_deck.pptx",
+                },
+            ],
+        },
+        "generation_errors": [],
+    }
+
+
 def _fake_diagnosis(seed: str, debate_role: str | None) -> dict[str, Any]:
     # Failing FIRST attempt: RES misses the -26 dB(mean) gate. The default
     # repair target is the Experiment Agent (under-provisioned memory depth).
     return {
         "schema": "diagnosis.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "commander",
         "run_id": f"mock_{seed[:8]}",
         "attempt": 1,
@@ -404,7 +467,7 @@ def _fake_feedback_packet(seed: str, debate_role: str | None) -> dict[str, Any]:
     # Must AGREE with _fake_diagnosis: same failed metric, same target agent.
     return {
         "schema": "feedback_packet.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "commander",
         "run_id": f"mock_{seed[:8]}",
         "target_agent": "experiment",
@@ -447,7 +510,7 @@ def _fake_feedback_packet(seed: str, debate_role: str | None) -> dict[str, Any]:
 def _fake_evaluation_report(seed: str, debate_role: str | None) -> dict[str, Any]:
     return {
         "schema": "evaluation_report.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "scope": "artifact",
         "target_ref": "writing/research_report.v1.md",
         "target_schema": "report.v1",
@@ -504,6 +567,7 @@ _FAKE_BUILDERS: dict[str, _FakeBuilder] = {
     "feedback_packet.v1": _fake_feedback_packet,
     "evaluation_report.v1": _fake_evaluation_report,
     "report.v1": _fake_report,
+    "report_bundle.v1": _fake_report_bundle,
 }
 
 
@@ -617,6 +681,12 @@ def _inline_body(schema_id: str, metadata: dict[str, Any]) -> str:
             "经 Commander 回传 Experiment Agent 加深记忆深度后达标。\n\n"
             "## 风险与下一步\n\n"
             "数值为 CPU 仿真,需真实硬件复核;RES 为 mean 聚合,应补充切换瞬态分布。\n"
+        )
+    if schema_id == "report_bundle.v1":
+        return (
+            "# Report Bundle\n\n"
+            "该 manifest 汇总 Writing Agent 的 Markdown、Excel、Word、PPT 产物,"
+            "并记录 data pack、来源引用和结构化 QA 状态。\n"
         )
     if schema_id == "diagnosis.v1":
         fm = (metadata.get("failed_metrics") or [{}])[0]

@@ -1,6 +1,6 @@
 ---
 schema: code_spec.v1
-project: moe-pimc
+project: pimc
 agent: coding
 upstream_artifact: experiment_plan.approved.md
 target_lang: python

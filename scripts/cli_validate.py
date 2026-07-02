@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", default="cli_validate", help="task slug for the run")
     parser.add_argument(
         "--project",
-        default="moe-pimc",
+        default="pimc",
         help="project name (must match frontmatter project)",
     )
     parser.add_argument(

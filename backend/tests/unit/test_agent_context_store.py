@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from app.agents.base import RunRequest
+from app.agents.experiment.agent import ExperimentAgent
 from app.harness.kb.stores import KBStores
 from app.storage import agent_context_store as store
 
@@ -34,8 +36,55 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     (bridge_root / "commander.py").write_text("class Commander: ...\n", encoding="utf-8")
+    project_repo = tmp_path / "workspace" / "repos" / "pimc"
+    project_repo.mkdir(parents=True)
+    (project_repo / "README.md").write_text("# PIMC repo\n", encoding="utf-8")
+    project_dir = tmp_path / "projects" / "pimc"
+    project_dir.mkdir(parents=True)
+    (project_dir / "repo_link.yaml").write_text(
+        "project: pimc\n"
+        "repo_mode: local_path\n"
+        f"repo_path: {project_repo}\n"
+        "read_only: false\n"
+        "sync_strategy: live\n"
+        "allowed_paths:\n"
+        "  - libs/\n"
+        "  - README.md\n"
+        "protected_paths:\n"
+        "  - libs/model.py\n"
+        "ignore_patterns:\n"
+        "  - data/\n",
+        encoding="utf-8",
+    )
     config_dir = tmp_path / "configs" / "agent_contexts"
     config_dir.mkdir(parents=True)
+    (tmp_path / "configs" / "context.yaml").write_text(
+        "context_engineering:\n"
+        "  storage_layout:\n"
+        "    long_term_root: configs/agent_contexts/{agent}.yaml\n"
+        "    agent_root: runs/<run_id>/context/agents/{agent}/\n"
+        "    manifests: runs/<run_id>/context/agents/{agent}/manifests/\n"
+        "    raw: runs/<run_id>/context/agents/{agent}/raw/\n"
+        "    packed: runs/<run_id>/context/agents/{agent}/packed/\n"
+        "    memory: runs/<run_id>/context/agents/{agent}/memory/\n"
+        "    research: runs/<run_id>/context/agents/{agent}/research/\n"
+        "    debate: runs/<run_id>/context/agents/{agent}/debate/\n"
+        "    tool_results: runs/<run_id>/context/agents/{agent}/tool_results/\n"
+        "  agent_blueprints:\n"
+        "    idea:\n"
+        "      goal: Generate hypotheses.\n"
+        "      packing_order: [system role, task]\n"
+        "      items:\n"
+        "        - order: 1\n"
+        "          layer: 系统提示词\n"
+        "          content: Idea system prompt\n"
+        "          storage: [configs/agents.yaml]\n"
+        "          required: 必装\n"
+        "          risk: 低\n"
+        "          strategy: 不修剪、不卸载\n"
+        "          packing_position: system 最前\n",
+        encoding="utf-8",
+    )
     (config_dir / "idea.yaml").write_text(
         "agent: idea\n"
         "research_sites:\n"
@@ -59,13 +108,47 @@ def test_context_store_lists_runtime_and_editable_files(fake_repo: Path) -> None
     assert by_path["agent.py"].source == "runtime_code"
 
 
-def test_context_store_supports_all_v1_agents(fake_repo: Path) -> None:
+def test_context_store_supports_all_v2_agents(fake_repo: Path) -> None:
     del fake_repo
     for agent in ("commander", "idea", "experiment", "coding", "execution", "writing"):
         files = store.list_agent_context_files(agent)
         assert files, agent
         assert any(item.editable for item in files), agent
         assert any(item.source == "runtime_code" for item in files), agent
+
+
+def test_agent_context_blueprint_exposes_storage_strategy(fake_repo: Path) -> None:
+    del fake_repo
+    blueprint = store.load_agent_context_blueprint("idea")
+    assert blueprint.goal == "Generate hypotheses."
+    assert blueprint.storage_layout.agent_root == "runs/<run_id>/context/agents/idea/"
+    assert blueprint.storage_layout.manifests.endswith("/agents/idea/manifests/")
+    assert blueprint.items[0].layer == "系统提示词"
+    assert blueprint.items[0].storage == ("configs/agents.yaml",)
+    assert blueprint.packing_order == ("system role", "task")
+
+
+def test_code_repository_config_is_visible_to_all_agents(fake_repo: Path) -> None:
+    for agent in ("idea", "experiment", "coding", "execution", "writing"):
+        repos = store.load_agent_code_repositories(agent, project="pimc")
+        assert len(repos) == 1
+        assert repos[0].exists, agent
+        assert repos[0].allowed_paths == ("libs/", "README.md")
+        assert repos[0].protected_paths == ("libs/model.py",)
+
+
+@pytest.mark.asyncio
+async def test_non_idea_agent_context_includes_code_repository(fake_repo: Path) -> None:
+    del fake_repo
+    agent = ExperimentAgent()
+
+    context = await agent.build_context(
+        RunRequest(project="pimc", user_request="turn proposal into experiments")
+    )
+
+    assert "experiment_code_repositories" in context.upstream
+    assert "README.md" in context.upstream["experiment_code_repositories"]
+    assert context.metadata["experiment_code_repository_count"] == 1
 
 
 def test_context_store_create_update_delete_uploaded_code(fake_repo: Path) -> None:
@@ -140,7 +223,7 @@ def test_context_files_register_as_governed_memory(fake_repo: Path) -> None:
 
     written = store.register_agent_context_memory(
         "idea",
-        project="moe-pimc",
+        project="pimc",
         stores=stores,
     )
 
@@ -170,7 +253,7 @@ def test_context_file_sync_upserts_and_delete_cleans_memory(fake_repo: Path) -> 
         store.sync_agent_context_file_to_memory(
             "idea",
             created,
-            project="moe-pimc",
+            project="pimc",
             stores=stores,
         )
         == 1
@@ -184,7 +267,7 @@ def test_context_file_sync_upserts_and_delete_cleans_memory(fake_repo: Path) -> 
         store.sync_agent_context_file_to_memory(
             "idea",
             updated,
-            project="moe-pimc",
+            project="pimc",
             stores=stores,
         )
         == 1

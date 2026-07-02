@@ -1,4 +1,4 @@
-# 合格 Proposal 示例 — MoE-PIMC
+# 合格 Proposal 示例 — PIMC
 
 下面是一个能让 Experiment Agent 直接展开消融、并在双载波 PIM simulator 上跑出可比 RES
 曲线的合格 proposal 样例。

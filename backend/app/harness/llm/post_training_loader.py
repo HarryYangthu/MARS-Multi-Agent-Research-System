@@ -1,7 +1,7 @@
 """Post-training artifact loader (V0 = load-only).
 
 V0 only knows how to *reference* a post-trained model so the Coding Agent
-can route requests to it. V1 ships the actual GRPO training pipeline.
+can route requests to it. V2 ships the actual GRPO training pipeline.
 The four supported modes mirror PRODUCT.md §7.3:
 
 * ``load_only`` — V0 default; nothing is loaded, the registered provider

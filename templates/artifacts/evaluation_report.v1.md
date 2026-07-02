@@ -1,6 +1,6 @@
 ---
 schema: evaluation_report.v1
-project: moe-pimc
+project: pimc
 scope: artifact
 target_ref: idea/idea_proposal.v1.md
 target_schema: proposal.v1

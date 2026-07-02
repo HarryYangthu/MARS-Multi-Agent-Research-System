@@ -4,7 +4,7 @@ The DESIGN spec says ChromaDB. For Dev E2E we want zero network/model
 dependencies, so V0 ships a pure-Python store with the same surface (add /
 query). When the host has a real ChromaDB available, ``stores.py`` could be
 swapped via the ``provider`` field in ``configs/knowledge.yaml`` — left as
-V1 work.
+V2 work.
 """
 from __future__ import annotations
 

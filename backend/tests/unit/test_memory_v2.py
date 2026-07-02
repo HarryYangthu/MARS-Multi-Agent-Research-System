@@ -19,7 +19,7 @@ from app.storage.run_store import RunStore
 
 PROPOSAL_TEXT = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: "How can routing be simplified while preserving RES?"
 hypothesis: "Hard top-2 routing keeps RES degradation below the threshold."
@@ -34,7 +34,7 @@ This mock_provider artifact should be isolated from the four main KB zones.
 
 REAL_PROPOSAL_TEXT = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: "How can routing be simplified while preserving RES?"
 hypothesis: "Hard top-2 routing keeps RES degradation below the threshold."
@@ -75,7 +75,7 @@ def test_file_backend_adapter_keeps_legacy_store_surface(tmp_path: Path) -> None
     written = ingest_memory(
         zone="methodology",
         text="adapter boundary keeps selector and sedimentation stable",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         source_path="tests/adapter.md",
         memory_type="procedural",
         approved=True,
@@ -94,7 +94,7 @@ def test_chroma_backend_adapter_round_trip(tmp_path: Path) -> None:
     written = ingest_memory(
         zone="methodology",
         text="chroma adapter stores governed procedural memory",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         source_path="tests/chroma.md",
         memory_type="procedural",
         approved=True,
@@ -108,7 +108,7 @@ def test_chroma_backend_adapter_round_trip(tmp_path: Path) -> None:
     hits = select_memory(
         query="governed procedural memory",
         zones=["methodology"],
-        project="moe-pimc",
+        project="pimc",
         stores=stores,
     )
     assert [hit.record.id for hit in hits] == [written.id]
@@ -134,7 +134,7 @@ def test_approved_mock_artifact_writes_only_quarantine(
     stores = reset_for_tests(base=tmp_path / "knowledge")
     run = RunStore(tmp_path / "runs").create(
         task="memory",
-        project="moe-pimc",
+        project="pimc",
         user_request="test memory",
     )
     art_store = ArtifactStore(run)
@@ -156,7 +156,7 @@ def test_evaluation_reports_are_sedimented_as_memory(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path / "knowledge")
     run = RunStore(tmp_path / "runs").create(
         task="eval-memory",
-        project="moe-pimc",
+        project="pimc",
         user_request="test eval memory",
     )
     art_store = ArtifactStore(run)
@@ -186,7 +186,7 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     good = ingest_memory(
         zone="methodology",
         text="stable router methodology with verified RES comparison",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         confidence=0.9,
         eval_status=eval_status,
@@ -197,7 +197,7 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     mock = ingest_memory(
         zone="methodology",
         text="mock router methodology placeholder",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         is_mock=True,
         approved=True,
@@ -206,7 +206,7 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     old = ingest_memory(
         zone="methodology",
         text="obsolete router methodology",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         approved=True,
         stores=stores,
@@ -216,7 +216,7 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     hits = select_memory(
         query="router methodology RES",
         zones=["methodology"],
-        project="moe-pimc",
+        project="pimc",
         memory_type="procedural",
         stores=stores,
     )
@@ -233,7 +233,7 @@ def test_source_upsert_keeps_all_chunks(tmp_path: Path) -> None:
     first = ingest_memory(
         zone="methodology",
         text=text,
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         source_path="agent/prompts/router.md",
         memory_type="procedural",
         chunk_size=120,
@@ -244,7 +244,7 @@ def test_source_upsert_keeps_all_chunks(tmp_path: Path) -> None:
     second = ingest_memory(
         zone="methodology",
         text=text + "\nupdated line",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         source_path="agent/prompts/router.md",
         memory_type="procedural",
         chunk_size=120,
@@ -266,7 +266,7 @@ def test_consolidation_archives_main_and_deletes_expired_mock(
     main = ingest_memory(
         zone="methodology",
         text="old but real methodology",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="memory/main.md",
         approved=True,
@@ -275,7 +275,7 @@ def test_consolidation_archives_main_and_deletes_expired_mock(
     mock = ingest_memory(
         zone="quarantine",
         text="old mock methodology",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="memory/mock.md",
         is_mock=True,

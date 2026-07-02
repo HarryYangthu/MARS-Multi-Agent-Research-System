@@ -24,6 +24,16 @@ from app.harness.schema.validator import validate_document
 
 ScoreFn = Callable[[dict[str, Any], str], dict[str, float]]
 
+_PROPOSAL_EVIDENCE_WARNING_IDS: frozenset[str] = frozenset(
+    {
+        "missing_evidence_refs",
+        "evidence_refs_not_in_research_index",
+        "literature_relevance_low",
+        "related_literature_placeholder",
+        "source_summaries_missing",
+    }
+)
+
 
 class ArtifactQualityEvaluator:
     id = "artifact_quality.rubric"
@@ -136,15 +146,23 @@ def _score_for_schema(schema_id: str, metadata: dict[str, Any], body: str) -> di
 def _score_proposal(metadata: dict[str, Any], _body: str) -> dict[str, float]:
     constraints_text = " ".join(str(x).lower() for x in raw_list(metadata.get("constraints")))
     risks_text = " ".join(str(x).lower() for x in raw_list(metadata.get("risk_register")))
+    quality_warnings = {
+        str(item).strip()
+        for item in raw_list(metadata.get("quality_warnings"))
+        if str(item).strip()
+    }
+    evidence_score = _score_bool(
+        bool(raw_list(metadata.get("evidence_refs")) or raw_list(metadata.get("related_literature"))),
+        fallback=0.55 if metadata.get("theoretical_basis") else 0.25,
+    )
+    if quality_warnings & _PROPOSAL_EVIDENCE_WARNING_IDS:
+        evidence_score = min(evidence_score, 0.35)
     return {
         "testability": _score_bool(
             bool(raw_list(metadata.get("testable_predictions"))),
             fallback=0.7 if _mentions_metric(metadata.get("hypothesis")) else 0.4,
         ),
-        "evidence": _score_bool(
-            bool(raw_list(metadata.get("evidence_refs")) or raw_list(metadata.get("related_literature"))),
-            fallback=0.55 if metadata.get("theoretical_basis") else 0.25,
-        ),
+        "evidence": evidence_score,
         "downstream_readiness": _score_bool(
             bool(metadata.get("experiment_hint") or raw_list(metadata.get("downstream_requirements"))),
             fallback=0.45,

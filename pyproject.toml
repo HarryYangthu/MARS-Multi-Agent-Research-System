@@ -76,5 +76,6 @@ module = [
   "socketio.*",
   "anthropic.*",
   "openai.*",
+  "matplotlib.*",
 ]
 ignore_missing_imports = true

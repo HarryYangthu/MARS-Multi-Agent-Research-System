@@ -56,9 +56,9 @@ async def test_full_pipeline_under_mock(tmp_path: Path) -> None:
     session = orch.create_session(
         RunRequest(
             task="phase3-mock-e2e",
-            project="moe-pimc",
+            project="pimc",
             entrypoint="pipeline",
-            user_request="Investigate hard top-2 router for ATK-MoE under 8L config.",
+            user_request="Investigate hard top-2 router for PIMC under 8L config.",
             auto_approve=True,
         )
     )
@@ -100,7 +100,7 @@ async def test_full_pipeline_under_mock(tmp_path: Path) -> None:
         assert feedback_packet.exists()
         assert (session.run.subdir("coding") / "patch.v2.diff").exists()
     assert (session.run.root / "run_state.json").exists()
-    assert (session.run.subdir("context") / "trace_manifest.v1.json").exists()
+    assert (session.run.subdir("context") / "trace_manifest.v2.json").exists()
     assert (session.run.subdir("context") / "context_manifest.v2.json").exists()
     manifests = sorted(session.run.subdir("context").glob("context_manifest.v2.*.json"))
     assert len(manifests) >= 5

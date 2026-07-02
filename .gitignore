@@ -5,9 +5,11 @@ venv/
 .env
 .env.local
 .env.production
+.env.*.local
 
 node_modules/
 .next/
+.pnpm-store/
 build/
 dist/
 out/
@@ -28,6 +30,8 @@ out/
 
 knowledge/.chromadb/
 knowledge/.chromadb-server/
+knowledge/**/_arxiv_cache/
+knowledge/**/_web_cache/
 # Runtime KB indexes are local run state. This also catches Finder-created
 # duplicate files such as "_index 2.json" so V1 memory work does not get noisy.
 knowledge/*/_index*.json
@@ -45,6 +49,22 @@ workspace/uploads/
 workspace/repos/*
 !workspace/repos/pimc-stub/
 !workspace/repos/README.md
+
+# Large or local-only research artifacts. Keep real data in external project
+# repos or local data directories configured through repo_link.yaml/env vars.
+*.pth
+*.pt
+*.ckpt
+*.npy
+*.npz
+*.pkl
+*.mat
+*.h5
+*.hdf5
+
+# Generated docs/inspection artifacts.
+*.inspect.ndjson
+docs/*.xlsx
 
 .mypy_cache/
 .pytest_cache/

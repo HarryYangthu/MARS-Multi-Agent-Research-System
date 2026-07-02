@@ -32,6 +32,9 @@ tools:
         query: {type: string}
         top_k: {type: integer, minimum: 1, maximum: 20}
         date_from: {type: string}
+        sort_by:
+          type: string
+          enum: [relevance, lastUpdatedDate, submittedDate]
         categories:
           type: array
           items: {type: string}
@@ -41,7 +44,7 @@ tools:
       additionalProperties: true
 
   search.web_search:
-    enabled: false
+    enabled: true
     description: Provider-backed web search with domain allowlist.
     mutation_level: read
     allowed_agents: [idea]
@@ -60,6 +63,35 @@ tools:
     output_schema:
       type: object
       required: [provider, query, domains, hits]
+      additionalProperties: true
+
+  search.fetch_sources:
+    enabled: true
+    description: Download selected paper/blog sources and write source summaries into the run research workspace.
+    mutation_level: read
+    allowed_agents: [idea]
+    timeout_seconds: 30
+    network: true
+    input_schema:
+      type: object
+      required: [sources]
+      additionalProperties: true
+      properties:
+        max_sources: {type: integer, minimum: 1, maximum: 5}
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              title: {type: string}
+              url: {type: string}
+              pdf_url: {type: string}
+              summary: {type: string}
+              snippet: {type: string}
+    output_schema:
+      type: object
+      required: [download_dir, sources]
       additionalProperties: true
 
   knowledge.kb_query:
@@ -109,7 +141,7 @@ tools:
 
   knowledge.code_assets:
     enabled: true
-    description: Query reusable canceller / MoE-router code assets (kept Gate-5-safe, additive-only).
+    description: Query reusable canceller / router code assets (kept Gate-5-safe, additive-only).
     mutation_level: read
     allowed_agents: [coding]
     timeout_seconds: 10
@@ -315,7 +347,7 @@ tools:
       Run one dual-carrier PIM cancellation ablation (memory-polynomial canceller)
       and emit RES (residual dB, lower=better) / PIM suppression dB / APE deg / loss.
       config knobs: expert_count (→memory taps), order, router_type, snr_db, learning_rate.
-      backend ∈ {mock, pim_cpu, local}.
+      backend ∈ {mock, pim_cpu, paper_static, local_command}.
     mutation_level: write
     allowed_agents: [execution, system, bridge]
     timeout_seconds: 180
@@ -398,6 +430,22 @@ tools:
     output_schema:
       type: object
       required: [run_id, metrics]
+      additionalProperties: true
+
+  reporting.generate_bundle:
+    enabled: true
+    description: Generate Writing Agent report_bundle manifest plus xlsx/docx/pptx deliverables from run artifacts.
+    mutation_level: write
+    allowed_agents: [writing, system, bridge]
+    timeout_seconds: 120
+    input_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id: {type: string}
+    output_schema:
+      type: object
+      required: [exists, manifest, metadata]
       additionalProperties: true
 
   run.create:

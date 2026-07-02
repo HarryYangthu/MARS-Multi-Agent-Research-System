@@ -35,6 +35,7 @@ class ContextPack:
                 "agents_md_chars": len(self.project.agents_md),
                 "project_yaml_keys": list(self.project.project_yaml.keys()),
                 "repo_link_keys": list(self.project.repo_link.keys()),
+                "context_docs": [name for name, _content in self.project.context_docs],
             },
             "task": {
                 "user_request_chars": len(self.task.user_request),

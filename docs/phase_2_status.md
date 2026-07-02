@@ -11,7 +11,7 @@
 | `bridge/agent_registry.py` (reverse dep) | ✓ | `Protocol`-based registry; agents register via `register("idea", ...)` |
 | `bridge/workflow_service.py` (linear topology lives HERE) | ✓ | `LINEAR_STAGES = (idea, experiment, coding, execution, writing)`; `build_pipeline()` + `build_standalone()`; entrypoint pre-skips upstream |
 | `bridge/orchestrator.py` | ✓ | Drives ready→running→waiting_review→approved→done loop, publishes WS events, writes `runs/<id>/events/{agent,websocket}_events.jsonl` |
-| `bridge/project_isolation.py` | ✓ | Single-project placeholder (defaults to `moe-pimc` from `.env`) |
+| `bridge/project_isolation.py` | ✓ | Single-project placeholder (defaults to `pimc` from `.env`) |
 | `api/runs.py` REST | ✓ | POST / GET / GET-by-id / start / stop |
 | `api/websocket.py` | ✓ | `/ws/runs/{run_id}` (lifecycle + agent_state) and `/ws/runs/{run_id}/experiment/{exp_id}` (Phase 6 hook) |
 | `bridge/` no direct agent imports | ✓ | `tests/integration/test_bridge_no_agent_import.py` AST-walks bridge/ |
@@ -48,7 +48,7 @@ PYTHONPATH=backend pytest backend/tests/  # → 153 passed
 PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8765 &
 curl -s -XPOST http://127.0.0.1:8765/api/runs \
     -H 'Content-Type: application/json' \
-    -d '{"task":"smoke","project":"moe-pimc","entrypoint":"pipeline"}'
+    -d '{"task":"smoke","project":"pimc","entrypoint":"pipeline"}'
 # returns run_id; then POST /api/runs/<run_id>/start; then GET shows states={...:done}
 ```
 

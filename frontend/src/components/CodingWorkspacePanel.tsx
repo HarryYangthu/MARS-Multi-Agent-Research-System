@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AgentContextPanel } from "@/components/AgentContextPanel";
+import { SidebarToggleButton } from "@/components/SidebarToggleButton";
 import {
   getCodingWorkspace,
   getCodingWorkspaceFile,
@@ -40,6 +41,8 @@ export function CodingWorkspacePanel({
   const [memoryDrafts, setMemoryDrafts] = useState<CodingMemoryItem[]>([]);
   const [selectedContextId, setSelectedContextId] = useState("");
   const [status, setStatus] = useState("");
+  const [codeSidebarCollapsed, setCodeSidebarCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -110,6 +113,14 @@ export function CodingWorkspacePanel({
     if (!workspace) return null;
     return workspace.upstream_context.find((item) => item.id === selectedContextId) ?? null;
   }, [selectedContextId, workspace]);
+  const workspaceGridClass =
+    codeSidebarCollapsed && inspectorCollapsed
+      ? "grid-cols-[minmax(340px,1fr)]"
+      : codeSidebarCollapsed
+        ? "grid-cols-[minmax(340px,1fr),340px]"
+        : inspectorCollapsed
+          ? "grid-cols-[260px,minmax(340px,1fr)]"
+          : "grid-cols-[260px,minmax(340px,1fr),340px]";
 
   function selectSource(nextSource: string): void {
     setSource(nextSource);
@@ -153,14 +164,23 @@ export function CodingWorkspacePanel({
   }
 
   return (
-    <section className="grid min-h-[640px] flex-1 grid-cols-[260px,minmax(340px,1fr),340px] gap-0 overflow-hidden rounded border border-mars-border bg-mars-bg">
+    <section className={`grid min-h-[640px] flex-1 gap-0 overflow-hidden rounded border border-mars-border bg-mars-bg ${workspaceGridClass}`}>
+      {!codeSidebarCollapsed ? (
       <aside className="flex min-h-0 flex-col border-r border-mars-border bg-mars-panel/35">
         <div className="border-b border-mars-border p-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-100">项目代码</h2>
-            <span className="rounded bg-mars-bg px-2 py-0.5 text-[10px] uppercase text-slate-400">
-              {visibleFiles.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-mars-bg px-2 py-0.5 text-[10px] uppercase text-slate-400">
+                {visibleFiles.length}
+              </span>
+              <SidebarToggleButton
+                collapsed={codeSidebarCollapsed}
+                side="left"
+                label="项目代码边栏"
+                onToggle={() => setCodeSidebarCollapsed((current) => !current)}
+              />
+            </div>
           </div>
           <select
             value={activeSource}
@@ -202,20 +222,39 @@ export function CodingWorkspacePanel({
           ))}
         </div>
       </aside>
+      ) : null}
 
       <section className="flex min-h-0 flex-col">
         <div className="border-b border-mars-border px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-slate-100">Coding Agent</h2>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                {codeSidebarCollapsed ? (
+                  <SidebarToggleButton
+                    collapsed={codeSidebarCollapsed}
+                    side="left"
+                    label="项目代码边栏"
+                    onToggle={() => setCodeSidebarCollapsed((current) => !current)}
+                  />
+                ) : null}
+                <h2 className="text-base font-semibold text-slate-100">Coding Agent</h2>
+              </div>
               <p className="mt-0.5 text-xs text-slate-500">
                 {selectedPath || "未选择文件"}
               </p>
             </div>
-            <div className="flex gap-2 text-[11px] text-slate-400">
+            <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-400">
               <Metric label="context" value={workspace.upstream_context.length} />
               <Metric label="memory" value={memoryDrafts.filter((item) => item.enabled).length} />
               <Metric label="files" value={workspace.files.filter((item) => item.kind === "file").length} />
+              {inspectorCollapsed ? (
+                <SidebarToggleButton
+                  collapsed={inspectorCollapsed}
+                  side="right"
+                  label="Inspector 边栏"
+                  onToggle={() => setInspectorCollapsed((current) => !current)}
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -278,25 +317,36 @@ export function CodingWorkspacePanel({
         </div>
       </section>
 
+      {!inspectorCollapsed ? (
       <aside className="flex min-h-0 flex-col border-l border-mars-border bg-mars-panel/30">
         <div className="border-b border-mars-border p-2">
-          <div className="grid grid-cols-4 gap-1 rounded border border-mars-border bg-mars-bg p-0.5 text-xs">
-            {(["preview", "context", "memory", "upstream"] as const).map((item) => (
-              <button
-                key={item}
-                onClick={() => setTab(item)}
-                className={`rounded px-2 py-1.5 ${
-                  tab === item ? "bg-mars-accent text-white" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                {tabLabel(item)}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="grid flex-1 grid-cols-4 gap-1 rounded border border-mars-border bg-mars-bg p-0.5 text-xs">
+              {(["preview", "context", "memory", "upstream"] as const).map((item) => (
+                <button
+                  key={item}
+                  onClick={() => setTab(item)}
+                  className={`rounded px-2 py-1.5 ${
+                    tab === item ? "bg-mars-accent text-white" : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {tabLabel(item)}
+                </button>
+              ))}
+            </div>
+            <SidebarToggleButton
+              collapsed={inspectorCollapsed}
+              side="right"
+              label="Inspector 边栏"
+              onToggle={() => setInspectorCollapsed((current) => !current)}
+            />
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-3">
           {tab === "preview" ? <PreviewPanel file={file} selectedPath={selectedPath} /> : null}
-          {tab === "context" ? <AgentContextPanel agent="coding" variant="compact" /> : null}
+          {tab === "context" ? (
+            <AgentContextPanel agent="coding" project={project} variant="compact" />
+          ) : null}
           {tab === "memory" ? (
             <MemoryPanel
               memoryDrafts={memoryDrafts}
@@ -329,6 +379,7 @@ export function CodingWorkspacePanel({
           ) : null}
         </div>
       </aside>
+      ) : null}
     </section>
   );
 }

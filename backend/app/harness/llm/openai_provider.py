@@ -51,7 +51,8 @@ class _OpenAICompatProvider(LLMProvider):
             max_tokens=config.max_tokens,
             messages=[{"role": m.role, "content": m.content} for m in messages],
         )
-        choice = resp.choices[0].message.content or ""
+        message = resp.choices[0].message
+        choice = message.content or str(getattr(message, "reasoning_content", "") or "")
         return Completion(
             text=choice,
             provider=self.name,
@@ -71,7 +72,10 @@ class _OpenAICompatProvider(LLMProvider):
             stream=True,
         )
         async for chunk in stream:
-            piece = chunk.choices[0].delta.content if chunk.choices else None
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            piece = delta.content or str(getattr(delta, "reasoning_content", "") or "")
             if piece:
                 yield Delta(text=piece)
         yield Delta(text="", finish_reason="stop")

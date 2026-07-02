@@ -92,7 +92,7 @@ def _stream_index(run: RunHandle) -> dict[str, dict[str, Any]]:
 
 
 def _trace_summary(run: RunHandle) -> dict[str, Any]:
-    path = run.subdir("context") / "trace_manifest.v1.json"
+    path = run.subdir("context") / "trace_manifest.v2.json"
     raw = _read_json(path)
     spans = raw.get("spans", []) if isinstance(raw, dict) else []
     span_rows = [item for item in spans if isinstance(item, dict)]
@@ -104,7 +104,7 @@ def _trace_summary(run: RunHandle) -> dict[str, Any]:
         statuses[status] = statuses.get(status, 0) + 1
         kinds[kind] = kinds.get(kind, 0) + 1
     return {
-        "path": "context/trace_manifest.v1.json",
+        "path": "context/trace_manifest.v2.json",
         "exists": path.exists(),
         "trace_id": str(raw.get("trace_id", "")) if isinstance(raw, dict) else "",
         "span_count": len(span_rows),

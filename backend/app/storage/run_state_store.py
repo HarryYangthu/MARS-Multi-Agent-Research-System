@@ -1,4 +1,4 @@
-"""Durable run graph state for V1 recovery."""
+"""Durable run graph state for V2 recovery."""
 from __future__ import annotations
 
 import json

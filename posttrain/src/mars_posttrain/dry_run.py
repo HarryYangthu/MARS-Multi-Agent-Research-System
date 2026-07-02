@@ -1,4 +1,4 @@
-"""CPU/mock post-training dry-run for V1 acceptance.
+"""CPU/mock post-training dry-run for V2 acceptance.
 
 The dry-run consumes MARS post-training export JSONL records, constructs
 traceable preference candidates, scores three reward families, and writes a
@@ -232,7 +232,7 @@ def _project_for_run(run_root: Path) -> str:
         parsed = json.loads(request_path.read_text(encoding="utf-8"))
         if isinstance(parsed, dict) and isinstance(parsed.get("project"), str):
             return str(parsed["project"])
-    return "moe-pimc"
+    return "pimc"
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

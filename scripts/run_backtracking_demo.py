@@ -56,7 +56,7 @@ async def _main(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--project", default="moe-pimc")
+    parser.add_argument("--project", default="pimc")
     parser.add_argument("--task", default="sixteen_parallel_backtracking_demo")
     parser.add_argument(
         "--user-request",

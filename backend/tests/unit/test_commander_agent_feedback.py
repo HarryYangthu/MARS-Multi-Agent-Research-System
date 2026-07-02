@@ -89,7 +89,7 @@ def _write_metrics_and_artifacts(
 
 
 def test_commander_targets_experiment_for_config_sanity(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="feedback", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="feedback", project="pimc")
     _write_metrics_and_artifacts(run, empty_ablations=True)
 
     decision = CommanderAgent().diagnose(run=run, attempt=1)
@@ -103,7 +103,7 @@ def test_commander_targets_experiment_for_config_sanity(tmp_path: Path) -> None:
 
 
 def test_commander_targets_coding_for_code_risk_and_writes_memory(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="feedback", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="feedback", project="pimc")
     _write_metrics_and_artifacts(run, high_code_risk=True)
 
     decision = CommanderAgent().diagnose(run=run, attempt=1)
@@ -118,7 +118,7 @@ def test_commander_targets_coding_for_code_risk_and_writes_memory(tmp_path: Path
 
 
 def test_low_confidence_target_flip_pauses_for_human(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="flip", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="flip", project="pimc")
     analysis = DiagnosisAnalysis(
         passed=False,
         failed_metrics=(
@@ -140,7 +140,7 @@ def test_low_confidence_target_flip_pauses_for_human(tmp_path: Path) -> None:
         run=run,
         attempt=1,
         config=DiagnosticsConfig(
-            project="moe-pimc",
+            project="pimc",
             allowed_targets=(),
             default_target="coding",
             metric_rules=(),
@@ -170,7 +170,7 @@ def test_low_confidence_target_flip_pauses_for_human(tmp_path: Path) -> None:
 
 
 def test_feedback_context_is_target_only_and_bounded(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="packet", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="packet", project="pimc")
     _write_metrics_and_artifacts(run, high_code_risk=True)
     CommanderAgent().diagnose(run=run, attempt=1)
 
@@ -224,7 +224,7 @@ async def test_agent_runner_injects_commander_feedback_only_for_target(
 ) -> None:
     reset_registry_for_tests()
     try:
-        run = RunStore(tmp_path).create(task="runner", project="moe-pimc")
+        run = RunStore(tmp_path).create(task="runner", project="pimc")
         _write_metrics_and_artifacts(run, high_code_risk=True)
         CommanderAgent().diagnose(run=run, attempt=1)
         agent = _CaptureCodingAgent()
@@ -245,7 +245,7 @@ def test_pending_memory_does_not_load_until_approved(
     import app.storage.agent_context_store as context_store
 
     monkeypatch.setattr(context_store, "repo_root", lambda: tmp_path)
-    run = RunStore(tmp_path / "runs").create(task="memory", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="memory", project="pimc")
     _write_metrics_and_artifacts(run, high_code_risk=True)
     CommanderAgent().diagnose(run=run, attempt=1)
     candidates = read_jsonl(run.subdir("memory") / "memory_candidates.jsonl")
@@ -300,7 +300,7 @@ def test_self_evolution_levers_are_manual_review_only(
         filename="risk_rubric.md",
         content="Block risky patch rewrites.",
     )
-    run = RunStore(tmp_path / "runs").create(task="levers", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="levers", project="pimc")
     (run.subdir("memory") / "memory_candidates.jsonl").write_text(
         json.dumps(
             {
@@ -354,7 +354,7 @@ def test_self_evolution_mutation_requires_gate_and_approval(
         filename="repair.md",
         content="Prefer small patches during repair.",
     )
-    run = RunStore(tmp_path / "runs").create(task="mutation", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="mutation", project="pimc")
     stores = KBStores(tmp_path / "knowledge")
 
     blocked = create_self_evolution_mutation(
@@ -418,7 +418,7 @@ def test_self_evolution_mutation_reject_does_not_apply(
         filename="rubric.md",
         content="Block risky patches.",
     )
-    run = RunStore(tmp_path / "runs").create(task="reject-mutation", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="reject-mutation", project="pimc")
     proposal = create_self_evolution_mutation(
         run=run,
         lever_id="agent_context:coding:evals/rubric.md",
@@ -443,7 +443,7 @@ def test_self_evolution_mutation_reject_does_not_apply(
 
 
 def test_memory_candidate_lifecycle_decisions_are_audited(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="memory-lifecycle", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="memory-lifecycle", project="pimc")
     candidates_path = run.subdir("memory") / "memory_candidates.jsonl"
     rows = [
         {"id": "reject_me", "agent": "coding", "status": "pending_review", "text": "x"},
@@ -509,7 +509,7 @@ def test_commander_marks_approved_memory_stale_after_repeated_failures(
         ),
         encoding="utf-8",
     )
-    run = RunStore(tmp_path / "runs").create(task="stale", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="stale", project="pimc")
     context_manifest = {
         "summary": {
             "metadata": {
@@ -520,7 +520,7 @@ def test_commander_marks_approved_memory_stale_after_repeated_failures(
             }
         }
     }
-    (run.subdir("context") / "coding_attempt_2_context_pack.v1.json").write_text(
+    (run.subdir("context") / "coding_attempt_2_context_pack.v2.json").write_text(
         json.dumps(context_manifest),
         encoding="utf-8",
     )
@@ -558,7 +558,7 @@ def test_commander_marks_approved_memory_stale_after_repeated_failures(
     first_observation = RunObservation(
         run=run,
         attempt=2,
-        config=DiagnosticsConfig(project="moe-pimc"),
+        config=DiagnosticsConfig(project="pimc"),
         analysis=analysis,
         metrics_summary={},
         curve_summary={},
@@ -570,7 +570,7 @@ def test_commander_marks_approved_memory_stale_after_repeated_failures(
     second_observation = RunObservation(
         run=run,
         attempt=3,
-        config=DiagnosticsConfig(project="moe-pimc"),
+        config=DiagnosticsConfig(project="pimc"),
         analysis=analysis,
         metrics_summary={},
         curve_summary={},
@@ -603,7 +603,7 @@ def test_commander_marks_approved_memory_stale_after_repeated_failures(
 def test_commander_observability_collects_attempt_context_and_memory(
     tmp_path: Path,
 ) -> None:
-    run = RunStore(tmp_path).create(task="observe", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="observe", project="pimc")
     _write_metrics_and_artifacts(run, high_code_risk=True)
     CommanderAgent().diagnose(run=run, attempt=1)
     context_manifest = {
@@ -623,7 +623,7 @@ def test_commander_observability_collects_attempt_context_and_memory(
         },
         "tokens_estimated": 900,
     }
-    (run.subdir("context") / "coding_attempt_2_context_pack.v1.json").write_text(
+    (run.subdir("context") / "coding_attempt_2_context_pack.v2.json").write_text(
         json.dumps(context_manifest),
         encoding="utf-8",
     )
@@ -641,7 +641,7 @@ def test_commander_observability_collects_attempt_context_and_memory(
 
 
 def test_commander_attribution_eval_replay_cases_pass() -> None:
-    result = run_commander_attribution_eval(project="moe-pimc")
+    result = run_commander_attribution_eval(project="pimc")
 
     assert result["schema"] == "commander_attribution_eval.v1"
     assert result["case_count"] >= 6

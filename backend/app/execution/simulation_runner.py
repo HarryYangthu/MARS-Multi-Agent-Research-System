@@ -1,12 +1,12 @@
 """Single-experiment runner.
 
-For the moe-pimc project this runs a REAL (lightweight) dual-carrier PIM
+For the pimc project this runs a REAL (lightweight) dual-carrier PIM
 cancellation simulation on CPU (see ``pim_cancellation.py``) — generating a
 real ~30k-point complex dual-carrier signal, fitting a memory-polynomial
 canceller, and emitting a real loss curve + RES/PIM/APE metrics.
 
 Falls back to the synthetic mock simulation when ``MARS_MOCK_MODE=always`` or
-for non-PIM projects. GPU training of the full 7-layer model is V1.
+for non-PIM projects. GPU training of the full 7-layer model is V2.
 """
 from __future__ import annotations
 
@@ -226,12 +226,13 @@ async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int =
     settings = get_settings()
     if settings.is_production and settings.mars_execution_backend == "mock":
         raise RuntimeError("production mode cannot use mock execution backend")
-    use_real = (
-        settings.mars_mock_mode != "always"
-        and settings.mars_execution_backend != "mock"
-        and spec.project == "moe-pimc"
-    )
-    if use_real:
+    backend = settings.mars_execution_backend
+    use_real = settings.mars_mock_mode != "always" and spec.project == "pimc"
+    if use_real and backend == "paper_static":
+        from app.execution.paper_static_adapter import run_paper_static_simulation
+
+        return await run_paper_static_simulation(spec, bus_publish=bus_publish, steps=steps)
+    if use_real and backend == "pim_cpu":
         return await run_real_pim_simulation(spec, bus_publish=bus_publish, steps=steps)
 
     job = MockJob(

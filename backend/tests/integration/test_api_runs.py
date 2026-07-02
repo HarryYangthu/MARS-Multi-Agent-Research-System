@@ -61,18 +61,18 @@ def test_coding_workspace_endpoint_exposes_code_context_and_memory(
 ) -> None:
     created = client.post(
         "/api/runs",
-        json={"task": "coding-workspace", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "coding-workspace", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert created.status_code == 200
     run_id = created.json()["run_id"]
 
     workspace = client.get(
         "/api/agents/coding/workspace",
-        params={"project": "moe-pimc", "run_id": run_id},
+        params={"project": "pimc", "run_id": run_id},
     )
     assert workspace.status_code == 200, workspace.text
     payload = workspace.json()
-    assert payload["project"] == "moe-pimc"
+    assert payload["project"] == "pimc"
     assert payload["selected_source"] in {"project_repo", "pimc_stub", "empty"}
     assert payload["sources"]
     assert "memory_items" in payload
@@ -82,7 +82,7 @@ def test_coding_workspace_endpoint_exposes_code_context_and_memory(
 def test_context_preview_and_run_manifest_endpoints(client: TestClient) -> None:
     created = client.post(
         "/api/runs",
-        json={"task": "context-api", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "context-api", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert created.status_code == 200
     run_id = created.json()["run_id"]
@@ -91,7 +91,7 @@ def test_context_preview_and_run_manifest_endpoints(client: TestClient) -> None:
         "/api/context/preview",
         json={
             "agent": "coding",
-            "project": "moe-pimc",
+            "project": "pimc",
             "task": "Patch the router safely.",
         },
     )
@@ -108,7 +108,7 @@ def test_context_preview_and_run_manifest_endpoints(client: TestClient) -> None:
         CompileContextInput(
             agent="coding",
             node_key="coding",
-            project="moe-pimc",
+            project="pimc",
             output_schema="code_spec.v1",
             system="system",
             project_context="project",
@@ -145,7 +145,7 @@ def test_context_workbench_can_be_disabled(
         "/api/context/preview",
         json={
             "agent": "coding",
-            "project": "moe-pimc",
+            "project": "pimc",
             "task": "Patch the router safely.",
         },
     )
@@ -156,7 +156,7 @@ def test_context_workbench_can_be_disabled(
 def test_create_and_list_run(client: TestClient) -> None:
     r = client.post(
         "/api/runs",
-        json={"task": "smoke", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "smoke", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert r.status_code == 200, r.text
     detail = r.json()
@@ -174,7 +174,7 @@ def test_create_and_list_run(client: TestClient) -> None:
     assert r2.status_code == 200
     assert any(item["run_id"] == run_id for item in r2.json())
 
-    r2_project = client.get("/api/runs?project=moe-pimc")
+    r2_project = client.get("/api/runs?project=pimc")
     assert r2_project.status_code == 200
     assert any(item["run_id"] == run_id for item in r2_project.json())
 
@@ -192,7 +192,7 @@ def test_evaluation_endpoints_return_artifact_reports_and_scorecard(
 ) -> None:
     created = client.post(
         "/api/runs",
-        json={"task": "evaluation-api", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "evaluation-api", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert created.status_code == 200, created.text
     run_id = created.json()["run_id"]
@@ -208,7 +208,7 @@ def test_evaluation_endpoints_return_artifact_reports_and_scorecard(
         text=fm_dumps(
             {
                 "schema": "proposal.v1",
-                "project": "moe-pimc",
+                "project": "pimc",
                 "agent": "idea",
                 "research_question": "How can routing be simplified while preserving RES?",
                 "hypothesis": "Hard top-2 routing keeps RES degradation below 1.5 dB.",
@@ -278,7 +278,7 @@ def test_feedback_packet_and_run_memory_endpoints(
 ) -> None:
     created = client.post(
         "/api/runs",
-        json={"task": "feedback-api", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "feedback-api", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert created.status_code == 200
     run_id = created.json()["run_id"]
@@ -293,7 +293,7 @@ def test_feedback_packet_and_run_memory_endpoints(
     assert run is not None
     packet_meta = {
         "schema": "feedback_packet.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "commander",
         "run_id": run_id,
         "target_agent": "coding",
@@ -319,7 +319,7 @@ def test_feedback_packet_and_run_memory_endpoints(
     packet_path.write_text(fm_dumps(packet_meta, "# packet\n"), encoding="utf-8")
     diagnosis_meta = {
         "schema": "diagnosis.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "commander",
         "run_id": run_id,
         "attempt": 1,
@@ -377,7 +377,7 @@ def test_feedback_packet_and_run_memory_endpoints(
         },
         "tokens_estimated": 900,
     }
-    (run.subdir("context") / "coding_attempt_2_context_pack.v1.json").write_text(
+    (run.subdir("context") / "coding_attempt_2_context_pack.v2.json").write_text(
         json.dumps(context_manifest),
         encoding="utf-8",
     )
@@ -576,7 +576,7 @@ def test_run_tool_audit_filters(
 ) -> None:
     from app.api import dependencies as deps
 
-    run = deps.get_run_store().create(task="tool-filters", project="moe-pimc", entrypoint="pipeline")
+    run = deps.get_run_store().create(task="tool-filters", project="pimc", entrypoint="pipeline")
     asyncio.run(
         get_tool_registry().dispatch(
             "search.web_search",
@@ -641,7 +641,7 @@ def test_create_run_blocked_when_production_not_ready(
     settings_mod._settings = None
     r = client.post(
         "/api/runs",
-        json={"task": "prod-block", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "prod-block", "project": "pimc", "entrypoint": "pipeline"},
     )
     monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
     settings_mod._settings = None
@@ -659,7 +659,7 @@ def test_get_unknown_run_returns_404(client: TestClient) -> None:
 def test_execution_plot_endpoints(client: TestClient) -> None:
     r = client.post(
         "/api/runs",
-        json={"task": "plot-smoke", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "plot-smoke", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert r.status_code == 200, r.text
     run_id = r.json()["run_id"]
@@ -687,7 +687,7 @@ def test_get_run_recovers_from_run_state_after_orchestrator_reset(
 ) -> None:
     created = client.post(
         "/api/runs",
-        json={"task": "recover", "project": "moe-pimc", "entrypoint": "pipeline"},
+        json={"task": "recover", "project": "pimc", "entrypoint": "pipeline"},
     )
     assert created.status_code == 200
     run_id = created.json()["run_id"]

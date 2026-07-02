@@ -25,7 +25,7 @@ from app.harness.schema.validator import (
 def proposal_v1_base() -> dict[str, Any]:
     return {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "research_question": "How to simplify routing while preserving RES?",
         "hypothesis": "Hard top-2 routing degrades RES <1.5 dB.",
@@ -36,7 +36,7 @@ def proposal_v1_base() -> dict[str, Any]:
 def experiment_plan_v1_base() -> dict[str, Any]:
     return {
         "schema": "experiment_plan.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "experiment",
         "variables": {
             "independent": ["expert_count"],
@@ -52,7 +52,7 @@ def experiment_plan_v1_base() -> dict[str, Any]:
 def code_spec_v1_base() -> dict[str, Any]:
     return {
         "schema": "code_spec.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "coding",
         "target_lang": "python",
         "baseline_compat": {"preserved": True, "rationale": "signature unchanged"},
@@ -63,7 +63,7 @@ def code_spec_v1_base() -> dict[str, Any]:
 def run_log_v1_base() -> dict[str, Any]:
     return {
         "schema": "run_log.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "execution",
         "run_id": "2026-05-04T2310_demo",
         "status": "completed",
@@ -75,7 +75,7 @@ def run_log_v1_base() -> dict[str, Any]:
 def diagnosis_v1_base() -> dict[str, Any]:
     return {
         "schema": "diagnosis.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "bridge",
         "run_id": "2026-05-04T2310_demo",
         "attempt": 1,
@@ -108,7 +108,7 @@ def diagnosis_v1_base() -> dict[str, Any]:
 def evaluation_report_v1_base() -> dict[str, Any]:
     return {
         "schema": "evaluation_report.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "scope": "artifact",
         "target_ref": "idea/idea_proposal.v1.md",
         "target_schema": "proposal.v1",
@@ -127,7 +127,7 @@ def evaluation_report_v1_base() -> dict[str, Any]:
 def feedback_packet_v1_base() -> dict[str, Any]:
     return {
         "schema": "feedback_packet.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "commander",
         "run_id": "2026-05-04T2310_demo",
         "target_agent": "coding",
@@ -147,11 +147,54 @@ def feedback_packet_v1_base() -> dict[str, Any]:
 def report_v1_base() -> dict[str, Any]:
     return {
         "schema": "report.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "writing",
         "deliverable_type": "research_report",
         "target_audience": "phd_advisor",
         "chain_refs": {"proposal": "idea_proposal.approved.md"},
+    }
+
+
+def report_bundle_v1_base() -> dict[str, Any]:
+    return {
+        "schema": "report_bundle.v1",
+        "project": "pimc",
+        "agent": "writing",
+        "run_id": "2026-06-20T1212_demo",
+        "created_at": "2026-06-20T12:12:00Z",
+        "data_pack": "writing/report_data_pack.v1.json",
+        "deliverables": [
+            {
+                "kind": "excel",
+                "path": "writing/deliverables/results_workbook.xlsx",
+                "status": "completed",
+                "bytes": 2048,
+            },
+            {
+                "kind": "word",
+                "path": "writing/deliverables/research_report.docx",
+                "status": "completed",
+                "bytes": 4096,
+            },
+            {
+                "kind": "powerpoint",
+                "path": "writing/deliverables/research_deck.pptx",
+                "status": "completed",
+                "bytes": 4096,
+            },
+        ],
+        "source_refs": ["execution/metrics.json", "writing/research_report.approved.md"],
+        "qa_status": {
+            "status": "passed",
+            "checks": [
+                {
+                    "name": "excel.zip_structure",
+                    "status": "passed",
+                    "detail": "results_workbook.xlsx",
+                }
+            ],
+        },
+        "generation_errors": [],
     }
 
 
@@ -164,6 +207,7 @@ BASE_BUILDERS: dict[str, Callable[[], dict[str, Any]]] = {
     "evaluation_report.v1": evaluation_report_v1_base,
     "feedback_packet.v1": feedback_packet_v1_base,
     "report.v1": report_v1_base,
+    "report_bundle.v1": report_bundle_v1_base,
 }
 
 
@@ -343,6 +387,47 @@ def _report_valid_variants() -> list[dict[str, Any]]:
     return out
 
 
+def _report_bundle_valid_variants() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = [report_bundle_v1_base()]
+    v2 = report_bundle_v1_base()
+    v2["deliverables"].append(
+        {
+            "kind": "markdown",
+            "path": "writing/research_report.approved.md",
+            "status": "completed",
+            "bytes": 1200,
+        }
+    )
+    out.append(v2)
+    v3 = report_bundle_v1_base()
+    v3["qa_status"] = {
+        "status": "degraded",
+        "checks": [{"name": "input.degraded", "status": "degraded", "detail": "no plots"}],
+    }
+    out.append(v3)
+    v4 = report_bundle_v1_base()
+    v4["deliverables"][0]["status"] = "failed"
+    v4["deliverables"][0]["error"] = "xlsx writer failed"
+    v4["qa_status"]["status"] = "failed"
+    v4["qa_status"]["checks"][0]["status"] = "failed"
+    v4["generation_errors"] = ["excel: xlsx writer failed"]
+    out.append(v4)
+    v5 = report_bundle_v1_base()
+    v5["deliverables"][1]["status"] = "skipped"
+    v5["deliverables"][1]["error"] = "docx disabled"
+    out.append(v5)
+    v6 = report_bundle_v1_base()
+    v6["source_refs"] = []
+    out.append(v6)
+    for i in range(6):
+        v = report_bundle_v1_base()
+        v["run_id"] = f"run_{i}"
+        v["created_at"] = f"2026-06-20T12:1{i}:00Z"
+        v["data_pack"] = f"writing/report_data_pack.v{i + 1}.json"
+        out.append(v)
+    return out
+
+
 def _diagnosis_valid_variants() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = [diagnosis_v1_base()]
     v2 = diagnosis_v1_base()
@@ -485,6 +570,7 @@ VALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "evaluation_report.v1": _evaluation_report_valid_variants(),
     "feedback_packet.v1": _feedback_packet_valid_variants(),
     "report.v1": _report_valid_variants(),
+    "report_bundle.v1": _report_bundle_valid_variants(),
 }
 
 
@@ -674,6 +760,34 @@ def _feedback_packet_invalid_variants() -> list[dict[str, Any]]:
     ]
 
 
+def _report_bundle_invalid_variants() -> list[dict[str, Any]]:
+    base = report_bundle_v1_base()
+    bad_agent = _set(base, "agent", "bridge")
+    bad_data_pack = _set(base, "data_pack", "")
+    bad_deliverable_kind = report_bundle_v1_base()
+    bad_deliverable_kind["deliverables"][0]["kind"] = "pdf"
+    bad_deliverable_status = report_bundle_v1_base()
+    bad_deliverable_status["deliverables"][0]["status"] = "ok"
+    bad_deliverable_missing = report_bundle_v1_base()
+    bad_deliverable_missing["deliverables"] = [{"path": "x.xlsx", "status": "completed"}]
+    bad_qa_status = report_bundle_v1_base()
+    bad_qa_status["qa_status"]["status"] = "ok"
+    bad_qa_check = report_bundle_v1_base()
+    bad_qa_check["qa_status"]["checks"] = [{"name": "excel.zip_structure"}]
+    return [
+        _drop(base, "schema"),
+        _drop(base, "run_id"),
+        _drop(base, "deliverables"),
+        bad_agent,
+        bad_data_pack,
+        bad_deliverable_kind,
+        bad_deliverable_status,
+        bad_deliverable_missing,
+        bad_qa_status,
+        bad_qa_check,
+    ]
+
+
 INVALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "proposal.v1": _proposal_invalid_variants(),
     "experiment_plan.v1": _experiment_plan_invalid_variants(),
@@ -683,6 +797,7 @@ INVALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "evaluation_report.v1": _evaluation_report_invalid_variants(),
     "feedback_packet.v1": _feedback_packet_invalid_variants(),
     "report.v1": _report_invalid_variants(),
+    "report_bundle.v1": _report_bundle_invalid_variants(),
 }
 
 

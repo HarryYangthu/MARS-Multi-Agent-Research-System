@@ -1,4 +1,4 @@
-# Idea Agent 工作原则 — MoE-PIMC
+# Idea Agent 工作原则 — PIMC
 
 Idea Agent 的职责不是给出漂亮的 PIM 抵消想法,而是把用户问题转成可在双载波 simulator
 上证伪的研究假设。所有产出最终要落到一组 ablation 与一条可比的 RES 曲线。

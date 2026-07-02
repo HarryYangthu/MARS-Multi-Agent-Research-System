@@ -1,0 +1,34 @@
+version: 1
+project: pimc
+
+loop:
+  max_iterations: 2
+  default_budget: 2
+  allowed_targets:
+    - coding
+    - experiment
+  # Metrics-only misses are treated as experiment/config questions first. Coding
+  # is selected only when code_change_risk provides direct evidence.
+  default_target: experiment
+  enable_idea_loop: false
+
+diagnostic_analyzers:
+  metrics_gap: true
+  config_sanity: true
+  code_change_risk: true
+
+metrics:
+  # Training residual power ratio (linear). Lower is better. Use as a coarse
+  # compatibility gate across mock and real execution backends.
+  loss:
+    target: 0.04
+    direction: lte
+    tolerance: 0.0
+    aggregation: max
+  # MARS compatibility residual score in dB. Lower is better. For paper_static,
+  # this is derived from paper_APE_db as documented in public_context.md.
+  RES:
+    target: -26.0
+    direction: lte
+    tolerance: 0.0
+    aggregation: mean

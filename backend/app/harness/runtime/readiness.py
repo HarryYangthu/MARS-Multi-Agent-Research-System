@@ -1,4 +1,4 @@
-"""Production readiness checks for V1 run admission.
+"""Production readiness checks for V2 run admission.
 
 The checker lives in harness so API and bridge callers can share one policy
 without depending on each other. It inspects configuration and filesystem
@@ -6,13 +6,19 @@ state only; it does not import execution or agent implementations.
 """
 from __future__ import annotations
 
+import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from app.harness.llm.model_registry import available_providers, list_agent_configs
+from app.harness.llm.model_registry import (
+    available_providers,
+    list_agent_configs,
+    provider_configured_for_agent,
+)
 from app.settings import get_settings, repo_root
 
 
@@ -109,7 +115,7 @@ def _check_llm_providers() -> ReadinessCheck:
         required.add(provider)
         if provider == "mock":
             mock_requested.append(cfg.name)
-        elif provider not in configured:
+        elif not provider_configured_for_agent(cfg):
             missing.add(provider)
         for participant in cfg.debate_participants:
             p = str(participant.get("provider", ""))
@@ -118,23 +124,26 @@ def _check_llm_providers() -> ReadinessCheck:
             required.add(p)
             if p == "mock":
                 mock_requested.append(f"{cfg.name}:debate")
+            elif p == provider and provider_configured_for_agent(cfg):
+                continue
             elif p not in configured:
                 missing.add(p)
 
-    if settings.is_production and mock_requested:
+    strict_real_llm = settings.is_production or settings.mars_mock_mode == "never"
+    if strict_real_llm and mock_requested:
         return ReadinessCheck(
             name="llm_providers",
             ready=False,
             severity="blocker",
-            message="production mode cannot use mock LLM providers",
+            message="strict real-LLM mode cannot use mock LLM providers",
             details={"mock_requested_by": mock_requested},
         )
-    if settings.is_production and missing:
+    if strict_real_llm and missing:
         return ReadinessCheck(
             name="llm_providers",
             ready=False,
             severity="blocker",
-            message="production mode is missing required LLM provider configuration",
+            message="strict real-LLM mode is missing required LLM provider configuration",
             details={"missing": sorted(missing), "required": sorted(required)},
         )
     return ReadinessCheck(
@@ -237,14 +246,31 @@ def _check_execution_backend(project: str) -> ReadinessCheck:
         exists = (repo_root() / "backend" / "app" / "execution" / "pim_cancellation.py").exists()
         return ReadinessCheck(
             name="execution_backend",
-            ready=exists and project == "moe-pimc",
+            ready=exists and project == "pimc",
             severity="blocker" if settings.is_production else "info",
             message=(
                 "PIM CPU execution backend is available"
-                if exists and project == "moe-pimc"
-                else "PIM CPU execution backend is only available for moe-pimc"
+                if exists and project == "pimc"
+                else "PIM CPU execution backend is only available for pimc"
             ),
             details={"backend": backend},
+        )
+    if backend == "paper_static":
+        details = _paper_static_details()
+        ready = all(
+            bool(details[key])
+            for key in ("python_exists", "repo_exists", "config_exists", "data_exists")
+        )
+        return ReadinessCheck(
+            name="execution_backend",
+            ready=ready,
+            severity="blocker" if settings.is_production else "warning",
+            message=(
+                "Paper static execution backend is connected"
+                if ready
+                else "Paper static execution backend is missing code, data, config, or Python"
+            ),
+            details={"backend": backend, **details},
         )
     ready = backend in {"mock", "local_command", "docker_command", "remote_gpu"}
     return ReadinessCheck(
@@ -261,6 +287,42 @@ def _read_yaml(path: Path) -> dict[str, Any]:
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _paper_static_details() -> dict[str, Any]:
+    raw = _read_yaml(repo_root() / "configs" / "execution.yaml")
+    execution = raw.get("execution", {}) if isinstance(raw.get("execution"), dict) else {}
+    paper = execution.get("paper_static", {}) if isinstance(execution.get("paper_static"), dict) else {}
+    repo_path = _resolve_plain_path(str(paper.get("repo_path", "")), repo_root())
+    config_path = _resolve_plain_path(str(paper.get("config_path", "configs/static.yaml")), repo_path)
+    data_path = _resolve_plain_path(str(paper.get("data_path", "")), repo_path)
+    python = str(os.environ.get("MARS_PAPER_STATIC_PYTHON") or paper.get("python") or "python")
+    return {
+        "python": python,
+        "python_exists": _python_exists(python),
+        "repo_path": str(repo_path),
+        "repo_exists": repo_path.is_dir(),
+        "config_path": str(config_path),
+        "config_exists": config_path.is_file(),
+        "data_path": str(data_path),
+        "data_exists": data_path.is_file(),
+        "default_max_iters": paper.get("default_max_iters", 1),
+        "default_dry_run": paper.get("default_dry_run", False),
+    }
+
+
+def _resolve_plain_path(raw_path: str, base: Path) -> Path:
+    if not raw_path:
+        return Path("")
+    path = Path(raw_path).expanduser()
+    return path.resolve() if path.is_absolute() else (base / path).resolve()
+
+
+def _python_exists(python: str) -> bool:
+    candidate = Path(python).expanduser()
+    if candidate.is_absolute():
+        return candidate.is_file() and os.access(candidate, os.X_OK)
+    return shutil.which(python) is not None
 
 
 def _resolve_project_path(project_dir: Path, raw_path: str) -> Path:

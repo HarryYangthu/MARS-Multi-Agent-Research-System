@@ -11,7 +11,7 @@ import {
 import { listProjects, type ProjectSummary } from "@/lib/api";
 
 const STORAGE_KEY = "mars.selected_project";
-const DEFAULT_PROJECT = "moe-pimc";
+const DEFAULT_PROJECT = "pimc";
 
 type ProjectContextValue = {
   selectedProject: string;

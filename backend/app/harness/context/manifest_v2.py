@@ -1,4 +1,4 @@
-"""Context Engineering V1 manifest model and writer.
+"""Context Engineering V2 manifest model and writer.
 
 This module intentionally stays storage-agnostic: callers pass a run root
 ``Path`` when they want durable files. The manifest records the exact message
@@ -143,7 +143,7 @@ class ContextManifestV2:
 
 
 def estimate_tokens(text: str) -> int:
-    """Cheap deterministic estimate used throughout V0/V1 tests."""
+    """Cheap deterministic estimate used throughout V0/V2 tests."""
     if not text:
         return 0
     return max(1, len(text) // 4)
@@ -162,7 +162,7 @@ def messages_token_estimate(messages: list[Message]) -> int:
 
 
 def write_manifest_v2(*, run_root: Path, manifest: ContextManifestV2) -> Path:
-    cdir = run_root / "context"
+    cdir = run_root / "context" / "agents" / _safe_id(manifest.agent) / "manifests"
     cdir.mkdir(parents=True, exist_ok=True)
     if not manifest.manifest_id:
         manifest.manifest_id = _manifest_id(
@@ -175,7 +175,8 @@ def write_manifest_v2(*, run_root: Path, manifest: ContextManifestV2) -> Path:
         json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
-    _update_index(cdir, manifest=manifest, path=path)
+    _update_index(run_root / "context", manifest=manifest, path=path)
+    _update_agent_index(cdir, manifest=manifest, path=path)
     return path
 
 
@@ -183,11 +184,21 @@ def manifest_file_for_id(*, run_root: Path, manifest_id: str) -> Path:
     clean = _safe_id(manifest_id)
     if clean.endswith(".json"):
         clean = clean[:-5]
-    return run_root / "context" / f"{clean}.json"
+    indexed = _manifest_file_from_index(run_root=run_root, manifest_id=clean)
+    if indexed is not None:
+        return indexed
+    legacy = run_root / "context" / f"{clean}.json"
+    if legacy.exists():
+        return legacy
+    matches = sorted((run_root / "context" / "agents").glob(f"*/manifests/{clean}.json"))
+    if matches:
+        return matches[0]
+    return legacy
 
 
-def _update_index(cdir: Path, *, manifest: ContextManifestV2, path: Path) -> None:
-    index_path = cdir / "context_manifest.v2.json"
+def _update_index(context_dir: Path, *, manifest: ContextManifestV2, path: Path) -> None:
+    context_dir.mkdir(parents=True, exist_ok=True)
+    index_path = context_dir / "context_manifest.v2.json"
     index: dict[str, Any] = {
         "schema": "context_manifest_index.v2",
         "updated_at": _now(),
@@ -207,7 +218,7 @@ def _update_index(cdir: Path, *, manifest: ContextManifestV2, path: Path) -> Non
         "node_key": manifest.node_key,
         "purpose": manifest.purpose,
         "created_at": manifest.created_at,
-        "path": path.relative_to(cdir.parent).as_posix(),
+        "path": path.relative_to(context_dir.parent).as_posix(),
         "used_tokens": manifest.budget.used_tokens,
         "over_budget": manifest.budget.over_budget,
         "risk_counts": manifest.diagnostics.get("risk_counts", {}),
@@ -223,6 +234,68 @@ def _update_index(cdir: Path, *, manifest: ContextManifestV2, path: Path) -> Non
         json.dumps(index, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+
+
+def _update_agent_index(cdir: Path, *, manifest: ContextManifestV2, path: Path) -> None:
+    index_path = cdir / "context_manifest.v2.json"
+    index: dict[str, Any] = {
+        "schema": "agent_context_manifest_index.v2",
+        "agent": manifest.agent,
+        "updated_at": _now(),
+        "manifests": [],
+    }
+    if index_path.exists():
+        try:
+            raw = json.loads(index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            raw = {}
+        if isinstance(raw, dict):
+            manifests = raw.get("manifests", [])
+            index["manifests"] = manifests if isinstance(manifests, list) else []
+    record = {
+        "manifest_id": manifest.manifest_id,
+        "node_key": manifest.node_key,
+        "purpose": manifest.purpose,
+        "created_at": manifest.created_at,
+        "path": path.relative_to(cdir).as_posix(),
+        "used_tokens": manifest.budget.used_tokens,
+        "over_budget": manifest.budget.over_budget,
+        "risk_counts": manifest.diagnostics.get("risk_counts", {}),
+    }
+    existing = [
+        item
+        for item in index["manifests"]
+        if isinstance(item, dict) and item.get("manifest_id") != manifest.manifest_id
+    ]
+    existing.append(record)
+    index["manifests"] = existing[-500:]
+    index_path.write_text(
+        json.dumps(index, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def _manifest_file_from_index(*, run_root: Path, manifest_id: str) -> Path | None:
+    index_path = run_root / "context" / "context_manifest.v2.json"
+    if not index_path.exists():
+        return None
+    try:
+        raw = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    manifests = raw.get("manifests", []) if isinstance(raw, dict) else []
+    if not isinstance(manifests, list):
+        return None
+    for item in manifests:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("manifest_id", "")) != manifest_id:
+            continue
+        rel = Path(str(item.get("path", "")))
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+            return None
+        return run_root / rel
+    return None
 
 
 def _manifest_id(*, agent: str, node_key: str, purpose: str) -> str:

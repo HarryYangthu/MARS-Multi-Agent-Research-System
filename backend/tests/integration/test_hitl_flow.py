@@ -83,7 +83,7 @@ async def test_pipeline_pauses_for_feedback_when_metrics_miss_target(
     session = orch.create_session(
         RunRequest(
             task="phase4-hitl",
-            project="moe-pimc",
+            project="pimc",
             entrypoint="pipeline",
             user_request="test",
             auto_approve=False,
@@ -130,7 +130,7 @@ async def test_reject_marks_run_failed(tmp_path: Path) -> None:
     bus = InProcessEventBus()
     orch = Orchestrator(run_store=RunStore(tmp_path), bus=bus)
     session = orch.create_session(
-        RunRequest(task="reject-flow", project="moe-pimc", auto_approve=False)
+        RunRequest(task="reject-flow", project="pimc", auto_approve=False)
     )
     async with bus.subscribe(f"run.{session.run.run_id}.hitl") as queue:
         run_task = asyncio.create_task(orch.run(session.run.run_id))

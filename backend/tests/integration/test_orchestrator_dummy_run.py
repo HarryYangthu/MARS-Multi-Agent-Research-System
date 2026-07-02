@@ -45,7 +45,7 @@ async def test_pipeline_walks_all_nodes(tmp_path: Path) -> None:
     session = orch.create_session(
         RunRequest(
             task="phase2-dummy",
-            project="moe-pimc",
+            project="pimc",
             entrypoint="pipeline",
             auto_approve=True,
         )
@@ -92,7 +92,7 @@ async def test_pipeline_with_coding_entrypoint_skips_upstream(tmp_path: Path) ->
     session = orch.create_session(
         RunRequest(
             task="phase2-mid",
-            project="moe-pimc",
+            project="pimc",
             entrypoint="coding",
             auto_approve=True,
         )

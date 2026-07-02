@@ -349,12 +349,19 @@ def _install_default_tools(reg: ToolRegistry) -> None:
         methodology_tool,
         run_archive_tool,
     )
-    from app.harness.tools.search import arxiv_search_tool, local_docs_tool, web_search_tool
+    from app.harness.tools.reporting import report_bundle_tool
+    from app.harness.tools.search import (
+        arxiv_search_tool,
+        fetch_sources_tool,
+        local_docs_tool,
+        web_search_tool,
+    )
 
     # search.*
     reg.register("search.local_docs", local_docs_tool)
     reg.register("search.arxiv_search", arxiv_search_tool)
     reg.register("search.web_search", web_search_tool)
+    reg.register("search.fetch_sources", fetch_sources_tool)
     # knowledge.*
     reg.register("knowledge.kb_query", kb_query_tool)
     reg.register("knowledge.baseline_match", baseline_match_tool)
@@ -377,6 +384,8 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     reg.register("execution.batch_runner", batch_runner_tool)
     reg.register("execution.log_streamer", log_streamer_tool)
     reg.register("execution.metrics_collector", metrics_collector_tool)
+    # reporting.*
+    reg.register("reporting.generate_bundle", report_bundle_tool)
 
 
 def _validate_agent_tool_references(reg: ToolRegistry) -> None:
@@ -448,6 +457,9 @@ def _finalize_and_record(
             "requires_approval": result.requires_approval,
             "rollback_ref": result.rollback_ref,
             "evidence_refs": result.evidence_refs,
+            "artifacts": _safe_json(result.artifacts),
+            "metrics": _safe_json(result.metrics),
+            "output_summary": _output_summary(result.output),
             "metadata": result.metadata,
             "duration_ms": result.duration_ms,
         },
@@ -528,6 +540,9 @@ def _record_invocation(
         "requires_approval": result.requires_approval,
         "rollback_ref": result.rollback_ref,
         "evidence_refs": result.evidence_refs,
+        "artifacts": _safe_json(result.artifacts),
+        "metrics": _safe_json(result.metrics),
+        "output_summary": _output_summary(result.output),
         "metadata": result.metadata,
         "duration_ms": result.duration_ms,
     }
@@ -547,6 +562,49 @@ def _safe_json(value: Any) -> Any:
     except (TypeError, ValueError):
         return str(value)
     return value
+
+
+def _output_summary(value: Any) -> dict[str, Any]:
+    """Keep tool audit useful without dumping large payloads into event logs."""
+    if not isinstance(value, dict):
+        if isinstance(value, list):
+            return {"items": len(value)}
+        if value is None:
+            return {}
+        return {"value": _truncate_scalar(value)}
+    summary: dict[str, Any] = {}
+    for key, item in value.items():
+        key_text = str(key)
+        lowered = key_text.lower()
+        if lowered in {"content", "diff", "stdout", "stderr", "lines"}:
+            if isinstance(item, str):
+                summary[f"{key_text}_chars"] = len(item)
+            elif isinstance(item, list):
+                summary[f"{key_text}_count"] = len(item)
+            continue
+        if isinstance(item, dict):
+            summary[f"{key_text}_keys"] = sorted(str(k) for k in item.keys())[:12]
+        elif isinstance(item, list):
+            summary[f"{key_text}_count"] = len(item)
+            paths = [
+                str(child.get("path"))
+                for child in item
+                if isinstance(child, dict) and child.get("path")
+            ][:6]
+            if paths:
+                summary[f"{key_text}_paths"] = paths
+        else:
+            summary[key_text] = _truncate_scalar(item)
+    return summary
+
+
+def _truncate_scalar(value: Any, limit: int = 240) -> str | int | float | bool:
+    if isinstance(value, bool | int | float):
+        return value
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
 
 
 def _default_spec(name: str, *, bridge_only: bool = False) -> ToolSpec:

@@ -31,6 +31,7 @@ from app.settings import get_settings
 from app.storage.agent_context_store import (
     SUPPORTED_AGENTS,
     list_agent_context_files,
+    load_agent_code_repositories,
     load_agent_memory_items,
     load_agent_research_sites,
 )
@@ -156,6 +157,28 @@ class BaseAgent(ABC):
                 )
                 metadata[f"{self.name}_research_site_count"] = len(
                     [site for site in research_sites if site.enabled]
+                )
+            code_repositories = load_agent_code_repositories(
+                self.name,
+                project=request.project,
+            )
+            if code_repositories:
+                upstream[f"{self.name}_code_repositories"] = "\n".join(
+                    "- {label}: path={path} exists={exists} mode={mode} sync={sync} "
+                    "read_only={read_only} allowed={allowed} protected={protected}".format(
+                        label=repo.label,
+                        path=repo.repo_path or "(未配置)",
+                        exists=repo.exists,
+                        mode=repo.repo_mode,
+                        sync=repo.sync_strategy,
+                        read_only=repo.read_only,
+                        allowed=", ".join(repo.allowed_paths) or "(all)",
+                        protected=", ".join(repo.protected_paths) or "(none)",
+                    )
+                    for repo in code_repositories
+                )
+                metadata[f"{self.name}_code_repository_count"] = len(
+                    [repo for repo in code_repositories if repo.repo_path]
                 )
             memory_items = load_agent_memory_items(self.name)
             if memory_items:

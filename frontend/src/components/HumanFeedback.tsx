@@ -11,7 +11,7 @@ export function HumanFeedback(): JSX.Element {
 
   function send(): void {
     if (!v.trim()) return;
-    // V0 just stores locally; V1 will POST to a feedback endpoint.
+    // V0 just stores locally; V2 will POST to a feedback endpoint.
     try {
       const key = "mars.feedback.log";
       const prev = window.localStorage.getItem(key);
@@ -39,7 +39,7 @@ export function HumanFeedback(): JSX.Element {
       {sent ? (
         <span className="text-[10px] text-emerald-300">✓ saved</span>
       ) : (
-        <span className="text-[10px] text-slate-500">▸ V1: 发送给当前活跃 Agent</span>
+        <span className="text-[10px] text-slate-500">▸ V2: 发送给当前活跃 Agent</span>
       )}
     </div>
   );

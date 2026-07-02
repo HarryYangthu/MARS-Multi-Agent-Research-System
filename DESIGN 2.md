@@ -42,7 +42,7 @@ agents ────────────┘
 | | bridge/ | harness/ |
 |---|---|---|
 | **角色** | 产品编排层 | Agent-agnostic 可信机制 |
-| **知道什么** | 当前有 5 个 Agent / 当前 project 是 moe-pimc / 用户从哪个入口进 | 只知道接口,不知道实现 |
+| **知道什么** | 当前有 5 个 Agent / 当前 project 是 pimc / 用户从哪个入口进 | 只知道接口,不知道实现 |
 | **典型职责** | 编排 RunGraph、路由用户请求到正确 Agent、project 隔离 | Schema 校验、Tool 调用、Gate 触发、Context 装载、LLM 调用、KB 检索、沉淀 |
 | **可替换性** | 换个产品形态(如 CLI 而非 Web)就要改 | 换 Agent / 换项目 / 换部署形态都不动 |
 
@@ -130,7 +130,7 @@ frontmatter 通过对应 JSON Schema 校验,人写 / Agent 写一视同仁。
 ```yaml
 ---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 created: 2026-05-04T10:32:00Z
 research_question: "..."
@@ -154,7 +154,7 @@ debate_summary:        # 可选,debate 开启时填
 ```yaml
 ---
 schema: experiment_plan.v1
-project: moe-pimc
+project: pimc
 agent: experiment
 upstream_artifact: idea_proposal.approved.md
 variables:
@@ -182,7 +182,7 @@ estimated_gpu_hours: 24
 ```yaml
 ---
 schema: code_spec.v1
-project: moe-pimc
+project: pimc
 agent: coding
 upstream_artifact: experiment_plan.approved.md
 target_lang: python    # python / c
@@ -205,10 +205,10 @@ test_coverage:
 ```yaml
 ---
 schema: run_log.v1
-project: moe-pimc
+project: pimc
 agent: execution
 upstream_artifact: code_spec.approved.md
-run_id: "2026-05-04T2310_pimc_moe_ablation_run3"
+run_id: "2026-05-04T2310_pimc_ablation_run3"
 batch_size: 512
 gpu_used: ["L40S:1", "L40S:2"]
 duration_seconds: 3420
@@ -226,7 +226,7 @@ fingerprint_hash: "sha256:abcd1234..."
 ```yaml
 ---
 schema: report.v1
-project: moe-pimc
+project: pimc
 agent: writing
 deliverable_type: research_report  # research_report / paper_fragment / ppt_outline / tech_summary
 target_audience: phd_advisor
@@ -413,7 +413,7 @@ LLM provider call
 
 **Context Manifest** 是审计抓手:每次 LLM 调用前,记录"这次调用装载了什么、来自哪里、token 预算多少、为何这样选"。
 
-V1 在不破坏 V0 `context_pack.vN.json` 的前提下,新增 `context_manifest.v2.*.json`:
+V2 在不破坏 V0 `context_pack.vN.json` 的前提下,新增 `context_manifest.v2.*.json`:
 - pre-call 写入真实 `messages_preview`,而不是 Agent 完成后重建。
 - 上下文先归一成 `ContextSegment`,记录 kind / priority / source_ref / content_hash / token 估算 / selection_reason / compression / risk_flags / raw_ref。
 - `context_manifest.v2.json` 作为 run 内索引,供 `/api/context/*` 与 `/context` 工作台读取。
@@ -440,7 +440,7 @@ Context Workbench(`/context`) 是独立操作页,不嵌入 run 页面主流程:
 - Pollution diagnostics 展示风险说明与可执行处理建议。
 - 前端纯逻辑集中在 `frontend/src/lib/contextWorkbench.ts`,由 `pnpm --dir frontend test:context` 做无新依赖 smoke 回归。
 
-Context V1 配置:
+Context V2 配置:
 - `MARS_CONTEXT_MAX_TOKENS`:硬上限预算,默认 `32000`。
 - `MARS_CONTEXT_TARGET_TOKENS`:packer 目标预算,默认 `24000`。
 - `MARS_CONTEXT_AUTO_COMPRESS`:是否自动触发压缩,默认开启。
@@ -473,7 +473,7 @@ match_score
 - 任务切换边界(Agent 之间 handoff)
 - 用户显式触发
 
-V0 不自动触发;V1 允许自动触发,但必须可配置、可审计、可关闭。
+V0 不自动触发;V2 允许自动触发,但必须可配置、可审计、可关闭。
 
 3 种策略,按上下文类型选:
 - `hier_summary`:对话历史压成 abstract → key decisions → detail pointers,只保留前两层
@@ -486,8 +486,8 @@ V0 不自动触发;V1 允许自动触发,但必须可配置、可审计、可关
 
 每次任务启动 → 创建 `runs/<timestamp>_<task>/`:
 - timestamp 格式 `2026-05-04T2310`(ISO 8601 短)
-- task 是 slug,如 `pimc_moe_ablation`
-- 完整示例:`runs/2026-05-04T2310_pimc_moe_ablation/`
+- task 是 slug,如 `pimc_ablation`
+- 完整示例:`runs/2026-05-04T2310_pimc_ablation/`
 
 ### 子目录强制结构
 
@@ -499,7 +499,7 @@ runs/<timestamp>_<task>/
 │  ├─ uploaded_files/         # 上传的论文 / 文档
 │  └─ selected_context.json   # 用户在前端勾选的上下文项
 ├─ context/
-│  ├─ context_pack.v1.json    # 每次 LLM 调用的 ContextPack
+│  ├─ context_pack.v2.json    # 每次 LLM 调用的 ContextPack
 │  └─ context_snapshot.md     # 人类可读的 context manifest
 ├─ idea/
 │  ├─ idea_proposal.v1.md
@@ -602,7 +602,7 @@ configs/
 ### 10.2 项目配置(`projects/<name>/`)
 
 ```
-projects/moe-pimc/
+projects/pimc/
 ├─ project.yaml        # 项目元数据(name / domain / tags)
 ├─ repo_link.yaml      # 真实代码仓接入(见 §10.3)
 ├─ AGENTS.md           # 项目级硬约束(baseline 保护、领域规则)
@@ -641,7 +641,7 @@ class LLMProvider(ABC):
 - `anthropic_provider.py` / `openai_provider.py` / `qwen_provider.py` / `gemini_provider.py` — 远程 API
 - `local_vllm_provider.py` — 本地 vLLM serve(支持挂载 LoRA adapter / 全参微调权重)
 - `custom_endpoint_provider.py` — 自定义 OpenAI-compatible endpoint
-- `post_training_loader.py` — 加载 GRPO 后训练产物(V0 只 load,V1 才 train)
+- `post_training_loader.py` — 加载 GRPO 后训练产物(V0 只 load,V2 才 train)
 
 `model_registry.py` 根据 `configs/agents.yaml` 的 `provider + model` 字段路由到对应 provider。
 
@@ -652,7 +652,7 @@ class LLMProvider(ABC):
 coding:
   model:
     provider: local_vllm
-    model: qwen2.5-coder-7b-grpo-pimc-v1   # V1 才有,V0 用占位 / 公开模型
+    model: qwen2.5-coder-7b-grpo-pimc-v1   # V2 才有,V0 用占位 / 公开模型
   post_training:
     enabled: false                          # V0 默认 false
     mode: adapter                           # adapter | endpoint | fine_tuned_id
@@ -679,7 +679,7 @@ services:
   - redis          (Bridge 队列 + WS pub/sub)
   - chromadb       (4 区 KB)
   - vllm-serve     (可选,Coding Agent 本地模型)
-  - postgres       (V0 不用,V1 持久化 run metadata)
+  - postgres       (V0 不用,V2 持久化 run metadata)
 ```
 
 ### 12.3 GPU 调度策略
@@ -695,7 +695,7 @@ backend/tests/
 ├─ schema/                # 5 个 schema 的合规率测试(目标 ≥95%)
 ├─ gate/                  # 5 个 Gate 触发逻辑
 ├─ baseline/              # Baseline 复用语义匹配准确率
-└─ e2e/                   # 完整 pipeline e2e(走通 moe-pimc demo)
+└─ e2e/                   # 完整 pipeline e2e(走通 pimc demo)
 ```
 
 CI 强制:

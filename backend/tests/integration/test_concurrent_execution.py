@@ -24,7 +24,7 @@ async def test_six_jobs_run_concurrently() -> None:
         JobSpec(
             run_id="batch-test",
             experiment_id=f"exp_{i}",
-            project="moe-pimc",
+            project="pimc",
             seed=i,
         )
         for i in range(6)
@@ -69,7 +69,7 @@ async def test_seventh_job_queues_behind_cap() -> None:
         JobSpec(
             run_id="cap-test",
             experiment_id=f"exp_{i}",
-            project="moe-pimc",
+            project="pimc",
             seed=i,
         )
         for i in range(3)

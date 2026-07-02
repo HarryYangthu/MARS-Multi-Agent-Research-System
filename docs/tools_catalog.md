@@ -91,7 +91,7 @@ Every registry-dispatched tool writes:
   redacted arguments.
 - `runs/<id>/coding/tool_applications/*.json`: per-call records for mutating
   code tools and rollback lookups.
-- `runs/<id>/context/trace_manifest.v1.json`: a `tool:<name>` span for each
+- `runs/<id>/context/trace_manifest.v2.json`: a `tool:<name>` span for each
   dispatch when a run directory is available.
 
 Public APIs:
@@ -109,7 +109,7 @@ pending approvals, rollback buttons, and MCP adapter status.
 
 ## MCP Adapter Status
 
-MCP is optional in V1. `/api/tools/adapters` exposes health/configuration for
+MCP is optional in V2. `/api/tools/adapters` exposes health/configuration for
 `chroma`, `filesystem`, `git`, and `github`, `/api/tools/adapters/{kind}/tools`
 lists tools through a configured MCP stdio server, and
 `/api/tools/adapters/{kind}/call` invokes one MCP tool through the same guarded
@@ -136,7 +136,7 @@ MARS_ENABLE_NETWORK_TOOLS=true \
 MARS_WEB_SEARCH_PROVIDER=tavily \
 MARS_WEB_SEARCH_ALLOWLIST=arxiv.org \
 TAVILY_API_KEY=... \
-PYTHONPATH=backend pytest backend/tests/unit/test_search_tools_v1.py::test_web_search_provider_external_smoke_when_configured -q
+PYTHONPATH=backend pytest backend/tests/unit/test_search_tools_v2.py::test_web_search_provider_external_smoke_when_configured -q
 ```
 
 LangSmith is also optional. File-backed traces remain mandatory even when the

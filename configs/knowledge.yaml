@@ -7,7 +7,7 @@ embedding:
 
 zones:
   # literature: PIM / passive-intermodulation cancellation papers, memory
-  # polynomial & Volterra references, MoE-routing surveys.
+  # polynomial & Volterra references, routing-routing surveys.
   literature:
     chunk_size: 1500
     overlap: 200

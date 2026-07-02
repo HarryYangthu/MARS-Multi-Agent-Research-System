@@ -16,7 +16,7 @@ from app.storage.run_store import RunStore
 
 def test_gate_1_blocks_until_idea_approved(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     out = plan_finalized.check(run.root)
     assert out.triggered and out.requires_human
 
@@ -45,7 +45,7 @@ def test_gate_3_experiment_launch_gpu_threshold() -> None:
 
 def test_gate_4_conclusion_output_blocks_without_approved_report(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     out = conclusion_output.check(run.root)
     assert out.triggered
 

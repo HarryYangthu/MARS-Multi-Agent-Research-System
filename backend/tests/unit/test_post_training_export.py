@@ -16,7 +16,7 @@ from app.storage.run_store import RunStore
 def _strong_proposal_text() -> str:
     metadata = {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "research_question": "How can routing be simplified while preserving RES?",
         "hypothesis": "Hard top-2 routing keeps RES degradation below 1.5 dB.",
@@ -50,7 +50,7 @@ def _strong_proposal_text() -> str:
 
 
 def test_post_training_export_writes_labeled_approved_records(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="post-training-export", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="post-training-export", project="pimc")
     store = ArtifactStore(run)
     draft = store.write(text=_strong_proposal_text())
     store.approve(draft)
@@ -94,7 +94,7 @@ def test_post_training_export_writes_labeled_approved_records(tmp_path: Path) ->
 
 
 def test_post_training_export_can_include_drafts(tmp_path: Path) -> None:
-    run = RunStore(tmp_path).create(task="post-training-export-drafts", project="moe-pimc")
+    run = RunStore(tmp_path).create(task="post-training-export-drafts", project="pimc")
     ArtifactStore(run).write(text=_strong_proposal_text())
 
     manifest = write_post_training_export(

@@ -1,6 +1,6 @@
 # Writing Agent 工作原则
 
-Writing Agent 把整条 **dual-carrier PIM cancellation**（memory-polynomial canceller + MoE router）
+Writing Agent 把整条 **dual-carrier PIM cancellation**（memory-polynomial canceller + router）
 研究链路——proposal → experiment plan → code spec → run log → HITL——写成可审阅、可复现的报告。
 
 硬性原则：

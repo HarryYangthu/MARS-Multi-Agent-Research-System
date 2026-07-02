@@ -58,6 +58,33 @@ export type ArtifactView = {
   errors: { path: string; message: string }[];
 };
 
+export type WorkspaceFileView = {
+  run_id: string;
+  agent_dir: string;
+  relative_path: string;
+  path: string;
+  exists: boolean;
+  text: string;
+  size_bytes: number;
+  content_type: string;
+};
+
+export type WorkspaceTreeEntry = {
+  relative_path: string;
+  name: string;
+  kind: "file" | "directory" | string;
+  path: string;
+  size_bytes: number;
+  content_type: string;
+};
+
+export type WorkspaceTreeView = {
+  run_id: string;
+  agent_dir: string;
+  root_path: string;
+  entries: WorkspaceTreeEntry[];
+};
+
 export type DiagnosisView = {
   run_id: string;
   version: string;
@@ -352,6 +379,19 @@ export type RuntimeStatus = {
         enabled: boolean;
         configured: boolean;
       };
+      paper_static: {
+        enabled: boolean;
+        python: string;
+        python_exists: boolean;
+        repo_path: string;
+        repo_exists: boolean;
+        config_path: string;
+        config_exists: boolean;
+        data_path: string;
+        data_exists: boolean;
+        default_max_iters: number;
+        default_dry_run: boolean;
+      };
       code_checks: {
         lint_enabled: boolean;
         test_enabled: boolean;
@@ -428,10 +468,58 @@ export type AgentResearchSite = {
   source: string;
 };
 
+export type AgentCodeRepository = {
+  project: string;
+  label: string;
+  repo_mode: string;
+  repo_path: string;
+  exists: boolean;
+  read_only: boolean;
+  sync_strategy: string;
+  allowed_paths: string[];
+  protected_paths: string[];
+  ignore_patterns: string[];
+  baseline_rules_file: string;
+};
+
+export type AgentContextBlueprintItem = {
+  order: number;
+  layer: string;
+  content: string;
+  storage: string[];
+  required: string;
+  risk: string;
+  strategy: string;
+  packing_position: string;
+};
+
+export type AgentContextStorageLayout = {
+  long_term_root: string;
+  run_root: string;
+  agent_root: string;
+  manifests: string;
+  raw: string;
+  packed: string;
+  memory: string;
+  research: string;
+  debate: string;
+  tool_results: string;
+};
+
+export type AgentContextBlueprint = {
+  agent: string;
+  goal: string;
+  storage_layout: AgentContextStorageLayout;
+  items: AgentContextBlueprintItem[];
+  packing_order: string[];
+};
+
 export type AgentContextView = {
   agent: string;
   files: AgentContextFile[];
   research_sites: AgentResearchSite[];
+  code_repositories: AgentCodeRepository[];
+  blueprint: AgentContextBlueprint;
   defaults: {
     editable_categories?: string[];
     read_only_sources?: string[];
@@ -731,6 +819,145 @@ export type ToolApprovalRecord = Record<string, unknown> & {
   created_at?: string;
 };
 
+export type TimelineItem = {
+  id: string;
+  timestamp: string;
+  source: string;
+  kind: string;
+  title: string;
+  summary: string;
+  status: string;
+  agent: string;
+  node: string;
+  payload: Record<string, unknown>;
+};
+
+export type WorkLogItem = {
+  id: string;
+  timestamp: string;
+  elapsed_seconds: number | null;
+  agent: string;
+  kind: string;
+  status: string;
+  title: string;
+  detail: string;
+  next_action: string;
+  evidence_refs: string[];
+};
+
+export type WorkLogView = {
+  run_id: string;
+  project: string;
+  agent: string;
+  status: string;
+  started_at: string;
+  latest_at: string;
+  elapsed_seconds: number | null;
+  items: WorkLogItem[];
+};
+
+export type ReportDeliverable = {
+  kind: "markdown" | "excel" | "word" | "powerpoint" | string;
+  path: string;
+  status: "completed" | "failed" | "skipped" | string;
+  error?: string;
+  bytes?: number;
+};
+
+export type ReportQaStatus = {
+  status: "passed" | "degraded" | "failed" | string;
+  checks: { name: string; status: string; detail?: string }[];
+};
+
+export type ReportBundle = {
+  exists: boolean;
+  run_id?: string;
+  manifest?: string;
+  metadata?: {
+    schema?: string;
+    project?: string;
+    agent?: string;
+    run_id?: string;
+    created_at?: string;
+    data_pack?: string;
+    deliverables?: ReportDeliverable[];
+    source_refs?: string[];
+    qa_status?: ReportQaStatus;
+    generation_errors?: string[];
+    [key: string]: unknown;
+  };
+  body?: string;
+};
+
+export type ConfigFile = {
+  name: string;
+  path: string;
+  text: string;
+  data: Record<string, unknown>;
+  high_risk: boolean;
+};
+
+export type ConfigSnapshot = {
+  files: ConfigFile[];
+};
+
+export type ConfigValidationResult = {
+  valid: boolean;
+  errors: string[];
+  data: Record<string, unknown>;
+};
+
+export type ConfigDiffResult = {
+  name: string;
+  diff: string;
+  valid: boolean;
+  errors: string[];
+  high_risk: boolean;
+};
+
+export type ProviderDefaultView = {
+  api_key_env: string;
+  base_url: string;
+  base_url_env: string;
+  configured: boolean;
+  base_url_configured: boolean;
+};
+
+export type AgentLlmConfigRow = {
+  agent: string;
+  enabled: boolean;
+  provider: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  api_key_env: string;
+  api_key_configured: boolean;
+  base_url: string;
+  base_url_env: string;
+  base_url_configured: boolean;
+};
+
+export type AgentLlmConfigView = {
+  agents: AgentLlmConfigRow[];
+  providers: string[];
+  provider_defaults: Record<string, ProviderDefaultView>;
+  secrets_path: string;
+  note: string;
+};
+
+export type AgentLlmUpdateRow = {
+  agent: string;
+  enabled: boolean;
+  provider: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  api_key_env: string;
+  api_key?: string;
+  base_url: string;
+  base_url_env: string;
+};
+
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   if (!r.ok) {
     const text = await r.text();
@@ -773,6 +1000,20 @@ export async function createRun(body: {
 }
 export async function startRun(runId: string): Promise<{ status: string }> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/start`, { method: "POST" }));
+}
+
+export async function retryAgent(
+  runId: string,
+  agent: string,
+  reason: string,
+): Promise<{ status: string; run_id: string; agent: string; node: string }> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/runs/${runId}/agents/${agent}/retry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    }),
+  );
 }
 
 // ---------- tools ----------
@@ -853,6 +1094,21 @@ export async function getArtifact(
   return jsonOrThrow(
     await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}`),
   );
+}
+export async function getWorkspaceFile(
+  runId: string,
+  agentDir: string,
+  path: string,
+): Promise<WorkspaceFileView> {
+  const url = apiUrl(`${BASE}/api/artifacts/${runId}/${agentDir}/workspace-file`);
+  url.searchParams.set("path", path);
+  return jsonOrThrow(await fetch(url));
+}
+export async function getWorkspaceTree(
+  runId: string,
+  agentDir: string,
+): Promise<WorkspaceTreeView> {
+  return jsonOrThrow(await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/workspace-tree`));
 }
 export async function diffVersions(
   runId: string,
@@ -1026,7 +1282,7 @@ export async function getCommanderObservability(
 }
 
 export async function getCommanderAttributionEval(
-  project = "moe-pimc",
+  project = "pimc",
 ): Promise<CommanderAttributionEvalView> {
   const url = apiUrl(`${BASE}/api/evaluation/commander-attribution`);
   url.searchParams.set("project", project);
@@ -1207,8 +1463,9 @@ export async function getDebateTranscript(
 }
 
 // ---------- agent context configuration ----------
-export async function getAgentContext(agent: string): Promise<AgentContextView> {
-  return jsonOrThrow(await fetch(`${BASE}/api/agents/${agent}/context`));
+export async function getAgentContext(agent: string, project?: string): Promise<AgentContextView> {
+  const suffix = project ? `?project=${encodeURIComponent(project)}` : "";
+  return jsonOrThrow(await fetch(`${BASE}/api/agents/${agent}/context${suffix}`));
 }
 
 export async function createAgentContextItem(
@@ -1260,6 +1517,23 @@ export async function updateAgentResearchSites(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sites }),
     }),
+  );
+}
+
+export async function updateAgentCodeRepositories(
+  agent: string,
+  project: string,
+  repositories: AgentCodeRepository[],
+): Promise<AgentCodeRepository[]> {
+  return jsonOrThrow(
+    await fetch(
+      `${BASE}/api/agents/${agent}/context/code-repositories?project=${encodeURIComponent(project)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositories }),
+      },
+    ),
   );
 }
 
@@ -1395,6 +1669,111 @@ export async function listEvents(limit = 80): Promise<EventEntry[]> {
   return jsonOrThrow(await fetch(`${BASE}/api/events?limit=${limit}`));
 }
 
+export async function getRunTimeline(runId: string, limit = 500): Promise<TimelineItem[]> {
+  const url = apiUrl(`${BASE}/api/timeline/runs/${runId}`);
+  url.searchParams.set("limit", String(limit));
+  return jsonOrThrow(await fetch(url));
+}
+
+export async function getRunWorkLog(
+  runId: string,
+  agent?: string,
+  limit = 200,
+): Promise<WorkLogView> {
+  const url = apiUrl(`${BASE}/api/timeline/runs/${runId}/worklog`);
+  url.searchParams.set("limit", String(limit));
+  if (agent) {
+    url.searchParams.set("agent", agent);
+  }
+  return jsonOrThrow(await fetch(url));
+}
+
+export async function getReportBundle(runId: string): Promise<ReportBundle> {
+  return jsonOrThrow(await fetch(`${BASE}/api/reports/${runId}`));
+}
+
+export async function regenerateReportBundle(runId: string): Promise<ReportBundle> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/reports/${runId}/regenerate`, {
+      method: "POST",
+    }),
+  );
+}
+
+export function reportFileUrl(runId: string, filename: string): string {
+  return `${BASE}/api/reports/${runId}/files/${encodeURIComponent(filename)}`;
+}
+
+export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config`));
+}
+
+export async function getAgentLlmConfig(): Promise<AgentLlmConfigView> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config/agent-llm`));
+}
+
+export async function updateAgentLlmConfig(params: {
+  agents: AgentLlmUpdateRow[];
+  actor?: string;
+}): Promise<AgentLlmConfigView> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/config/agent-llm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agents: params.agents,
+        actor: params.actor ?? "frontend",
+      }),
+    }),
+  );
+}
+
+export async function validateConfigFile(
+  name: string,
+  text: string,
+): Promise<ConfigValidationResult> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/config/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text }),
+    }),
+  );
+}
+
+export async function previewConfigDiff(
+  name: string,
+  text: string,
+): Promise<ConfigDiffResult> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/config/preview-diff`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text }),
+    }),
+  );
+}
+
+export async function applyConfigFile(params: {
+  name: string;
+  text: string;
+  actor?: string;
+  confirmHighRisk?: boolean;
+}): Promise<ConfigFile> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/config/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: params.name,
+        text: params.text,
+        actor: params.actor ?? "user",
+        confirm_high_risk: params.confirmHighRisk ?? false,
+      }),
+    }),
+  );
+}
+
 export async function listExecutionPlots(runId: string): Promise<ExecutionPlot[]> {
   return jsonOrThrow(await fetch(`${BASE}/api/execution/${runId}/plots`));
 }
@@ -1425,7 +1804,7 @@ export type Conversation = {
   messages: ChatMessageView[];
 };
 
-export async function createConversation(project = "moe-pimc"): Promise<Conversation> {
+export async function createConversation(project = "pimc"): Promise<Conversation> {
   return jsonOrThrow(
     await fetch(`${BASE}/api/chat/conversations`, {
       method: "POST",

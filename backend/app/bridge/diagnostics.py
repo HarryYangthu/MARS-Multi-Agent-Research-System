@@ -1,4 +1,4 @@
-"""Project diagnostics config and deterministic V1 analyzers."""
+"""Project diagnostics config and deterministic V2 analyzers."""
 from __future__ import annotations
 
 import json
@@ -32,7 +32,7 @@ class DiagnosticsConfig:
     max_iterations: int = 2
     default_budget: int = 2
     allowed_targets: tuple[str, ...] = ("coding", "experiment")
-    default_target: str = "coding"
+    default_target: str = "experiment"
     enable_idea_loop: bool = False
     analyzers: dict[str, bool] = field(default_factory=dict)
     metric_rules: tuple[MetricRule, ...] = ()
@@ -132,7 +132,7 @@ def load_diagnostics_config(project: str) -> DiagnosticsConfig:
         max_iterations=int(loop.get("max_iterations", 2) or 2),
         default_budget=int(loop.get("default_budget", 2) or 2),
         allowed_targets=allowed,
-        default_target=str(loop.get("default_target", "coding")),
+        default_target=str(loop.get("default_target", "experiment")),
         enable_idea_loop=bool(loop.get("enable_idea_loop", False)),
         analyzers=analyzers,
         metric_rules=tuple(metric_rules),

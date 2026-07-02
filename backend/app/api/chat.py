@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 class CreateConversationPayload(BaseModel):
-    project: str = Field(default="moe-pimc")
+    project: str = Field(default="pimc")
 
 
 class MessagePayload(BaseModel):

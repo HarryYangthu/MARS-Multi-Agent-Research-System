@@ -131,6 +131,7 @@ def _execution_summary() -> dict[str, Any]:
     execution = _as_dict(raw.get("execution"))
     code_checks = _as_dict(raw.get("code_checks"))
     remote_gpu = _as_dict(execution.get("remote_gpu"))
+    paper_static = _paper_static_summary(_as_dict(execution.get("paper_static")))
     local_commands = execution.get("local_commands")
     return {
         "backend": settings.mars_execution_backend,
@@ -147,10 +148,31 @@ def _execution_summary() -> dict[str, Any]:
             "enabled": bool(remote_gpu.get("enabled", False)),
             "configured": bool(remote_gpu.get("endpoint")),
         },
+        "paper_static": paper_static,
         "code_checks": {
             "lint_enabled": bool(_as_dict(code_checks.get("lint")).get("enabled", False)),
             "test_enabled": bool(_as_dict(code_checks.get("test")).get("enabled", False)),
         },
+    }
+
+
+def _paper_static_summary(cfg: dict[str, Any]) -> dict[str, Any]:
+    repo_path = _resolve_status_path(str(cfg.get("repo_path", "")), repo_root())
+    config_path = _resolve_status_path(str(cfg.get("config_path", "configs/static.yaml")), repo_path)
+    data_path = _resolve_status_path(str(cfg.get("data_path", "")), repo_path)
+    python = str(os.environ.get("MARS_PAPER_STATIC_PYTHON") or cfg.get("python") or "python")
+    return {
+        "enabled": bool(cfg.get("enabled", False)),
+        "python": python,
+        "python_exists": _python_exists(python),
+        "repo_path": str(repo_path),
+        "repo_exists": repo_path.is_dir(),
+        "config_path": str(config_path),
+        "config_exists": config_path.is_file(),
+        "data_path": str(data_path),
+        "data_exists": data_path.is_file(),
+        "default_max_iters": _to_int(cfg.get("default_max_iters"), default=0),
+        "default_dry_run": bool(cfg.get("default_dry_run", False)),
     }
 
 
@@ -197,7 +219,7 @@ def _tracing_summary() -> dict[str, Any]:
     return {
         "enabled": bool(tracing.get("enabled", True)),
         "exporter": str(tracing.get("exporter", "file")),
-        "manifest_path": str(tracing.get("manifest_path", "context/trace_manifest.v1.json")),
+        "manifest_path": str(tracing.get("manifest_path", "context/trace_manifest.v2.json")),
         "file_sink": bool(_as_dict(sinks.get("file")).get("enabled", True)),
         "websocket_sink": bool(_as_dict(sinks.get("websocket")).get("enabled", True)),
     }
@@ -359,6 +381,20 @@ def _average(values: Sequence[int | float]) -> float:
 
 def _env_bool(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_status_path(raw_path: str, base: Path) -> Path:
+    if not raw_path:
+        return Path("")
+    path = Path(raw_path).expanduser()
+    return path.resolve() if path.is_absolute() else (base / path).resolve()
+
+
+def _python_exists(python: str) -> bool:
+    candidate = Path(python).expanduser()
+    if candidate.is_absolute():
+        return candidate.is_file() and os.access(candidate, os.X_OK)
+    return shutil.which(python) is not None
 
 
 __all__ = ["build_runtime_status", "probe_gpu_resources"]

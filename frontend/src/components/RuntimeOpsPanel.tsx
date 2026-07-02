@@ -213,6 +213,13 @@ function AdvancedConfigPanel({ status }: { status: RuntimeStatus }): JSX.Element
   const llm = status.config.llm;
   const mcpRows = Object.entries(status.config.mcp);
   const secretRows = Object.entries(llm.secrets_configured);
+  const paperStatic = status.resources.execution.paper_static;
+  const paperReady =
+    paperStatic.enabled &&
+    paperStatic.python_exists &&
+    paperStatic.repo_exists &&
+    paperStatic.config_exists &&
+    paperStatic.data_exists;
   return (
     <section className="rounded border border-mars-border bg-mars-bg/40 p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -256,6 +263,8 @@ function AdvancedConfigPanel({ status }: { status: RuntimeStatus }): JSX.Element
             ["超时", `${status.resources.execution.command_timeout_seconds}s`],
             ["本地命令", String(status.resources.execution.local_command_count)],
             ["远程 GPU", boolText(status.resources.execution.remote_gpu.configured)],
+            ["真实静态仿真", boolText(paperReady)],
+            ["真实迭代", String(paperStatic.default_max_iters)],
           ]}
         />
       </div>

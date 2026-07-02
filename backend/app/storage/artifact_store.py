@@ -32,6 +32,7 @@ SCHEMA_TO_AGENT: dict[str, tuple[str, str]] = {
     "diagnosis.v1": ("diagnosis", "diagnosis"),
     "feedback_packet.v1": ("diagnosis", "feedback_packet"),
     "report.v1": ("writing", "research_report"),
+    "report_bundle.v1": ("writing", "report_bundle"),
 }
 
 _VERSION_RE = re.compile(r"^(?P<stem>.+?)\.(?P<ver>v\d+|approved)\.md$")

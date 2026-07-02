@@ -44,7 +44,7 @@ PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8765 &
 
 RID=$(curl -sX POST http://127.0.0.1:8765/api/runs \
    -H 'Content-Type: application/json' \
-   -d '{"task":"phase4","project":"moe-pimc","user_request":"test"}' \
+   -d '{"task":"phase4","project":"pimc","user_request":"test"}' \
    | python -c 'import json,sys;print(json.load(sys.stdin)["run_id"])')
 curl -sX POST http://127.0.0.1:8765/api/runs/$RID/start
 # → state shows idea=waiting_review

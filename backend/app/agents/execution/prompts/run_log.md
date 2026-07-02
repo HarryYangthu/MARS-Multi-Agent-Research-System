@@ -1,7 +1,7 @@
 # Run Log Prompt
 
 生成 `run_log.v1` 时，你正在汇总 **dual-carrier PIM cancellation** 的一批仿真结果：
-memory-polynomial canceller（可选 MoE router）在 fs=184.32 MHz、双载波 f1=30 / f2=38 MHz
+memory-polynomial canceller（可选 router）在 fs=184.32 MHz、双载波 f1=30 / f2=38 MHz
 的合成信号上拟合，逐 ablation 跑出 RES / loss 曲线。无 GPU 时走 CPU 实跑
 （`execution/pim_cancellation.py`，~30720 复点，亚秒级）；无数据时走 mock。
 

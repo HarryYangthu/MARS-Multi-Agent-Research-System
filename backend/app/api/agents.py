@@ -1,7 +1,6 @@
 """Agent runtime configuration endpoints."""
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -12,15 +11,23 @@ from pydantic import BaseModel, Field
 from app.api.dependencies import get_run_store
 from app.bridge.agent_registry import get_registry
 from app.harness.llm.post_training_loader import PostTrainingHandle
+from app.settings import env_or_local
 from app.storage.agent_context_store import (
+    AgentCodeRepository,
+    AgentContextBlueprint,
+    AgentContextBlueprintItem,
     AgentContextFile,
+    AgentContextStorageLayout,
     AgentResearchSite,
     SUPPORTED_AGENTS,
     create_agent_context_file,
     delete_agent_context_file,
     delete_agent_context_memory,
+    load_agent_code_repositories,
+    load_agent_context_blueprint,
     list_agent_context_files,
     load_agent_research_sites,
+    save_agent_code_repositories,
     save_agent_research_sites,
     sync_agent_context_file_to_memory,
     update_agent_context_file,
@@ -82,10 +89,58 @@ class AgentResearchSiteView(BaseModel):
     source: str = "custom"
 
 
+class AgentCodeRepositoryView(BaseModel):
+    project: str = "pimc"
+    label: str = "项目代码仓"
+    repo_mode: str = "local_path"
+    repo_path: str = ""
+    exists: bool = False
+    read_only: bool = False
+    sync_strategy: str = "live"
+    allowed_paths: list[str] = []
+    protected_paths: list[str] = []
+    ignore_patterns: list[str] = []
+    baseline_rules_file: str = "./AGENTS.md"
+
+
+class AgentContextBlueprintItemView(BaseModel):
+    order: int
+    layer: str
+    content: str
+    storage: list[str]
+    required: str
+    risk: str
+    strategy: str
+    packing_position: str
+
+
+class AgentContextStorageLayoutView(BaseModel):
+    long_term_root: str
+    run_root: str
+    agent_root: str
+    manifests: str
+    raw: str
+    packed: str
+    memory: str
+    research: str
+    debate: str
+    tool_results: str
+
+
+class AgentContextBlueprintView(BaseModel):
+    agent: str
+    goal: str
+    storage_layout: AgentContextStorageLayoutView
+    items: list[AgentContextBlueprintItemView]
+    packing_order: list[str]
+
+
 class AgentContextView(BaseModel):
     agent: str
     files: list[AgentContextFileView]
     research_sites: list[AgentResearchSiteView]
+    code_repositories: list[AgentCodeRepositoryView]
+    blueprint: AgentContextBlueprintView
     defaults: dict[str, Any]
 
 
@@ -106,6 +161,10 @@ class DeleteContextItemPayload(BaseModel):
 
 class UpdateResearchSitesPayload(BaseModel):
     sites: list[AgentResearchSiteView]
+
+
+class UpdateCodeRepositoriesPayload(BaseModel):
+    repositories: list[AgentCodeRepositoryView]
 
 
 class CodeSourceView(BaseModel):
@@ -217,6 +276,64 @@ def _site_view(site: AgentResearchSite) -> AgentResearchSiteView:
     )
 
 
+def _code_repository_view(repo: AgentCodeRepository) -> AgentCodeRepositoryView:
+    return AgentCodeRepositoryView(
+        project=repo.project,
+        label=repo.label,
+        repo_mode=repo.repo_mode,
+        repo_path=repo.repo_path,
+        exists=repo.exists,
+        read_only=repo.read_only,
+        sync_strategy=repo.sync_strategy,
+        allowed_paths=list(repo.allowed_paths),
+        protected_paths=list(repo.protected_paths),
+        ignore_patterns=list(repo.ignore_patterns),
+        baseline_rules_file=repo.baseline_rules_file,
+    )
+
+
+def _blueprint_item_view(
+    item: AgentContextBlueprintItem,
+) -> AgentContextBlueprintItemView:
+    return AgentContextBlueprintItemView(
+        order=item.order,
+        layer=item.layer,
+        content=item.content,
+        storage=list(item.storage),
+        required=item.required,
+        risk=item.risk,
+        strategy=item.strategy,
+        packing_position=item.packing_position,
+    )
+
+
+def _storage_layout_view(
+    item: AgentContextStorageLayout,
+) -> AgentContextStorageLayoutView:
+    return AgentContextStorageLayoutView(
+        long_term_root=item.long_term_root,
+        run_root=item.run_root,
+        agent_root=item.agent_root,
+        manifests=item.manifests,
+        raw=item.raw,
+        packed=item.packed,
+        memory=item.memory,
+        research=item.research,
+        debate=item.debate,
+        tool_results=item.tool_results,
+    )
+
+
+def _blueprint_view(item: AgentContextBlueprint) -> AgentContextBlueprintView:
+    return AgentContextBlueprintView(
+        agent=item.agent,
+        goal=item.goal,
+        storage_layout=_storage_layout_view(item.storage_layout),
+        items=[_blueprint_item_view(row) for row in item.items],
+        packing_order=list(item.packing_order),
+    )
+
+
 def _code_source_view(source: CodeSource) -> CodeSourceView:
     return CodeSourceView(
         id=source.id,
@@ -292,17 +409,21 @@ def _handle(agent: Any) -> PostTrainingHandle:
 
 
 @router.get("/{agent}/context", response_model=AgentContextView)
-async def get_agent_context(agent: str) -> AgentContextView:
+async def get_agent_context(agent: str, project: str = "pimc") -> AgentContextView:
     _ensure_context_agent(agent)
     try:
         files = list_agent_context_files(agent)
         sites = load_agent_research_sites(agent)
+        repositories = load_agent_code_repositories(agent, project=project)
+        blueprint = load_agent_context_blueprint(agent)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return AgentContextView(
         agent=agent,
         files=[_file_view(item) for item in files],
         research_sites=[_site_view(site) for site in sites],
+        code_repositories=[_code_repository_view(repo) for repo in repositories],
+        blueprint=_blueprint_view(blueprint),
         defaults={
             "editable_categories": [
                 "docs",
@@ -321,7 +442,7 @@ async def get_agent_context(agent: str) -> AgentContextView:
 async def create_context_item(
     agent: str,
     payload: CreateContextItemPayload,
-    project: str = "moe-pimc",
+    project: str = "pimc",
 ) -> AgentContextFileView:
     _ensure_context_agent(agent)
     try:
@@ -341,7 +462,7 @@ async def create_context_item(
 async def update_context_item(
     agent: str,
     payload: UpdateContextItemPayload,
-    project: str = "moe-pimc",
+    project: str = "pimc",
 ) -> AgentContextFileView:
     _ensure_context_agent(agent)
     try:
@@ -386,9 +507,27 @@ async def update_research_sites(
     return [_site_view(site) for site in saved]
 
 
+@router.put("/{agent}/context/code-repositories", response_model=list[AgentCodeRepositoryView])
+async def update_code_repositories(
+    agent: str,
+    payload: UpdateCodeRepositoriesPayload,
+    project: str = "pimc",
+) -> list[AgentCodeRepositoryView]:
+    _ensure_context_agent(agent)
+    try:
+        saved = save_agent_code_repositories(
+            agent,
+            [item.model_dump() for item in payload.repositories],
+            project=project,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return [_code_repository_view(repo) for repo in saved]
+
+
 @router.get("/coding/workspace", response_model=CodingWorkspaceView)
 async def get_coding_workspace(
-    project: str = "moe-pimc",
+    project: str = "pimc",
     source: str = "auto",
     run_id: str | None = None,
 ) -> CodingWorkspaceView:
@@ -417,7 +556,7 @@ async def get_coding_workspace(
 
 @router.get("/coding/workspace/file", response_model=CodeFileContentView)
 async def get_coding_workspace_file(
-    project: str = "moe-pimc",
+    project: str = "pimc",
     source: str = "auto",
     path: str = "",
 ) -> CodeFileContentView:
@@ -545,7 +684,7 @@ def _warnings(handle: PostTrainingHandle) -> list[str]:
         handle.enabled
         and handle.mode == "endpoint"
         and handle.endpoint_provider == "custom"
-        and not os.environ.get(handle.api_key_env or "")
+        and not env_or_local(handle.api_key_env or "")
     ):
         warnings.append(
             f"api_key_env={handle.api_key_env} is not set; provider will fall back to mock"

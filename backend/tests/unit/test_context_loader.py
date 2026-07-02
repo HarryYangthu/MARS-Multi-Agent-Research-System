@@ -12,24 +12,26 @@ def test_loader_renders_three_layers() -> None:
     pack = build_context(
         agent_role="idea",
         output_schema="proposal.v1",
-        project="moe-pimc",
+        project="pimc",
         user_request="How to simplify the router?",
         upstream_handoff={"prev": "previous version body"},
     )
     text = pack.render()
     assert "MARS" in text
-    assert "Project: moe-pimc" in text
+    assert "Project: pimc" in text
+    assert "PIMC 公共上下文" in text
+    assert "paper_APE_db" in text
     assert "How to simplify the router?" in text
     assert "previous version body" in text
 
 
 def test_manifest_writes_to_runs_dir(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     pack = build_context(
         agent_role="idea",
         output_schema="proposal.v1",
-        project="moe-pimc",
+        project="pimc",
         user_request="x",
     )
     p = write_manifest(run_root=run.root, pack=pack, agent_name="idea")
@@ -38,7 +40,8 @@ def test_manifest_writes_to_runs_dir(tmp_path: Path) -> None:
     assert p.suffix == ".json"
     payload = json.loads(p.read_text(encoding="utf-8"))
     assert payload["summary"]["source"] == "compiler"
-    assert payload["compiled_manifest"]["schema"] == "context_compile_manifest.v1"
+    assert payload["compiled_manifest"]["schema"] == "context_compile_manifest.v2"
     assert payload["compiled_manifest"]["messages"]
+    assert "public_context.md" in payload["summary"]["project"]["context_docs"]
     snap = p.parent / p.name.replace("_pack", "_snapshot").replace(".json", ".md")
     assert snap.exists()

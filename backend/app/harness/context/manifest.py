@@ -16,9 +16,15 @@ from app.harness.context.loader import ContextPack
 
 def _next_version(d: Path, stem: str) -> int:
     if not d.exists():
-        return 1
-    existing = list(d.glob(f"{stem}.v*.json"))
-    return len(existing) + 1
+        return 2
+    versions: list[int] = []
+    for path in d.glob(f"{stem}.v*.json"):
+        suffix = path.name.removeprefix(f"{stem}.v").removesuffix(".json")
+        try:
+            versions.append(int(suffix))
+        except ValueError:
+            continue
+    return max(2, max(versions, default=1) + 1)
 
 
 def write(*, run_root: Path, pack: ContextPack, agent_name: str) -> Path:
@@ -83,6 +89,7 @@ def _summary_from_compiled(
         "project": {
             "name": pack.project.project,
             "agents_md_chars": len(pack.project.agents_md),
+            "context_docs": [name for name, _content in pack.project.context_docs],
         },
         "task": {
             "user_request_chars": len(pack.task.user_request),

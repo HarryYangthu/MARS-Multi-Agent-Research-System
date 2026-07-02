@@ -22,10 +22,10 @@
 ```yaml
 ---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 created: 2026-05-04T10:32:00Z
-research_question: "How can ATK-MoE further reduce compute under 8L config while preserving RES performance?"
+research_question: "How can PIMC further reduce compute under 8L config while preserving RES performance?"
 hypothesis: "A simplified hard top-2 router degrades RES by less than 1.5 dB while cutting MAC count by ~30%."
 novelty: "Combines hard top-2 routing with stream-aware gating; not present in surveyed literature."
 theoretical_basis: "Sparse expert activation reduces effective compute; PIM cancellation preserves dominant expert path."
@@ -33,7 +33,7 @@ constraints:
   - "baseline_compat: required"
   - "ASIC_resource: ≤40% reduction"
 related_literature:
-  - title: "MoE Routing Survey 2024"
+  - title: "routing Routing Survey 2024"
     url: "https://arxiv.org/abs/2404.00000"
 debate_summary:
   rounds: 2
@@ -55,7 +55,7 @@ debate_summary:
 ```yaml
 ---
 schema: experiment_plan.v1
-project: moe-pimc
+project: pimc
 agent: experiment
 upstream_artifact: idea_proposal.approved.md
 variables:
@@ -94,7 +94,7 @@ estimated_gpu_hours: 18
 ```yaml
 ---
 schema: code_spec.v1
-project: moe-pimc
+project: pimc
 agent: coding
 upstream_artifact: experiment_plan.approved.md
 target_lang: python
@@ -128,10 +128,10 @@ test_coverage:
 ```yaml
 ---
 schema: run_log.v1
-project: moe-pimc
+project: pimc
 agent: execution
 upstream_artifact: code_spec.approved.md
-run_id: "2026-05-04T2310_pimc_moe_ablation_run3"
+run_id: "2026-05-04T2310_pimc_ablation_run3"
 batch_size: 512
 gpu_used: ["L40S:1", "L40S:2"]
 duration_seconds: 3420
@@ -158,7 +158,7 @@ When `is_mock: true` the artifact came from `execution/mock_simulation.py`. Sche
 ```yaml
 ---
 schema: report.v1
-project: moe-pimc
+project: pimc
 agent: writing
 deliverable_type: research_report
 target_audience: phd_advisor
@@ -189,7 +189,7 @@ debate_summary:
 ```yaml
 ---
 schema: diagnosis.v1
-project: moe-pimc
+project: pimc
 agent: bridge
 run_id: example_run
 attempt: 1
@@ -226,7 +226,7 @@ budget_status: within_budget
 ```yaml
 ---
 schema: evaluation_report.v1
-project: moe-pimc
+project: pimc
 scope: artifact
 target_ref: idea/idea_proposal.v1.md
 target_schema: proposal.v1

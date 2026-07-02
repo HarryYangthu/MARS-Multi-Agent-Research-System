@@ -1,6 +1,6 @@
 ---
 schema: report.v1
-project: moe-pimc
+project: pimc
 agent: writing
 deliverable_type: research_report
 target_audience: phd_advisor

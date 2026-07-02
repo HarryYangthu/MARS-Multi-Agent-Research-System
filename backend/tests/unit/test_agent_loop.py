@@ -94,7 +94,7 @@ class _RunnerAgent(_RepairingAgent):
 @pytest.mark.asyncio
 async def test_agent_loop_repairs_schema_invalid_draft() -> None:
     agent = _RepairingAgent(loop={"max_validation_repairs": 1, "max_tool_steps": 5})
-    request = RunRequest(project="moe-pimc", user_request="repair test")
+    request = RunRequest(project="pimc", user_request="repair test")
     context = await agent.build_context(request)
 
     artifact = await agent.run_loop(request, context)
@@ -110,7 +110,7 @@ async def test_agent_loop_repairs_schema_invalid_draft() -> None:
 @pytest.mark.asyncio
 async def test_agent_loop_preserves_invalid_artifact_when_repair_disabled() -> None:
     agent = _RepairingAgent(loop={"max_validation_repairs": 0})
-    request = RunRequest(project="moe-pimc", user_request="repair disabled")
+    request = RunRequest(project="pimc", user_request="repair disabled")
     context = await agent.build_context(request)
 
     artifact = await agent.run_loop(request, context)
@@ -133,7 +133,7 @@ async def test_agent_runner_uses_agent_loop(tmp_path: Path) -> None:
     get_registry().register("idea", agent)
     run = RunStore(tmp_path / "runs").create(
         task="agent-loop",
-        project="moe-pimc",
+        project="pimc",
         entrypoint="idea",
         user_request="runner should use run_loop",
     )

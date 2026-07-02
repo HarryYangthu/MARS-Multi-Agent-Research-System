@@ -6,7 +6,7 @@
 ## 项目一句话定义
 
 MARS = 研究型多 Agent 系统的底座(Multi-Agent Research System)。
-首个项目:`projects/moe-pimc/` — PIMC for FDD Massive MIMO under beam/layer switching。
+首个项目:`projects/pimc/` — PIMC for FDD Massive MIMO under beam/layer switching。
 
 ## 技术栈
 
@@ -55,8 +55,8 @@ mars/
 ├─ knowledge/                  # 4 区 KB 物理文件(literature/methodology/code_assets/run_archive)
 ├─ runs/<timestamp>_<task>/    # 每次任务完整沉淀
 ├─ templates/                  # prompts / artifacts / reports / code_rules
-├─ projects/moe-pimc/          # 项目元数据 + AGENTS.md + repo_link.yaml + data_gen.py
-├─ posttrain/                  # V1 占位
+├─ projects/pimc/          # 项目元数据 + AGENTS.md + repo_link.yaml + data_gen.py
+├─ posttrain/                  # V2 占位
 ├─ docs/                       # 补充文档
 └─ scripts/                    # dev.sh / run_agent.py / index_repo.py
 ```
@@ -71,7 +71,7 @@ mars/
 
 4. **HITL 两层**:每个 Agent 输出支持人工 review / 编辑 / approve(`hitl/`,高频);系统级 5 个 Gate 强制阻塞(`harness/gates/`,稀疏)。Gate 5(baseline_compatibility)由项目 `AGENTS.md` 静态规则触发,**挂在 `harness/tools/registry.py` 的 dispatch 路径上**,不是 bridge 流程的 checkpoint。
 
-5. **Posttrain V0/V1 边界**:V0 只支持**加载**后训练模型(vLLM serve / LoRA adapter / 远程 endpoint)。V0 **不实现** GRPO 训练流水线、preference pair 构造、reward 设计。这些是 V1。
+5. **Posttrain V0/V2 边界**:V0 只支持**加载**后训练模型(vLLM serve / LoRA adapter / 远程 endpoint)。V0 **不实现** GRPO 训练流水线、preference pair 构造、reward 设计。这些是 V2。
 
 6. **真实研究代码不复制进仓**:通过 `projects/<name>/repo_link.yaml` 接入(`local_path` / `git_submodule` / `mirror`)。仓内只存:项目元数据、`AGENTS.md`、可入仓的合成数据脚本(如 `data_gen.py`)、可选脱敏简化样例。
 
@@ -87,7 +87,7 @@ mars/
 
 - Python 3.11,类型注解强制(`mypy --strict` CI 必过)
 - 日志用 `loguru`,禁用 `print`
-- tensor 操作前后必须有 shape 注释(沿用 `projects/moe-pimc/AGENTS.md` 第 4 条)
+- tensor 操作前后必须有 shape 注释(沿用 `projects/pimc/AGENTS.md` 第 4 条)
 - 配置统一用 YAML,禁止硬编码常量
 - 新增依赖必须在 PR 描述说明理由
 - 测试目录 `backend/tests/`,新功能必须配 unit test

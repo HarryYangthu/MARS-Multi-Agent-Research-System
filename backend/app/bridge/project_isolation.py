@@ -1,4 +1,4 @@
-"""Project isolation surface (V0 single-project; interface preserved for V1)."""
+"""Project isolation surface (V0 single-project; interface preserved for V2)."""
 from __future__ import annotations
 
 from dataclasses import dataclass

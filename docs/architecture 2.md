@@ -109,7 +109,7 @@ Each zone is a JSON-persisted vector store with a deterministic 256-d hash embed
 |---|---|---|
 | LLM | API key absent for the provider | `harness/llm/mock_provider.py` |
 | Debate | required providers missing | `agents/debate/debate_runner.py::_auto_mode` |
-| Simulation | always in V0 (real subprocess is V1) | `execution/mock_simulation.py` |
+| Simulation | always in V0 (real subprocess is V2) | `execution/mock_simulation.py` |
 
 Together they let V0 boot on a laptop with zero API keys, zero GPUs, zero network — and still run the entire 11-step demo (`scripts/run_demo.py`).
 
@@ -141,7 +141,7 @@ mars_claude/
 │  ├─ storage/                        (run_store, artifact_store, file_store)
 │  └─ workers/                        (placeholders — V0 uses asyncio inline)
 ├─ configs/                           (agents/models/tools/gates/knowledge/execution.yaml)
-├─ projects/moe-pimc/                 (project metadata + AGENTS.md + data_gen)
+├─ projects/pimc/                 (project metadata + AGENTS.md + data_gen)
 ├─ workspace/repos/pimc-stub/         (Dev-E2E placeholder for the real research repo)
 ├─ knowledge/                         (4 KB zones — JSON-persisted)
 ├─ runs/                              (per-task sedimentation: 9 subdirs each)

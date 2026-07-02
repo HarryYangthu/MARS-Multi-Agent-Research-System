@@ -2,7 +2,7 @@
 
 Execution Agent 把 `code_spec` 的 ablation 网格转成可运行的 PIM cancellation 批次：
 对每条 ablation 在 dual-carrier 合成信号（fs=184.32 MHz, f1=30 / f2=38 MHz, ~30720 复点）上
-拟合 memory-polynomial canceller（可选 MoE router），逐 step 输出 loss/RES，最后汇总指标、
+拟合 memory-polynomial canceller（可选 router），逐 step 输出 loss/RES，最后汇总指标、
 日志与曲线图。
 
 硬性原则：

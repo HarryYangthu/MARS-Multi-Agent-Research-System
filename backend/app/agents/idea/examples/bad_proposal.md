@@ -1,4 +1,4 @@
-# 不合格 Proposal 示例 — MoE-PIMC
+# 不合格 Proposal 示例 — PIMC
 
 下面是一个会被打回的 PIM 抵消 proposal 样例,以及它为什么不合格。
 

@@ -1,4 +1,4 @@
-"""Context Engineering V1 APIs."""
+"""Context Engineering V2 APIs."""
 from __future__ import annotations
 
 import json
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/context", tags=["context"])
 
 class ContextPreviewPayload(BaseModel):
     agent: str = Field(..., min_length=1)
-    project: str = Field(default="moe-pimc", min_length=1)
+    project: str = Field(default="pimc", min_length=1)
     task: str = ""
     upstream: dict[str, str] = Field(default_factory=dict)
 
@@ -126,11 +126,13 @@ def _manifest_paths(run_root: Path) -> list[Path]:
     context_dir = run_root / "context"
     if not context_dir.exists():
         return []
-    return sorted(
+    legacy = [
         path
         for path in context_dir.glob("context_manifest.v2.*.json")
         if path.name != "context_manifest.v2.json"
-    )
+    ]
+    agent_manifests = list(context_dir.glob("agents/*/manifests/context_manifest.v2.*.json"))
+    return sorted(legacy + agent_manifests)
 
 
 def _manifest_summary(path: Path, *, run_root: Path) -> dict[str, Any]:

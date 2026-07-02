@@ -17,6 +17,7 @@ from loguru import logger
 from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.bridge_agent import BridgeAgent, BridgeDecision
 from app.bridge.commander_agent import CommanderAgent, FeedbackDecision
+from app.bridge.langgraph_runtime import LangGraphRuntimeFacade
 from app.bridge.node_key import attempt_key, parse_node_key
 from app.bridge.workflow_service import EntryPoint, build_pipeline, build_standalone
 from app.harness.observability.tracing import TraceRecorder
@@ -68,6 +69,7 @@ class Orchestrator:
         self.bus = bus or InProcessEventBus()
         self.bridge_agent = BridgeAgent()
         self.commander_agent = CommanderAgent()
+        self.langgraph_runtime = LangGraphRuntimeFacade()
         self._sessions: dict[str, RunSession] = {}
 
     # --------------------------------------------------------------- create
@@ -91,6 +93,8 @@ class Orchestrator:
         session = RunSession(run=run, graph=graph, request=request, bus=self.bus)
         self._sessions[run.run_id] = session
         TraceRecorder(run).ensure_manifest()
+        if self.langgraph_runtime.enabled():
+            self.langgraph_runtime.write_manifest(run=run, graph=graph)
         self._persist_state(session, status="created")
         return session
 
@@ -188,10 +192,59 @@ class Orchestrator:
             )
 
     async def _advance(self, session: RunSession, node_key: str) -> None:
+        await self._transition(session, node_key, NodeState.RUNNING)
+        if not await self._run_node_runner(session, node_key):
+            return
+        # default flow: agent finishes -> waiting_review -> (HITL or auto) -> approved -> done
+        if session.graph.state(node_key) == NodeState.RUNNING:
+            await self._transition(session, node_key, NodeState.WAITING_REVIEW)
+            self._refresh_idea_acceptance_report(session, node_key)
+        if session.graph.state(node_key) == NodeState.WAITING_REVIEW:
+            await self._await_hitl_or_auto(session, node_key)
+            await self._complete_approved_node(session, node_key)
+
+    def _refresh_idea_acceptance_report(
+        self,
+        session: RunSession,
+        node_key: str,
+    ) -> None:
+        if parse_node_key(node_key).stage != "idea":
+            return
+        try:
+            from app.agents.idea.acceptance import write_idea_acceptance_report
+
+            report_path = write_idea_acceptance_report(
+                run=session.run,
+                node_key=node_key,
+            )
+            session.run.write_event(
+                "agent_events",
+                {
+                    "event": "idea.acceptance_report_refreshed",
+                    "agent": "idea",
+                    "node": node_key,
+                    "path": report_path.relative_to(session.run.root).as_posix(),
+                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - report refresh is non-blocking
+            logger.warning(
+                "idea acceptance report refresh failed: run={} node={} error={}",
+                session.run.run_id,
+                node_key,
+                exc,
+            )
+
+    async def _run_node_runner(
+        self,
+        session: RunSession,
+        node_key: str,
+        *,
+        revision_reason: str = "",
+    ) -> bool:
         runner = session.runners.get(node_key) or self._default_runner(node_key)
         node_kind = session.graph.nodes[node_key].kind
         recorder = TraceRecorder(session.run)
-        await self._transition(session, node_key, NodeState.RUNNING)
         try:
             with recorder.start_span(
                 name=f"node:{node_key}",
@@ -201,9 +254,20 @@ class Orchestrator:
                     "node": node_key,
                     "stage": parse_node_key(node_key).stage,
                     "attempt": parse_node_key(node_key).attempt,
+                    "revision": bool(revision_reason),
                 },
             ):
-                await runner(session.run, node_key)
+                if revision_reason and node_key not in session.runners:
+                    from app.bridge.agent_runner import run_agent_node
+
+                    await run_agent_node(
+                        session.run,
+                        node_key,
+                        bus=session.bus,
+                        revision_reason=revision_reason,
+                    )
+                else:
+                    await runner(session.run, node_key)
         except Exception as exc:
             await self._transition(session, node_key, NodeState.FAILED)
             await self._publish_state(
@@ -211,68 +275,8 @@ class Orchestrator:
                 channel=f"run.{session.run.run_id}.failure",
                 payload={"node": node_key, "error": str(exc)},
             )
-            return
-        # default flow: agent finishes -> waiting_review -> (HITL or auto) -> approved -> done
-        if session.graph.state(node_key) == NodeState.RUNNING:
-            await self._transition(session, node_key, NodeState.WAITING_REVIEW)
-        if session.graph.state(node_key) == NodeState.WAITING_REVIEW:
-            await self._await_hitl_or_auto(session, node_key)
-        if session.graph.state(node_key) == NodeState.APPROVED:
-            if parse_node_key(node_key).stage == "execution":
-                await self._transition(session, node_key, NodeState.RUNNING)
-                try:
-                    from app.bridge.agent_runner import _run_execution_batch
-                    from app.harness.tools.registry import (
-                        ToolContext,
-                        get_registry as get_tool_registry,
-                    )
-
-                    async def _batch_runner(
-                        _args: dict[str, Any],
-                        _ctx: ToolContext,
-                    ) -> dict[str, Any]:
-                        await _run_execution_batch(
-                            run=session.run,
-                            node_key=node_key,
-                            bus=session.bus,
-                        )
-                        summary_path = session.run.subdir("execution") / "batch_summary.json"
-                        summary = (
-                            summary_path.read_text(encoding="utf-8")
-                            if summary_path.exists()
-                            else "{}"
-                        )
-                        return {"summary": summary}
-
-                    tool_result = await get_tool_registry().dispatch(
-                        "execution.batch_runner",
-                        {"node_key": node_key},
-                        ToolContext(
-                            run_id=session.run.run_id,
-                            project=session.run.project,
-                            agent="bridge",
-                            extra={
-                                "run_root": str(session.run.root),
-                                "batch_runner": _batch_runner,
-                            },
-                        ),
-                    )
-                    if not tool_result.ok:
-                        raise RuntimeError(tool_result.error or "execution batch failed")
-                except Exception as exc:
-                    await self._transition(session, node_key, NodeState.FAILED)
-                    await self._publish_state(
-                        session,
-                        channel=f"run.{session.run.run_id}.failure",
-                        payload={"node": node_key, "error": str(exc)},
-                    )
-                    return
-            await self._transition(session, node_key, NodeState.DONE)
-        if (
-            parse_node_key(node_key).stage == "execution"
-            and session.graph.state(node_key) == NodeState.DONE
-        ):
-            await self._after_execution(session, node_key)
+            return False
+        return True
 
     async def _await_hitl_or_auto(self, session: RunSession, node_key: str) -> None:
         """Wait for a human review decision, or auto-approve.
@@ -364,16 +368,169 @@ class Orchestrator:
             },
         )
 
-        # Wait until either approval or rejection fires. We poll every 100ms
-        # so that the test orchestrator can drive the events synchronously.
-        while not (review.approval_event.is_set() or review.rejection_event.is_set()):
-            await asyncio.sleep(0.05)
+        while True:
+            while not (
+                review.approval_event.is_set()
+                or review.rejection_event.is_set()
+                or review.regenerate_event.is_set()
+            ):
+                await asyncio.sleep(0.05)
 
-        if review.rejection_event.is_set():
-            await self._transition(session, node_key, NodeState.FAILED)
-        else:
+            if review.regenerate_event.is_set():
+                reason = review.revision_reason
+                await get_review_registry().unregister(session.run.run_id, stage)
+                await self._publish_state(
+                    session,
+                    channel=f"run.{session.run.run_id}.hitl",
+                    payload={
+                        "event": "hitl.revision_started",
+                        "agent": stage,
+                        "node": node_key,
+                        "reason": reason,
+                    },
+                )
+                await self._transition(session, node_key, NodeState.RUNNING)
+                if not await self._run_node_runner(
+                    session,
+                    node_key,
+                    revision_reason=reason,
+                ):
+                    return
+                if session.graph.state(node_key) == NodeState.RUNNING:
+                    await self._transition(
+                        session,
+                        node_key,
+                        NodeState.WAITING_REVIEW,
+                    )
+                latest = store.latest(agent_dir=agent_dir, stem=stem)
+                if latest is None:
+                    await self._transition(session, node_key, NodeState.FAILED)
+                    return
+                review = ReviewSession(
+                    run=session.run,
+                    agent_name=stage,
+                    artifact_ref=latest,
+                )
+                await get_review_registry().register(review)
+                await self._publish_state(
+                    session,
+                    channel=f"run.{session.run.run_id}.hitl",
+                    payload={
+                        "event": "hitl.review_required",
+                        "agent": stage,
+                        "node": node_key,
+                        "artifact_id": latest.path.name,
+                        "version": latest.version,
+                        "revision": True,
+                    },
+                )
+                continue
+
+            if review.rejection_event.is_set():
+                await self._transition(session, node_key, NodeState.FAILED)
+            else:
+                await self._transition(session, node_key, NodeState.APPROVED)
+            await get_review_registry().unregister(session.run.run_id, stage)
+            return
+
+    async def _complete_approved_node(
+        self,
+        session: RunSession,
+        node_key: str,
+    ) -> None:
+        if session.graph.state(node_key) != NodeState.APPROVED:
+            return
+        if parse_node_key(node_key).stage == "execution":
+            await self._transition(session, node_key, NodeState.RUNNING)
+            try:
+                from app.bridge.agent_runner import _run_execution_batch
+                from app.harness.tools.registry import (
+                    ToolContext,
+                    get_registry as get_tool_registry,
+                )
+
+                async def _batch_runner(
+                    _args: dict[str, Any],
+                    _ctx: ToolContext,
+                ) -> dict[str, Any]:
+                    await _run_execution_batch(
+                        run=session.run,
+                        node_key=node_key,
+                        bus=session.bus,
+                    )
+                    summary_path = session.run.subdir("execution") / "batch_summary.json"
+                    summary = (
+                        summary_path.read_text(encoding="utf-8")
+                        if summary_path.exists()
+                        else "{}"
+                    )
+                    return {"summary": summary}
+
+                tool_result = await get_tool_registry().dispatch(
+                    "execution.batch_runner",
+                    {"node_key": node_key},
+                    ToolContext(
+                        run_id=session.run.run_id,
+                        project=session.run.project,
+                        agent="bridge",
+                        extra={
+                            "run_root": str(session.run.root),
+                            "batch_runner": _batch_runner,
+                        },
+                    ),
+                )
+                if not tool_result.ok:
+                    raise RuntimeError(tool_result.error or "execution batch failed")
+            except Exception as exc:
+                await self._transition(session, node_key, NodeState.FAILED)
+                await self._publish_state(
+                    session,
+                    channel=f"run.{session.run.run_id}.failure",
+                    payload={"node": node_key, "error": str(exc)},
+                )
+                return
+        await self._transition(session, node_key, NodeState.DONE)
+        if parse_node_key(node_key).stage == "execution":
+            await self._after_execution(session, node_key)
+
+    async def resume_after_artifact_approval(
+        self,
+        *,
+        run_id: str,
+        agent: str,
+    ) -> dict[str, Any]:
+        """Recover orchestration when an approval arrives without ReviewSession.
+
+        ReviewSession is in-memory. After a backend restart the artifact
+        approval endpoint can still durably promote ``*.approved.md``, but no
+        event exists to wake the original HITL wait. This method advances the
+        matching waiting node and starts the downstream scheduler.
+        """
+        session = self.session(run_id)
+        node_key = self._latest_node_for_stage(session, agent)
+        if node_key is None:
+            return {"ok": False, "error": f"stage {agent} is not in this run"}
+        state = session.graph.state(node_key)
+        if state == NodeState.WAITING_REVIEW:
             await self._transition(session, node_key, NodeState.APPROVED)
-        await get_review_registry().unregister(session.run.run_id, stage)
+            state = session.graph.state(node_key)
+        if state == NodeState.APPROVED:
+            await self._complete_approved_node(session, node_key)
+            state = session.graph.state(node_key)
+        if state not in {NodeState.DONE, NodeState.SKIPPED}:
+            return {
+                "ok": False,
+                "status": "not_resumable",
+                "node": node_key,
+                "state": state.value,
+            }
+        if not session.graph.is_complete() and not session.waiting_for_feedback:
+            self._persist_state(session, status="running")
+            asyncio.create_task(self.run(run_id), name=f"resume_after_approval:{run_id}")
+            return {"ok": True, "status": "resumed", "node": node_key}
+        status = "waiting_feedback" if session.waiting_for_feedback else "completed"
+        self._persist_state(session, status=status)
+        return {"ok": True, "status": status, "node": node_key}
 
     def _auto_promote(self, session: RunSession, node_key: str) -> bool:
         """Copy the latest <stem>.vN.md to <stem>.approved.md.
@@ -435,6 +592,17 @@ class Orchestrator:
                     approved.path.name,
                     exc,
                 )
+            if stage == "writing":
+                try:
+                    from app.reporting import generate_report_bundle
+
+                    generate_report_bundle(session.run, actor="auto_approve")
+                except Exception as exc:  # pragma: no cover - report bundle is non-blocking
+                    logger.warning(
+                        "auto-approved report bundle generation failed: run={} error={}",
+                        session.run.run_id,
+                        exc,
+                    )
             return True
         return True
 
@@ -459,7 +627,7 @@ class Orchestrator:
     async def _after_execution(self, session: RunSession, node_key: str) -> None:
         """Let the Commander/Bridge evaluate metrics after execution.
 
-        Diagnosis is a run-level failure analysis artifact in V1, not a
+        Diagnosis is a run-level failure analysis artifact in V2, not a
         pipeline node. In development auto-approve runs may append the repair
         chain automatically so legacy e2e stays runnable; otherwise the run
         pauses at waiting_feedback until a human starts the feedback loop.
@@ -618,6 +786,88 @@ class Orchestrator:
             "confidence": getattr(decision, "confidence", 0.0),
         }
 
+    async def request_artifact_revision(
+        self,
+        *,
+        run_id: str,
+        agent: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        session = self.session(run_id)
+        node_key = self._latest_node_for_stage(session, agent)
+        if node_key is None:
+            return {"ok": False, "error": f"stage {agent} is not in this run"}
+        state = session.graph.state(node_key)
+        if state == NodeState.RUNNING:
+            return {"ok": True, "status": "already_running", "node": node_key}
+        if state not in {
+            NodeState.WAITING_REVIEW,
+            NodeState.FAILED,
+            NodeState.APPROVED,
+        }:
+            return {
+                "ok": False,
+                "error": f"stage {agent} cannot be revised from {state.value}",
+                "node": node_key,
+            }
+        await self._publish_state(
+            session,
+            channel=f"run.{session.run.run_id}.hitl",
+            payload={
+                "event": "hitl.revision_requested",
+                "agent": agent,
+                "node": node_key,
+                "reason": reason,
+                "fallback": True,
+            },
+        )
+        asyncio.create_task(
+            self._run_revision_flow(
+                session=session,
+                node_key=node_key,
+                reason=reason,
+            ),
+            name=f"artifact_revision:{run_id}:{node_key}",
+        )
+        return {"ok": True, "status": "revision_started", "node": node_key}
+
+    async def _run_revision_flow(
+        self,
+        *,
+        session: RunSession,
+        node_key: str,
+        reason: str,
+    ) -> None:
+        try:
+            await self._transition(session, node_key, NodeState.RUNNING)
+            if not await self._run_node_runner(
+                session,
+                node_key,
+                revision_reason=reason,
+            ):
+                return
+            if session.graph.state(node_key) == NodeState.RUNNING:
+                await self._transition(session, node_key, NodeState.WAITING_REVIEW)
+            if session.graph.state(node_key) == NodeState.WAITING_REVIEW:
+                await self._await_hitl_or_auto(session, node_key)
+        except Exception as exc:  # pragma: no cover - background safety net
+            logger.warning(
+                "artifact revision flow failed: run={} node={} error={}",
+                session.run.run_id,
+                node_key,
+                exc,
+            )
+
+    def _latest_node_for_stage(self, session: RunSession, stage: str) -> str | None:
+        candidates = [
+            key
+            for key in session.graph.nodes
+            if parse_node_key(key).stage == stage
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda key: parse_node_key(key).attempt)
+
     def _recover_session(self, run_id: str) -> RunSession | None:
         run = self.run_store.get(run_id)
         if run is None:
@@ -712,6 +962,13 @@ class Orchestrator:
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         }
         session.run.write_event("agent_events", payload)
+        await self.langgraph_runtime.emit_transition(
+            run=session.run,
+            bus=session.bus,
+            node_key=node_key,
+            from_state=prev,
+            to_state=new_state,
+        )
         TraceRecorder(session.run).record_event_ref(
             channel="agent_events",
             event="agent_state",

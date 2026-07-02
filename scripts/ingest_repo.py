@@ -7,7 +7,7 @@ to `knowledge/code_assets/_index.json` via the same ingestion path the
 runtime uses.
 
 Usage:
-    python scripts/ingest_repo.py                        # default project = moe-pimc
+    python scripts/ingest_repo.py                        # default project = pimc
     python scripts/ingest_repo.py --project other-name
     python scripts/ingest_repo.py --dry-run              # report only
 """
@@ -40,7 +40,7 @@ def _load_repo_link(project: str) -> dict:
 def _resolve_path(repo_path: str) -> Path:
     if repo_path.startswith("/"):
         return Path(repo_path)
-    return (REPO_ROOT / "projects" / "moe-pimc" / repo_path).resolve()
+    return (REPO_ROOT / "projects" / "pimc" / repo_path).resolve()
 
 
 def _matches_ignore(rel: Path, patterns: list[str]) -> bool:
@@ -67,7 +67,7 @@ def _matches_allowed(rel: Path, allowed: list[str]) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--project", default="moe-pimc")
+    ap.add_argument("--project", default="pimc")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--max-bytes-per-file", type=int, default=200_000)
     args = ap.parse_args(argv)

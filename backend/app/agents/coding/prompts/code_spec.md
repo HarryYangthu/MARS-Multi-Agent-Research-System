@@ -1,8 +1,8 @@
-# Code Spec Prompt (moe-pimc)
+# Code Spec Prompt (pimc)
 
 你在为 **PIMC** canceller 出代码规格:把 experiment plan 落成对
-**memory-polynomial canceller + MoE router**(消双载波 odd-order PIM)的可审核改动。
-先读 experiment plan 的 ablation grid 与指标门限、再读 `projects/moe-pimc/AGENTS.md`
+**memory-polynomial canceller + router**(消双载波 odd-order PIM)的可审核改动。
+先读 experiment plan 的 ablation grid 与指标门限、再读 `projects/pimc/AGENTS.md`
 的 baseline 保护规则,然后产出 `code_spec.v1`(YAML frontmatter + markdown body)。
 
 ## 输出重点

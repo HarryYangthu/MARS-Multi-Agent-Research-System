@@ -102,7 +102,7 @@ I implemented the entire system **solo, full-stack, from scratch**, in a 5-tier 
 - **Function-calling via JSON-ReAct**: instead of provider-native tool-use, the LLM emits a **strict JSON decision** `{reply, next_state, actions}` and I run a **ReAct loop** (execute tools → feed results back → decide again). Benefits: provider-agnostic, works under mock, more controllable;
 - **Doesn't rewrite the engine**: Commander is the "brain"; it reuses the existing orchestrator + self-healing engine as "hands" via tools — clean separation.
 
-**Live result**: one sentence — "run an ablation on ATK-MoE router simplification comparing expert_count vs RES, all the way to a paper" — and Commander **autonomously completes in ~4 minutes**: idea (debate) → experiment (auto-designs a memory×lr ablation grid) → coding → execution (real PIM sim) → writing (debate), all 5 stages done.
+**Live result**: one sentence — "run an ablation on PIMC router simplification comparing expert_count vs RES, all the way to a paper" — and Commander **autonomously completes in ~4 minutes**: idea (debate) → experiment (auto-designs a memory×lr ablation grid) → coding → execution (real PIM sim) → writing (debate), all 5 stages done.
 
 ### Problem 6: Demoable with zero dependencies — triple mock fallback
 
@@ -193,7 +193,7 @@ A: Schema validation + template few-shot in the system prompt + fence stripping 
 A: Conversation cadence (clarifying? awaiting confirm? reporting?) and pipeline execution (node running/done) are orthogonal concerns. The conversation FSM governs human-AI interaction; the pipeline FSM governs agent execution; Commander bridges them. Merging them would couple the two.
 
 **Q6: Concurrency / scalability?**
-A: V0 uses asyncio + semaphore (execution pool concurrency cap 6), an in-process event bus (swappable to Redis pub/sub), and per-run/per-experiment WebSocket channel isolation. V0 is single-user single-host; multi-user/distributed is V1 (a `project_isolation` interface is already reserved).
+A: V0 uses asyncio + semaphore (execution pool concurrency cap 6), an in-process event bus (swappable to Redis pub/sub), and per-run/per-experiment WebSocket channel isolation. V0 is single-user single-host; multi-user/distributed is V2 (a `project_isolation` interface is already reserved).
 
 **Q7: What would you redo?**
 A: (1) Deepen Commander's self-healing coupling (attribution is currently rule-engine + LLM explanation; could become LLM-led); (2) the KB embedding is a deterministic hash (for zero-dependency) — swap to sentence-transformers in production; (3) several frontend components poll independently — consolidate into a single state subscription.
@@ -213,7 +213,7 @@ A: Solo, full-stack, from scratch. Architecture first (5 top-level design docs),
 
 **Candid limitations**:
 - V0 single-user; no real GPU training yet (physics stand-in);
-- posttrain is a placeholder (V1);
+- posttrain is a placeholder (V2);
 - some capabilities are mock-backed;
 - solo dev, so some modules trade depth for breadth.
 

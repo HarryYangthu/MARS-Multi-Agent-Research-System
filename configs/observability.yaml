@@ -14,7 +14,7 @@ sinks:
 tracing:
   enabled: true
   exporter: file
-  manifest_path: context/trace_manifest.v1.json
+  manifest_path: context/trace_manifest.v2.json
   capture_llm_summary: true
   capture_tool_args: redacted
   capture_tool_result: summary

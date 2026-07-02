@@ -17,7 +17,7 @@ async def get_trace(run_id: str) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    path = run.subdir("context") / "trace_manifest.v1.json"
+    path = run.subdir("context") / "trace_manifest.v2.json"
     if not path.exists():
         return TraceRecorder(run).ensure_manifest()
     raw = json.loads(path.read_text(encoding="utf-8"))

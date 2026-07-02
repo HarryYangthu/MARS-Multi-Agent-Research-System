@@ -113,10 +113,10 @@ async def _run_demo(args: argparse.Namespace) -> int:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://mars.test") as client:
         _step(1, "User clicks Pipeline card on the front-end (simulated by API call)")
-        _step(2, "Select project: moe-pimc")
+        _step(2, "Select project: pimc")
         _step(3, "Enter research question:")
         user_request = (
-            "How can ATK-MoE further reduce compute under 8L config while preserving "
+            "How can PIMC further reduce compute under 8L config while preserving "
             "RES performance?"
         )
         print(f"        {user_request}")
@@ -128,7 +128,7 @@ async def _run_demo(args: argparse.Namespace) -> int:
             "/api/runs",
             {
                 "task": args.task,
-                "project": "moe-pimc",
+                "project": "pimc",
                 "entrypoint": "pipeline",
                 "user_request": user_request,
             },
@@ -145,7 +145,7 @@ async def _run_demo(args: argparse.Namespace) -> int:
 
         _step(
             6,
-            "HITL: review v1 -> approve -> idea_proposal.approved.md (Gate 1 passes)",
+            "HITL: review draft -> approve -> idea_proposal.approved.md (Gate 1 passes)",
         )
         await _approve(client, run_id, "idea", STEM_BY_AGENT["idea"])
 

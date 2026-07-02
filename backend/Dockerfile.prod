@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/backend
+
+COPY pyproject.toml /app/pyproject.toml
+COPY backend /app/backend
+RUN pip install --upgrade pip && pip install .
+
+COPY configs /app/configs
+COPY projects /app/projects
+COPY templates /app/templates
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*"]

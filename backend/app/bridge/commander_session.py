@@ -200,7 +200,7 @@ class CommanderSessionStore:
             state = ConversationState.IDLE
         return CommanderSession(
             conv_id=conv_id,
-            project=str(meta.get("project", "moe-pimc")),
+            project=str(meta.get("project", "pimc")),
             state=state,
             linked_run_id=meta.get("linked_run_id"),
             auto_mode=bool(meta.get("auto_mode", False)),

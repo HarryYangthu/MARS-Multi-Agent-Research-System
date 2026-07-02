@@ -41,10 +41,10 @@ function NewRunInner(): JSX.Element {
   const entrypoint = VALID_ENTRYPOINTS.has(initialEntry) ? initialEntry : "pipeline";
   const usesTemplate = TEMPLATE_ENTRIES.has(entrypoint);
 
-  const [task, setTask] = useState("ATK-MoE 8L 路由简化");
+  const [task, setTask] = useState("PIMC 8L 路由简化");
   const [project, setProject] = useState(selectedProject);
   const [userRequest, setUserRequest] = useState(
-    "如何在 8L 配置下进一步降低 ATK-MoE 的计算资源，同时保持 RES 性能？请用中文生成研究假设、实验方案和后续产物。",
+    "如何在 8L 配置下进一步降低 PIMC 的计算资源，同时保持 RES 性能？请用中文生成研究假设、实验方案和后续产物。",
   );
 
   useEffect(() => {
@@ -81,7 +81,8 @@ function NewRunInner(): JSX.Element {
       }
       const detail = await createRun(body);
       await startRun(detail.run_id);
-      router.push(`/runs/${detail.run_id}`);
+      const initialAgent = entrypoint === "pipeline" ? "commander" : entrypoint;
+      router.push(`/runs/${detail.run_id}?agent=${initialAgent}`);
     } catch (e) {
       const msg = String(e);
       // Try to parse Schema 422 errors from the server.

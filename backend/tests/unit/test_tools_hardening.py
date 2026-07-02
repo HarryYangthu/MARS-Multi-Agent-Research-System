@@ -42,7 +42,7 @@ async def test_dispatch_records_tool_call(tmp_path: Path) -> None:
         {"x": 1},
         ToolContext(
             run_id="r1",
-            project="moe-pimc",
+            project="pimc",
             agent="bridge",
             extra={"run_root": str(run_root)},
         ),
@@ -65,7 +65,7 @@ async def test_disabled_tool_returns_standard_status(tmp_path: Path) -> None:
         {"q": "pim"},
         ToolContext(
             run_id="r1",
-            project="moe-pimc",
+            project="pimc",
             agent="bridge",
             extra={"run_root": str(run_root)},
         ),
@@ -81,7 +81,7 @@ async def test_schema_invalid_args_are_rejected_before_tool() -> None:
     result = await reg.dispatch(
         "code.write_file",
         {"path": "libs/generated.py"},
-        ToolContext(run_id="r1", project="moe-pimc", agent="coding"),
+        ToolContext(run_id="r1", project="pimc", agent="coding"),
     )
 
     assert result.ok is False
@@ -100,7 +100,7 @@ async def test_large_refactor_diff_requires_approval_before_tool() -> None:
     result = await reg.dispatch(
         "code.patch_generator",
         {"diff": diff},
-        ToolContext(run_id="r1", project="moe-pimc", agent="coding"),
+        ToolContext(run_id="r1", project="pimc", agent="coding"),
     )
 
     assert result.ok is False
@@ -392,7 +392,7 @@ async def test_tool_audit_redacts_default_and_spec_keys(tmp_path: Path) -> None:
         },
         ToolContext(
             run_id="r1",
-            project="moe-pimc",
+            project="pimc",
             agent="bridge",
             extra={"run_root": str(run_root)},
         ),
@@ -423,7 +423,7 @@ def test_commander_canonical_tools_are_registered() -> None:
         assert name in TOOLS
 
 
-def test_tool_catalogue_has_v1_specs_and_config_entries() -> None:
+def test_tool_catalogue_has_v2_specs_and_config_entries() -> None:
     reg = reset_for_tests()
     configs = load_tool_configs()
     registered = set(reg.names())
@@ -504,7 +504,7 @@ async def test_agent_permission_blocks_before_tool_runs(tmp_path: Path) -> None:
         {},
         ToolContext(
             run_id="r1",
-            project="moe-pimc",
+            project="pimc",
             agent="coding",
             extra={"run_root": str(run_root)},
         ),
@@ -523,13 +523,13 @@ async def test_commander_canonical_tool_uses_registry_audit(tmp_path: Path) -> N
     store = RunStore(tmp_path / "runs")
     orchestrator = Orchestrator(run_store=store, bus=InProcessEventBus())
     session = orchestrator.create_session(
-        RunRequest(task="commander-tools", project="moe-pimc", entrypoint="pipeline")
+        RunRequest(task="commander-tools", project="pimc", entrypoint="pipeline")
     )
     from app.bridge.commander_session import CommanderSession
 
     commander_session = CommanderSession(
         conv_id="conv_tools",
-        project="moe-pimc",
+        project="pimc",
         linked_run_id=session.run.run_id,
     )
     result = await execute_commander_tool(

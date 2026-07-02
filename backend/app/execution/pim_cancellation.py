@@ -367,7 +367,11 @@ def plot_loss_curves(
     """Save a detailed overlay plot for a batch of loss curves."""
     if not loss_curves:
         raise ValueError("loss_curves must not be empty")
-    plt = _load_pyplot()
+    try:
+        plt = _load_pyplot()
+    except ImportError:
+        _write_simple_loss_png(loss_curve=_aggregate_loss_curve(loss_curves), path=path)
+        return
 
     with _PLOT_LOCK:
         fig, ax = plt.subplots(figsize=(13.0, 7.2), dpi=220)
@@ -419,6 +423,18 @@ def plot_loss_curves(
         )
         fig.tight_layout()
         _save_figure(fig, plt, path)
+
+
+def _aggregate_loss_curve(loss_curves: Mapping[str, Sequence[float]]) -> list[float]:
+    valid = [list(curve) for curve in loss_curves.values() if curve]
+    if not valid:
+        raise ValueError("loss_curves contains no points")
+    max_len = max(len(curve) for curve in valid)
+    out: list[float] = []
+    for index in range(max_len):
+        values = [float(curve[min(index, len(curve) - 1)]) for curve in valid]
+        out.append(sum(values) / len(values))
+    return out
 
 
 def _load_pyplot() -> Any:

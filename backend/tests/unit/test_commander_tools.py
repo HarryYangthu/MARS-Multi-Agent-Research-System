@@ -16,7 +16,7 @@ from app.storage.run_store import RunStore
 async def test_commander_tool_chain_writes_run_event(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs")
     orch = Orchestrator(run_store=store, bus=InProcessEventBus())
-    session = CommanderSession(conv_id="conv_test", project="moe-pimc")
+    session = CommanderSession(conv_id="conv_test", project="pimc")
     ctx = ToolContext(orchestrator=orch, session=session, run_store=store)
 
     result = await execute_tool(

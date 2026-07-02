@@ -1,6 +1,6 @@
 """File-backed trace manifest with optional OpenTelemetry compatibility.
 
-V1 keeps JSONL events as the audit source and writes a compact trace manifest
+V2 keeps JSONL events as the audit source and writes a compact trace manifest
 for UI waterfall/debugging. If OpenTelemetry packages are installed later,
 the trace id/span ids here can be correlated with real exported spans.
 """
@@ -43,7 +43,7 @@ class TraceSpan:
 class TraceRecorder:
     def __init__(self, run: RunLike) -> None:
         self.run = run
-        self.path = run.subdir("context") / "trace_manifest.v1.json"
+        self.path = run.subdir("context") / "trace_manifest.v2.json"
 
     def ensure_manifest(self) -> dict[str, Any]:
         if self.path.exists():
@@ -51,7 +51,7 @@ class TraceRecorder:
             if isinstance(raw, dict):
                 return raw
         manifest: dict[str, Any] = {
-            "schema": "trace_manifest.v1",
+            "schema": "trace_manifest.v2",
             "run_id": self.run.run_id,
             "trace_id": uuid.uuid4().hex,
             "root_span_id": uuid.uuid4().hex[:16],

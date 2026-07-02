@@ -53,6 +53,7 @@ SUPPORTED_SCHEMAS: tuple[str, ...] = (
     "feedback_packet.v1",
     "evaluation_report.v1",
     "report.v1",
+    "report_bundle.v1",
 )
 
 

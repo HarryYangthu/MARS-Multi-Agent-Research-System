@@ -13,7 +13,7 @@ from mars_posttrain.dry_run import DryRunOptions, run_dry_run
 def _proposal_text() -> str:
     metadata = {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "research_question": "Can hard routing reduce compute while preserving RES?",
         "hypothesis": "Hard top-2 routing preserves RES within 1.5 dB.",
@@ -42,7 +42,7 @@ def _proposal_text() -> str:
 
 
 def test_posttrain_dry_run_writes_traceable_mock_checkpoint(tmp_path: Path) -> None:
-    run = RunStore(tmp_path / "runs").create(task="posttrain-dry-run", project="moe-pimc")
+    run = RunStore(tmp_path / "runs").create(task="posttrain-dry-run", project="pimc")
     store = ArtifactStore(run)
     draft = store.write(text=_proposal_text())
     store.approve(draft)

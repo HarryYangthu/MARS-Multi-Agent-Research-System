@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 
 
 @router.get("/commander-attribution")
-async def get_commander_attribution_eval(project: str = "moe-pimc") -> dict[str, Any]:
+async def get_commander_attribution_eval(project: str = "pimc") -> dict[str, Any]:
     return run_commander_attribution_eval(project=project)
 
 

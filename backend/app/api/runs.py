@@ -45,6 +45,10 @@ class RunDetail(RunSummary):
     graph: dict[str, Any]
 
 
+class RetryAgentPayload(BaseModel):
+    reason: str = ""
+
+
 @router.post("", response_model=RunDetail)
 async def create_run(payload: CreateRunPayload) -> RunDetail:
     try:
@@ -185,7 +189,33 @@ async def start_run(run_id: str) -> dict[str, str]:
     return {"status": "started", "run_id": run_id}
 
 
+@router.post("/{run_id}/agents/{agent}/retry", status_code=202)
+async def retry_agent(
+    run_id: str,
+    agent: str,
+    payload: RetryAgentPayload,
+) -> dict[str, str]:
+    orch = get_orchestrator()
+    reason = payload.reason.strip() or "人工请求重试失败 Agent。"
+    try:
+        result = await orch.request_artifact_revision(
+            run_id=run_id,
+            agent=agent,
+            reason=reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result)
+    return {
+        "status": str(result.get("status") or "revision_started"),
+        "run_id": run_id,
+        "agent": agent,
+        "node": str(result.get("node") or agent),
+    }
+
+
 @router.post("/{run_id}/stop", status_code=202)
 async def stop_run(run_id: str) -> dict[str, str]:
-    # V0 has no cancellation hook; placeholder for V1.
+    # V0 has no cancellation hook; placeholder for V2.
     return {"status": "stop_requested", "run_id": run_id}

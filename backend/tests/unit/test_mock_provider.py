@@ -20,7 +20,7 @@ def test_build_fake_metadata_validates(schema_id: str) -> None:
     assert result.valid, f"{schema_id} fake invalid: {result.errors}"
 
 
-def test_fake_proposal_has_v1_idea_fields() -> None:
+def test_fake_proposal_has_v2_idea_fields() -> None:
     md = build_fake_metadata("proposal.v1", seed="abc123")
     assert md["testable_predictions"]
     assert md["experiment_hint"]

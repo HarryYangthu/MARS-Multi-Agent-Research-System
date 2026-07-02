@@ -68,7 +68,7 @@ async def test_mock_pipeline_sediments_only_to_quarantine(
     session = orch.create_session(
         RunRequest(
             task="memory-governance-mock",
-            project="moe-pimc",
+            project="pimc",
             entrypoint="pipeline",
             user_request="Run mock pipeline and keep long-term KB clean.",
             auto_approve=True,
@@ -93,14 +93,14 @@ def test_research_profile_eval_fail_does_not_enter_main_zones(tmp_path: Path) ->
     stores = reset_kb_stores(tmp_path / "knowledge")
     run = RunStore(tmp_path / "runs").create(
         task="eval-fail",
-        project="moe-pimc",
+        project="pimc",
         user_request="invalid artifact",
     )
     path = run.subdir("idea") / "idea_proposal.approved.md"
     path.write_text(
         """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: "How can routing be simplified?"
 hypothesis: "Hard routing may work under switching."
@@ -140,7 +140,7 @@ def test_knowledge_api_defaults_filter_unsafe_memory(tmp_path: Path) -> None:
     good = ingest_memory(
         zone="methodology",
         text="router memory governance verified baseline",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="tests/good.md",
         eval_status=eval_status,
@@ -152,7 +152,7 @@ def test_knowledge_api_defaults_filter_unsafe_memory(tmp_path: Path) -> None:
     mock = ingest_memory(
         zone="methodology",
         text="router memory governance mock placeholder",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="tests/mock.md",
         is_mock=True,
@@ -162,7 +162,7 @@ def test_knowledge_api_defaults_filter_unsafe_memory(tmp_path: Path) -> None:
     old = ingest_memory(
         zone="methodology",
         text="router memory governance superseded",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="tests/old.md",
         approved=True,
@@ -171,7 +171,7 @@ def test_knowledge_api_defaults_filter_unsafe_memory(tmp_path: Path) -> None:
     quarantined = ingest_memory(
         zone="quarantine",
         text="router memory governance quarantine",
-        metadata={"project": "moe-pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology"},
         memory_type="procedural",
         source_path="tests/quarantine.md",
         is_mock=True,

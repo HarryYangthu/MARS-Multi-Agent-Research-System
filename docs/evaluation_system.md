@@ -65,7 +65,7 @@ The current V0-compatible behavior is:
 - Store per-artifact eval files beside the target artifact, e.g.
   `runs/<id>/idea/idea_proposal.v1.eval.md`.
 - Store run-level scorecard as `runs/<id>/events/evaluation_scorecard.json`.
-- V1 may add `runs/<id>/evaluation/` after `ACCEPTANCE.md` is updated.
+- V2 may add `runs/<id>/evaluation/` after `ACCEPTANCE.md` is updated.
 
 ## 5. Core Data Model
 
@@ -74,7 +74,7 @@ All evaluator output should be normalized to `evaluation_report.v1`.
 ```yaml
 ---
 schema: evaluation_report.v1
-project: moe-pimc
+project: pimc
 scope: artifact          # artifact / run / benchmark / model_backend
 target_ref: idea/idea_proposal.v1.md
 target_schema: proposal.v1
@@ -179,7 +179,7 @@ block: any deterministic blocker
 For research outcome, project thresholds override generic thresholds. Example:
 
 ```yaml
-moe-pimc:
+pimc:
   metrics:
     loss:
       target: 0.04
@@ -261,7 +261,7 @@ scopes:
       - benchmark.e2e_mock_success
 
 projects:
-  moe-pimc:
+  pimc:
     metrics:
       loss: {target: 0.04, direction: lte, aggregation: max}
       RES: {target: -43.5, direction: gte, aggregation: mean}
@@ -322,7 +322,7 @@ Create `evals/` or `backend/tests/evaluation/fixtures/` with fixed cases:
 evals/
 ├─ suites/
 │  ├─ smoke_mock.yaml
-│  ├─ moe_pimc_routing.yaml
+│  ├─ pimc_routing.yaml
 │  ├─ gate_regression.yaml
 │  └─ baseline_reuse.yaml
 └─ golden/
@@ -362,7 +362,7 @@ Allowed now:
   `schema_validity`, `baseline_preservation`, `artifact_score`, `outcome_passed`.
 - store evaluator version and evidence refs with every label.
 
-Not allowed until V1:
+Not allowed until V2:
 
 - GRPO training loop.
 - reward model training.

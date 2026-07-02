@@ -10,7 +10,7 @@ from app.harness.schema.validator import validate_document
 
 VALID_PROPOSAL = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: How can routing be simplified while preserving RES?
 hypothesis: Hard top-2 routing keeps RES degradation below the threshold.
@@ -25,7 +25,7 @@ Testable proposal.
 
 STRONG_PROPOSAL = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: How can routing be simplified while preserving RES?
 hypothesis: Hard top-2 routing keeps RES degradation below 1.5 dB.
@@ -55,9 +55,43 @@ The experiment directly tests the routing simplification claim.
 """
 
 
+STRONG_PROPOSAL_WITH_LOW_EVIDENCE_WARNING = """---
+schema: proposal.v1
+project: pimc
+agent: idea
+research_question: How can routing be simplified while preserving RES?
+hypothesis: Hard top-2 routing keeps RES degradation below 1.5 dB.
+novelty: Stream-aware hard routing is explicitly compared with the existing soft router baseline and prior run archive behavior.
+constraints:
+  - "baseline_compat: required"
+related_literature:
+  - title: Routing Survey
+quality_warnings:
+  - literature_relevance_low
+testable_predictions:
+  - prediction: RES degradation remains below 1.5 dB.
+    metric: RES
+    expected_direction: lte_degradation
+    success_threshold: "<=1.5 dB"
+experiment_hint:
+  variables: [router_type, expert_count]
+  metrics: [RES, PIM, APE]
+  minimal_ablations:
+    - {name: soft, config: {router_type: soft}}
+    - {name: hard, config: {router_type: hard-top2}}
+downstream_requirements:
+  - Compare soft and hard routers under identical 8L settings.
+---
+
+# Proposal
+
+The experiment directly tests the routing simplification claim.
+"""
+
+
 INVALID_PROPOSAL = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: How can routing be simplified while preserving RES?
 hypothesis: Hard top-2 routing keeps RES degradation below the threshold.
@@ -71,7 +105,7 @@ Missing novelty.
 
 WEAK_REPORT = """---
 schema: report.v1
-project: moe-pimc
+project: pimc
 agent: writing
 deliverable_type: research_report
 target_audience: advisor
@@ -87,7 +121,7 @@ This is a brief summary without metrics or limitations.
 
 def test_schema_validity_evaluator_passes_valid_artifact() -> None:
     reports = EvaluationRunner().evaluate_text(
-        project="moe-pimc",
+        project="pimc",
         text=VALID_PROPOSAL,
         target_ref="idea/idea_proposal.v1.md",
         expected_schema="proposal.v1",
@@ -108,7 +142,7 @@ def test_schema_validity_evaluator_passes_valid_artifact() -> None:
 
 def test_artifact_quality_rubric_passes_strong_proposal() -> None:
     reports = EvaluationRunner().evaluate_text(
-        project="moe-pimc",
+        project="pimc",
         text=STRONG_PROPOSAL,
         target_ref="idea/idea_proposal.v1.md",
         expected_schema="proposal.v1",
@@ -127,9 +161,23 @@ def test_artifact_quality_rubric_passes_strong_proposal() -> None:
     assert result.valid, result.errors
 
 
+def test_artifact_quality_rubric_revises_hard_evidence_warning() -> None:
+    reports = EvaluationRunner().evaluate_text(
+        project="pimc",
+        text=STRONG_PROPOSAL_WITH_LOW_EVIDENCE_WARNING,
+        target_ref="idea/idea_proposal.v1.md",
+        expected_schema="proposal.v1",
+    )
+
+    quality = next(r for r in reports if r.evaluator == "artifact_quality.rubric")
+    assert quality.decision == "revise"
+    assert quality.scores["evidence"] == 0.35
+    assert any(f.category == "evidence" for f in quality.findings)
+
+
 def test_artifact_quality_rubric_revises_weak_report() -> None:
     reports = EvaluationRunner().evaluate_text(
-        project="moe-pimc",
+        project="pimc",
         text=WEAK_REPORT,
         target_ref="writing/research_report.v1.md",
         expected_schema="report.v1",
@@ -148,7 +196,7 @@ def test_artifact_quality_rubric_revises_weak_report() -> None:
 
 def test_schema_validity_evaluator_blocks_invalid_artifact(tmp_path: Path) -> None:
     reports = EvaluationRunner().evaluate_text(
-        project="moe-pimc",
+        project="pimc",
         text=INVALID_PROPOSAL,
         target_ref="idea/idea_proposal.v1.md",
         expected_schema="proposal.v1",

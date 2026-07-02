@@ -15,7 +15,7 @@ from app.storage.run_store import RunStore
 def _proposal_text() -> str:
     md = {
         "schema": "proposal.v1",
-        "project": "moe-pimc",
+        "project": "pimc",
         "agent": "idea",
         "research_question": "How to simplify the router?",
         "hypothesis": "Hard top-2 keeps RES within 1.5 dB.",
@@ -26,7 +26,7 @@ def _proposal_text() -> str:
 
 def test_write_validates_and_versions(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     art = ArtifactStore(run)
 
     ref1 = art.write(text=_proposal_text())
@@ -39,7 +39,7 @@ def test_write_validates_and_versions(tmp_path: Path) -> None:
 
 def test_write_rejects_invalid(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     art = ArtifactStore(run)
     bad = "---\nschema: proposal.v1\nagent: idea\n---\n"  # missing fields
     with pytest.raises(ArtifactValidationError) as exc:
@@ -49,7 +49,7 @@ def test_write_rejects_invalid(tmp_path: Path) -> None:
 
 def test_approve_creates_approved_md(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     art = ArtifactStore(run)
     ref = art.write(text=_proposal_text())
     approved = art.approve(ref)
@@ -59,7 +59,7 @@ def test_approve_creates_approved_md(tmp_path: Path) -> None:
 
 def test_write_and_approve_create_evaluation_reports(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     art = ArtifactStore(run)
 
     ref = art.write(text=_proposal_text())
@@ -101,7 +101,7 @@ def test_write_and_approve_create_evaluation_reports(tmp_path: Path) -> None:
 
 def test_latest_prefers_approved(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
-    run = store.create(task="t", project="moe-pimc")
+    run = store.create(task="t", project="pimc")
     art = ArtifactStore(run)
     ref1 = art.write(text=_proposal_text())
     ref2 = art.write(text=_proposal_text())
