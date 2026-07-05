@@ -1,269 +1,265 @@
-# MARS · Multi-Agent Research System
+# MARS - Multi-Agent Research System
 
-> An opinionated substrate for **research-grade multi-agent pipelines** —
-> turn a research question into a paper draft via 5 specialized LLM agents,
-> with strict schema validation, human-in-the-loop review at every step,
-> and full audit-replay sedimentation.
+![version](https://img.shields.io/badge/release-Mars_V2.0-coral)
+![python](https://img.shields.io/badge/python-3.11%2B-blue)
+![next](https://img.shields.io/badge/next.js-15-black)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
-[简体中文](README.zh-CN.md) · English
+> MARS is a research-grade multi-agent workbench that turns a research
+> question into auditable proposals, experiment plans, code specs, execution
+> logs, reports, memory, and evaluation records.
 
-![status](https://img.shields.io/badge/V0-passing-brightgreen) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![next](https://img.shields.io/badge/next.js-15-black) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
+[简体中文](README.zh-CN.md) · English · [Architecture](docs/architecture.md) · [Evaluation](docs/evaluation_system.md) · [Memory](docs/memory_system.md)
 
----
+<p align="center">
+  <img src="docs/assets/readme/mars-hero.png" alt="MARS Mars planet hero" width="100%" />
+</p>
 
-## What is MARS?
+## Why MARS
 
-MARS is a workbench that compresses the research loop from **months to weeks**.
-A researcher's question flows through five composable agents:
+Research automation fails when it becomes a one-shot chat transcript. MARS is
+designed as a substrate for repeatable research work:
 
-```
-Idea  →  Experiment  →  Coding  →  Execution  →  Writing
-```
+- five specialized agents instead of one generic assistant
+- strict artifact schemas instead of loose prose
+- human review and approval at each step
+- project-level baseline protection before code changes land
+- run sedimentation so every decision can be inspected, replayed, and evaluated
+- memory and evaluation loops that improve future runs without hiding evidence
 
-Every transition is gated by a **schema-validated Markdown artifact** and a
-**human review checkpoint**. The harness underneath provides multi-model
-debate, a 4-zone knowledge base, baseline-reuse fingerprinting, and a tool
-dispatcher whose **Gate 5** statically rejects any patch that would break
-the project's protected baselines.
+The first concrete project is `projects/pimc/`: PIMC for FDD Massive MIMO under
+beam/layer switching.
 
-The first concrete project living on top of MARS is `projects/pimc/` —
-*PIMC for FDD Massive MIMO under beam/layer switching*.
+## Visual Tour
 
-## Highlights
+### Workbench
 
-- **5 specialized agents** (Idea / Experiment / Coding / Execution / Writing),
-  each with its own LLM, tools, and (optional) multi-role debate.
-- **Schema is the spine.** Every artifact is `markdown body + YAML frontmatter`,
-  validated against one of 5 JSON Schemas. Human-written and agent-written
-  documents are interchangeable downstream.
-- **HITL at every step.** Each agent parks at `WAITING_REVIEW`; the next
-  agent only starts after you click Approve. Reject halts the chain.
-- **5 system gates** — flow gates 1-4 plus **Gate 5 hooked into the tool
-  dispatch path**, blocking any patch that mutates a baseline-protected
-  surface based on the project's `AGENTS.md` static rules.
-- **Multi-model debate.** Idea / Writing agents run a 3-role debate by
-  default; mode auto-degrades from `real_multi_model` →
-  `single_model_simulated` → `mock_debate` based on which API keys are
-  present.
-- **Provider-agnostic LLM layer.** First-class support for Anthropic,
-  OpenAI, Qwen, Gemini, **DeepSeek**, local vLLM, and an OpenAI-compatible
-  custom endpoint.
-- **4-zone shared knowledge base** (literature / methodology / code_assets
-  / run_archive) with deterministic-hash embeddings out of the box —
-  swappable to ChromaDB / sentence-transformers later.
-- **Mock-first.** With zero API keys and no GPU, the entire 11-step Demo
-  still runs end-to-end via `mock_provider` + `mock_simulation` +
-  `mock_debate`. CI verifies this every PR.
-- **Full sedimentation.** Each task writes nine subdirectories under
-  `runs/<timestamp>_<task>/` — input / context / per-agent artifacts /
-  HITL / events — making every run replayable and auditable.
-- **Tools V2 platform.** Agents and Commander share one registry-backed tool
-  catalogue with schema validation, config gating, Gate 5 protection,
-  audit events, approval records, and rollback snapshots.
+The main workbench keeps project state, data preparation, run history, agent
+state, execution artifacts, and HITL controls in one operator-focused screen.
 
-## Architecture at a glance
+<p align="center">
+  <img src="docs/assets/readme/mars-workbench-full.jpg" alt="MARS workbench full interface screenshot" width="100%" />
+</p>
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Tier 1  Web Workbench (Next.js 15)                                   │
-│   Lab Dashboard · Agent Workbench · Multi-experiment view · HITL     │
-├──────────────────────────────────────────────────────────────────────┤
-│ Tier 2  API + Bridge (FastAPI)                                       │
-│   /api/runs · /api/artifacts · /api/execution · /api/templates …     │
-│   bridge/orchestrator drives the RunGraph; agent_registry inverts    │
-│   the dependency so bridge never imports concrete agents.            │
-├──────────────────────────────────────────────────────────────────────┤
-│ Tier 3  Five Agents                                                  │
-│   IdeaAgent (debate-on)     →  proposal.v1                           │
-│   ExperimentAgent           →  experiment_plan.v1                    │
-│   CodingAgent               →  code_spec.v1   (3 LLM backends)       │
-│   ExecutionAgent            →  run_log.v1     (≤6 concurrent sims)   │
-│   WritingAgent (debate-on)  →  report.v1                             │
-├──────────────────────────────────────────────────────────────────────┤
-│ Tier 4  Harness (agent-agnostic)                                     │
-│   runtime · schema · llm · context · kb · gates · tools · sediment.  │
-├──────────────────────────────────────────────────────────────────────┤
-│ Tier 5  Storage & Projects                                           │
-│   runs/<id>/ (9 subdirs) · knowledge/<zone>/ · workspace/repos/      │
-│   projects/<name>/{AGENTS.md, repo_link.yaml, data_gen.py}           │
-└──────────────────────────────────────────────────────────────────────┘
-```
+### Evaluation And Memory
 
-Strict directional dependency, enforced by **import-linter**:
+MARS V2 adds a first-class evaluation harness and memory layer. Evaluation
+suites can replay stored runs, grade artifacts, export calibration data, and
+feed self-evolution records back into the knowledge system.
 
-```
-api  →  bridge  →  hitl  →  (agents | execution | workers)  →  storage  →  harness
+<p align="center">
+  <img src="docs/mars_evaluation_harness_overview.svg" alt="MARS evaluation harness overview" width="48%" />
+  <img src="docs/mars_memory_system_overview.svg" alt="MARS memory system overview" width="48%" />
+</p>
+
+<p align="center">
+  <img src="docs/mars_evaluation_self_evolution_loop.svg" alt="MARS self evolution loop" width="48%" />
+  <img src="docs/mars_memory_development_roadmap.svg" alt="MARS memory roadmap" width="48%" />
+</p>
+
+## What Is In Mars_V2.0
+
+Mars_V2.0 is the current development line. It includes the original mock-first
+multi-agent pipeline plus the newer V2 workbench, evaluation, memory, and data
+preparation surfaces.
+
+| Area | What it does |
+|---|---|
+| Agent pipeline | Idea, Experiment, Coding, Execution, and Writing agents produce schema-validated artifacts. |
+| Bridge runtime | Product calls go through `backend/app/bridge/`, with topology assembled outside `harness/runtime`. |
+| HITL | Agent outputs can be reviewed, edited, approved, or rejected before downstream agents continue. |
+| Gates | System gates protect workflow quality; Gate 5 protects baseline-sensitive project surfaces from unsafe tool dispatch. |
+| Data preparation | Users can upload/select datasets, inspect metadata, and carry selected data into run context. |
+| Evaluation harness | Replay/live-smoke suites, calibration export, score aggregation, and suite reports. |
+| Memory system | Episode, semantic, importance, usage, conflict, injection, and selector-policy helpers. |
+| Knowledge base | Four zones: literature, methodology, code assets, and run archive. |
+| Post-training boundary | V0 loads post-trained models; training pipelines remain V2+ scope. |
+
+## Agent Flow
+
+```mermaid
+flowchart LR
+  U["Researcher"] --> B["Bridge / Orchestrator"]
+  B --> I["Idea Agent<br/>proposal.v1"]
+  I --> H1["HITL Review"]
+  H1 --> E["Experiment Agent<br/>experiment_plan.v1"]
+  E --> H2["HITL Review"]
+  H2 --> C["Coding Agent<br/>code_spec.v1"]
+  C --> G5["Gate 5<br/>baseline compatibility"]
+  G5 --> X["Execution Agent<br/>run_log.v1"]
+  X --> W["Writing Agent<br/>report.v1"]
+  W --> R["Report bundle + run sedimentation"]
+  R --> EV["Evaluation + memory feedback"]
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for diagrams.
+Every artifact is Markdown body plus YAML frontmatter. The frontmatter must pass
+its JSON Schema before downstream systems treat it as valid.
 
-## Quickstart (zero-dependency)
+## Architecture
 
-No GPU, no LLM keys, no Docker required:
+```text
+frontend -> api -> bridge -> agents
+bridge / agents -> harness
+harness/runtime does not depend on bridge or agents
+```
+
+The important boundary is that `harness/` is agent-agnostic. It owns runtime
+mechanics, schemas, context loading, LLM adapters, KB access, gates, tools,
+evaluation, memory, and sedimentation. Product orchestration lives in
+`bridge/`.
+
+```text
+backend/app/
+  api/          FastAPI routes and WebSocket entrypoints
+  bridge/       product orchestration, commander, agent registry
+  agents/       Idea, Experiment, Coding, Execution, Writing
+  harness/      runtime, schema, context, llm, kb, gates, tools, eval, memory
+  hitl/         review, approval, audit helpers
+  execution/    simulation and paper-static adapters
+  storage/      run, artifact, context, data-source, self-evolution stores
+```
+
+## Quickstart
+
+The default path runs without API keys or a GPU. Missing LLM credentials fall
+back to `mock_provider`; missing execution hardware falls back to mock or CPU
+simulation paths.
 
 ```bash
 git clone git@github.com:HarryYangthu/MARS-Multi-Agent-Research-System.git mars
 cd mars
-cp .env.example .env                 # leaving every key empty is fine — mock fallback
-python3 -m venv .venv && source .venv/bin/activate
+cp .env.example .env
+
+python3.11 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 
-# === backend ===
-PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-
-# === frontend ===
-cd frontend && npm install --legacy-peer-deps && npm run dev
-# open http://localhost:3000
+PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app \
+  --host 127.0.0.1 --port 8000
 ```
 
-Run the canonical 11-step end-to-end demo (mock-mode):
+In another shell:
 
 ```bash
-python scripts/run_demo.py --port 8000 --mock-mode
+cd frontend
+npm install --legacy-peer-deps
+NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000 \
+NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8000 \
+npm run dev -- -p 3000
 ```
 
-Full acceptance gate (mypy --strict + import-linter + backend/frontend checks +
-Tools V2 audit + e2e):
+Open `http://127.0.0.1:3000`. If port `3000` is occupied, use `-p 3001`.
+
+## Useful Commands
 
 ```bash
-bash scripts/acceptance.sh
+# backend unit tests
+PYTHONPATH=backend:posttrain/src uv run pytest backend/tests/unit -q
+
+# focused V2 evaluation / memory tests
+PYTHONPATH=backend:posttrain/src uv run pytest \
+  backend/tests/unit/test_evaluation_calibration.py \
+  backend/tests/unit/test_evaluation_suite_report.py \
+  backend/tests/unit/test_memory_system_complete.py \
+  backend/tests/unit/test_run_evaluation_replay.py -q
+
+# type/import checks
+PYTHONPATH=backend:posttrain/src uv run mypy --strict backend/
+PYTHONPATH=backend:posttrain/src uv run lint-imports
+
+# frontend typecheck
+cd frontend && npm run typecheck
+
+# run evaluation suites
+python scripts/run_evaluation_suite.py --suite configs/evaluation_suites/mars_run_replay_v0.yaml
+python scripts/run_evaluation_suite.py --suite configs/evaluation_suites/mars_live_smoke_v0.yaml
 ```
 
-## Deployment
+## Working With Real Models
 
-For production, use the hybrid path: deploy the Next.js frontend to Vercel and
-run the FastAPI backend, Redis, Chroma, `runs/`, `knowledge/`, and execution
-backends on a long-running server.
-
-See [`docs/deployment_runbook.md`](docs/deployment_runbook.md) for the standard
-上线流程, rollback strategy, memory management, multi-user guardrails, and tool
-safety FAQ.
-
-## Going real (Hardware E2E lane)
-
-Drop your provider key into `.env` — DeepSeek as an example:
+Put provider credentials in `.env` or `.env.local`. Do not commit real keys.
 
 ```bash
-DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+QWEN_API_KEY=
+GEMINI_API_KEY=
 ```
 
-You can also open `/config` in the frontend and configure provider/model/API key
-per Agent. The UI writes model routing to `configs/agents.yaml` and stores
-secrets in ignored `.env.local`, so keys do not enter Git.
+Each agent has its own model config in `configs/agents.yaml`. The frontend
+config workbench can update model routing while keeping secrets in ignored
+local env files.
 
-Mount your real research code via a symlink (it stays out of the MARS repo,
-per CLAUDE.md hard constraint):
+## Working With Real Research Code
+
+Do not copy real research repositories into this repo. Link them through
+`projects/<name>/repo_link.yaml`:
 
 ```bash
-ln -s /path/to/your/code workspace/repos/pimc-current
-# update projects/pimc/repo_link.yaml::repo_path
+ln -s /path/to/your/research/code workspace/repos/pimc-current
 python scripts/ingest_repo.py --project pimc
 ```
 
-Index reference papers (PDF):
+Reference papers and uploaded datasets stay under ignored workspace folders:
 
-```bash
-cp ~/Downloads/*.pdf workspace/uploads/papers/
-python scripts/ingest_pdfs.py
+```text
+workspace/uploads/
+workspace/repos/
+knowledge/
+runs/
 ```
 
-## Repository layout
+## Repository Layout
 
-```
+```text
 mars/
-├─ README.md / CLAUDE.md / PRODUCT.md / DESIGN.md / ACCEPTANCE.md
-├─ pyproject.toml · docker-compose.yml · .env.example
-├─ configs/                  # agents/models/tools/gates/knowledge/execution YAML
-├─ backend/app/
-│  ├─ api/                   # REST + WebSocket
-│  ├─ bridge/                # orchestrator · agent_registry · workflow_service
-│  ├─ harness/               # runtime · schema · llm · context · kb · gates · tools · sedimentation
-│  ├─ agents/                # 5 agents + debate runner
-│  ├─ hitl/                  # review_session · approval · audit_log · diff_view
-│  ├─ execution/             # mock_simulation · batch_runner · log_streamer · metrics_collector
-│  ├─ storage/               # run_store · artifact_store · file_store
-│  └─ workers/
-├─ frontend/src/
-│  ├─ app/                   # Next.js routes — Lab dashboard / Run detail / Multi view / Entries
-│  ├─ components/            # TopBar · ProjectsPanel · PipelineOverview · EventLog · KBPanel
-│  ├─ lib/                   # api · i18n · socket
-│  └─ stores/
-├─ projects/pimc/        # AGENTS.md · repo_link.yaml · data_gen.py
-├─ workspace/repos/          # real research code (symlinked, gitignored)
-├─ workspace/uploads/papers/ # reference PDFs (gitignored)
-├─ knowledge/                # 4 KB zones (gitignored after first ingest)
-├─ runs/                     # per-task sedimentation (gitignored)
-├─ templates/                # artifact templates · code_rules
-├─ scripts/                  # dev.sh · run_demo.py · acceptance.sh · ingest_repo.py · ingest_pdfs.py
-└─ docs/                     # architecture · agent_io_schema · run_lifecycle · evaluation · phase status
+  AGENTS.md / PRODUCT.md / DESIGN.md / ACCEPTANCE.md / README.md
+  configs/                 agents, tools, gates, knowledge, context, eval suites
+  backend/app/
+    api/                   REST and WebSocket routes
+    bridge/                orchestrator, commander, registry, workflow service
+    agents/                five concrete agents and debate helpers
+    harness/               agent-agnostic runtime, schemas, memory, eval, tools
+    hitl/                  review and approval flows
+    execution/             simulation runners and static-paper adapters
+    storage/               local stores for runs, artifacts, data, evolution
+  frontend/                Next.js workbench
+  projects/pimc/           project metadata, AGENTS.md, data_gen.py
+  docs/                    architecture, evaluation, memory, run lifecycle
+  scripts/                 demos, ingestion, evaluation, acceptance helpers
+  templates/               artifact templates and code rules
 ```
 
-## Project status
+## Documentation Map
 
-**V0 acceptance: passing** (the Dev E2E lane). See
-[`docs/implementation_report.md`](docs/implementation_report.md) for the full
-audit. Highlights:
-
-| | |
-|---|---|
-| Backend tests | unit / integration / gate passing |
-| Frontend checks | typecheck / lint / context smoke passing |
-| Tools V2 audit | catalogue / API filters / trace / execution artifacts verified |
-| `mypy --strict` | clean |
-| `import-linter` contracts | 4 kept, 0 broken |
-| Schema compliance | ≥ 95% |
-| Baseline matcher recall / precision | 100% / 100% on synthetic set |
-| 11-step e2e demo | passes in mock mode without external deps |
-| `runs/<id>/` completeness | 9/9 subdirs populated |
-
-## Roadmap (V2 themes)
-
-V0 remains the stable release line (`v0.1.0`). V2 work should be treated as
-development until [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) is green.
-
-- **Post-training pipeline** — GRPO trainer, preference-pair construction
-  from `runs/<id>/hitl/*`, composite reward (schema validity ×
-  baseline preservation × downstream metric).
-- **Streaming UX** — token-by-token LLM output for the Coding agent;
-  one-click "fill missing schema fields" repair.
-- **Real-time training observability** — subprocess stdout → WS, GPU
-  utilization curves alongside loss.
-- **Multi-project isolation** — per-project `runs/` and `knowledge/`
-  segregation, project switcher in the Lab dashboard.
-- **Real-vector KB** — drop-in replace the deterministic-hash embedder
-  with sentence-transformers / ChromaDB.
-
-## Documentation
-
-- [`PRODUCT.md`](PRODUCT.md) — product definition (5 agents, dual-form, KB zones, decision log)
-- [`DESIGN.md`](DESIGN.md) — architecture (tiers, schemas, harness internals, runtime, frontend)
-- [`ACCEPTANCE.md`](ACCEPTANCE.md) — V0 acceptance bar (Dev E2E + Hardware E2E)
-- [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) — V2 development gate before stable version bump
-- [`docs/V2_RELEASE_STATUS.md`](docs/V2_RELEASE_STATUS.md) — latest P3 release-gate result and command
-- [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) — hard constraints, layout, style rules for coding agents
-- [`docs/architecture.md`](docs/architecture.md) — companion diagrams
-- [`docs/agent_io_schema.md`](docs/agent_io_schema.md) — artifact/system schemas, fields, examples
-- [`docs/run_lifecycle.md`](docs/run_lifecycle.md) — sequence diagram of one task end-to-end
-- [`docs/evaluation_system.md`](docs/evaluation_system.md) — systematic evaluation layer design
-- [`docs/tools_catalog.md`](docs/tools_catalog.md) — Tools V2 catalogue, APIs, audit records, external smoke
-- [`docs/tool_security.md`](docs/tool_security.md) — dispatch order, Gate 5, rollback, redaction, network policy
-- [`docs/V2_AGENT_TODO.md`](docs/V2_AGENT_TODO.md) — V2 cleanup and implementation queue
-- [`docs/frontend_ux.md`](docs/frontend_ux.md) — P0 UI contract
+- [`AGENTS.md`](AGENTS.md) - hard project constraints for coding agents
+- [`PRODUCT.md`](PRODUCT.md) - product definition and agent responsibilities
+- [`DESIGN.md`](DESIGN.md) - tiered architecture, schemas, and dependency rules
+- [`ACCEPTANCE.md`](ACCEPTANCE.md) - V0 acceptance boundaries
+- [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) - V2 development gate
+- [`docs/architecture.md`](docs/architecture.md) - architecture notes and diagrams
+- [`docs/evaluation_system.md`](docs/evaluation_system.md) - evaluation harness design
+- [`docs/memory_system.md`](docs/memory_system.md) - memory system design
+- [`docs/run_lifecycle.md`](docs/run_lifecycle.md) - one task from input to report
+- [`docs/tools_catalog.md`](docs/tools_catalog.md) - tools, audit, and registry behavior
+- [`docs/tool_security.md`](docs/tool_security.md) - Gate 5, rollback, and network policy
+- [`docs/deployment_runbook.md`](docs/deployment_runbook.md) - production deployment notes
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
 
 ## Citation
 
-If you use MARS in academic work, please cite the repo:
+If you use MARS in academic work, cite this repository:
 
 ```bibtex
-@misc{mars2026,
-  title  = {MARS: Multi-Agent Research System},
-  author = {Yang, Harry},
-  year   = {2026},
-  url    = {https://github.com/HarryYangthu/MARS-Multi-Agent-Research-System}
+@software{mars_multi_agent_research_system,
+  title = {MARS: Multi-Agent Research System},
+  author = {Harry Yang},
+  year = {2026},
+  url = {https://github.com/HarryYangthu/MARS-Multi-Agent-Research-System}
 }
 ```
