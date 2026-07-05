@@ -107,7 +107,7 @@ async def get_plot(run_id: str, name: str) -> FileResponse:
 
 def _ready_png(path: Path) -> bool:
     try:
-        if path.stat().st_size < 64:
+        if path.stat().st_size < 8:
             return False
         with path.open("rb") as fh:
             return fh.read(8) == b"\x89PNG\r\n\x1a\n"

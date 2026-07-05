@@ -330,9 +330,11 @@ async def run_agent_node(
 
     if stage == "idea":
         try:
-            from app.agents.idea.acceptance import write_idea_acceptance_report
+            write_acceptance_report = getattr(agent, "write_acceptance_report", None)
+            if not callable(write_acceptance_report):
+                return
 
-            report_path = write_idea_acceptance_report(
+            report_path = write_acceptance_report(
                 run=run,
                 artifact_ref=ref,
                 node_key=node_key,

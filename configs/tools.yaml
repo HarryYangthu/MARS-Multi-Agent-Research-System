@@ -44,7 +44,7 @@ tools:
       additionalProperties: true
 
   search.web_search:
-    enabled: true
+    enabled: false
     description: Provider-backed web search with domain allowlist.
     mutation_level: read
     allowed_agents: [idea]

@@ -227,7 +227,11 @@ async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int =
     if settings.is_production and settings.mars_execution_backend == "mock":
         raise RuntimeError("production mode cannot use mock execution backend")
     backend = settings.mars_execution_backend
-    use_real = settings.mars_mock_mode != "always" and spec.project == "pimc"
+    use_real = (
+        settings.mars_mock_mode != "always"
+        and spec.project == "pimc"
+        and spec.run_root is not None
+    )
     if use_real and backend == "paper_static":
         from app.execution.paper_static_adapter import run_paper_static_simulation
 

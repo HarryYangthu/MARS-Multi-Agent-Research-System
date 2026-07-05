@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
@@ -18,6 +19,8 @@ from app.agents.idea.research import (
     validate_idea_quality,
 )
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
+from app.storage.artifact_store import ArtifactRef
+from app.storage.run_store import RunHandle
 
 
 class IdeaAgent(BaseAgent):
@@ -129,3 +132,18 @@ class IdeaAgent(BaseAgent):
         artifact.schema_id = str(artifact.metadata.get("schema", self.output_schema))
         artifact.text = fm_dumps(artifact.metadata, artifact.body)
         return artifact
+
+    def write_acceptance_report(
+        self,
+        *,
+        run: RunHandle,
+        artifact_ref: ArtifactRef | None = None,
+        node_key: str = "idea",
+    ) -> Path:
+        from app.agents.idea.acceptance import write_idea_acceptance_report
+
+        return write_idea_acceptance_report(
+            run=run,
+            artifact_ref=artifact_ref,
+            node_key=node_key,
+        )

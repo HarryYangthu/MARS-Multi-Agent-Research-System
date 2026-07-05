@@ -31,6 +31,13 @@ def write_raw_context(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    legacy_dir = run_root / "context" / "raw" / _safe_part(agent)
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_path = legacy_dir / filename
+    legacy_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     return path.relative_to(run_root / "context").as_posix()
 
 

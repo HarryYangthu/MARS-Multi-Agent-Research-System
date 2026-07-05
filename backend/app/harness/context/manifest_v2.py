@@ -175,6 +175,11 @@ def write_manifest_v2(*, run_root: Path, manifest: ContextManifestV2) -> Path:
         json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    legacy_path = run_root / "context" / f"{manifest.manifest_id}.json"
+    legacy_path.write_text(
+        json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     _update_index(run_root / "context", manifest=manifest, path=path)
     _update_agent_index(cdir, manifest=manifest, path=path)
     return path

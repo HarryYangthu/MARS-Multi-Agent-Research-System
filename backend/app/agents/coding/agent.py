@@ -49,7 +49,10 @@ class CodingAgent(BaseAgent):
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:
         settings = get_settings()
-        if settings.mars_coding_backend == "opencode":
+        if (
+            settings.mars_coding_backend == "opencode"
+            and settings.mars_mock_mode != "always"
+        ):
             adapter = OpenCodeAdapter()
             if not adapter.is_available():
                 if settings.is_production:

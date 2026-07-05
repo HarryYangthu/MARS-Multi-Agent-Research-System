@@ -213,9 +213,14 @@ class Orchestrator:
         if parse_node_key(node_key).stage != "idea":
             return
         try:
-            from app.agents.idea.acceptance import write_idea_acceptance_report
+            if not self.registry.has("idea"):
+                return
+            agent = self.registry.get("idea")
+            write_acceptance_report = getattr(agent, "write_acceptance_report", None)
+            if not callable(write_acceptance_report):
+                return
 
-            report_path = write_idea_acceptance_report(
+            report_path = write_acceptance_report(
                 run=session.run,
                 node_key=node_key,
             )
