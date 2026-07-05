@@ -1,433 +1,275 @@
-# MARS Evaluation System Design
+# MARS Evaluation Harness
 
-> Goal: turn today's scattered checks (schema, gates, metrics diagnosis, acceptance)
-> into a systematic, auditable, project-aware evaluation layer.
+> 当前文档描述新的 MARS 评测实现:先内置在 MARS 仓内,可单独启动评测程序,以 `runs/<run_id>/` 为事实源,输出评测报告,并沉淀 self-evolution 候选项。
 
-## 1. Positioning
+![MARS Evaluation Harness Overview](./mars_evaluation_harness_overview.svg)
 
-MARS 的评价体系不是一个单独的 Agent,也不是一个简单的分数面板。
-它应该是 `harness/` 里的 agent-agnostic governance layer:
+## 1. 定位
 
-- `harness/evaluation/` 负责评估逻辑、scorecard、rubric、benchmark、证据引用。
-- `bridge/` 只负责在正确时机调用评价,并把结果接入 RunGraph / HITL / feedback loop。
-- `agents/` 不知道评价系统内部实现,只消费评价结果作为上下文或修订建议。
-- `frontend` 只展示 scorecard、finding、evidence、趋势和 benchmark 对比。
+MARS Evaluation Harness 不是一个 Agent,也不是前端分数面板。它是 `backend/app/harness/evaluation/` 下的 run-centered 评测系统:
 
-评价结果必须像 Agent 输出一样可审计:结构化 frontmatter + markdown body,可版本化,
-可被人编辑/确认,可进入后续 post-training 数据构造。
+- **只读事实源**:`runs/<run_id>/` 中的 artifact、events、context、tool audit、metrics、HITL、memory。
+- **不依赖具体 Agent**:不 import `agents/`、`bridge/`、`api/`。
+- **可单独启动**:CLI 可以评已有 run,也可以把多个 run 当 trial 聚合成 suite report。
+- **服务自进化**:findings 会转成 pending review 的 self-evolution candidates,后续可进入 memory、prompt mutation、rubric 更新或 regression task。
 
-## 2. Existing Pieces To Unify
+核心判断:
 
-当前系统已经有评价材料,但分散在不同层:
+```text
+Transcript helps debugging.
+Outcome decides whether the system worked.
+```
 
-| Existing piece | Current location | Unified role |
-|---|---|---|
-| Schema compliance | `harness/schema/`, `tests/schema/` | Contract evaluators |
-| 5 HITL Gates | `harness/gates/`, `configs/gates.yaml` | Blocking policy checks |
-| Execution metrics diagnosis | `bridge/diagnostics.py`, `projects/*/diagnostics.yaml` | Outcome evaluators |
-| Baseline recall/precision | `tests/baseline/` | Benchmark evaluator |
-| Acceptance harness | `scripts/acceptance.sh` | System regression suite |
-| Idea quality rubric | `agents/idea/evals/quality_rubric.md` | Artifact rubric seed |
-| Diagnosis artifact | `diagnosis.v1` | Existing evaluation-style artifact |
+## 2. 三阶段能力
 
-The design below keeps these assets, but registers them under one evaluation
-model with consistent output, thresholds, evidence and routing semantics.
-
-## 3. Evaluation Layers
-
-Use five evaluation layers. The layers are ordered by blast radius: local checks
-run early and cheaply; cross-run benchmarks run in CI or scheduled jobs.
-
-| Layer | Name | Question answered | Example output |
+| 阶段 | 能力 | 入口 | 输出 |
 |---|---|---|---|
-| L0 | Contract | Is the artifact structurally valid and policy-safe? | schema errors, Gate 5 blockers |
-| L1 | Artifact Quality | Is this specific Agent output useful enough for downstream work? | rubric scores and findings |
-| L2 | Process Integrity | Did the run follow the intended lifecycle? | missing approval, skipped evidence |
-| L3 | Research Outcome | Did the experiment meet project targets? | failed metrics, diagnosis, rerun target |
-| L4 | Regression / Benchmark | Did the whole system improve or regress across a task set? | suite score, routing accuracy, cost |
+| V0 | Replay 一个已有 run | `scripts/evaluate_run.py` | run report、scorecard、self-evolution candidates |
+| V1 | Replay 多 run 或 live 多 trial | `scripts/run_evaluation_suite.py` | suite report、pass@k、pass^k、suite scorecard |
+| V2 | 自进化与校准资产化 | `self_evolution.py`、`calibration.py` | evolution export、human calibration samples、drift report |
 
-Important rule: blockers do not get averaged away. A high average score cannot
-hide schema failure, baseline violation, missing evidence, or a failed safety gate.
+V0/V1/V2 都已在仓内实现。Live suite 通过 MARS API 创建 fresh run,自动推进 trial,完成后复用同一套 replay evaluator。
 
-## 4. Evaluation Timing
-
-Evaluation should happen at stable lifecycle points:
-
-1. **Draft written**: run L0 + L1 before HITL review opens.
-2. **Human approved**: snapshot the evaluation result for the approved artifact.
-3. **Execution finished**: run L3 outcome evaluators and produce/refresh diagnosis.
-4. **Run completed**: aggregate all layer results into a run scorecard.
-5. **CI / scheduled benchmark**: replay fixed task suites through mock and selected real backends.
-
-The current V0-compatible behavior is:
-
-- Do not add a required tenth `runs/<id>/` subdir yet.
-- Store per-artifact eval files beside the target artifact, e.g.
-  `runs/<id>/idea/idea_proposal.v1.eval.md`.
-- Store run-level scorecard as `runs/<id>/events/evaluation_scorecard.json`.
-- V2 may add `runs/<id>/evaluation/` after `ACCEPTANCE.md` is updated.
-
-## 5. Core Data Model
-
-All evaluator output should be normalized to `evaluation_report.v1`.
-
-```yaml
----
-schema: evaluation_report.v1
-project: pimc
-scope: artifact          # artifact / run / benchmark / model_backend
-target_ref: idea/idea_proposal.v1.md
-target_schema: proposal.v1
-evaluator: artifact_quality.idea_rubric
-evaluator_version: 1
-decision: revise         # pass / warn / revise / block / fail
-overall_score: 0.78      # 0..1, null if pure blocker
-blocking: false
-scores:
-  testability: 0.8
-  evidence: 0.7
-  downstream_readiness: 0.9
-  baseline_safety: 1.0
-  novelty: 0.5
-findings:
-  - id: F001
-    severity: medium     # info / low / medium / high / blocker
-    category: evidence
-    message: "Novelty claim needs a concrete source or historical run comparison."
-    evidence_refs:
-      - idea/idea_proposal.v1.md#frontmatter.novelty
-recommended_actions:
-  - "Add one cited prior baseline and explain the delta."
-created: 2026-06-17T00:00:00Z
----
-
-# Evaluation Report
-
-Human-readable rationale goes here. It should explain the score and link each
-finding back to a concrete artifact, metric row, event, schema path or rule.
-```
-
-Required invariants:
-
-- Every non-info finding has at least one `evidence_refs` entry.
-- `decision=block` implies `blocking=true`.
-- LLM-judge output is advisory unless a deterministic evaluator confirms the blocker.
-- Evaluator version is mandatory so score drift is explainable.
-- Scores are comparable only within the same evaluator/version.
-
-## 6. Evaluator Types
-
-### 6.1 Deterministic Evaluators
-
-These run first and are trusted for blocking decisions:
-
-- `contract.schema_validity`: frontmatter + JSON Schema.
-- `contract.required_artifacts`: required upstream approved artifacts exist.
-- `contract.project_policy`: project `AGENTS.md` static rules.
-- `contract.baseline_compatibility`: Gate 5 dispatch-time compatibility.
-- `process.run_completeness`: required run subdirs and event files.
-- `outcome.metric_thresholds`: project metric targets from diagnostics config.
-- `outcome.claim_metric_consistency`: report claims match `metrics.json`.
-
-### 6.2 Rubric Evaluators
-
-These score quality, usually with deterministic prechecks plus an optional LLM
-judge. They should never import concrete Agent classes.
-
-| Target | Rubric dimensions |
-|---|---|
-| `proposal.v1` | testability, evidence, downstream readiness, baseline safety, novelty |
-| `experiment_plan.v1` | variable clarity, metric validity, ablation coverage, budget realism, baseline reuse |
-| `code_spec.v1` | patch minimality, test adequacy, baseline preservation, risk clarity, dependency discipline |
-| `run_log.v1` | metric completeness, reproducibility, failure isolation, curve/log integrity |
-| `report.v1` | claim support, metric accuracy, limitation honesty, chain coverage, audience fit |
-| `diagnosis.v1` | root-cause evidence, target selection, budget handling, action specificity |
-
-### 6.3 Benchmark Evaluators
-
-Benchmark evaluators operate across many runs:
-
-- routing accuracy: user request -> correct entrypoint/stage.
-- schema first-pass rate: valid first Agent output / total outputs.
-- gate precision/recall: known fixture set.
-- baseline match precision/recall: run_archive fixture set.
-- e2e success rate: fixed task suite under mock mode.
-- cost/latency budget: tokens, wall time, retry count, model backend.
-- self-healing success: failed first attempt -> corrected rerun within budget.
-
-## 7. Score Semantics
-
-Use a two-part result: **decision** and **score**.
-
-| Decision | Meaning | Pipeline effect |
-|---|---|---|
-| pass | Good enough to proceed | no interruption |
-| warn | Proceed, but display findings | no interruption |
-| revise | Needs human or Agent revision | opens HITL review with findings |
-| block | Violates hard rule | blocks downstream transition |
-| fail | Benchmark or completed run failed | marks suite/run as failed |
-
-For artifact quality, recommended thresholds:
-
-```yaml
-pass: overall_score >= 0.80 and no high/blocker findings
-warn: overall_score >= 0.65 and no blocker findings
-revise: overall_score < 0.65 or any high finding
-block: any deterministic blocker
-```
-
-For research outcome, project thresholds override generic thresholds. Example:
-
-```yaml
-pimc:
-  metrics:
-    loss:
-      target: 0.04
-      direction: lte
-      aggregation: max
-    RES:
-      target: -43.5
-      direction: gte
-      aggregation: mean
-```
-
-## 8. Proposed Module Layout
+## 3. 文件布局
 
 ```text
 backend/app/harness/evaluation/
-├─ __init__.py
-├─ models.py                 # EvaluationReport, Score, Finding, Decision
-├─ registry.py               # register evaluator by id/scope/schema
-├─ runner.py                 # run evaluators for artifact/run/benchmark
-├─ aggregation.py            # scorecard aggregation, blocker precedence
-├─ artifacts.py              # write/read .eval.md and scorecard JSON
-├─ evidence.py               # normalize artifact/event/metric refs
-├─ rubrics.py                # load rubric configs, not Agent classes
-├─ evaluators/
-│  ├─ contract.py            # schema, required refs, project rules
-│  ├─ artifact_quality.py    # schema-specific rubric evaluation
-│  ├─ process_integrity.py   # RunGraph + HITL + event checks
-│  ├─ research_outcome.py    # metrics + diagnosis bridge adapter
-│  ├─ report_consistency.py  # claims vs metrics/evidence
-│  └─ benchmark.py           # suite-level metrics
-└─ prompts/
-   ├─ artifact_quality_judge.md
-   └─ report_consistency_judge.md
+├─ run_evaluators.py      # run-level code / LLM / human grader stack
+├─ run_report.py          # replay 一个 run 并写报告
+├─ suite_report.py        # 多 run/trial 聚合
+├─ self_evolution.py      # findings -> self-evolution export
+├─ calibration.py          # human calibration sample/export and drift report
+├─ suites.py              # suite YAML loader
+├─ artifacts.py           # .eval.md 读写,scorecard 读写
+├─ aggregation.py         # scorecard aggregation
+└─ evaluators/            # artifact-level evaluators
+
+configs/evaluation_suites/
+└─ mars_run_replay_v0.yaml
+
+scripts/
+├─ evaluate_run.py
+├─ run_evaluation_suite.py
+└─ export_evaluation_calibration.py
 ```
 
-Dependency rules:
+## 4. 评测对象
 
-- `harness/evaluation/` may import `harness/schema`, `harness/kb`,
-  `harness/gates`, `harness/runtime` data types, and storage primitives only if
-  they remain agent-agnostic.
-- It must not import `agents/`, `bridge/`, `api/`, or frontend code.
-- `bridge/` may import `harness/evaluation.runner`.
-- Existing `bridge/diagnostics.py` can be wrapped by `research_outcome.py` first,
-  then gradually moved into harness if the bridge-specific parts are separated.
+MARS 不把 Agent 当单轮函数测。一次评测包含:
 
-## 9. Configuration
+| 对象 | MARS 来源 | 评什么 |
+|---|---|---|
+| Task | suite YAML + user request | 输入、期望结果、grader、指标 |
+| Trial | 一个 `runs/<run_id>/` | 一次完整执行 |
+| Trajectory | `events/` + `context/` + tool audit | 路径是否可审计 |
+| Outcome | approved artifacts + metrics + final state | 任务是否真的完成 |
+| Report | `events/evaluation_report.md` | 给人看的评测结论 |
+| Scorecard | `events/evaluation_scorecard.json` | 给程序消费的结构化结果 |
 
-Add `configs/evaluation.yaml` when implementation starts:
+## 5. Grader 栈
+
+当前 run-level V0/V1/V2 已内置三层 Grader。三层共享同一个 `EvaluationReport` schema,但决策语义不同:
+
+| Layer | 当前实现 | 决策权 | 主要输出 |
+|---|---|---|---|
+| Code / deterministic | Python evaluator、schema 校验、run 文件检查、tool audit 检查 | 可以 `warn/revise/block` | 硬约束、CI gate、回归信号 |
+| LLM rubric | `llm_rubric.advisory` | 默认 advisory,不单独阻塞 | 主观质量分、弱证据发现、校准样本 |
+| Human review | `human_review.queue` + `evaluation_human_review_queue.jsonl` + `human_review_labels.jsonl` | Gold label,通过 HITL/Gate 策略推广后才阻塞 | 人工结论、校准标签、高风险审查 |
+
+确定性 grader 稳定、便宜、适合 CI:
+
+| Evaluator | 作用 |
+|---|---|
+| `run_integrity.required_outcome` | 检查 run 目录、`run_meta.json`、required artifacts、required event files |
+| `trajectory.audit_coverage` | 检查 context manifest、tool audit、agent state trace、terminal state |
+| `outcome.execution_and_report` | 检查 execution metrics、batch summary、report chain refs |
+| `gate_behavior.expected` | 检查 suite 期望 Gate 是否在 tool audit 中出现 |
+| `multi_agent.collaboration_quality` | 检查 entrypoint/stage routing、handoff metadata、重复工具调用、failure/limitation acknowledgement |
+| artifact evaluators | 复用已有 `contract.schema_validity`、`contract.provenance`、`artifact_quality.rubric` |
+
+LLM rubric 负责确定性检查不擅长的主观维度:
+
+| Rubric dimension | 评什么 |
+|---|---|
+| `task_completion_clarity` | 结论是否明确回答任务 |
+| `evidence_grounding` | 结论是否绑定 artifact、metrics、chain refs |
+| `limitation_awareness` | 是否交代风险、限制、失败模式 |
+| `escape_hatch` | 证据不足时输出 `INSUFFICIENT_INFO`,避免模型硬猜 |
+
+人工审查负责两类事情:
+
+| Human lane | 触发条件 | 作用 |
+|---|---|---|
+| Calibration | LLM rubric 报告默认进入队列 | 计算 evaluator-human agreement,低于 0.85 时复查 rubric/prompt |
+| High-risk review | deterministic `revise/block/fail` 或 high/blocker finding | 判断是真系统问题、suite fixture 问题,还是应转 regression |
+
+最终 `overall_decision` 和主 `overall_score` 只聚合非 advisory 报告。LLM / human 的分数写入 `advisory_score`,并进入人工队列和校准报告。真正 blocker 必须来自 deterministic evaluator 或 Gate。
+
+## 6. CLI 用法
+
+评一个已有 run:
+
+```bash
+PYTHONPATH=backend uv run python scripts/evaluate_run.py \
+  --run-id 2026-07-04T1617_staticpimc
+```
+
+输出写回 run:
+
+```text
+runs/<run_id>/events/evals/run.v1.*.eval.md
+runs/<run_id>/events/evaluation_report.md
+runs/<run_id>/events/evaluation_scorecard.json
+runs/<run_id>/events/evaluation_self_evolution_candidates.json
+runs/<run_id>/events/evaluation_human_review_queue.jsonl
+```
+
+聚合多个 trial:
+
+```bash
+PYTHONPATH=backend uv run python scripts/run_evaluation_suite.py \
+  --run-id run_a \
+  --run-id run_b \
+  --suite configs/evaluation_suites/mars_run_replay_v0.yaml
+```
+
+启动 live trial:
+
+```bash
+PYTHONPATH=backend uv run python scripts/run_evaluation_suite.py \
+  --live \
+  --suite configs/evaluation_suites/mars_live_smoke_v0.yaml
+```
+
+完整 pipeline 也可以 live 运行,但应使用项目专属 suite 和更长 timeout;快速 CI smoke 推荐 `mars_live_smoke_v0.yaml`。
+
+输出:
+
+```text
+evaluation_runs/<timestamp>_<suite>/
+├─ report.md
+├─ report.json
+├─ scorecard.json
+└─ self_evolution_export.jsonl
+```
+
+导出人工校准样本:
+
+```bash
+PYTHONPATH=backend uv run python scripts/export_evaluation_calibration.py \
+  --run-id <run_id> \
+  --output /tmp/eval_calibration_samples.jsonl
+```
+
+标注 `human_decision` 后生成校准报告:
+
+```bash
+PYTHONPATH=backend uv run python scripts/export_evaluation_calibration.py \
+  --score-labels /tmp/eval_calibration_samples.jsonl \
+  --output /tmp/eval_calibration_report.json
+```
+
+## 7. Suite 配置
+
+`configs/evaluation_suites/mars_run_replay_v0.yaml` 定义默认 replay suite:
 
 ```yaml
-version: 1
+id: mars_run_replay_v0
+mode: replay
 
-defaults:
-  artifact_quality:
-    enabled: true
-    pass_threshold: 0.80
-    warn_threshold: 0.65
-    llm_judge: false
-  benchmark:
-    enabled: true
-    mock_mode_required: true
+expected_outcome:
+  required_dirs: [input, context, idea, experiment, coding, execution, diagnosis, writing, hitl, events, memory]
+  required_artifacts: []
+  required_event_files:
+    - events/evaluation_events.jsonl
+  require_context_manifest: true
+  require_tool_audit: true
+  require_execution_metrics: false
+  require_report_chain_refs: false
+  expected_gates: []
+  expected_entrypoint: null
+  expected_stages: []
 
-scopes:
-  artifact:
-    enabled_evaluators:
-      - contract.schema_validity
-      - contract.required_artifacts
-      - artifact_quality.rubric
-  run:
-    enabled_evaluators:
-      - process.run_completeness
-      - outcome.metric_thresholds
-      - outcome.claim_metric_consistency
-  benchmark:
-    enabled_evaluators:
-      - benchmark.schema_first_pass
-      - benchmark.gate_precision_recall
-      - benchmark.baseline_precision_recall
-      - benchmark.e2e_mock_success
-
-projects:
-  pimc:
-    metrics:
-      loss: {target: 0.04, direction: lte, aggregation: max}
-      RES: {target: -43.5, direction: gte, aggregation: mean}
-    artifact_threshold_overrides:
-      code_spec.v1:
-        pass_threshold: 0.85
+graders:
+  - run_integrity.required_outcome
+  - trajectory.audit_coverage
+  - outcome.execution_and_report
+  - gate_behavior.expected
+  - multi_agent.collaboration_quality
+  - llm_rubric.advisory
+  - human_review.queue
 ```
 
-Rubrics can live in `configs/evaluation_rubrics/*.yaml` or be loaded from each
-Agent context `evals/` directory. Config wins over prompt text.
+项目级 suite 可以收紧要求,例如强制完整 pipeline 必须有五个 approved artifacts、`execution/metrics.json` 和 writing chain refs。
 
-## 10. Bridge Integration
+## 8. Score 语义
 
-Bridge should call evaluation at four points:
+MARS 使用 decision + score,不是只看平均分:
+
+| Decision | 含义 |
+|---|---|
+| `pass` | 可继续 |
+| `warn` | 可继续,但有低/中风险发现 |
+| `revise` | 需要人工或 Agent 修订 |
+| `block` | 硬约束失败,不能被平均分掩盖 |
+| `fail` | suite / benchmark 级失败 |
+
+Scorecard 里同时保留两套分数:
+
+| 字段 | 来源 | 用途 |
+|---|---|---|
+| `overall_score` | 非 advisory grader | CI、回归、suite pass/fail |
+| `advisory_score` | LLM / human advisory grader | 主观质量观察、人工校准 |
+| `grader_counts` | 全部报告 metadata | 判断 code / llm / human 覆盖是否完整 |
+
+Suite 层额外输出:
 
 ```text
-Agent writes vN artifact
-  -> EvaluationRunner.evaluate_artifact(ref)
-  -> write <artifact>.eval.md
-  -> if decision=block: node FAILED or waiting_review with blocker
-  -> if decision=revise: HITL opens with findings
-  -> else: normal HITL review
-
-Artifact approved
-  -> snapshot approved eval result
-
-Execution completed
-  -> evaluate_run_outcome(run)
-  -> produce diagnosis.vN.md through existing BridgeAgent compatibility path
-  -> if should_continue: feedback-loop decision
-
-Run completed
-  -> aggregate scorecard
-  -> write events/evaluation_scorecard.json
+pass_rate = pass_or_warn_trials / total_trials
+pass@k = k 次里至少一次成功的概率估计
+pass^k = k 次全部成功的稳定性估计
 ```
 
-This keeps the current "Execution miss -> Bridge diagnosis -> feedback loop"
-behavior, but makes it one evaluator family inside the broader system.
+研究辅助场景看 `pass@k`;无人值守链路更看 `pass^k`。
 
-## 11. UI Contract
+## 9. Self-Evolution 闭环
 
-Minimum UI surfaces:
+![MARS Evaluation Self-Evolution Loop](./mars_evaluation_self_evolution_loop.svg)
 
-- Run list: compact health badge (`pass`, `warn`, `revise`, `block`, `fail`).
-- Run detail: scorecard tab with layer summary and latest findings.
-- Artifact panel: eval badge beside each version, with "why" and evidence refs.
-- Feedback loop modal: diagnosis + evaluation findings + recommended target.
-- Benchmark page: suite history, backend comparison, regression trend.
-
-The UI should never show only a bare score. It must show the decision, top
-findings and evidence refs so the user can judge whether the evaluator is right.
-
-## 12. Benchmark Suite Design
-
-Create `evals/` or `backend/tests/evaluation/fixtures/` with fixed cases:
+评测发现不会直接污染未来上下文。它们先进入 pending review:
 
 ```text
-evals/
-├─ suites/
-│  ├─ smoke_mock.yaml
-│  ├─ pimc_routing.yaml
-│  ├─ gate_regression.yaml
-│  └─ baseline_reuse.yaml
-└─ golden/
-   ├─ proposal/
-   ├─ experiment_plan/
-   ├─ code_spec/
-   ├─ run_log/
-   └─ report/
+finding
+  -> evaluation_self_evolution_candidates.json
+  -> evaluation_human_review_queue.jsonl
+  -> suite self_evolution_export.jsonl
+  -> human review
+  -> memory / prompt mutation / rubric update / regression task
+  -> deterministic eval gate
+  -> approved change
 ```
 
-Each case should define:
+Human calibration 是另一条输入线:
 
-- user request / entrypoint
-- optional uploaded artifacts
-- expected schema
-- expected route
-- expected gate behavior
-- expected metric thresholds
-- expected minimum artifact scores
-- allowed mock/real backend modes
+```text
+eval reports
+  -> calibration samples
+  -> human labels
+  -> calibration report
+  -> judge prompt/rubric review when agreement_rate < 0.85
+```
 
-The benchmark runner should emit:
+默认 lever:
 
-- `benchmark_report.v1.md`
-- `benchmark_results.json`
-- per-case run refs
-- regression summary versus previous baseline
+| Finding category | Suggested lever |
+|---|---|
+| `context`, `trajectory`, `tool_audit` | harness / observability regression |
+| `claim_support`, `report` | writing prompt or rubric mutation |
+| `outcome` | task fixture or agent feedback |
+| `run_integrity` | run-store contract regression |
 
-## 13. Post-Training Boundary
+## 10. 设计边界
 
-V0/V0.5 evaluation produces data, but does not train.
-
-Allowed now:
-
-- export preference candidates from HITL edits and evaluator findings.
-- compute composite labels for later use:
-  `schema_validity`, `baseline_preservation`, `artifact_score`, `outcome_passed`.
-- store evaluator version and evidence refs with every label.
-
-Not allowed until V2:
-
-- GRPO training loop.
-- reward model training.
-- live checkpoint routing.
-
-This keeps the existing project boundary intact while making future reward
-construction much less ad hoc.
-
-## 14. Acceptance Criteria For The Evaluation System
-
-Initial implementation is done when:
-
-1. `evaluation_report.v1` schema exists and has >=20 schema tests.
-2. `EvaluationRunner.evaluate_artifact()` runs L0 for all five existing schemas.
-3. Current diagnosis logic is exposed as an outcome evaluator without changing behavior.
-4. Every generated eval report has evidence refs for non-info findings.
-5. No `harness/evaluation/` import violates architecture contracts.
-6. Full mock pipeline still passes existing `scripts/acceptance.sh`.
-7. A new benchmark command can run a small smoke suite and produce `benchmark_results.json`.
-8. Frontend can display latest eval decision for an artifact or run.
-
-## 15. Implementation Roadmap
-
-### E0: Inventory Without Behavior Change
-
-- Add `evaluation_report.v1` schema.
-- Add `harness/evaluation/models.py`, `registry.py`, `runner.py`.
-- Wrap schema validation and current diagnostics as evaluators.
-- Write `.eval.md` beside artifacts, but do not block anything yet.
-
-### E1: Artifact Rubrics
-
-- Convert Idea rubric into structured YAML.
-- Add rubrics for Experiment, Coding, Execution, Writing and Diagnosis.
-- Add deterministic rubric checks first; optional LLM judge behind config flag.
-
-### E2: Run Scorecard
-
-- Aggregate artifact evals + diagnosis + HITL + event integrity.
-- Write `events/evaluation_scorecard.json`.
-- Add API endpoint and frontend scorecard tab.
-
-### E3: Benchmark Runner
-
-- Add fixed benchmark suite definitions.
-- Reuse mock pipeline for deterministic CI.
-- Track regression against checked-in golden expectations.
-
-### E4: Feedback Loop Integration
-
-- Map `revise` findings to HITL review comments.
-- Let Bridge select repair target from evaluator categories.
-- Keep human approval in the loop for non-auto mode.
-
-### E5: Post-Training Export
-
-- Export preference examples and composite labels.
-- Keep all labels tied to evaluator versions and evidence refs.
-
-## 16. Design Principles
-
-- **Evidence before score**: no finding without traceable evidence.
-- **Deterministic first**: LLM judges explain and rank; deterministic checks block.
-- **Project-aware, platform-owned**: project thresholds live in project/config, but
-  execution lives in harness.
-- **No hidden coupling**: evaluators read artifacts and schemas, not Agent classes.
-- **End-to-end first**: each phase must preserve the mock demo and current acceptance.
-- **Human override is explicit**: HITL decisions are recorded, never silently erased.
+- Evaluation Harness 放在 MARS 仓内,因为它强依赖 `runs/`、schema、ToolRegistry、Gate、Context Manifest。
+- 未来可以拆 `mars-evals` 仓,但只放大型 benchmark data、golden runs、跨模型报告;核心 evaluator 仍由 MARS 暴露稳定 CLI/API。
+- V0/V1/V2 评测不替代 HITL 和 Gate。Gate 是阻塞机制;Evaluation 是复盘、回归、质量度量和自进化输入。

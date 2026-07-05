@@ -1,0 +1,58 @@
+id: mars_run_replay_v0
+mode: replay
+description: >
+  Default replay suite for evaluating an existing MARS run from the run
+  directory as the source of truth.
+
+tasks:
+  - id: pimc_mock_full_pipeline
+    task: pimc_demo
+    project: pimc
+    entrypoint: pipeline
+    trials: 1
+    input:
+      user_request: >
+        How can PIMC further reduce compute under 8L config while preserving
+        RES performance?
+
+expected_outcome:
+  required_dirs:
+    - input
+    - context
+    - idea
+    - experiment
+    - coding
+    - execution
+    - diagnosis
+    - writing
+    - hitl
+    - events
+    - memory
+  required_artifacts: []
+  required_event_files:
+    - events/evaluation_events.jsonl
+  require_context_manifest: true
+  require_tool_audit: true
+  require_execution_metrics: false
+  require_report_chain_refs: false
+  expected_gates: []
+  expected_entrypoint: null
+  expected_stages: []
+
+graders:
+  - run_integrity.required_outcome
+  - trajectory.audit_coverage
+  - outcome.execution_and_report
+  - gate_behavior.expected
+  - multi_agent.collaboration_quality
+  - llm_rubric.advisory
+  - human_review.queue
+
+metrics:
+  - n_agent_state_events
+  - n_toolcalls
+  - n_tool_events
+  - context_manifest_coverage
+  - required_artifact_coverage
+  - advisory_score
+  - human_review_queue_count

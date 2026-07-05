@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1256" viewBox="0 0 2048 1256">
+  <defs>
+    <style>
+      .bg{fill:#f7f6ef}
+      .title{font:700 62px Arial,sans-serif;fill:#111827}
+      .sub{font:500 24px Arial,sans-serif;fill:#4b5563}
+      .h1{font:700 35px Arial,sans-serif;fill:#1f2937}
+      .h2{font:700 28px Arial,sans-serif;fill:#1f2937}
+      .txt{font:500 22px Arial,sans-serif;fill:#4b5563}
+      .small{font:700 18px Arial,sans-serif;fill:#4b5563}
+      .mono{font:700 19px Menlo,Consolas,monospace}
+      .frame{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .lane{fill:#fff;stroke:#d2d6cf;stroke-width:3}
+      .eval{fill:#fff4f8;stroke:#e6578b;stroke-width:4}
+      .candidate{fill:#e9fbf5;stroke:#20b486;stroke-width:4}
+      .gate{fill:#fffdf8;stroke:#f4a62a;stroke-width:4}
+      .asset{fill:#eef7ff;stroke:#2f8ed8;stroke-width:4}
+      .run{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .bus{stroke:#737373;stroke-width:4;fill:none}
+      .arrow{stroke:#737373;stroke-width:4;fill:none;marker-end:url(#arrow)}
+      .dash{stroke-dasharray:11 9}
+    </style>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#737373"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="2048" height="1256"/>
+  <text x="1024" y="105" text-anchor="middle" class="title">Evaluation to Self-Evolution Loop</text>
+  <text x="1024" y="150" text-anchor="middle" class="sub">Evaluation creates reviewable change candidates; only approved and re-tested mutations affect future runs.</text>
+
+  <rect x="55" y="190" width="1938" height="980" rx="34" class="frame"/>
+
+  <rect x="105" y="245" width="1838" height="300" rx="18" class="lane"/>
+  <text x="145" y="303" class="h2">1. Run feedback path</text>
+
+  <rect x="145" y="340" width="318" height="118" rx="14" class="run"/>
+  <text x="304" y="386" text-anchor="middle" class="h2">Completed Run</text>
+  <text x="304" y="424" text-anchor="middle" class="txt">artifacts + events + metrics</text>
+
+  <rect x="580" y="340" width="318" height="118" rx="14" class="eval"/>
+  <text x="739" y="386" text-anchor="middle" class="h2">Evaluation Harness</text>
+  <text x="739" y="424" text-anchor="middle" class="txt">scorecard + findings</text>
+
+  <rect x="580" y="475" width="318" height="45" rx="12" class="eval"/>
+  <text x="739" y="505" text-anchor="middle" class="small">calibration samples + labels</text>
+  <path d="M739 458 V470" class="arrow"/>
+
+  <rect x="1015" y="340" width="318" height="118" rx="14" class="candidate"/>
+  <text x="1174" y="386" text-anchor="middle" class="h2">Candidates</text>
+  <text x="1174" y="424" text-anchor="middle" class="txt">pending human decision</text>
+
+  <rect x="1450" y="340" width="338" height="118" rx="14" class="gate"/>
+  <text x="1619" y="386" text-anchor="middle" class="h2">Human Review</text>
+  <text x="1619" y="424" text-anchor="middle" class="txt">approve / reject / assign owner</text>
+
+  <path d="M463 399 H575" class="arrow"/>
+  <path d="M898 399 H1010" class="arrow"/>
+  <path d="M1333 399 H1445" class="arrow"/>
+
+  <rect x="105" y="585" width="1838" height="325" rx="18" class="lane"/>
+  <text x="145" y="643" class="h2">2. Approved evolution targets</text>
+
+  <rect x="704" y="625" width="640" height="82" rx="14" class="candidate"/>
+  <text x="1024" y="663" text-anchor="middle" class="h2">Promotion Bundle</text>
+  <text x="1024" y="692" text-anchor="middle" class="small">approved findings + owner + rationale + expected impact</text>
+  <path d="M1619 458 V568 H1024 V620" class="arrow"/>
+
+  <path d="M1024 707 V732" class="bus"/>
+  <path d="M304 732 H1744" class="bus"/>
+
+  <rect x="170" y="760" width="268" height="105" rx="14" class="asset"/>
+  <text x="304" y="804" text-anchor="middle" class="h2">Memory</text>
+  <text x="304" y="840" text-anchor="middle" class="txt">approved lessons</text>
+
+  <rect x="593" y="760" width="268" height="105" rx="14" class="asset"/>
+  <text x="727" y="804" text-anchor="middle" class="h2">Prompt</text>
+  <text x="727" y="840" text-anchor="middle" class="txt">mutation proposal</text>
+
+  <rect x="1016" y="760" width="268" height="105" rx="14" class="asset"/>
+  <text x="1150" y="804" text-anchor="middle" class="h2">Rubric</text>
+  <text x="1150" y="840" text-anchor="middle" class="txt">judge criteria update</text>
+
+  <rect x="1439" y="760" width="268" height="105" rx="14" class="asset"/>
+  <text x="1573" y="804" text-anchor="middle" class="h2">Regression</text>
+  <text x="1573" y="840" text-anchor="middle" class="txt">new eval task</text>
+
+  <path d="M304 732 V755" class="arrow"/>
+  <path d="M727 732 V755" class="arrow"/>
+  <path d="M1150 732 V755" class="arrow"/>
+  <path d="M1573 732 V755" class="arrow"/>
+
+  <rect x="105" y="955" width="1838" height="165" rx="18" class="lane"/>
+  <text x="145" y="1013" class="h2">3. Promotion gate</text>
+
+  <path d="M304 865 V913" class="bus"/>
+  <path d="M727 865 V913" class="bus"/>
+  <path d="M1150 865 V913" class="bus"/>
+  <path d="M1573 865 V913" class="bus"/>
+  <path d="M304 913 H1573" class="bus"/>
+  <path d="M1024 913 V950" class="arrow"/>
+
+  <rect x="573" y="1018" width="600" height="78" rx="14" class="gate"/>
+  <text x="873" y="1050" text-anchor="middle" class="h2">Deterministic Eval Gate</text>
+  <text x="873" y="1078" text-anchor="middle" class="small">replay + suite checks before promotion</text>
+
+  <rect x="1304" y="1018" width="398" height="78" rx="14" class="run"/>
+  <text x="1503" y="1050" text-anchor="middle" class="h2">Next Run</text>
+  <text x="1503" y="1078" text-anchor="middle" class="small">uses promoted assets; closes loop</text>
+  <path d="M1173 1057 H1299" class="arrow"/>
+</svg>

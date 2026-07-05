@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.harness.kb.stores import KBStores
+from app.harness.memory.episode import index_episode_event
 from app.storage.agent_context_store import (
     SUPPORTED_AGENTS,
     append_approved_agent_memory,
@@ -92,6 +93,7 @@ def append_learning_event(
         **event,
     }
     _append_jsonl(episode_path, episode_payload)
+    index_episode_event(run_root=run.root, event=episode_payload)
 
     for index, candidate in enumerate(memory_candidates):
         candidate_payload = {

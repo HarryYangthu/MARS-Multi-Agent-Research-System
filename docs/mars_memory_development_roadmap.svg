@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1256" viewBox="0 0 2048 1256">
+  <defs>
+    <style>
+      .bg{fill:#f7f6ef}
+      .title{font:700 62px Arial,sans-serif;fill:#111827}
+      .sub{font:500 24px Arial,sans-serif;fill:#4b5563}
+      .h1{font:700 34px Arial,sans-serif;fill:#1f2937}
+      .h2{font:700 27px Arial,sans-serif;fill:#1f2937}
+      .txt{font:500 21px Arial,sans-serif;fill:#4b5563}
+      .small{font:700 17px Arial,sans-serif;fill:#4b5563}
+      .frame{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .blue{fill:#eef7ff;stroke:#2f8ed8;stroke-width:4}
+      .gold{fill:#fffdf8;stroke:#f4a62a;stroke-width:4}
+      .green{fill:#e9fbf5;stroke:#20b486;stroke-width:4}
+      .pink{fill:#fff4f8;stroke:#e6578b;stroke-width:4}
+      .box{fill:#fff;stroke:#7b7f78;stroke-width:3}
+      .arrow{stroke:#737373;stroke-width:4;fill:none;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#737373"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="2048" height="1256"/>
+  <text x="1024" y="105" text-anchor="middle" class="title">MARS Memory Capability Matrix</text>
+  <text x="1024" y="150" text-anchor="middle" class="sub">Complete governed memory stack: injection, governance, semantic indexing, evaluation</text>
+
+  <rect x="55" y="190" width="1938" height="980" rx="34" class="frame"/>
+
+  <rect x="120" y="270" width="430" height="320" rx="20" class="blue"/>
+  <text x="335" y="330" text-anchor="middle" class="h1">Context Injection</text>
+  <rect x="170" y="390" width="330" height="54" rx="10" class="box"/>
+  <text x="335" y="425" text-anchor="middle" class="txt">MemorySelector pre-call</text>
+  <rect x="170" y="465" width="330" height="54" rx="10" class="box"/>
+  <text x="335" y="500" text-anchor="middle" class="txt">ContextSegment.kind=memory</text>
+  <rect x="170" y="540" width="330" height="54" rx="10" class="box"/>
+  <text x="335" y="575" text-anchor="middle" class="txt">manifest + raw refs</text>
+
+  <rect x="605" y="270" width="430" height="320" rx="20" class="gold"/>
+  <text x="820" y="330" text-anchor="middle" class="h1">Governance</text>
+  <rect x="655" y="390" width="330" height="54" rx="10" class="box"/>
+  <text x="820" y="425" text-anchor="middle" class="txt">approved-only writes</text>
+  <rect x="655" y="465" width="330" height="54" rx="10" class="box"/>
+  <text x="820" y="500" text-anchor="middle" class="txt">quarantine review API</text>
+  <rect x="655" y="540" width="330" height="54" rx="10" class="box"/>
+  <text x="820" y="575" text-anchor="middle" class="txt">ttl / decay / stale</text>
+
+  <rect x="1090" y="270" width="430" height="320" rx="20" class="green"/>
+  <text x="1305" y="330" text-anchor="middle" class="h1">Semantic Memory</text>
+  <rect x="1140" y="390" width="330" height="54" rx="10" class="box"/>
+  <text x="1305" y="425" text-anchor="middle" class="txt">entity / relation index</text>
+  <rect x="1140" y="465" width="330" height="54" rx="10" class="box"/>
+  <text x="1305" y="500" text-anchor="middle" class="txt">graph-enhanced retrieval</text>
+  <rect x="1140" y="540" width="330" height="54" rx="10" class="box"/>
+  <text x="1305" y="575" text-anchor="middle" class="txt">conflict hints</text>
+
+  <rect x="1575" y="270" width="350" height="320" rx="20" class="pink"/>
+  <text x="1750" y="330" text-anchor="middle" class="h1">Evaluation</text>
+  <rect x="1617" y="390" width="266" height="54" rx="10" class="box"/>
+  <text x="1750" y="425" text-anchor="middle" class="txt">retrieval precision</text>
+  <rect x="1617" y="465" width="266" height="54" rx="10" class="box"/>
+  <text x="1750" y="500" text-anchor="middle" class="txt">pollution guard</text>
+  <rect x="1617" y="540" width="266" height="54" rx="10" class="box"/>
+  <text x="1750" y="575" text-anchor="middle" class="txt">promotion safety</text>
+
+  <rect x="205" y="735" width="1638" height="110" rx="18" class="box"/>
+  <text x="1024" y="780" text-anchor="middle" class="h2">Always-On Safety Invariants</text>
+  <text x="1024" y="820" text-anchor="middle" class="txt">approved memory only · mock quarantine · no stale recall · deterministic gates · full usage audit</text>
+
+  <rect x="470" y="925" width="1108" height="105" rx="18" class="green"/>
+  <text x="1024" y="970" text-anchor="middle" class="h2">Closed Feedback Loop</text>
+  <text x="1024" y="1010" text-anchor="middle" class="txt">Run facts -> governed memory -> selected context -> evaluated outcome -> reviewed self-evolution</text>
+
+  <path d="M335 590 V730" class="arrow"/>
+  <path d="M820 590 V730" class="arrow"/>
+  <path d="M1305 590 V730" class="arrow"/>
+  <path d="M1750 590 V730" class="arrow"/>
+  <path d="M1024 845 V920" class="arrow"/>
+</svg>

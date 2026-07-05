@@ -245,6 +245,8 @@ def collect_segments(
                 reason=_selection_reason_for_kind(kind),
             )
         )
+    memory_result = _collect_memory_segments(data)
+    segments.extend(memory_result)
     if data.tool_names:
         selected_tools = _select_tool_names(data.tool_names, data.task)
         reason = (
@@ -274,6 +276,25 @@ def collect_segments(
             )
         )
     return segments
+
+
+def _collect_memory_segments(data: CompileContextInput) -> list[ContextSegment]:
+    if not _settings_bool("mars_context_memory_injection", True):
+        return []
+    try:
+        from app.harness.memory.injection import build_memory_segments
+
+        result = build_memory_segments(
+            agent=data.agent,
+            node_key=data.node_key or data.agent,
+            project=data.project,
+            task=data.task,
+            purpose=data.purpose,
+            run_root=data.run_root,
+        )
+        return result.segments
+    except Exception:
+        return []
 
 
 def select_segments(

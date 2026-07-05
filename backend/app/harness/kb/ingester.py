@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any, Iterable
 
 from app.harness.kb.embedder import embed
@@ -107,5 +108,15 @@ def ingest_memory(
         if resolved is None:
             continue
         z.upsert(resolved)
+        _index_semantics(base=s.base, record=resolved)
         out.append(resolved)
     return out
+
+
+def _index_semantics(*, base: Path, record: KBRecord) -> None:
+    try:
+        from app.harness.memory.semantic import index_semantic_record
+
+        index_semantic_record(base=base, record=record)
+    except Exception:
+        return

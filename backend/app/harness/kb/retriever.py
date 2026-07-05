@@ -23,6 +23,7 @@ def query(
     memory_type: str | None = None,
     include_mock: bool = False,
     include_superseded: bool = False,
+    approved_only: bool = True,
     stores: KBStores | None = None,
 ) -> list[Hit]:
     s = stores or get_stores()
@@ -34,6 +35,7 @@ def query(
         memory_type=memory_type,
         include_mock=include_mock,
         include_superseded=include_superseded,
+        approved_only=approved_only,
         stores=s,
     )
     return [Hit(score=hit.score, record=hit.record) for hit in selected]

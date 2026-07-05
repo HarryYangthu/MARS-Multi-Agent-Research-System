@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1256" viewBox="0 0 2048 1256">
+  <defs>
+    <style>
+      .bg{fill:#f7f6ef}
+      .title{font:700 62px Arial,sans-serif;fill:#111827}
+      .sub{font:500 24px Arial,sans-serif;fill:#4b5563}
+      .h1{font:700 35px Arial,sans-serif;fill:#1f2937}
+      .h2{font:700 27px Arial,sans-serif;fill:#1f2937}
+      .txt{font:500 21px Arial,sans-serif;fill:#4b5563}
+      .small{font:700 17px Arial,sans-serif;fill:#4b5563}
+      .mono{font:700 18px Menlo,Consolas,monospace}
+      .frame{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .run{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .context{fill:#eef7ff;stroke:#2f8ed8;stroke-width:4}
+      .kb{fill:#f0efff;stroke:#7b7f78;stroke-width:4}
+      .gate{fill:#fffdf8;stroke:#f4a62a;stroke-width:4}
+      .candidate{fill:#e9fbf5;stroke:#20b486;stroke-width:4}
+      .eval{fill:#fff4f8;stroke:#e6578b;stroke-width:4}
+      .arrow{stroke:#737373;stroke-width:4;fill:none;marker-end:url(#arrow)}
+      .bus{stroke:#737373;stroke-width:4;fill:none}
+      .dash{stroke-dasharray:11 9}
+    </style>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#737373"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="2048" height="1256"/>
+  <text x="1024" y="105" text-anchor="middle" class="title">MARS Memory System</text>
+  <text x="1024" y="150" text-anchor="middle" class="sub">Run-centered governed memory for research multi-agent workflows</text>
+
+  <rect x="55" y="190" width="1938" height="980" rx="34" class="frame"/>
+
+  <rect x="115" y="270" width="330" height="170" rx="16" class="run"/>
+  <text x="280" y="328" text-anchor="middle" class="h2">Run Facts</text>
+  <text x="280" y="368" text-anchor="middle" class="txt">artifacts + events</text>
+  <text x="280" y="402" text-anchor="middle" class="txt">metrics + HITL + eval</text>
+
+  <rect x="115" y="520" width="330" height="150" rx="16" class="context"/>
+  <text x="280" y="574" text-anchor="middle" class="h2">Working Memory</text>
+  <text x="280" y="614" text-anchor="middle" class="txt">current context</text>
+  <text x="280" y="648" text-anchor="middle" class="txt">manifest + raw refs</text>
+  <path d="M280 440 V515" class="arrow"/>
+
+  <rect x="575" y="260" width="420" height="190" rx="18" class="gate"/>
+  <text x="785" y="320" text-anchor="middle" class="h2">Governance Gate</text>
+  <text x="785" y="360" text-anchor="middle" class="txt">schema + eval + HITL</text>
+  <text x="785" y="394" text-anchor="middle" class="txt">mock quarantine</text>
+  <text x="785" y="424" text-anchor="middle" class="small">approved-only long-term writes</text>
+  <path d="M445 355 H570" class="arrow"/>
+
+  <rect x="1125" y="235" width="730" height="250" rx="18" class="kb"/>
+  <text x="1490" y="296" text-anchor="middle" class="h2">Governed KB Memory</text>
+  <rect x="1175" y="335" width="150" height="70" rx="12" class="run"/>
+  <text x="1250" y="378" text-anchor="middle" class="small">literature</text>
+  <rect x="1355" y="335" width="170" height="70" rx="12" class="run"/>
+  <text x="1440" y="378" text-anchor="middle" class="small">methodology</text>
+  <rect x="1555" y="335" width="160" height="70" rx="12" class="run"/>
+  <text x="1635" y="378" text-anchor="middle" class="small">code_assets</text>
+  <rect x="1175" y="420" width="190" height="45" rx="10" class="candidate"/>
+  <text x="1270" y="449" text-anchor="middle" class="mono" fill="#0f8a65">run_archive</text>
+  <rect x="1400" y="420" width="210" height="45" rx="10" class="eval"/>
+  <text x="1505" y="449" text-anchor="middle" class="mono" fill="#d9467a">quarantine</text>
+  <path d="M995 355 H1120" class="arrow"/>
+
+  <rect x="575" y="565" width="420" height="165" rx="18" class="candidate"/>
+  <text x="785" y="620" text-anchor="middle" class="h2">Memory Selector</text>
+  <text x="785" y="660" text-anchor="middle" class="txt">similarity + recency</text>
+  <text x="785" y="692" text-anchor="middle" class="txt">confidence + eval + salience</text>
+  <path d="M1125 450 C1045 520 995 595 1000 640" class="arrow"/>
+
+  <rect x="1125" y="560" width="730" height="205" rx="18" class="context"/>
+  <text x="1490" y="622" text-anchor="middle" class="h2">Context V2 Injection</text>
+  <text x="1490" y="662" text-anchor="middle" class="txt">memory segments enter pre-call context</text>
+  <text x="1490" y="696" text-anchor="middle" class="txt">summary in prompt, raw refs on disk</text>
+  <text x="1490" y="730" text-anchor="middle" class="small">every decision is recorded in context manifest</text>
+  <path d="M995 650 H1120" class="arrow"/>
+
+  <rect x="115" y="820" width="430" height="160" rx="18" class="eval"/>
+  <text x="330" y="875" text-anchor="middle" class="h2">Learning Events</text>
+  <text x="330" y="915" text-anchor="middle" class="txt">episode memory</text>
+  <text x="330" y="948" text-anchor="middle" class="txt">memory candidates</text>
+  <path d="M330 670 V815" class="arrow"/>
+
+  <rect x="710" y="835" width="430" height="130" rx="18" class="gate"/>
+  <text x="925" y="886" text-anchor="middle" class="h2">Human Review</text>
+  <text x="925" y="926" text-anchor="middle" class="txt">approve / reject / stale / supersede</text>
+  <path d="M545 900 H705" class="arrow"/>
+
+  <rect x="1305" y="835" width="430" height="130" rx="18" class="candidate"/>
+  <text x="1520" y="886" text-anchor="middle" class="h2">Agent Long-term Context</text>
+  <text x="1520" y="926" text-anchor="middle" class="txt">prompts / examples / evals / memory_items</text>
+  <path d="M1140 900 H1300" class="arrow"/>
+
+  <path d="M1520 835 V770" class="arrow dash"/>
+  <path d="M1490 765 V790 H785 V735" class="arrow dash"/>
+
+  <rect x="575" y="1035" width="860" height="80" rx="14" class="gate"/>
+  <text x="1005" y="1068" text-anchor="middle" class="h2">Memory Eval Gate</text>
+  <text x="1005" y="1096" text-anchor="middle" class="small">retrieval precision, pollution, stale recall, promotion safety</text>
+</svg>
