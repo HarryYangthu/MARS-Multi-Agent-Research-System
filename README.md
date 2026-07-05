@@ -38,7 +38,7 @@ The main workbench keeps project state, data preparation, run history, agent
 state, execution artifacts, and HITL controls in one operator-focused screen.
 
 <p align="center">
-  <img src="docs/assets/readme/mars-workbench-full.jpg" alt="MARS workbench full interface screenshot" width="100%" />
+  <img src="docs/assets/readme/mars-workbench-full.png" alt="MARS workbench full interface screenshot" width="100%" />
 </p>
 
 ### Evaluation And Memory
