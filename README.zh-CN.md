@@ -23,7 +23,7 @@ Idea(创意)→ Experiment(实验)→ Coding(编码)→ Execution(执行)→ Wri
 共享知识库、Baseline 复用 fingerprint、以及 hook 在工具分发路径上的
 **Gate 5** — 任何会破坏项目 baseline 的 patch 在执行前就被静态拒绝。
 
-首个落地项目是 `projects/moe-pimc/` — *PIMC for FDD Massive MIMO under
+首个落地项目是 `projects/pimc/` — *PIMC for FDD Massive MIMO under
 beam/layer switching*。
 
 ## 亮点
@@ -48,6 +48,8 @@ beam/layer switching*。
   PR 都跑这条路径。
 - **完整沉淀。** 每个任务在 `runs/<时间戳>_<任务名>/` 写 9 个子目录:
   input / context / 各 Agent 产物 / HITL / events,**全程可审计可回放**。
+- **Tools V2 平台。** Agent 与 Commander 共用 registry-backed 工具目录,
+  统一 schema 校验、配置开关、Gate 5 保护、审计事件、审批记录和 rollback 快照。
 
 ## 架构一览
 
@@ -110,11 +112,19 @@ cd frontend && npm install --legacy-peer-deps && npm run dev
 python scripts/run_demo.py --port 8000 --mock-mode
 ```
 
-完整验收(mypy --strict + import-linter + 209 tests + e2e):
+完整验收(mypy --strict + import-linter + 后端/前端检查 + Tools V2 audit + e2e):
 
 ```bash
 bash scripts/acceptance.sh
 ```
+
+## 上线部署
+
+生产环境建议采用混合部署:Next.js 前端上 Vercel,FastAPI 后端、Redis、
+Chroma、`runs/`、`knowledge/` 与执行后端放在长驻服务器/GPU 机器上。
+
+标准上线流程、回滚策略、memory 管理、多用户访问边界和工具防乱 FAQ 见
+[`docs/deployment_runbook.md`](docs/deployment_runbook.md)。
 
 ## 接入真实数据(Hardware E2E)
 
@@ -129,8 +139,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 ```bash
 ln -s /path/to/your/code workspace/repos/pimc-current
-# 改 projects/moe-pimc/repo_link.yaml 的 repo_path
-python scripts/ingest_repo.py --project moe-pimc
+# 改 projects/pimc/repo_link.yaml 的 repo_path
+python scripts/ingest_repo.py --project pimc
 ```
 
 索引参考论文(PDF):
@@ -161,7 +171,7 @@ mars/
 │  ├─ components/            # TopBar · ProjectsPanel · PipelineOverview · EventLog · KBPanel
 │  ├─ lib/                   # api · i18n · socket
 │  └─ stores/
-├─ projects/moe-pimc/        # AGENTS.md · repo_link.yaml · data_gen.py
+├─ projects/pimc/        # AGENTS.md · repo_link.yaml · data_gen.py
 ├─ workspace/repos/          # 真实研究代码(软链接,gitignore)
 ├─ workspace/uploads/papers/ # 参考论文 PDF(gitignore)
 ├─ knowledge/                # 4 区 KB(首次摄入后 gitignore)
@@ -178,15 +188,20 @@ mars/
 
 | | |
 |---|---|
-| 测试 | **209 通过** |
-| `mypy --strict` | 132 个源文件 0 错 |
+| 后端测试 | unit / integration / gate 通过 |
+| 前端检查 | typecheck / lint / context smoke 通过 |
+| Tools V2 audit | catalogue / API filters / trace / execution artifacts 已验证 |
+| `mypy --strict` | 0 错 |
 | `import-linter` 4 条契约 | 全部 KEPT |
 | Schema 合规率 | ≥ 95% |
 | Baseline matcher 召回/精度 | 合成集 100% / 100% |
 | 11 步 e2e demo | 零外部依赖通过 |
 | `runs/<id>/` 完整性 | 9/9 子目录有内容 |
 
-## 路线图(V1 主题)
+## 路线图(V2 主题)
+
+V0 仍是当前稳定发布线(`v0.1.0`)。在 [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md)
+通过之前,V2 都按开发态处理,不要提前把 UI/API 版本标成稳定 V2。
 
 - **后训练流水线** — GRPO 训练器、从 `runs/<id>/hitl/*` 构造 preference
   pair、复合 reward(schema 合规 × baseline 保护 × 下游指标)。
@@ -203,10 +218,15 @@ mars/
 - [`PRODUCT.md`](PRODUCT.md) — 产品定义(5 Agent、双形态、KB 区、决策日志)
 - [`DESIGN.md`](DESIGN.md) — 架构(分层、Schema、Harness 内部、运行时、前端)
 - [`ACCEPTANCE.md`](ACCEPTANCE.md) — V0 验收边界(Dev E2E + Hardware E2E)
-- [`CLAUDE.md`](CLAUDE.md) — 硬约束 + 目录结构 + 风格规范(Claude Code / Codex 自动加载)
+- [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) — V2 稳定发布前的开发验收门槛
+- [`docs/V2_RELEASE_STATUS.md`](docs/V2_RELEASE_STATUS.md) — 最新 P3 发布门禁结果与命令
+- [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) — 编码 Agent 使用的硬约束、目录结构和风格规范
 - [`docs/architecture.md`](docs/architecture.md) — 配套架构图
 - [`docs/agent_io_schema.md`](docs/agent_io_schema.md) — 5 个 schema 字段说明 + 示例
 - [`docs/run_lifecycle.md`](docs/run_lifecycle.md) — 一次任务从创建到归档的时序图
+- [`docs/tools_catalog.md`](docs/tools_catalog.md) — Tools V2 工具目录、API、审计记录、外部 smoke
+- [`docs/tool_security.md`](docs/tool_security.md) — dispatch 顺序、Gate 5、rollback、红action、网络策略
+- [`docs/V2_AGENT_TODO.md`](docs/V2_AGENT_TODO.md) — V2 清理与实现队列
 - [`docs/frontend_ux.md`](docs/frontend_ux.md) — P0 UI 契约
 
 ## 开源协议

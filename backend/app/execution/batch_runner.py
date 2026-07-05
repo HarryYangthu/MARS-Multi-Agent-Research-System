@@ -1,4 +1,4 @@
-"""Concurrent batch runner with a cap configured in configs/execution.yaml."""
+"""Concurrent batch runner with a configurable cap (V0 default = 16)."""
 from __future__ import annotations
 
 import asyncio
@@ -14,13 +14,8 @@ from app.execution.simulation_runner import JobSpec, run_one
 
 @dataclass
 class BatchConfig:
-    max_concurrency: int = field(
-        default_factory=lambda: get_execution_config().max_concurrency
-    )
-    steps: int = field(default_factory=lambda: get_execution_config().default_steps)
-    # Seconds between curve points (mock backend only). Default kept small so
-    # existing tests stay fast; the demo path passes a larger value explicitly.
-    tick_seconds: float = 0.05
+    max_concurrency: int = 16
+    steps: int = 30
 
 
 @dataclass

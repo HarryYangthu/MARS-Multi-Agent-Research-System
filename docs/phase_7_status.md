@@ -18,7 +18,7 @@
 | `docs/agent_io_schema.md` | ✓ | written |
 | `docs/run_lifecycle.md` | ✓ | written |
 | `docs/frontend_ux.md` | ✓ | written |
-| `posttrain/README.md` | ✓ | V0 boundary + V1 hooks documented |
+| `posttrain/README.md` | ✓ | V0 boundary + V2 hooks documented |
 | `templates/code_rules/pimc_python.md` | ✓ | already in place since Phase 5 |
 | `docs/implementation_report.md` | ✓ | filled per ACCEPTANCE §12 — 9 sections incl. risk callouts on spec inconsistencies |
 
@@ -65,7 +65,7 @@ Contracts: 4 kept, 0 broken.
 runs/<ts>_acceptance_demo/
 ├─ run_meta.json
 ├─ input/         user_request.md
-├─ context/       <agent>_context_pack.v1.json + <agent>_context_snapshot.v1.md ×5
+├─ context/       <agent>_context_pack.v2.json + <agent>_context_snapshot.v2.md ×5
 ├─ idea/          idea_proposal.{v1,approved}.md
 ├─ experiment/    experiment_plan.{v1,approved}.md
 ├─ coding/        code_spec.{v1,approved}.md

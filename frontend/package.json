@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node scripts/clean-next-types.cjs && tsc --noEmit",
+    "test:context": "tsc --outDir .tmp/context-workbench --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/context-workbench-smoke.ts src/lib/contextWorkbench.ts && node .tmp/context-workbench/scripts/context-workbench-smoke.js"
   },
   "dependencies": {
     "next": "15.0.3",

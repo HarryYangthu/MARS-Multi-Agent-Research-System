@@ -1,0 +1,12 @@
+agent: coding
+research_sites:
+  - id: github
+    label: GitHub
+    url: https://github.com
+    enabled: true
+    source: default
+  - id: pytorch_docs
+    label: PyTorch Docs
+    url: https://pytorch.org/docs/stable/index.html
+    enabled: true
+    source: default

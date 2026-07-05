@@ -13,11 +13,11 @@ cp -R /your/real/research/code   workspace/repos/pimc-current
 ln -s /your/real/research/code   workspace/repos/pimc-current
 ```
 
-然后修改 `projects/moe-pimc/repo_link.yaml`:
+然后修改 `projects/pimc/repo_link.yaml`:
 
 ```yaml
 repo_mode: local_path
-repo_path: ../../workspace/repos/pimc-current   # 相对于 projects/moe-pimc/
+repo_path: ../../workspace/repos/pimc-current   # 相对于 projects/pimc/
 ```
 
 ### 方案 B:Git submodule
@@ -50,7 +50,7 @@ sync_strategy: snapshot
 放好真实代码后,跑:
 
 ```bash
-python scripts/ingest_repo.py --project moe-pimc
+python scripts/ingest_repo.py --project pimc
 ```
 
 这会读 `repo_link.yaml` 里的 `allowed_paths` + `ignore_patterns`,把匹配的代码文件切块写入 `knowledge/code_assets/`。Coding Agent 在 build_context 时会从这个 KB 检索相关片段。
@@ -58,12 +58,12 @@ python scripts/ingest_repo.py --project moe-pimc
 `--dry-run` 先看会摄入哪些文件:
 
 ```bash
-python scripts/ingest_repo.py --project moe-pimc --dry-run
+python scripts/ingest_repo.py --project pimc --dry-run
 ```
 
 ## protected_paths(Gate 5 保护)
 
-`projects/moe-pimc/repo_link.yaml::protected_paths` 列出的路径会触发 Gate 5。
+`projects/pimc/repo_link.yaml::protected_paths` 列出的路径会触发 Gate 5。
 默认值:
 
 ```yaml

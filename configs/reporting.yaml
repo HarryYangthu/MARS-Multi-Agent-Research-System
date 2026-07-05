@@ -1,0 +1,28 @@
+reporting:
+  enabled: true
+  default_bundle_schema: report_bundle.v1
+  data_pack_filename: report_data_pack.v1.json
+  manifest_filename: report_bundle.v1.md
+  deliverables_dir: writing/deliverables
+  generate_on_writing_approval: true
+  formats:
+    markdown:
+      enabled: true
+      source_artifact: writing/research_report.approved.md
+    excel:
+      enabled: true
+      filename: results_workbook.xlsx
+    word:
+      enabled: true
+      filename: research_report.docx
+    powerpoint:
+      enabled: true
+      filename: research_deck.pptx
+  qa:
+    structural_validation: true
+    render_visual_qa: false
+    keep_render_logs: true
+  degraded_inputs:
+    allow_missing_metrics: true
+    allow_missing_plots: true
+    allow_partial_experiment_failures: true

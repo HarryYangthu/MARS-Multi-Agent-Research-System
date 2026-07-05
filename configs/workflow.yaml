@@ -1,0 +1,18 @@
+workflow:
+  engine: langgraph
+  legacy_readonly_restore: true
+  entrypoints:
+    pipeline:
+      nodes: [idea, experiment, coding, execution, writing]
+    standalone:
+      allowed_nodes: [idea, experiment, coding, execution, writing]
+  langgraph:
+    checkpoint_namespace: mars:v2
+    persistence: file
+    interrupt_before_review: true
+    stream_events: true
+    max_feedback_attempts: 3
+    emit_legacy_state: true
+  feedback_loop:
+    attempt_node_suffix: "_attempt_{attempt}"
+    preserve_previous_artifacts: true

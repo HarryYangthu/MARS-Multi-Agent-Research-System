@@ -13,11 +13,7 @@ export function HumanFeedback({ runId }: { runId?: string | null }): JSX.Element
 
   async function send(): Promise<void> {
     if (!v.trim()) return;
-    if (!runId) {
-      setErr(t("feedback.no_run"));
-      setTimeout(() => setErr(null), 1500);
-      return;
-    }
+    // V0 just stores locally; V2 will POST to a feedback endpoint.
     try {
       await sendFeedback(runId, v);
       setSent(v);
@@ -44,12 +40,7 @@ export function HumanFeedback({ runId }: { runId?: string | null }): JSX.Element
       ) : sent ? (
         <span className="text-[10px] text-emerald-300">✓ {t("feedback.sent_ok")}</span>
       ) : (
-        <button
-          onClick={() => void send()}
-          className="rounded bg-mars-accent px-2 py-0.5 text-[10px] text-white hover:bg-mars-accent2"
-        >
-          {t("feedback.send")}
-        </button>
+        <span className="text-[10px] text-slate-500">▸ V2: 发送给当前活跃 Agent</span>
       )}
     </div>
   );

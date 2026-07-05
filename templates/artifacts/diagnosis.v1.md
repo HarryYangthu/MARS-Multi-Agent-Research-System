@@ -1,24 +1,30 @@
 ---
 schema: diagnosis.v1
-project: moe-pimc
-agent: diagnosis
-failed_node: execution
-root_cause: "Describe the root cause of the failure (>= 8 chars)."
-recommended_action: revise_coding   # retry | revise_coding | revise_experiment | manual
-target_node: coding
+project: pimc
+agent: bridge
+run_id: example_run
 attempt: 1
-confidence: 0.6
-evidence:
-  - "Paste the key error line(s) or log excerpt here."
+passed: false
+failed_metrics:
+  - metric: loss
+    observed: 0.12
+    target: 0.02
+    direction: lte
+    gap: 0.1
+    aggregation: max
+suspected_causes:
+  - kind: metrics_gap
+    summary: Loss exceeded the configured threshold.
+    severity: high
+    evidence:
+      - execution/metrics.json
+recommended_target: coding
+recommended_action: Generate a focused code patch for human review.
+evidence_refs:
+  - execution/metrics.json
+budget_status: within_budget
 ---
 
 # Diagnosis
 
-## What failed
-Which node failed and the observable symptom.
-
-## Root cause
-The most likely cause, grounded in the error and upstream artifacts.
-
-## Recommended action
-Why re-routing to `target_node` (or retrying) should fix it.
+Replace this template with a bridge-generated diagnosis.

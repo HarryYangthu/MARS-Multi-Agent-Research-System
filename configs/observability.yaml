@@ -1,0 +1,20 @@
+version: 1
+
+sinks:
+  file:
+    enabled: true
+  websocket:
+    enabled: true
+  langsmith:
+    enabled: false
+    project: mars-dev
+    endpoint: https://api.smith.langchain.com
+    timeout_ms: 1000
+
+tracing:
+  enabled: true
+  exporter: file
+  manifest_path: context/trace_manifest.v2.json
+  capture_llm_summary: true
+  capture_tool_args: redacted
+  capture_tool_result: summary

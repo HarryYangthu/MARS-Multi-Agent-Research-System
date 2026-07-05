@@ -6,6 +6,10 @@ gates:
     files_changed_threshold: 5
   experiment_launch:
     enabled: true
+    # Holds an execution batch for human approval when the estimated GPU budget
+    # is large. Dormant in the CPU/mock demo (estimated_gpu_hours≈0); this is the
+    # V2 real-L40S-training guard. The 16-cell PIM sweep runs on CPU, so it
+    # auto-proceeds rather than parking at this gate.
     gpu_hours_threshold: 12
   conclusion_output:
     enabled: true

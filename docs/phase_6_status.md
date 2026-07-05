@@ -5,7 +5,7 @@
 | Item | Status | Evidence |
 |---|---|---|
 | `execution/mock_simulation.py` (★ no-GPU fallback) | ✓ | `MockJob` / `run_mock_simulation()`; emits `execution.started` / `curve_point` / `completed` per WS event-bus channel; produces `MockResult` w/ deterministic fingerprint |
-| `execution/simulation_runner.py` | ✓ | `JobSpec` + `run_one()` wraps the mock runner (real subprocess wiring is V1) |
+| `execution/simulation_runner.py` | ✓ | `JobSpec` + `run_one()` wraps the mock runner (real subprocess wiring is V2) |
 | `execution/batch_runner.py` (concurrency cap=6) | ✓ | `BatchConfig.max_concurrency`; semaphore-bounded `asyncio.gather` |
 | `execution/log_streamer.py` | ✓ | Async iterator that publishes `execution.log_line` events |
 | `execution/metrics_collector.py` | ✓ | Writes per-experiment `run_log_<exp>.v1.md` (schema-valid) + `metrics.json` |
@@ -16,7 +16,7 @@
 | Run-detail link to Multi view | ✓ | Sidebar "Multi view →" link |
 | WS per-experiment channel isolation | ✓ | `tests/integration/test_concurrent_execution.py::test_six_jobs_run_concurrently` asserts 6 distinct channels |
 | Concurrency cap honors queue | ✓ | `test_seventh_job_queues_behind_cap` (cap=2, 3 jobs → 3rd starts after 1st finishes) |
-| Mock results pass schema | ✓ | `tests/unit/test_mock_simulation.py::test_result_metadata_validates_run_log_v1` |
+| Mock results pass schema | ✓ | `tests/unit/test_mock_simulation.py::test_result_metadata_validates_run_log_schema` |
 | Fingerprint into RunArchive | ✓ | Each per-experiment run_log carries `fingerprint_hash`, sedimentation hook writes it into `run_archive` zone |
 | `mypy --strict` clean | ✓ | "Success: no issues found in 99 source files" |
 | `lint-imports` 4/4 KEPT | ✓ | bridge no longer imports api; bus passed via parameter |
@@ -43,7 +43,7 @@ PYTHONPATH=backend lint-imports                           # → 4 kept
 PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8765 &
 RID=$(curl -sX POST http://127.0.0.1:8765/api/runs \
    -H 'Content-Type: application/json' \
-   -d '{"task":"phase6","project":"moe-pimc","user_request":"test"}' \
+   -d '{"task":"phase6","project":"pimc","user_request":"test"}' \
    | python -c 'import json,sys;print(json.load(sys.stdin)["run_id"])')
 curl -sX POST http://127.0.0.1:8765/api/runs/$RID/start
 # approve through 5 stages…
@@ -63,7 +63,7 @@ E2E at this Phase = "Pipeline run + Execution Agent fans out N≤6 concurrent
 mock simulations + per-experiment run_log + curves + metrics persisted +
 fingerprints into RunArchive KB + Multi view shows mini charts".
 
-The HTTP smoke run above demonstrates this. With the moe-pimc mock_provider's
+The HTTP smoke run above demonstrates this. With the pimc mock_provider's
 experiment_plan emitting 3 ablations, we see 3 simulations; the 6-way capacity
 is unit-tested separately. Replacing the mock provider with real LLMs (or a
 hand-written experiment_plan with 6 ablations) yields full 6-way fan-out.
@@ -74,4 +74,4 @@ hand-written experiment_plan with 6 ablations) yields full 6-way fan-out.
 - **Bus passed by parameter**: orchestrator captures its bus when building the NodeRunner closure, then `run_agent_node(run, key, bus=bus)` propagates it into `_run_execution_batch`. This avoids `bridge → api` layering violation while keeping a single bus per session.
 - **Curve persistence**: The WS stream publishes ticks (which the front-end can consume live), AND the runner writes a deterministic curve to disk so `/api/execution/<run>/curves/<name>` works for replay. Real GPU runs would persist actual loss values from the trainer.
 - **Fingerprint into RunArchive**: handled by Phase 5 sedimentation hooks via `execution_extractor` — already in place; verified by `knowledge/run_archive/_index.json` containing the fingerprint after a run.
-- **No real subprocess yet**: V0 sticks to mock simulations even when GPU is detected (see `gpu_available()` helper). Hardware E2E (V1+) will swap `simulation_runner.run_one()` to spawn the project's training subprocess.
+- **No real subprocess yet**: V0 sticks to mock simulations even when GPU is detected (see `gpu_available()` helper). Hardware E2E (V2+) will swap `simulation_runner.run_one()` to spawn the project's training subprocess.

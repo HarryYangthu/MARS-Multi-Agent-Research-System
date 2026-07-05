@@ -27,9 +27,11 @@ from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import (
     AgentConfig,
     available_providers,
+    provider_configured_for_agent,
     select_provider,
 )
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
+from app.settings import get_settings
 
 
 class DebateMode(str, Enum):
@@ -57,15 +59,30 @@ class DebateResult:
     def consensus_summary(self) -> str:
         if not self.turns:
             return ""
-        return f"{self.mode.value} debate over {self.rounds} round(s) with {len(self.turns)} turns"
+        return f"{self.mode.value} 模式辩论完成：{self.rounds} 轮，{len(self.turns)} 次发言"
 
 
 def _auto_mode(agent_config: AgentConfig) -> DebateMode:
     """Replicates the auto-degrade logic from DESIGN §16.3."""
+    settings = get_settings()
+    if settings.mars_mock_mode == "always":
+        if settings.is_production:
+            raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
+        return DebateMode.MOCK_DEBATE
     avail = available_providers()
     if not agent_config.debate_enabled:
         return DebateMode.MOCK_DEBATE
-    required = {p.get("provider") for p in agent_config.debate_participants}
+    required = {
+        str(p.get("provider")) for p in agent_config.debate_participants if p.get("provider")
+    }
+    if provider_configured_for_agent(agent_config):
+        avail.add(agent_config.model_provider)
+    missing = required - avail
+    if missing and (settings.is_production or settings.mars_mock_mode == "never"):
+        raise RuntimeError(
+            f"debate provider(s) not configured for agent '{agent_config.name}': "
+            + ", ".join(sorted(missing))
+        )
     if required.issubset(avail) and required - {"mock"}:
         return DebateMode.REAL_MULTI_MODEL
     if avail - {"mock"}:
@@ -77,6 +94,7 @@ def _select_role_provider(
     role: str,
     participants: tuple[Mapping[str, Any], ...],
     fallback: tuple[LLMProvider, LLMConfig],
+    agent_config: AgentConfig,
     *,
     mode: DebateMode,
 ) -> tuple[LLMProvider, LLMConfig, str, str]:
@@ -87,7 +105,10 @@ def _select_role_provider(
     In single_model_simulated mode the fallback (the agent's primary) is
     used for every role. In mock_debate mode MockProvider is forced.
     """
+    settings = get_settings()
     if mode == DebateMode.MOCK_DEBATE:
+        if settings.is_production or settings.mars_mock_mode == "never":
+            raise RuntimeError("mock debate is disabled by runtime settings")
         return (
             MockProvider(),
             LLMConfig(provider="mock", model="mock-1", response_schema=fallback[1].response_schema),
@@ -103,13 +124,26 @@ def _select_role_provider(
         if p.get("role") == role:
             from app.harness.llm.model_registry import _build_real_provider
 
-            real = _build_real_provider(str(p.get("provider"))) or MockProvider()
             cfg = LLMConfig(
                 provider=str(p.get("provider")),
                 model=str(p.get("model", "default")),
                 temperature=0.7,
                 response_schema=fallback[1].response_schema,
             )
+            real = _build_real_provider(
+                cfg.provider,
+                agent_config=agent_config,
+                api_key_env=str(p.get("api_key_env") or ""),
+                base_url=str(p.get("base_url") or ""),
+                base_url_env=str(p.get("base_url_env") or ""),
+            )
+            if real is None:
+                if settings.is_production or settings.mars_mock_mode == "never":
+                    raise RuntimeError(
+                        f"debate provider '{cfg.provider}' failed to initialize "
+                        f"for role '{role}'"
+                    )
+                real = MockProvider()
             return real, cfg, cfg.provider, cfg.model
     return fallback[0], fallback[1], fallback[1].provider, fallback[1].model
 
@@ -153,7 +187,7 @@ async def run_debate(
     total_turns = rounds * len(roles)
 
     turns: list[Turn] = []
-    last_text = context.task or "Begin the debate."
+    last_text = context.task or "开始辩论。"
 
     def _flush_progress(running: bool) -> None:
         if not progress_path:
@@ -162,12 +196,12 @@ async def run_debate(
             from pathlib import Path
 
             header = (
-                f"# Debate transcript ({mode.value}, rounds={rounds}, roles={len(roles)})\n"
-                f"_{('Running…' if running else 'Done')}_  "
-                f"({len(turns)}/{total_turns} turns)\n\n"
+                f"# 多模型辩论转录（模式={mode.value}，轮数={rounds}，角色数={len(roles)}）\n"
+                f"_{('运行中…' if running else '已完成')}_  "
+                f"（{len(turns)}/{total_turns} 次发言）\n\n"
             )
             body = "\n".join(
-                f"## {i}. {t.role} ({t.provider}/{t.model})\n\n{t.text}\n"
+                f"## {i}. {_role_label(t.role)}（{t.provider}/{t.model}）\n\n{t.text}\n"
                 for i, t in enumerate(turns, 1)
             )
             Path(progress_path).write_text(header + body, encoding="utf-8")
@@ -179,7 +213,7 @@ async def run_debate(
     for r in range(rounds):
         for role in roles:
             provider, cfg, p_name, m_name = _select_role_provider(
-                role, participants, fallback, mode=mode
+                role, participants, fallback, agent_config, mode=mode
             )
             cfg.extra = dict(cfg.extra or {})
             cfg.extra["debate_role"] = role
@@ -193,11 +227,28 @@ async def run_debate(
             )
             if last_text and role != roles[0]:
                 messages.append(
-                    Message(role="assistant", content=f"Previous turn:\n{last_text}")
+                    Message(role="assistant", content=f"上一轮发言：\n{last_text}")
                 )
+            _write_debate_manifest(
+                request=request,
+                agent_name=agent_name,
+                output_schema=output_schema,
+                messages=messages,
+                purpose=f"debate_{role}_round_{r + 1}",
+                role=role,
+                mode=mode.value,
+            )
             try:
-                completion = await provider.complete(messages, cfg)
+                completion = await asyncio.wait_for(
+                    provider.complete(messages, cfg),
+                    timeout=get_settings().mars_llm_timeout_seconds,
+                )
             except Exception as exc:
+                settings = get_settings()
+                if settings.is_production or settings.mars_mock_mode == "never":
+                    raise RuntimeError(
+                        f"debate role '{role}' provider '{p_name}' failed"
+                    ) from exc
                 logger.warning(
                     "debate role {} provider {} failed ({}); falling back to mock",
                     role,
@@ -230,31 +281,76 @@ async def run_debate(
 
 
 def _format_transcript(mode: DebateMode, rounds: int, turns: list[Turn]) -> str:
-    lines = [f"# Debate transcript ({mode.value}, rounds={rounds})", ""]
+    lines = [f"# 多模型辩论转录（模式={mode.value}，轮数={rounds}）", ""]
     for i, t in enumerate(turns, 1):
-        lines.append(f"## {i}. {t.role} ({t.provider}/{t.model})")
+        lines.append(f"## {i}. {_role_label(t.role)}（{t.provider}/{t.model}）")
         lines.append("")
         lines.append(t.text)
         lines.append("")
     return "\n".join(lines)
 
 
+def _role_label(role: str) -> str:
+    labels = {
+        "proposer": "提案者",
+        "critic": "批判者",
+        "judge": "裁判",
+        "positive_reviewer": "正向审稿人",
+    }
+    return labels.get(role, role)
+
+
 def _artifact_from_text(text: str, output_schema: str) -> Artifact:
+    from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
     from app.harness.schema.frontmatter_parser import parse as parse_fm
 
+    cleaned = close_unclosed_frontmatter(text.strip())
     try:
-        parsed = parse_fm(text)
+        parsed = parse_fm(cleaned)
         metadata = parsed.metadata
         body = parsed.body
     except Exception:
         metadata = {}
-        body = text
+        body = cleaned
     return Artifact(
-        text=text,
+        text=cleaned,
         schema_id=str(metadata.get("schema", output_schema)),
         metadata=metadata,
         body=body,
     )
+
+
+def _write_debate_manifest(
+    *,
+    request: RunRequest,
+    agent_name: str,
+    output_schema: str,
+    messages: list[Message],
+    purpose: str,
+    role: str,
+    mode: str,
+) -> None:
+    raw_root = request.extra.get("run_root")
+    if not raw_root:
+        return
+    try:
+        from pathlib import Path
+
+        from app.harness.context.engine import write_messages_manifest
+
+        write_messages_manifest(
+            run_root=Path(str(raw_root)),
+            run_id=str(request.extra.get("run_id", "")),
+            agent=agent_name,
+            node_key=str(request.extra.get("node_key", agent_name)),
+            project=request.project,
+            output_schema=output_schema,
+            purpose=purpose,
+            messages=messages,
+            diagnostics_extra={"debate_role": role, "debate_mode": mode},
+        )
+    except Exception as exc:
+        logger.warning("debate context manifest write failed: {}", exc)
 
 
 # convenience for asyncio.run() in CLIs

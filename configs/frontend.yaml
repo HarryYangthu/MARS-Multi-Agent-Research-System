@@ -1,0 +1,26 @@
+frontend:
+  workbench:
+    layout: codex_three_pane
+    default_left_panel: runs
+    default_center_panel: timeline
+    default_inspector_tab: artifacts
+    show_private_chain_of_thought: false
+    reasoning_surface: audit_summary
+  timeline:
+    max_initial_events: 500
+    merge_sources:
+      - events
+      - trace_spans
+      - tool_calls
+      - context_manifests
+      - debate
+      - reporting
+  artifacts:
+    show_schema_status: true
+    show_evaluation_status: true
+    enable_diff: true
+    sticky_review_actions: true
+  config:
+    mode: controlled_form_with_yaml_diff
+    apply_to_running_runs: false
+    high_risk_requires_confirm: true

@@ -19,7 +19,7 @@
 - ✅ Execution Agent 支持多实验并发(默认上限 6)
 - ✅ 前端 P0 功能(见 PRODUCT.md §10)
 - ✅ `runs/` 完整沉淀链路(9 个子目录)
-- ✅ 首个项目 `projects/moe-pimc/` 跑通
+- ✅ 首个项目 `projects/pimc/` 跑通
 - ✅ 单机 4 × L40S 部署(**仅作为 Hardware Demo 验收的目标环境**;Dev / CI 验收必须能在零 GPU + Mock 模式下跑通,见下文 §1.1)
 
 ### 1.1 验收分层(关键)
@@ -29,11 +29,11 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 | 层级 | 适用场景 | 硬件 | LLM | Demo 通过条件 |
 |---|---|---|---|---|
 | **Dev E2E**(必过) | 开发 / CI / 你睡觉时跑 | 零 GPU,CPU only | 全 mock_provider | 完整 11 步 demo + 7 Phase 全过 + acceptance.sh 全绿 |
-| **Hardware E2E**(目标) | 你公司 4×L40S 上验证 | 4 × L40S | 真实 LLM API + 本地 vLLM | 6 路真实并发实验,真实 ATK-MoE 跑出 RES 指标 |
+| **Hardware E2E**(目标) | 你公司 4×L40S 上验证 | 4 × L40S | 真实 LLM API + 本地 vLLM | 6 路真实并发实验,真实 PIMC 跑出 RES 指标 |
 
 **意义**:开发 Agent 没有真实 GPU / 没有 LLM API key 也能交付完整 V0。你拿到代码后再上自己的 4×L40S 跑 Hardware E2E。
 
-### V0 不做(留 V1)
+### V0 不做(留 V2)
 
 - ❌ GRPO 训练流水线
 - ❌ Preference pair 构造工具
@@ -45,7 +45,37 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 - ❌ 多用户 / 权限隔离
 - ❌ 云端部署
 
-## 2. Demo 主脚本(MOE-PIMC 全链路)
+### 1.2 Context Engineering V2 验收补充
+
+- ✅ 每次 LLM provider 调用前写入 `runs/<id>/context/context_manifest.v2.*.json`
+- ✅ 兼容保留 V0 `*_context_pack.vN.json` / `*_context_snapshot.vN.md`
+- ✅ V2 manifest 记录 ContextSegment、token budget、render_order、messages_preview、diagnostics、raw_refs
+- ✅ 大块 tool output 写入 `runs/<id>/context/raw/`,prompt 只注入 compact observation + `raw_ref`
+- ✅ Agent handoff 默认传蒸馏摘要,原始 approved artifact 仍保留在 `runs/`
+- ✅ `/api/context/runs/{run_id}` / manifest / raw / preview API 可用
+- ✅ 前端 `/context` 工作台可查看 manifest、segment、预算、raw ref 与污染诊断
+- ✅ 前端 `/context` 工作台支持 manifest agent/purpose/risk/over-budget 过滤、segment 过滤排序、manifest diff、raw ref 快速打开与 JSON pretty preview
+- ✅ `diagnostics.compression` / `diagnostics.packing` 记录压缩、截断、丢弃、over-budget 的审计决策
+- ✅ 污染诊断在工作台展示可执行建议,而不是只展示风险标签
+- ✅ draft / schema repair / debate / tool gather 都必须走 pre-call manifest 或 message-capture manifest
+- ✅ Context V2 配置可通过 `MARS_CONTEXT_MAX_TOKENS` / `MARS_CONTEXT_TARGET_TOKENS` / `MARS_CONTEXT_AUTO_COMPRESS` / `MARS_CONTEXT_TOOL_RAW_EXTERNALIZE` / `MARS_CONTEXT_WORKBENCH_ENABLED` 控制
+- ✅ Context Workbench 纯逻辑回归通过 `pnpm --dir frontend test:context` 覆盖 manifest filter、segment sort、manifest diff、raw formatting
+
+### 1.3 Tools V2 验收补充
+
+- ✅ `configs/tools.yaml` 是唯一工具开关与权限控制面,所有注册工具都有 `enabled` / `mutation_level` / `allowed_agents` / `timeout_seconds` / schema 配置
+- ✅ `configs/agents.yaml` 中每个工具名必须已注册,或在 `configs/tools.yaml` 中显式标记 `bridge_only: true`
+- ✅ `ToolRegistry.dispatch()` 对未知工具、禁用工具、越权 agent、schema invalid、large refactor、Gate 5 block 返回结构化 `ToolResult`
+- ✅ 每次 dispatch 写 `events/tool_events.jsonl`、`events/tool_calls.jsonl` 和 trace span
+- ✅ Mutating code tools 只允许写 `repo_link.yaml.allowed_paths`,并保存 rollback snapshot
+- ✅ `code.delete_file` 和 large refactor 默认 `requires_approval`;Gate 5 baseline 保护始终 `blocked`,不能人工审批绕过
+- ✅ `search.arxiv_search` 默认 config-enabled,但运行时必须由 `MARS_ENABLE_NETWORK_TOOLS=true` 才能联网
+- ✅ `search.web_search` 默认 config-disabled,只允许 allowlisted domains 和已配置 provider
+- ✅ `execution.batch_runner` 在 mock demo 中通过 registry dispatch 启动,并产生 `metrics.json` / `curves/` / `run_log_*.v1.md`
+- ✅ Run Detail Commander 面板可按 tool/status/event/call_id/limit 查询工具审计,并支持 pending approval 与 rollback 操作
+- ✅ `scripts/verify_tools_v2_acceptance.py` 能对完成的 demo run 验证 catalogue、API filter、tool audit、trace span、execution artifacts
+
+## 2. Demo 主脚本(PIMC 全链路)
 
 这个 demo 必须 e2e 跑通才算 V0 完成。
 
@@ -53,8 +83,8 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 
 ```
 1. configs/.env 配置好 LLM API keys
-2. projects/moe-pimc/repo_link.yaml 指向真实 / 简化 PIMC 代码
-3. projects/moe-pimc/AGENTS.md 已就位
+2. projects/pimc/repo_link.yaml 指向真实 / 简化 PIMC 代码
+3. projects/pimc/AGENTS.md 已就位
 4. data_gen.py 能生成合成 PIM 数据
 5. 4 个 ChromaDB collection 已初始化(空也行)
 6. Docker Compose 全部 up
@@ -64,9 +94,9 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 
 ```
 [Step 1] 用户在前端首页点 "Pipeline" 卡片
-[Step 2] 选择 project: moe-pimc
+[Step 2] 选择 project: pimc
 [Step 3] 输入研究问题:
-         "如何在 8L 配置下进一步降低 ATK-MoE 的计算资源,同时保持 RES 性能?"
+         "如何在 8L 配置下进一步降低 PIMC 的计算资源,同时保持 RES 性能?"
 [Step 4] 点击 "Start Run"
 [Step 5] Idea Agent 启动
          - 在 frontend 看到 5 节点 pipeline,Idea 节点亮起
@@ -85,7 +115,7 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
          - 用户选 "Modify" → 把 router 改成新方案
          - 输出 experiment_plan.approved.md
 [Step 8] Coding Agent 启动
-         - 通过 projects/moe-pimc/repo_link.yaml 定位代码,挂载到 workspace/repos/pimc-current/(真实代码不在 mars 仓内)
+         - 通过 projects/pimc/repo_link.yaml 定位代码,挂载到 workspace/repos/pimc-current/(真实代码不在 mars 仓内)
          - 生成 patch 修改 libs/Model.py 的 router
          - Gate 5 静态检查 AGENTS.md → 发现 patch 不破坏 baseline,通过
          - lint / test 自动跑,test_coverage 报告
@@ -103,7 +133,7 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
          - HITL review,用户 approve
          - Gate 4 (conclusion_output) 通过
          - 落库 + 沉淀 methodology KB
-[Step 11] runs/<timestamp>_pimc_moe_router_simplification/ 完整可见
+[Step 11] runs/<timestamp>_pimc_router_simplification/ 完整可见
          - 9 个子目录都有内容
          - 用户可在前端 RunDetail 页面回放整个链路
 ```
@@ -120,7 +150,7 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 输入:
   research_question: "PIMC 的 stream switching 如何用更轻量的 router 处理"
   uploaded:
-    - papers/MoE_Routing_Survey_2024.pdf
+    - papers/Routing_Survey_2024.pdf
 预期输出:
   idea_proposal.v1.md (schema 校验通过)
   含至少 1 条新颖性论证
@@ -229,7 +259,7 @@ V0 验收必须分两层。Claude Code / Codex 实现时,**Dev E2E 是硬指标,
 | Schema 合规率 | ≥ 95% | `tests/schema/` 自动统计 |
 | Baseline 复用召回率 | ≥ 80% | `tests/baseline/` 对照集 |
 | 多实验并发上限 | 6 | `tests/integration/` |
-| Pipeline e2e 跑通时长 | ≤ 4 小时(MOE-PIMC demo) | demo 时手动记录 |
+| Pipeline e2e 跑通时长 | ≤ 4 小时(PIMC demo) | demo 时手动记录 |
 | HITL Gate 误触发率 | ≤ 5% | `tests/gate/` |
 | 沉淀资产数(运行 demo 期) | ≥ 50 | 统计 4 区 KB 写入 |
 | `runs/` 完整性 | 100% | 9 子目录都非空 |
@@ -259,10 +289,10 @@ V0 完成时还要交付:
   - `agent_io_schema.md`(5 schema 详细字段说明 + 示例)
   - `run_lifecycle.md`(一次 run 从创建到归档的完整时序)
   - `frontend_ux.md`(P0 各页面交互规范)
-- ✅ `projects/moe-pimc/AGENTS.md`(项目级硬约束)
+- ✅ `projects/pimc/AGENTS.md`(项目级硬约束)
 - ✅ `templates/code_rules/pimc_python.md`(代码规范模板)
-- ✅ `posttrain/README.md`(V1 占位说明)
-- ✅ Demo 录屏(MOE-PIMC 全链路,≤ 10 分钟)
+- ✅ `posttrain/README.md`(V2 占位说明)
+- ✅ Demo 录屏(PIMC 全链路,≤ 10 分钟)
 
 ## 11. 实现顺序(7 个 Phase)
 
@@ -420,8 +450,8 @@ docker compose up -d
 - 架构 / 依赖 / 性能 / 安全风险
 
 ## 9. Suggested next X
-- 建议 V1(Posttrain 训练流水线)X 文档应该聚焦什么
-- 当前 V0 哪些抽象不够稳,V1 之前要重构
+- 建议 V2(Posttrain 训练流水线)X 文档应该聚焦什么
+- 当前 V0 哪些抽象不够稳,V2 之前要重构
 ```
 
 ## 13. Acceptance 校验脚本
@@ -440,22 +470,43 @@ import-linter --config .importlinter
 pytest backend/tests/unit/
 pytest backend/tests/schema/ --cov-fail-under=95   # schema 合规率
 pytest backend/tests/gate/
+pytest backend/tests/unit/test_tools_hardening.py \
+  backend/tests/unit/test_search_tools_v2.py \
+  backend/tests/unit/test_execution_tools_v2.py
 pytest backend/tests/baseline/
 
 # 3. 集成测试
 pytest backend/tests/integration/
 
-# 4. e2e demo(零外部依赖)
-docker compose up -d
-sleep 10
-python scripts/run_demo.py --mock-mode
-docker compose down
+# 4. 前端 / Context Workbench
+pnpm --dir frontend typecheck
+pnpm --dir frontend lint
+pnpm --dir frontend test:context
 
-# 5. 检查 runs/ 完整性
+# 5. e2e demo(零外部依赖)
+python scripts/run_demo_inprocess.py \
+  --mock-mode \
+  --task acceptance_demo \
+  --run-id-file /tmp/mars-acceptance-run-id
+RUN_ID="$(cat /tmp/mars-acceptance-run-id)"
+
+# 6. 检查 runs/ 完整性 + tools/context 审计
 ls runs/*/idea/ runs/*/experiment/ runs/*/coding/ \
    runs/*/execution/ runs/*/writing/ runs/*/hitl/ runs/*/events/
+python scripts/verify_tools_v2_acceptance.py --run-id "$RUN_ID" --in-process
+test -f "runs/$RUN_ID/context/context_manifest.v2.json"
+find "runs/$RUN_ID/context" -name 'context_manifest.v2.*.json' | wc -l
+python - "$RUN_ID" <<'PY'
+import sys
+from fastapi.testclient import TestClient
+from app.main import create_app
 
-echo "✅ V0 acceptance passed"
+response = TestClient(create_app()).get(f"/api/context/runs/{sys.argv[1]}")
+assert response.status_code == 200
+assert response.json()["budget_summary"]["manifest_count"] >= 5
+PY
+
+echo "✅ V0 + Tools V2 + Context Workbench acceptance passed"
 ```
 
 CI 必须每次 PR 跑这个脚本,全绿才能 merge。

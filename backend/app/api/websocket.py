@@ -20,9 +20,10 @@ async def run_socket(ws: WebSocket, run_id: str) -> None:
     channels = [
         f"run.{run_id}.agent_state",
         f"run.{run_id}.failure",
-        f"run.{run_id}.thinking",
-        f"run.{run_id}.execution",
         f"run.{run_id}.hitl",
+        f"run.{run_id}.feedback_loop",
+        f"run.{run_id}.evaluation",
+        f"run.{run_id}.execution",
         "run.lifecycle",
     ]
     queues: list[asyncio.Queue] = []  # type: ignore[type-arg]

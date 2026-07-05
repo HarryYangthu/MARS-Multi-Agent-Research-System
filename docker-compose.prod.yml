@@ -1,0 +1,100 @@
+name: mars-prod
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - mars-internal
+
+  chromadb:
+    image: chromadb/chroma:0.5.3
+    restart: unless-stopped
+    environment:
+      - IS_PERSISTENT=TRUE
+    volumes:
+      - chroma-server-data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "</dev/tcp/localhost/8000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mars-internal
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      - MARS_RUNTIME_MODE=production
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMADB_PATH=/app/knowledge/.chromadb
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./projects:/app/projects:ro
+      - ./templates:/app/templates:ro
+      - ./knowledge:/app/knowledge
+      - ./workspace:/app/workspace
+      - ./runs:/app/runs
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mars-internal
+
+  frontend:
+    profiles:
+      - self-hosted-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        BACKEND_URL: ${BACKEND_URL:-http://127.0.0.1:8000}
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://127.0.0.1:8000}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://127.0.0.1:8000}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - path: .env.production
+        required: false
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - mars-internal
+
+volumes:
+  redis-data:
+  chroma-server-data:
+
+networks:
+  mars-internal:
+    driver: bridge

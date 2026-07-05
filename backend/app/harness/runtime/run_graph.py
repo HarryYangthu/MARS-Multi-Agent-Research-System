@@ -124,6 +124,9 @@ class RunGraph:
     def state(self, key: str) -> NodeState:
         return self._nodes[key].state
 
+    def metadata(self, key: str) -> dict[str, Any]:
+        return dict(self._nodes[key].metadata)
+
     def all_states(self) -> dict[str, NodeState]:
         return {k: n.state for k, n in self._nodes.items()}
 
@@ -134,13 +137,11 @@ class RunGraph:
         assert_transition(node.state, new_state)
         node.state = new_state
 
-    def reset_to_pending(self, key: str) -> None:
-        """Force a node back to PENDING for re-route / self-heal reruns.
-
-        Bypasses the transition table on purpose: re-routing must reset even
-        terminal (DONE) upstream nodes so the scheduler reruns them.
-        """
-        self._nodes[key].state = NodeState.PENDING
+    def restore_state(self, key: str, state: NodeState) -> None:
+        """Set a node state while rebuilding a graph from durable storage."""
+        if key not in self._nodes:
+            raise GraphError(f"unknown node '{key}'")
+        self._nodes[key].state = state
 
     # --------------------------------------------------------- scheduling
 
@@ -199,26 +200,44 @@ class RunGraph:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RunGraph:
-        """Rebuild a graph (including per-node states) from ``to_dict()``.
-
-        Used by run recovery to rehydrate an in-flight run after a restart.
-        Node states are restored verbatim — this bypasses transition
-        validation on purpose, because we're loading an already-valid state.
-        """
-        g = cls()
-        for raw in data.get("nodes", []):
-            node = g.add_node(
-                str(raw["key"]),
-                kind=str(raw.get("kind", "agent")),
-                metadata=dict(raw.get("metadata", {})),
+    def from_dict(cls, data: dict[str, Any]) -> "RunGraph":
+        graph = cls()
+        for raw_node in data.get("nodes", []):
+            if not isinstance(raw_node, dict):
+                continue
+            key = str(raw_node.get("key", ""))
+            if not key:
+                continue
+            metadata_raw = raw_node.get("metadata", {})
+            metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+            graph.add_node(
+                key,
+                kind=str(raw_node.get("kind", "agent")),
+                metadata=metadata,
             )
-            node.state = NodeState(str(raw.get("state", NodeState.PENDING.value)))
         for raw_edge in data.get("edges", []):
-            g.add_edge(str(raw_edge["src"]), str(raw_edge["dst"]))
-        for ep in data.get("entrypoints", []):
-            g.set_entrypoint(str(ep))
-        return g
+            if not isinstance(raw_edge, dict):
+                continue
+            src = str(raw_edge.get("src", ""))
+            dst = str(raw_edge.get("dst", ""))
+            if src and dst and src in graph._nodes and dst in graph._nodes:
+                graph.add_edge(src, dst)
+        for entry in data.get("entrypoints", []):
+            key = str(entry)
+            if key in graph._nodes:
+                graph.set_entrypoint(key)
+        for raw_node in data.get("nodes", []):
+            if not isinstance(raw_node, dict):
+                continue
+            key = str(raw_node.get("key", ""))
+            if key not in graph._nodes:
+                continue
+            state_raw = str(raw_node.get("state", NodeState.PENDING.value))
+            try:
+                graph.restore_state(key, NodeState(state_raw))
+            except ValueError:
+                graph.restore_state(key, NodeState.PENDING)
+        return graph
 
     # --------------------------------------------------------------- private
 

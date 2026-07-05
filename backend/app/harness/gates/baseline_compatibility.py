@@ -6,7 +6,7 @@ calls ``gate_check`` on every dispatch. The check reads the project's
 ``AGENTS.md`` and ``repo_link.yaml::protected_paths`` to decide whether the
 tool's args would mutate a baseline-protected surface.
 
-For V0 we hard-code the rule set against the moe-pimc patterns; if a
+For V0 we hard-code the rule set against the pimc patterns; if a
 project supplies its own ``AGENTS.md`` we additionally pull file/path
 patterns from there (lightweight regex scan).
 """
@@ -29,6 +29,7 @@ GATE_ID = "baseline_compatibility"
 # Fallback list if configs/gates.yaml is missing or omits monitored_tools.
 _DEFAULT_MONITORED_TOOLS: tuple[str, ...] = (
     "code.patch_generator",
+    "code.apply_patch",
     "code.write_file",
     "code.delete_file",
 )
@@ -51,7 +52,7 @@ def monitored_tools() -> tuple[str, ...]:
     return _DEFAULT_MONITORED_TOOLS
 
 # Forbidden regex against the third positional arg of forward(...) — pulled
-# straight from projects/moe-pimc/AGENTS.md rule #2.
+# straight from projects/pimc/AGENTS.md rule #2.
 _FORWARD_INTERFACE_RE = re.compile(
     r"def\s+forward\s*\(\s*self\s*,\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*[A-Za-z_][A-Za-z0-9_]*\s*,"
 )
@@ -101,7 +102,7 @@ def _check_forward_signature(diff_or_code: str) -> str | None:
     The check is intentionally conservative: it only fires when there's a
     forward(...) signature with three positional args **and** the third arg
     is *not* literally `stream_label`. False-positive risk is low because
-    the moe-pimc codebase declares stream_label by name everywhere.
+    the pimc codebase declares stream_label by name everywhere.
     """
     has_forward = _FORWARD_INTERFACE_RE.search(diff_or_code)
     if not has_forward:
@@ -109,6 +110,24 @@ def _check_forward_signature(diff_or_code: str) -> str | None:
     if _FORWARD_OK_RE.search(diff_or_code):
         return None
     return "patch modifies forward(self, x, ?, ...) — third positional arg must be 'stream_label' (AGENTS.md rule #2)"
+
+
+def _extract_diff_paths(diff: str) -> list[str]:
+    """Extract touched paths from a unified diff without trusting caller metadata."""
+    out: list[str] = []
+    patterns = (
+        r"^diff --git\s+a/(.+?)\s+b/(.+)$",
+        r"^\+\+\+\s+b/(.+)$",
+        r"^---\s+a/(.+)$",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, diff, flags=re.MULTILINE):
+            groups = match.groups()
+            for raw in groups:
+                path = raw.strip()
+                if path and path != "/dev/null" and path not in out:
+                    out.append(path)
+    return out
 
 
 def static_check(
@@ -135,6 +154,9 @@ def static_check(
         target_paths.extend(str(f.get("path", f)) for f in args["files"])
 
     diff = str(args.get("diff", "")) + "\n" + str(args.get("content", ""))
+    for path in _extract_diff_paths(diff):
+        if path not in target_paths:
+            target_paths.append(path)
 
     for tp in target_paths:
         hit = _matches_protected_path(tp, protected, diff_or_code=diff)

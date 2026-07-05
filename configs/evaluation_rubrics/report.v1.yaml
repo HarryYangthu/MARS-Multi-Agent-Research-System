@@ -1,0 +1,29 @@
+schema: report.v1
+pass_threshold: 0.8
+warn_threshold: 0.65
+dimensions:
+  - id: claim_support
+    label: Claim Support
+    weight: 0.24
+    signals:
+      - Report claims are tied to upstream artifacts.
+  - id: metric_accuracy
+    label: Metric Accuracy
+    weight: 0.22
+    signals:
+      - Metrics are referenced with concrete names or run refs.
+  - id: limitation_honesty
+    label: Limitation Honesty
+    weight: 0.18
+    signals:
+      - Limitations, risks, or caveats are stated.
+  - id: chain_coverage
+    label: Chain Coverage
+    weight: 0.22
+    signals:
+      - chain_refs covers proposal, plan, code, and runs where applicable.
+  - id: audience_fit
+    label: Audience Fit
+    weight: 0.14
+    signals:
+      - target_audience and deliverable_type are specific.

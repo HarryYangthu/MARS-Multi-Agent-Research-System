@@ -1,7 +1,7 @@
-# Python coding rules — MoE-PIMC
+# Python coding rules — PIMC
 
 The Coding Agent must follow these rules when writing or modifying Python in
-the moe-pimc project.
+the pimc project.
 
 ## 1. Tensor shape comments
 
@@ -30,5 +30,5 @@ Hyperparameters live in `configs/*.yaml`. Hard-coded magic numbers in
 
 ## 5. Frozen surfaces
 
-Classes and signatures listed in `projects/moe-pimc/AGENTS.md` are baseline-
+Classes and signatures listed in `projects/pimc/AGENTS.md` are baseline-
 protected. Gate 5 enforces these.

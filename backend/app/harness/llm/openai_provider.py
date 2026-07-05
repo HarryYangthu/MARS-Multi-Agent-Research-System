@@ -51,7 +51,8 @@ class _OpenAICompatProvider(LLMProvider):
             max_tokens=config.max_tokens,
             messages=[{"role": m.role, "content": m.content} for m in messages],
         )
-        choice = resp.choices[0].message.content or ""
+        message = resp.choices[0].message
+        choice = message.content or str(getattr(message, "reasoning_content", "") or "")
         return Completion(
             text=choice,
             provider=self.name,
@@ -74,12 +75,7 @@ class _OpenAICompatProvider(LLMProvider):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
-            # DeepSeek-reasoner (R1) streams the chain-of-thought on a separate
-            # `reasoning_content` field before the final answer `content`.
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                yield Delta(text=reasoning, kind="reasoning")
-            piece = getattr(delta, "content", None)
+            piece = delta.content or str(getattr(delta, "reasoning_content", "") or "")
             if piece:
                 yield Delta(text=piece, kind="content")
         yield Delta(text="", finish_reason="stop")

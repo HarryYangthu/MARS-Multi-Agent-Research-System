@@ -1,0 +1,122 @@
+feedback:
+  max_tokens: 1500
+  chars_per_token: 4
+  recent_packet_count: 2
+  ledger_summary_ref: diagnosis/attempt_ledger_summary.md
+  drop_full_diagnosis: true
+  drop_full_logs: true
+  drop_full_curves: true
+
+context_engineering:
+  storage_layout:
+    long_term_root: configs/agent_contexts/{agent}.yaml
+    run_root: runs/<run_id>/context/agents/{agent}/
+    agent_root: runs/<run_id>/context/agents/{agent}/
+    manifests: runs/<run_id>/context/agents/{agent}/manifests/
+    raw: runs/<run_id>/context/agents/{agent}/raw/
+    packed: runs/<run_id>/context/agents/{agent}/packed/
+    memory: runs/<run_id>/context/agents/{agent}/memory/
+    research: runs/<run_id>/context/agents/{agent}/research/
+    debate: runs/<run_id>/context/agents/{agent}/debate/
+    tool_results: runs/<run_id>/context/agents/{agent}/tool_results/
+  strategy_terms:
+    quarantine: 上下文隔离
+    pruning: 上下文修剪
+    summarization: 上下文摘要
+    offloading: 上下文卸载
+    packing: 上下文打包
+  agent_blueprints:
+    idea:
+      goal: 从研究背景、代码现状和调研证据中生成可验证 hypothesis。
+      packing_order:
+        - system role
+        - schema/output contract
+        - research background
+        - baseline/code constraints
+        - commander task
+        - selected memory
+        - research summary + evidence index
+        - debate consensus/gaps
+        - iteration instruction
+        - final task recap
+      items:
+        - {order: 1, layer: 系统提示词, content: "Idea 角色、proposal.v1 输出规则、禁止编造、证据缺口声明", storage: ["configs/agents.yaml", "backend/app/agents/idea/prompts/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: 研究大背景, content: "PIMC、FDD Massive MIMO、beam/layer switching、项目 AGENTS.md、baseline 保护", storage: ["projects/pimc/AGENTS.md", "projects/pimc/project.yaml", "knowledge/"], required: 必装, risk: 背景过长导致干扰, strategy: "Summarization;只保留任务相关约束", packing_position: system/project 后}
+        - {order: 3, layer: 代码仓核心上下文, content: "baseline 结构、核心算法、可调 knobs、数据生成入口、不可改区域", storage: ["projects/pimc/repo_link.yaml", "workspace/repos/", "backend/app/agents/idea/docs/"], required: 必装, risk: 代码太长、无关文件干扰, strategy: "Summarization + Offloading;核心约束不可剪", packing_position: project/code constraints}
+        - {order: 4, layer: Commander 当前任务, content: 研究问题、目标、输出要求、约束, storage: ["runs/<run_id>/context/agents/idea/input/", "runs/<run_id>/events/"], required: 必装, risk: 低, strategy: 不可摘要失真, packing_position: task 末尾附近}
+        - {order: 5, layer: 长期 memory, content: 历史有效假设、失败假设、方法偏好、领域经验, storage: ["configs/agent_contexts/idea.yaml", "runs/<run_id>/context/agents/idea/memory/", "knowledge/methodology/", "knowledge/run_archive/"], required: 条件装, risk: "memory 污染、过期经验", strategy: "无证据 memory Quarantine;按相似度 Pruning top-k", packing_position: task 后}
+        - {order: 6, layer: 调研结果, content: "KB 检索、论文摘要、source summaries、evidence index、research summary", storage: ["runs/<run_id>/context/agents/idea/research/", "knowledge/literature/"], required: 条件装, risk: 低质量来源、证据冲突, strategy: "source 原文 Offloading;Pack evidence summary / claim / citation / gap;冲突来源 Quarantine", packing_position: evidence 区}
+        - {order: 7, layer: Debate 结果, content: "supporter / critic / synthesizer 共识、分歧、风险、evidence gaps", storage: ["runs/<run_id>/context/agents/idea/debate/"], required: 条件装, risk: "transcript 过长、分歧干扰", strategy: "transcript Offloading;只 Pack 共识和未解决分歧", packing_position: evidence 后}
+        - {order: 8, layer: Commander 迭代指令, content: "补充 router 简化、降低风险、调整 hypothesis 等", storage: ["runs/<run_id>/context/agents/idea/feedback/", "runs/<run_id>/events/", "runs/<run_id>/diagnosis/"], required: 条件装, risk: 新旧指令冲突, strategy: "最新指令高优先级 Pack;旧指令 Quarantine", packing_position: final recap 前}
+        - {order: 9, layer: 动态上下文, content: "工具失败、schema repair、HITL feedback、最新检索", storage: ["runs/<run_id>/context/agents/idea/raw/", "runs/<run_id>/events/", "runs/<run_id>/hitl/"], required: 条件装, risk: 错误信息污染, strategy: "失败原文 Quarantine/Offload;Pack 错误摘要", packing_position: final recap 前}
+        - {order: 10, layer: 最终打包, content: 当前任务所需最小上下文集合, storage: ["runs/<run_id>/context/agents/idea/manifests/", "runs/<run_id>/context/agents/idea/packed/"], required: 必装, risk: lost-in-middle, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+    experiment:
+      goal: 把 proposal.v1 变成可执行、可评估、预算明确的实验计划。
+      packing_order: [system role, schema/output contract, metrics/budget constraints, proposal distilled summary, code/data/simulation entry summary, commander task, selected historical runs, memory lessons, repair/iteration instruction, final experiment-plan recap]
+      items:
+        - {order: 1, layer: 系统提示词, content: "Experiment 角色、experiment_plan.v1 输出规则、变量/指标/消融要求", storage: ["configs/agents.yaml", "backend/app/agents/experiment/prompts/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: 实验背景, content: "RES / PIM / APE / loss 指标、资源预算、mock/real 执行边界", storage: ["projects/pimc/AGENTS.md", "configs/execution.yaml", "configs/evaluation.yaml"], required: 必装, risk: 背景过宽, strategy: "Summarization;只保留实验相关内容", packing_position: project/constraints}
+        - {order: 3, layer: 上游 Proposal, content: "research_question、hypothesis、constraints、evidence gaps", storage: ["runs/<run_id>/idea/", "runs/<run_id>/context/agents/experiment/upstream/"], required: 必装, risk: proposal 太长, strategy: "Schema-aware Summarization;原文 Offloading", packing_position: proposal summary}
+        - {order: 4, layer: 代码仓实验入口, content: "data_gen、simulation runner、config、可调参数", storage: ["projects/pimc/data_gen.py", "backend/app/execution/", "workspace/repos/"], required: 必装, risk: 代码噪声, strategy: "Pack 参数表和入口摘要;完整代码 Offloading", packing_position: code entry}
+        - {order: 5, layer: Commander 当前任务, content: 设计哪类实验、成本限制、优先验证点, storage: ["runs/<run_id>/context/agents/experiment/input/", "runs/<run_id>/events/"], required: 必装, risk: 低, strategy: 高优先级 Pack, packing_position: task 区}
+        - {order: 6, layer: 长期 memory, content: 历史实验设计、失败消融、资源超预算案例, storage: ["configs/agent_contexts/experiment.yaml", "runs/<run_id>/context/agents/experiment/memory/", "knowledge/methodology/", "knowledge/run_archive/"], required: 条件装, risk: 过期经验, strategy: "按 hypothesis/metric 相似度 Pruning;过期 Quarantine", packing_position: memory 区}
+        - {order: 7, layer: 历史 run archive, content: "baseline、历史 metrics、fingerprint、可复用结果", storage: ["knowledge/run_archive/", "runs/<previous_run_id>/execution/"], required: 条件装, risk: 错误复用 baseline, strategy: "低相似 fingerprint Quarantine;Pack 可复用摘要", packing_position: historical runs}
+        - {order: 8, layer: 迭代修正指令, content: "HITL / Commander / evaluation 对实验计划的修改", storage: ["runs/<run_id>/context/agents/experiment/feedback/", "runs/<run_id>/diagnosis/", "runs/<run_id>/evaluation/"], required: 条件装, risk: 新旧 plan 冲突, strategy: "Pack 最新指令;旧版本 Offloading/Quarantine", packing_position: final recap 前}
+        - {order: 9, layer: 动态上下文, content: "schema errors、预算冲突、变量缺失", storage: ["runs/<run_id>/context/agents/experiment/raw/", "runs/<run_id>/events/"], required: 条件装, risk: 修复信息过载, strategy: 只 Pack 当前修复所需字段, packing_position: repair 区}
+        - {order: 10, layer: 最终打包, content: 实验设计所需上下文, storage: ["runs/<run_id>/context/agents/experiment/manifests/", "runs/<run_id>/context/agents/experiment/packed/"], required: 必装, risk: 信息重复, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+    coding:
+      goal: 根据 code spec 和当前任务安全修改代码,不破坏 baseline。
+      packing_order: [system role, code safety / Gate 5 constraints, code_spec distilled, target repo map + file snippets, commander task, relevant memory, latest tool observations, failed test/lint summary, current patch objective recap]
+      items:
+        - {order: 1, layer: 系统提示词, content: "Coding 角色、patch 目标、最小改动原则、输出要求", storage: ["configs/agents.yaml", "backend/app/agents/coding/prompts/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: 代码安全规则, content: "AGENTS.md、project AGENTS.md、Gate 5、protected paths、禁止事项", storage: ["AGENTS.md", "projects/pimc/AGENTS.md", "configs/gates.yaml", "projects/pimc/repo_link.yaml"], required: 必装, risk: 低, strategy: "不可修剪;高优先级 Pack", packing_position: safety constraints}
+        - {order: 3, layer: 代码仓核心代码, content: 目标文件、相关接口、调用链、测试入口, storage: ["workspace/repos/", "projects/pimc/repo_link.yaml", "runs/<run_id>/context/agents/coding/workspace/"], required: 必装, risk: 文件过多干扰, strategy: "无关文件 Pruning;目标片段 Pack;完整文件 Offloading", packing_position: repo snippets}
+        - {order: 4, layer: 上游 Code Spec, content: "files_to_change、contracts、tests、risks、acceptance", storage: ["runs/<run_id>/coding/", "runs/<run_id>/context/agents/coding/upstream/"], required: 必装, risk: spec 过长或含糊, strategy: "Schema-aware Summarization;原文 Offloading", packing_position: code_spec summary}
+        - {order: 5, layer: Commander 当前任务, content: 本轮实现目标、限制、禁止改动范围, storage: ["runs/<run_id>/context/agents/coding/input/", "runs/<run_id>/events/", "runs/<run_id>/diagnosis/"], required: 必装, risk: 与旧 spec 冲突, strategy: "高优先级 Pack;旧任务 Quarantine", packing_position: task 区}
+        - {order: 6, layer: 长期 memory, content: 历史 patch 经验、测试坑、代码风格规则, storage: ["configs/agent_contexts/coding.yaml", "runs/<run_id>/context/agents/coding/memory/", "knowledge/code_assets/", "knowledge/run_archive/"], required: 条件装, risk: 过期或错误经验, strategy: "按 target file/error type Pruning;无证据 Quarantine", packing_position: memory 区}
+        - {order: 7, layer: 工具读取结果, content: "repo_reader、grep、lint/test output", storage: ["runs/<run_id>/context/agents/coding/tool_results/", "runs/<run_id>/events/"], required: 条件装, risk: 日志过长, strategy: "Summarization;原始输出 Offloading", packing_position: tool observations}
+        - {order: 8, layer: 迭代修复上下文, content: 上次 patch、失败测试、错误日志、Commander feedback, storage: ["runs/<run_id>/context/agents/coding/patches/", "runs/<run_id>/diagnosis/", "runs/<run_id>/evaluation/"], required: 条件装, risk: 错误信息污染, strategy: "Pack 最新失败摘要;旧 patch Quarantine", packing_position: failure recap}
+        - {order: 9, layer: 动态上下文, content: 当前 diff、rollback info、未通过检查, storage: ["runs/<run_id>/context/agents/coding/raw/", "runs/<run_id>/events/"], required: 条件装, risk: 状态冲突, strategy: "只保留最新 attempt;历史 attempt Summarization", packing_position: dynamic}
+        - {order: 10, layer: 最终打包, content: 安全改代码所需上下文, storage: ["runs/<run_id>/context/agents/coding/manifests/", "runs/<run_id>/context/agents/coding/packed/"], required: 必装, risk: 无关上下文干扰, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+    execution:
+      goal: 执行实验、收集 metrics、生成 run_log.v1,真实记录 mock/real 状态。
+      packing_order: [system role, execution policy, experiment_plan distilled, simulation/code entry summary, commander execution instruction, baseline/fingerprint memory, latest metrics summary, failures/retry context, run_log output contract recap]
+      items:
+        - {order: 1, layer: 系统提示词, content: "Execution 角色、run_log.v1 输出规则、真实记录要求", storage: ["configs/agents.yaml", "backend/app/agents/execution/prompts/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: Execution Policy, content: "CPU/mock/GPU 策略、并发、timeout、路径规则", storage: ["configs/execution.yaml", "configs/tools.yaml"], required: 必装, risk: 配置过多, strategy: "当前策略不可剪;非当前 backend Summarization", packing_position: execution constraints}
+        - {order: 3, layer: Experiment Plan, content: "variables、metrics、ablations、budget、baseline", storage: ["runs/<run_id>/experiment/", "runs/<run_id>/context/agents/execution/upstream/"], required: 必装, risk: 计划太长, strategy: 保留核心字段;原文 Offloading, packing_position: plan summary}
+        - {order: 4, layer: 代码/脚本入口, content: "simulation runner、data path、config template、metrics collector", storage: ["backend/app/execution/", "projects/pimc/data_gen.py", "workspace/repos/"], required: 必装, risk: 代码噪声, strategy: "Pack 执行入口和参数;完整代码 Offloading", packing_position: script entry}
+        - {order: 5, layer: Commander 当前任务, content: 执行哪组实验、是否 mock、是否复用 baseline, storage: ["runs/<run_id>/context/agents/execution/input/", "runs/<run_id>/events/"], required: 必装, risk: 低, strategy: 高优先级 Pack, packing_position: task 区}
+        - {order: 6, layer: 历史 run memory, content: 可复用 baseline、失败 run、相同 fingerprint 结果, storage: ["runs/<run_id>/context/agents/execution/memory/", "knowledge/run_archive/", "runs/<previous_run_id>/execution/"], required: 条件装, risk: baseline 误匹配, strategy: "低相似 run Pruning;可疑结果 Quarantine", packing_position: baseline memory}
+        - {order: 7, layer: 工具执行结果, content: "batch_runner output、metrics、curves、logs", storage: ["runs/<run_id>/context/agents/execution/tool_results/", "runs/<run_id>/execution/"], required: 条件装, risk: 日志/曲线过大, strategy: "metrics Pack;curves/logs Offloading", packing_position: results}
+        - {order: 8, layer: 失败上下文, content: "stderr、timeout、missing file、failed job", storage: ["runs/<run_id>/context/agents/execution/raw/", "runs/<run_id>/diagnosis/"], required: 条件装, risk: 错误污染, strategy: "Pack error summary + tail;完整日志 Offloading", packing_position: failure context}
+        - {order: 9, layer: 动态上下文, content: "retry、partial results、stop/retry 指令", storage: ["runs/<run_id>/context/agents/execution/raw/", "runs/<run_id>/events/"], required: 条件装, risk: 状态冲突, strategy: "最新状态优先;旧 partial run Quarantine", packing_position: dynamic}
+        - {order: 10, layer: 最终打包, content: 生成 run_log 所需上下文, storage: ["runs/<run_id>/context/agents/execution/manifests/", "runs/<run_id>/context/agents/execution/packed/"], required: 必装, risk: 结果遗漏, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+    writing:
+      goal: 把全链路结果写成有证据、有边界、有结论的研究报告。
+      packing_order: [system role, report/output contract, project/report background, artifact chain summaries, metrics table + evidence refs, commander writing instruction, evaluation/HITL feedback, debate concerns, final claim/evidence/limitation recap]
+      items:
+        - {order: 1, layer: 系统提示词, content: "Writing 角色、report.v1 输出规则、claim 必须有 evidence", storage: ["configs/agents.yaml", "backend/app/agents/writing/prompts/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: 报告背景, content: 项目目标、研究问题、受众、风格, storage: ["projects/pimc/project.yaml", "projects/pimc/AGENTS.md", "backend/app/agents/writing/docs/"], required: 必装, risk: 背景过长, strategy: Summarization, packing_position: report background}
+        - {order: 3, layer: 上游 artifacts, content: "proposal、experiment_plan、code_spec、run_log、evaluation_report", storage: ["runs/<run_id>/context/agents/writing/upstream/", "runs/<run_id>/idea/", "runs/<run_id>/experiment/", "runs/<run_id>/coding/", "runs/<run_id>/execution/", "runs/<run_id>/evaluation/"], required: 必装, risk: 链路太长, strategy: "每个 artifact schema-aware Summarization;原文 Offloading", packing_position: artifact chain}
+        - {order: 4, layer: metrics/curves/logs, content: 关键结果、失败实验、baseline 对比, storage: ["runs/<run_id>/context/agents/writing/evidence/", "runs/<run_id>/execution/"], required: 必装, risk: 数据过大, strategy: "Pack metrics table;curves/logs Offloading", packing_position: metrics/evidence}
+        - {order: 5, layer: Commander 当前任务, content: 报告重点、要解释的失败、限制说明, storage: ["runs/<run_id>/context/agents/writing/input/", "runs/<run_id>/events/", "runs/<run_id>/diagnosis/"], required: 必装, risk: 低, strategy: 高优先级 Pack, packing_position: task 区}
+        - {order: 6, layer: 长期 memory, content: 写作偏好、审稿经验、报告常见问题, storage: ["configs/agent_contexts/writing.yaml", "runs/<run_id>/context/agents/writing/memory/", "knowledge/methodology/", "knowledge/run_archive/"], required: 条件装, risk: 与当前报告无关, strategy: "Prune 技术实现 memory;只保留写作相关", packing_position: memory 区}
+        - {order: 7, layer: Debate 结果, content: 对 claims 的质疑、evidence gap、limitation, storage: ["runs/<run_id>/context/agents/writing/debate/"], required: 条件装, risk: 争议干扰, strategy: "Pack unresolved concerns;transcript Offloading", packing_position: debate concerns}
+        - {order: 8, layer: HITL/evaluation feedback, content: 人工意见、质量评估、缺失证据, storage: ["runs/<run_id>/context/agents/writing/feedback/", "runs/<run_id>/hitl/", "runs/<run_id>/evaluation/"], required: 条件装, risk: 多轮反馈冲突, strategy: "Pack 最新有效反馈;旧反馈 Summarization", packing_position: feedback}
+        - {order: 9, layer: 动态上下文, content: "report bundle、data pack、scorecard", storage: ["runs/<run_id>/context/agents/writing/raw/", "runs/<run_id>/writing/"], required: 条件装, risk: 数据重复, strategy: "Pack index 和关键结果;大数据 Offloading", packing_position: dynamic}
+        - {order: 10, layer: 最终打包, content: 生成 report 所需上下文, storage: ["runs/<run_id>/context/agents/writing/manifests/", "runs/<run_id>/context/agents/writing/packed/"], required: 必装, risk: claim 无证据, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+    commander:
+      goal: 拆任务、调度 Agent、诊断失败、生成下一步迭代指令。
+      packing_order: [system role, global hard constraints, user original task, run state summary, latest approved artifacts, blockers/gates/evaluation, HITL comments, selected commander memory, dynamic failure/attempt summary, next-action decision prompt]
+      items:
+        - {order: 1, layer: 系统提示词, content: 主控角色、Bridge 必经、不能绕 Gate、不能伪造 Agent 产物, storage: ["configs/agents.yaml", "backend/app/bridge/prompts/", "backend/app/bridge/docs/"], required: 必装, risk: 低, strategy: 不修剪、不卸载, packing_position: system 最前}
+        - {order: 2, layer: 全局项目状态, content: "run state、workflow graph、已完成节点、blocked gates", storage: ["runs/<run_id>/context/agents/commander/state/", "runs/<run_id>/events/"], required: 必装, risk: 状态过长, strategy: "Summarization;完整 event stream Offloading", packing_position: run state}
+        - {order: 3, layer: 用户原始任务, content: 用户目标、约束、偏好, storage: ["runs/<run_id>/context/agents/commander/input/", "runs/<run_id>/events/"], required: 必装, risk: 低, strategy: "不可丢;高优先级 Pack", packing_position: user task}
+        - {order: 4, layer: 各 Agent 最新产物, content: "approved/draft/invalid artifacts", storage: ["runs/<run_id>/context/agents/commander/artifacts/", "runs/<run_id>/idea/", "runs/<run_id>/experiment/", "runs/<run_id>/coding/", "runs/<run_id>/execution/", "runs/<run_id>/writing/"], required: 必装, risk: invalid 污染, strategy: "approved summary Pack;invalid Quarantine", packing_position: artifacts}
+        - {order: 5, layer: HITL 状态, content: "review/edit/approve/reject、人工评论", storage: ["runs/<run_id>/context/agents/commander/feedback/", "runs/<run_id>/hitl/"], required: 条件装, risk: 多轮评论冲突, strategy: "最新人工指令 Pack;历史评论 Summarization", packing_position: HITL}
+        - {order: 6, layer: Gate/Evaluation 结果, content: "gate block、baseline compatibility、quality scorecard", storage: ["runs/<run_id>/context/agents/commander/evaluation/", "runs/<run_id>/evaluation/", "configs/gates.yaml"], required: 条件装, risk: 报告太长, strategy: "blocker 不可剪;完整报告 Offloading", packing_position: blockers}
+        - {order: 7, layer: 长期 memory, content: 调度经验、失败诊断、历史修复策略, storage: ["configs/agent_contexts/commander.yaml", "runs/<run_id>/context/agents/commander/memory/", "knowledge/run_archive/", "knowledge/methodology/"], required: 条件装, risk: 错误策略复用, strategy: "按 failure type 检索;无证据 Quarantine", packing_position: memory}
+        - {order: 8, layer: 运行时动态上下文, content: "events、trace、tool audit、attempt ledger", storage: ["runs/<run_id>/context/agents/commander/raw/", "runs/<run_id>/diagnosis/"], required: 条件装, risk: 事件流过长, strategy: "Pack current blockers/latest attempts;trace Offloading", packing_position: runtime}
+        - {order: 9, layer: 下一步决策上下文, content: 给哪个 Agent、修什么、带哪些约束, storage: ["runs/<run_id>/context/agents/commander/decision/", "runs/<run_id>/feedback/", "runs/<run_id>/events/"], required: 必装, risk: 决策受旧状态干扰, strategy: "Pack 最新状态;旧 attempt Quarantine", packing_position: decision}
+        - {order: 10, layer: 最终打包, content: 生成调度/诊断/迭代指令, storage: ["runs/<run_id>/context/agents/commander/manifests/", "runs/<run_id>/context/agents/commander/packed/"], required: 必装, risk: 上下文冲突, strategy: 按蓝图顺序 Packing, packing_position: final messages}

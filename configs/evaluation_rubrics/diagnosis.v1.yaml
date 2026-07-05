@@ -1,0 +1,29 @@
+schema: diagnosis.v1
+pass_threshold: 0.8
+warn_threshold: 0.65
+dimensions:
+  - id: root_cause_evidence
+    label: Root-Cause Evidence
+    weight: 0.26
+    signals:
+      - suspected_causes and failed_metrics cite evidence.
+  - id: target_selection
+    label: Target Selection
+    weight: 0.22
+    signals:
+      - recommended_target is consistent with pass/fail state.
+  - id: budget_handling
+    label: Budget Handling
+    weight: 0.18
+    signals:
+      - attempt and budget_status are explicit.
+  - id: action_specificity
+    label: Action Specificity
+    weight: 0.2
+    signals:
+      - recommended_action is concrete enough for the next Agent/HITL user.
+  - id: confidence
+    label: Confidence
+    weight: 0.14
+    signals:
+      - confidence, failed metrics, or evidence coverage supports the diagnosis.

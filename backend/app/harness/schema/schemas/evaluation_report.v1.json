@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mars://schemas/evaluation_report.v1.json",
+  "title": "MARS evaluation report frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "project",
+    "scope",
+    "target_ref",
+    "evaluator",
+    "evaluator_version",
+    "decision",
+    "blocking",
+    "findings",
+    "created"
+  ],
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision": { "const": "block" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "properties": { "blocking": { "const": true } }
+      }
+    }
+  ],
+  "properties": {
+    "schema": { "const": "evaluation_report.v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "scope": {
+      "enum": ["artifact", "run", "benchmark", "model_backend"]
+    },
+    "target_ref": { "type": "string", "minLength": 1 },
+    "target_schema": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "evaluator": { "type": "string", "minLength": 1 },
+    "evaluator_version": { "type": "integer", "minimum": 1 },
+    "decision": {
+      "enum": ["pass", "warn", "revise", "block", "fail"]
+    },
+    "overall_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "blocking": { "type": "boolean" },
+    "scores": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "category", "message", "evidence_refs"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": {
+            "enum": ["info", "low", "medium", "high", "blocker"]
+          },
+          "category": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 },
+          "evidence_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "recommended_actions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "created": { "type": "string", "minLength": 1 }
+  }
+}

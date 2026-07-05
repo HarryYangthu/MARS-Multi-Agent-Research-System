@@ -26,9 +26,10 @@ def write_run_log(*, run_root: Path, result: MockResult, project: str) -> Path:
         "fingerprint_hash": result.fingerprint_hash,
         "is_mock": result.is_mock,
     }
+    backend = "mock simulation" if result.is_mock else "PIM CPU simulation"
     body = (
         f"# Run log — {result.experiment_id}\n\n"
-        f"Mock simulation completed at "
+        f"{backend} completed at "
         f"{datetime.now(tz=timezone.utc).isoformat()}.\n"
     )
     text = fm_dumps(metadata, body)

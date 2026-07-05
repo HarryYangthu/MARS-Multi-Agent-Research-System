@@ -1,4 +1,4 @@
-"""Constructs the V0 linear pipeline RunGraph.
+"""Constructs the V2 linear pipeline RunGraph.
 
 ★ Critical CLAUDE.md hard constraint #10: the linear topology
 ``Idea → Experiment → Coding → Execution → Writing`` must NOT be hard-coded
@@ -11,8 +11,6 @@ from typing import Literal
 
 from app.harness.runtime.run_graph import RunGraph
 
-# The five Agent stages as keys (these strings double as event channel names
-# and as agent registry lookup keys).
 LINEAR_STAGES: tuple[str, ...] = (
     "idea",
     "experiment",
@@ -39,7 +37,7 @@ def build_pipeline(entrypoint: EntryPoint = "pipeline") -> RunGraph:
     """
     g = RunGraph()
     for stage in LINEAR_STAGES:
-        g.add_node(stage, kind="agent")
+        g.add_node(stage, kind="agent", metadata={"stage": stage, "attempt": 1})
     for src, dst in zip(LINEAR_STAGES, LINEAR_STAGES[1:], strict=False):
         g.add_edge(src, dst)
 
@@ -68,6 +66,10 @@ def build_standalone(agent_name: str) -> RunGraph:
     if agent_name not in LINEAR_STAGES:
         raise ValueError(f"unknown agent '{agent_name}'")
     g = RunGraph()
-    g.add_node(agent_name, kind="agent", metadata={"standalone": True})
+    g.add_node(
+        agent_name,
+        kind="agent",
+        metadata={"standalone": True, "stage": agent_name, "attempt": 1},
+    )
     g.set_entrypoint(agent_name)
     return g

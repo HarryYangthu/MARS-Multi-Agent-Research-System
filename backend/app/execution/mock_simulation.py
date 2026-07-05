@@ -38,6 +38,7 @@ class MockResult:
     metrics: dict[str, float]
     fingerprint_hash: str
     is_mock: bool = True
+    loss_curve: list[float] = field(default_factory=list)
 
 
 def _loss_curve(steps: int, *, template: str, seed: int | None) -> list[float]:
@@ -58,6 +59,58 @@ def _loss_curve(steps: int, *, template: str, seed: int | None) -> list[float]:
     return out
 
 
+def _config_memory(config: dict[str, Any]) -> int:
+    """Resolve the canceller memory depth from an ablation config."""
+    for key in ("expert_count", "experts", "n_experts", "memory"):
+        if key in config:
+            try:
+                return max(1, min(48, int(config[key])))
+            except (TypeError, ValueError):
+                continue
+    return 4
+
+
+def _res_for_memory(memory: int, *, seed: int) -> float:
+    """Monotone fit to the real canceller (pim_cancellation.py).
+
+    Shallow memory leaves uncancelled PIM (high residual); deep memory (>= the
+    true 12 taps) saturates near the -29 dB noise floor. Keeps the mock backend
+    physically consistent with the real one so the demo's fail->fix arc holds in
+    either backend.
+    """
+    base = -29.0 + 14.0 * math.exp(-(memory - 2) / 3.5)
+    jitter = random.Random(seed ^ 0x5151).uniform(-0.4, 0.4)
+    return min(-12.0, base + jitter)
+
+
+def _ape_for_res(res_db: float, *, seed: int) -> float:
+    """Worse cancellation (higher residual) -> larger residual phase error."""
+    base = 23.0 + max(0.0, res_db + 29.0) * 1.15
+    return base + random.Random(seed ^ 0x2727).uniform(-0.5, 0.5)
+
+
+def _capacity_loss_curve(
+    steps: int, *, final_loss: float, template: str, seed: int
+) -> list[float]:
+    """Decay curve that lands on ``final_loss`` so loss == 10^(RES/10) holds."""
+    rng = random.Random(seed)
+    floor = max(1e-4, final_loss)
+    tau = max(1.0, steps / 4.0)
+    out: list[float] = []
+    for i in range(steps):
+        v = floor + (1.0 - floor) * math.exp(-i / tau)
+        if template == "noisy_decay":
+            v *= 1.0 + rng.uniform(-0.06, 0.06)
+        elif template == "plateau" and i > steps // 3:
+            v = max(v, floor * 3.0)
+        else:
+            v += rng.uniform(-0.004, 0.004)
+        out.append(max(floor * 0.9, v))
+    if out:
+        out[-1] = floor
+    return out
+
+
 async def run_mock_simulation(
     job: MockJob,
     *,
@@ -75,7 +128,12 @@ async def run_mock_simulation(
         if job.seed is not None
         else int(hashlib.sha256(f"{job.run_id}:{job.experiment_id}".encode()).hexdigest()[:8], 16)
     )
-    curve = _loss_curve(steps, template=job.template, seed=seed)
+    memory = _config_memory(job.config)
+    res_db = _res_for_memory(memory, seed=seed)
+    final_loss = 10.0 ** (res_db / 10.0)
+    curve = _capacity_loss_curve(
+        steps, final_loss=final_loss, template=job.template, seed=seed
+    )
 
     channel = f"run.{job.run_id}.experiment.{job.experiment_id}"
     if bus_publish is not None:
@@ -98,12 +156,12 @@ async def run_mock_simulation(
         await asyncio.sleep(sleep_per_tick)
 
     elapsed = time.monotonic() - started
-    final_loss = curve[-1] if curve else 0.0
     metrics = {
-        "loss": final_loss,
-        "RES": -42.0 + random.Random(seed).uniform(-1.5, 1.5),
-        "PIM": -18.0 + random.Random(seed).uniform(-1.0, 1.0),
-        "APE": 23.0 + random.Random(seed).uniform(-0.5, 0.5),
+        "loss": round(float(final_loss), 6),
+        "RES": round(res_db, 3),
+        "PIM": round(-res_db, 3),
+        "APE": round(_ape_for_res(res_db, seed=seed), 3),
+        "n_basis": float(4 * memory),
     }
     fingerprint_hash = "sha256:" + hashlib.sha256(
         f"{job.project}:{job.run_id}:{job.experiment_id}:{job.config}:{steps}:{job.template}".encode()
@@ -125,4 +183,5 @@ async def run_mock_simulation(
         status="completed",
         metrics=metrics,
         fingerprint_hash=fingerprint_hash,
+        loss_curve=[float(v) for v in curve],
     )

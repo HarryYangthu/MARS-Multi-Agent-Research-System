@@ -95,7 +95,7 @@ export function EventLog(): JSX.Element {
             const toState = (e.payload?.to_state as string) ?? "";
             const event = (e.payload?.event as string) ?? "";
             const summary = toState
-              ? `${fromState || "?"} → ${toState}`
+              ? `${stateLabel(fromState || "?")} → ${stateLabel(toState)}`
               : event || JSON.stringify(e.payload).slice(0, 80);
             return (
               <li
@@ -110,7 +110,7 @@ export function EventLog(): JSX.Element {
                     </span>
                   ) : null}
                   {stage ? (
-                    <span className="font-mono text-[10px] text-slate-400">{stage}</span>
+                    <span className="font-mono text-[10px] text-slate-400">{agentLabel(stage)}</span>
                   ) : null}
                 </div>
                 <p className="truncate text-slate-300">{summary}</p>
@@ -122,4 +122,28 @@ export function EventLog(): JSX.Element {
       </ol>
     </section>
   );
+}
+
+function agentLabel(stage: Stage): string {
+  const labels: Record<Stage, string> = {
+    idea: "Idea Agent",
+    experiment: "Experiment Agent",
+    coding: "Coding Agent",
+    execution: "Execution Agent",
+    writing: "Writing Agent",
+  };
+  return labels[stage];
+}
+
+function stateLabel(state: string): string {
+  const labels: Record<string, string> = {
+    pending: "待处理",
+    running: "运行中",
+    waiting_review: "待审核",
+    approved: "已批准",
+    done: "已完成",
+    failed: "失败",
+    skipped: "已跳过",
+  };
+  return labels[state] ?? state;
 }

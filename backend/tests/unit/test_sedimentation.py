@@ -10,7 +10,7 @@ from app.harness.sedimentation.hooks import on_agent_completed
 
 PROPOSAL_TEXT = """---
 schema: proposal.v1
-project: moe-pimc
+project: pimc
 agent: idea
 research_question: "How to simplify the router?"
 hypothesis: "Hard top-2 keeps RES within 1.5 dB."
@@ -25,7 +25,7 @@ def test_idea_extractor_writes_to_literature_and_methodology(tmp_path: Path) -> 
     stores = reset_for_tests(base=tmp_path)
     result = on_agent_completed(
         agent="idea",
-        project="moe-pimc",
+        project="pimc",
         run_id="run-1",
         artifact_text=PROPOSAL_TEXT,
     )
@@ -39,7 +39,7 @@ def test_idea_extractor_writes_to_literature_and_methodology(tmp_path: Path) -> 
 
 RUN_LOG_TEXT = """---
 schema: run_log.v1
-project: moe-pimc
+project: pimc
 agent: execution
 run_id: "rid_x"
 status: completed
@@ -55,7 +55,7 @@ def test_execution_extractor_writes_run_archive(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
     on_agent_completed(
         agent="execution",
-        project="moe-pimc",
+        project="pimc",
         run_id="run-2",
         artifact_text=RUN_LOG_TEXT,
     )

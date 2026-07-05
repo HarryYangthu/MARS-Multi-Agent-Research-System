@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MARS Memory 管理机制总览</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #1c2430;
+      --muted: #5d6878;
+      --line: #d8dee8;
+      --blue: #2563eb;
+      --green: #14805e;
+      --amber: #9a5b00;
+      --rose: #b4234a;
+      --slate: #334155;
+      --soft-blue: #eaf1ff;
+      --soft-green: #e8f6ef;
+      --soft-amber: #fff4dd;
+      --soft-rose: #ffedf2;
+      --shadow: 0 10px 30px rgba(20, 32, 50, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+      gap: 24px;
+      align-items: stretch;
+      min-height: 320px;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(32px, 5vw, 58px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    code {
+      padding: 2px 6px;
+      border: 1px solid #dbe2ec;
+      border-radius: 6px;
+      background: #f8fafc;
+      color: #263445;
+      font-size: 0.92em;
+    }
+
+    .lead {
+      max-width: 780px;
+      font-size: 18px;
+      color: var(--muted);
+    }
+
+    .answer {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 8px 12px;
+      border: 1px solid #b7dac8;
+      border-radius: 999px;
+      background: var(--soft-green);
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .answer .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-panel {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .stat {
+      min-height: 92px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 30px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stamp {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    section {
+      margin-top: 28px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .block {
+      padding: 18px;
+    }
+
+    .block p,
+    .zone p {
+      color: var(--muted);
+    }
+
+    .zone {
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      min-height: 190px;
+    }
+
+    .zone.literature {
+      border-top: 5px solid var(--blue);
+      background: var(--soft-blue);
+    }
+
+    .zone.methodology {
+      border-top: 5px solid var(--green);
+      background: var(--soft-green);
+    }
+
+    .zone.code {
+      border-top: 5px solid var(--amber);
+      background: var(--soft-amber);
+    }
+
+    .zone.archive {
+      border-top: 5px solid var(--rose);
+      background: var(--soft-rose);
+    }
+
+    .zone .count {
+      display: inline-block;
+      margin: 10px 0 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      font-weight: 700;
+    }
+
+    .flow {
+      padding: 22px;
+      overflow-x: auto;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 12px;
+      min-width: 840px;
+      align-items: stretch;
+    }
+
+    .flow-node {
+      position: relative;
+      padding: 14px;
+      min-height: 120px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .flow-node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      width: 12px;
+      height: 2px;
+      background: var(--slate);
+    }
+
+    .flow-node b {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--slate);
+    }
+
+    .flow-node span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef2f7;
+      color: #273344;
+      font-size: 14px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 7px;
+    }
+
+    .callout {
+      padding: 18px;
+      border-left: 5px solid var(--blue);
+      background: #ffffff;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .risk {
+      border-left-color: var(--amber);
+    }
+
+    footer {
+      margin-top: 34px;
+      padding: 20px 0 32px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .hero,
+      .grid-2,
+      .grid-4 {
+        grid-template-columns: 1fr;
+      }
+
+      .stat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .wrap {
+        padding: 24px 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div>
+        <div class="answer"><span class="dot"></span>包含四库知识分区</div>
+        <h1>MARS Memory 管理机制总览</h1>
+        <p class="lead">
+          当前系统的 Memory 不是一个单体服务，而是由短期上下文、Run 落盘、四库长期知识库、Commander 对话历史、Agent 自上下文共同组成。核心长期记忆就是四个知识分区：文献库、方法库、代码资产库、实验运行档案。
+        </p>
+      </div>
+
+      <aside class="panel hero-panel">
+        <div>
+          <h2>四库当前记录数</h2>
+          <div class="stat-grid">
+            <div class="stat">
+              <strong>519</strong>
+              <span>literature 文献库</span>
+            </div>
+            <div class="stat">
+              <strong>154</strong>
+              <span>methodology 方法库</span>
+            </div>
+            <div class="stat">
+              <strong>140</strong>
+              <span>code_assets 代码资产库</span>
+            </div>
+            <div class="stat">
+              <strong>49</strong>
+              <span>run_archive 实验运行档案</span>
+            </div>
+          </div>
+        </div>
+        <p class="stamp">扫描日期：2026-06-17。数据来自 <code>knowledge/*/_index.json</code>。</p>
+      </aside>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel flow">
+      <h2>记忆流向</h2>
+      <div class="flow-grid" aria-label="MARS memory flow">
+        <div class="flow-node">
+          <b>1. 用户与 Commander</b>
+          <span>用户请求进入 Commander，对话写入 <code>conversations/&lt;conv_id&gt;/</code>。</span>
+        </div>
+        <div class="flow-node">
+          <b>2. Run 创建</b>
+          <span>每次任务创建 <code>runs/&lt;id&gt;/</code>，包含 input、context、Agent 产物、HITL、events。</span>
+        </div>
+        <div class="flow-node">
+          <b>3. Agent Working Memory</b>
+          <span>Agent 装载 system、project、task、upstream artifact、自上下文和工具结果。</span>
+        </div>
+        <div class="flow-node">
+          <b>4. 产物与审核</b>
+          <span>产物以 <code>v1/v2/approved</code> 版本保存，HITL 记录进入 <code>hitl/review_log.jsonl</code>。</span>
+        </div>
+        <div class="flow-node">
+          <b>5. 沉淀到四库</b>
+          <span>Agent 完成后通过 sedimentation extractor 写入四个长期知识分区。</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>四库知识分区</h2>
+      <div class="grid-4">
+        <article class="zone literature">
+          <h3>literature</h3>
+          <p>文献库。沉淀研究问题、文献线索、Idea 阶段的研究背景。</p>
+          <span class="count">当前 519 条</span>
+          <p>主要来源：Idea Agent，后续也可接上传文档和检索工具。</p>
+        </article>
+
+        <article class="zone methodology">
+          <h3>methodology</h3>
+          <p>方法库。保存 proposal、experiment plan、report 中可复用的方法论。</p>
+          <span class="count">当前 154 条</span>
+          <p>主要来源：Idea、Experiment、Writing Agent。</p>
+        </article>
+
+        <article class="zone code">
+          <h3>code_assets</h3>
+          <p>代码资产库。保存 code_spec、补丁思路、可复用实现和接口约束。</p>
+          <span class="count">当前 140 条</span>
+          <p>主要来源：Coding Agent，也会进入 Coding workspace 的 KB memory 面板。</p>
+        </article>
+
+        <article class="zone archive">
+          <h3>run_archive</h3>
+          <p>实验运行档案。保存 run_log、metrics、fingerprint，用于历史实验复用。</p>
+          <span class="count">当前 49 条</span>
+          <p>主要来源：Execution Agent，Experiment Agent 可用它做 baseline match。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel block">
+        <h2>短期 Working Memory</h2>
+        <p>
+          Agent 实际给 LLM 的上下文由 <code>BaseAgent.ContextPack</code> 管理，包括 <code>system</code>、<code>project</code>、<code>task</code>、<code>upstream</code> 和 <code>metadata</code>。上游已批准产物会被读入 downstream Agent 的 upstream handoff。
+        </p>
+      </article>
+
+      <article class="panel block">
+        <h2>Context Manifest</h2>
+        <p>
+          <code>harness/context</code> 负责写审计用 manifest：<code>context_pack.vN.json</code> 和 <code>context_snapshot.vN.md</code>。当前它主要记录“这次调用装载了什么”的审计视角，和实际 LLM messages 还没有完全统一。
+        </p>
+      </article>
+
+      <article class="panel block">
+        <h2>Run Memory</h2>
+        <p>
+          每次 run 都落盘到 <code>runs/&lt;timestamp&gt;_&lt;task&gt;/</code>。其中 <code>run_state.json</code> 保存 RunGraph 状态，<code>events/*.jsonl</code> 保存状态变更和 websocket 事件，Agent 产物按版本保存。
+        </p>
+      </article>
+
+      <article class="panel block">
+        <h2>Conversation 与 Agent Memory</h2>
+        <p>
+          Commander 对话写入 <code>conversations/&lt;conv_id&gt;/messages.jsonl</code>。每个 Agent 的 <code>docs/prompts/examples/evals/uploads</code> 是长期自上下文。Coding workspace 还维护手工 memory items 和 KB memory items。
+        </p>
+      </article>
+    </section>
+
+    <section>
+      <h2>关键模块映射</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>机制</th>
+              <th>职责</th>
+              <th>主要文件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Agent 实际上下文</td>
+              <td>构造 LLM 调用前的 system/project/task/upstream。</td>
+              <td><code>backend/app/agents/base.py</code></td>
+            </tr>
+            <tr>
+              <td>上游产物 handoff</td>
+              <td>读取已批准 artifact，传给后续 Agent。</td>
+              <td><code>backend/app/bridge/agent_runner.py</code></td>
+            </tr>
+            <tr>
+              <td>Context Manifest</td>
+              <td>写入上下文审计 JSON 和可读快照。</td>
+              <td><code>backend/app/harness/context/manifest.py</code></td>
+            </tr>
+            <tr>
+              <td>四库 KB Store</td>
+              <td>本地 JSON 向量库，按 zone 存储和检索。</td>
+              <td><code>backend/app/harness/kb/stores.py</code></td>
+            </tr>
+            <tr>
+              <td>沉淀 hooks</td>
+              <td>Agent 完成后按 extractor 写入四库。</td>
+              <td><code>backend/app/harness/sedimentation/hooks.py</code></td>
+            </tr>
+            <tr>
+              <td>Run 状态</td>
+              <td>持久化 RunGraph、请求和状态。</td>
+              <td><code>backend/app/storage/run_state_store.py</code></td>
+            </tr>
+            <tr>
+              <td>Commander 对话</td>
+              <td>保存会话状态、关联 run、messages 和工具结果。</td>
+              <td><code>backend/app/bridge/commander_session.py</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="callout">
+        <h2>当前优点</h2>
+        <ul>
+          <li>四库分区明确，能区分文献、方法、代码和实验档案。</li>
+          <li>每次 run 都完整落盘，具备 replay 和 audit 基础。</li>
+          <li>mock 模式下无外部模型和 GPU 也能跑完整链路。</li>
+          <li>KB 后端虽然简单，但 API 表面已经接近可替换实现。</li>
+        </ul>
+      </div>
+
+      <div class="callout risk">
+        <h2>主要短板</h2>
+        <ul>
+          <li>实际 LLM messages 和 Context Manifest 还没有完全同源。</li>
+          <li>KB 当前是 append-only 风格，缺少 content hash 去重和 upsert。</li>
+          <li>Commander 对话历史全量 replay，缺少滚动摘要和 token budget。</li>
+          <li>V0 使用 JSON 向量库，规模上来后需要迁移到 ChromaDB 或 sqlite-vss。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel block">
+      <h2>建议优化顺序</h2>
+      <ol>
+        <li>先把真实 LLM messages 写入 Manifest，解决“审计记录和实际输入不一致”。</li>
+        <li>给 KB 记录加统一 metadata：<code>source_path</code>、<code>content_hash</code>、<code>run_id</code>、<code>agent</code>、<code>approved_only</code>。</li>
+        <li>在 <code>KBStores</code> 增加 upsert、delete_by_source、metadata filter。</li>
+        <li>落地 MemorySelector：按相似度、同 project、approved、recency、importance 选择上下文。</li>
+        <li>实现 Commander 滚动摘要和长 artifact reference 压缩。</li>
+        <li>最后替换底层 JSON store 为 ChromaDB 或 sqlite-vss。</li>
+      </ol>
+    </section>
+  </main>
+
+  <footer>
+    MARS Memory Summary - 单文件 HTML，可直接打开；内容基于当前仓库实现和 2026-06-17 本地扫描结果。
+  </footer>
+</body>
+</html>

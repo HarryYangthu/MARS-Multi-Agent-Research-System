@@ -1,7 +1,7 @@
 """Asyncio-backed task queue.
 
 V0 keeps it simple: a bounded asyncio.Queue per RunGraph and an in-process
-worker pool. Redis durability hooks are stubbed for V1.
+worker pool. Redis durability hooks are stubbed for V2.
 """
 from __future__ import annotations
 

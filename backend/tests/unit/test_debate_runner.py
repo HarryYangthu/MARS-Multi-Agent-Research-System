@@ -6,8 +6,9 @@ disabled for demo pacing). The conftest fixture clears all provider env.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+import json
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -19,32 +20,20 @@ from app.agents.debate.debate_runner import (
 )
 from app.harness.llm.model_registry import AgentConfig
 
-
-def _debate_cfg(participants: Sequence[Mapping[str, Any]]) -> AgentConfig:
-    return AgentConfig(
-        name="idea",
-        enabled=True,
-        output_schema="proposal.v1",
-        model_provider="deepseek",
-        model_name="deepseek-reasoner",
-        temperature=0.7,
-        max_tokens=4096,
-        debate_enabled=True,
-        debate_rounds=1,
-        debate_participants=tuple(participants),
-        tools=(),
-        raw={},
-    )
+ALL_LLM_KEY_ENVS = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "QWEN_API_KEY",
+    "GEMINI_API_KEY",
+    "DEEPSEEK_API_KEY",
+)
 
 
-_DEEPSEEK_PARTICIPANTS = [
-    {"role": "proposer", "provider": "deepseek", "model": "deepseek-reasoner"},
-    {"role": "critic", "provider": "deepseek", "model": "deepseek-reasoner"},
-    {"role": "judge", "provider": "deepseek", "model": "deepseek-reasoner"},
-]
-
-
-def _reset_settings() -> None:
+def test_auto_mode_no_keys_returns_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -55,33 +44,69 @@ def test_auto_mode_no_keys_returns_mock() -> None:
     assert _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS)) == DebateMode.MOCK_DEBATE
 
 
+def test_auto_mode_never_rejects_missing_debate_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "staging")
+    monkeypatch.setenv("MARS_MOCK_MODE", "never")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = get_agent_config("idea")
+    with pytest.raises(RuntimeError, match="debate provider"):
+        _auto_mode(cfg)
+
+
 def test_auto_mode_partial_keys_simulates(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A key exists, but not for the deepseek participants → simulate.
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    _reset_settings()
-    mode = _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS))
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = replace(
+        get_agent_config("idea"),
+        debate_participants=(
+            {"role": "proposer", "provider": "deepseek", "model": "deepseek-chat"},
+            {"role": "critic", "provider": "openai", "model": "gpt-test"},
+        ),
+    )
+    mode = _auto_mode(cfg)
     assert mode == DebateMode.SINGLE_MODEL_SIMULATED
 
 
 def test_auto_mode_all_keys_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
-    _reset_settings()
-    mode = _auto_mode(_debate_cfg(_DEEPSEEK_PARTICIPANTS))
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = get_agent_config("idea")
+    mode = _auto_mode(cfg)
     assert mode == DebateMode.REAL_MULTI_MODEL
 
 
-def test_auto_mode_debate_disabled_is_mock() -> None:
-    cfg = _debate_cfg(_DEEPSEEK_PARTICIPANTS)
-    disabled = AgentConfig(**{**cfg.__dict__, "debate_enabled": False})
-    _reset_settings()
-    assert _auto_mode(disabled) == DebateMode.MOCK_DEBATE
-
-
 @pytest.mark.asyncio
-async def test_run_debate_mock_mode_produces_valid_artifact() -> None:
-    _reset_settings()
-    cfg = _debate_cfg(_DEEPSEEK_PARTICIPANTS)
-    request = RunRequest(project="moe-pimc", user_request="test")
+async def test_run_debate_mock_mode_produces_valid_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = get_agent_config("idea")
+    request = RunRequest(project="pimc", user_request="test")
     context = ContextPack(
         system="system text", project="project text", task="task text"
     )
@@ -98,3 +123,50 @@ async def test_run_debate_mock_mode_produces_valid_artifact() -> None:
 
     res = validate_document(result.final_artifact.text, expected_schema="proposal.v1")
     assert res.valid, res.errors
+
+
+@pytest.mark.asyncio
+async def test_run_debate_writes_precall_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    for env in ALL_LLM_KEY_ENVS:
+        monkeypatch.setenv(env, "")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
+    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    cfg = replace(get_agent_config("idea"), debate_rounds=1)
+    run_root = tmp_path / "run"
+    request = RunRequest(
+        project="pimc",
+        user_request="debate manifest",
+        extra={"run_id": "run-debate", "run_root": str(run_root), "node_key": "idea"},
+    )
+    context = ContextPack(
+        system="system text", project="project text", task="task text"
+    )
+
+    result = await run_debate(
+        agent_name="idea",
+        agent_config=cfg,
+        request=request,
+        context=context,
+        output_schema="proposal.v1",
+        mode=DebateMode.MOCK_DEBATE,
+    )
+
+    assert result.final_artifact is not None
+    manifests = []
+    for path in sorted((run_root / "context").glob("context_manifest.v2.*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            manifests.append(raw)
+    purposes = {item["purpose"] for item in manifests}
+    assert {
+        "debate_proposer_round_1",
+        "debate_critic_round_1",
+        "debate_judge_round_1",
+    }.issubset(purposes)
+    assert all(item["diagnostics"].get("capture_mode") == "messages" for item in manifests)

@@ -1,87 +1,84 @@
-"""Durable run-state record + graph rehydration + new state machines."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from app.harness.runtime.run_graph import RunGraph
-from app.harness.runtime.state_machine import (
-    IllegalTransition,
-    NodeState,
-    ReviewState,
-    RunState,
-    review_can_transition,
-    run_assert_transition,
-    run_can_transition,
-    run_is_terminal,
-)
-from app.storage import run_state_store
-from app.storage.run_state_store import RunStateRecord
+from app.bridge.agent_registry import AgentRegistry
+from app.bridge.orchestrator import Orchestrator, RunRequest
+from app.harness.runtime.event_bus import InProcessEventBus
+from app.harness.runtime.state_machine import NodeState
+from app.harness.schema.frontmatter_parser import dumps as fm_dumps
+from app.storage.artifact_store import ArtifactStore
+from app.storage.run_store import RunStore
+from app.storage.run_state_store import RunStateStore
 
 
-def test_run_state_record_round_trip(tmp_path: Path) -> None:
-    rec = RunStateRecord(
-        run_id="r1",
-        run_status=RunState.RUNNING.value,
-        graph={"nodes": [], "edges": [], "entrypoints": []},
-        idempotency_key="k1",
-        attempts={"idea": 2},
-        feedback_attempts=1,
+def _proposal_text() -> str:
+    return fm_dumps(
+        {
+            "schema": "proposal.v1",
+            "project": "pimc",
+            "agent": "idea",
+            "research_question": "How to simplify the router?",
+            "hypothesis": "Hard top-2 keeps RES within 1.5 dB.",
+            "novelty": "Stream-aware routing absent in surveys.",
+        },
+        "Body of proposal\n",
     )
-    run_state_store.write(tmp_path, rec)
-    loaded = run_state_store.read(tmp_path)
-    assert loaded is not None
-    assert loaded.run_id == "r1"
-    assert loaded.run_status == "running"
-    assert loaded.attempts == {"idea": 2}
-    assert loaded.feedback_attempts == 1
-    assert loaded.updated_at  # stamped on write
 
 
-def test_read_missing_returns_none(tmp_path: Path) -> None:
-    assert run_state_store.read(tmp_path) is None
+def test_run_state_written_and_recovered(tmp_path: Path) -> None:
+    store = RunStore(tmp_path)
+    orch = Orchestrator(run_store=store)
+    session = orch.create_session(
+        RunRequest(task="state", project="pimc", auto_approve=True)
+    )
+    session.graph.transition("idea", NodeState.RUNNING)
+    orch._persist_state(session, status="running")  # noqa: SLF001
+
+    snapshot = RunStateStore(session.run).load()
+    assert snapshot is not None
+    assert snapshot.graph.state("idea") == NodeState.RUNNING
+
+    recovered = Orchestrator(run_store=store).session(session.run.run_id)
+    assert recovered.graph.state("idea") == NodeState.RUNNING
+    assert recovered.request.project == "pimc"
 
 
-def test_graph_to_dict_from_dict_preserves_states() -> None:
-    g = RunGraph()
-    for k in ("idea", "experiment", "coding"):
-        g.add_node(k)
-    g.add_edge("idea", "experiment")
-    g.add_edge("experiment", "coding")
-    g.set_entrypoint("idea")
-    g.transition("idea", NodeState.RUNNING)
-    g.transition("idea", NodeState.DONE)
+@pytest.mark.asyncio
+async def test_inline_approval_recovers_waiting_review_state(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path)
+    bus = InProcessEventBus()
+    orch = Orchestrator(run_store=store, registry=AgentRegistry(), bus=bus)
+    session = orch.create_session(
+        RunRequest(
+            task="inline-approval",
+            project="pimc",
+            entrypoint="idea",
+            standalone=True,
+            auto_approve=False,
+        )
+    )
+    ref = ArtifactStore(session.run).write(text=_proposal_text())
+    ArtifactStore(session.run).approve(ref)
+    session.graph.transition("idea", NodeState.RUNNING)
+    session.graph.transition("idea", NodeState.WAITING_REVIEW)
+    orch._persist_state(session, status="running")  # noqa: SLF001
 
-    rebuilt = RunGraph.from_dict(g.to_dict())
-    assert rebuilt.state("idea") == NodeState.DONE
-    assert rebuilt.state("experiment") == NodeState.PENDING
-    assert rebuilt.successors("idea") == {"experiment"}
-    assert rebuilt.entrypoints == ["idea"]
-    # ready_nodes still works on the rehydrated graph
-    assert rebuilt.ready_nodes() == ["experiment"]
+    recovered = Orchestrator(run_store=store, registry=AgentRegistry(), bus=bus)
+    result = await recovered.resume_after_artifact_approval(
+        run_id=session.run.run_id,
+        agent="idea",
+    )
 
-
-def test_run_state_transitions() -> None:
-    assert run_can_transition(RunState.CREATED, RunState.RUNNING)
-    assert run_can_transition(RunState.RUNNING, RunState.COMPLETED)
-    assert run_can_transition(RunState.FAILED, RunState.RUNNING)  # retry
-    assert not run_can_transition(RunState.COMPLETED, RunState.RUNNING)
-    assert run_is_terminal(RunState.COMPLETED)
-    assert not run_is_terminal(RunState.WAITING_HUMAN)
-    with pytest.raises(IllegalTransition):
-        run_assert_transition(RunState.COMPLETED, RunState.RUNNING)
-
-
-def test_review_state_transitions() -> None:
-    assert review_can_transition(ReviewState.PENDING, ReviewState.APPROVED)
-    assert review_can_transition(ReviewState.EDITED, ReviewState.APPROVED)
-    assert not review_can_transition(ReviewState.APPROVED, ReviewState.REJECTED)
-
-
-def test_node_failed_can_reset_to_pending() -> None:
-    """Retry path resets a failed node so the scheduler reruns it."""
-    from app.harness.runtime.state_machine import can_transition
-
-    assert can_transition(NodeState.FAILED, NodeState.PENDING)
-    assert can_transition(NodeState.FAILED, NodeState.RUNNING)
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert recovered.session(session.run.run_id).graph.state("idea") == NodeState.DONE
+    states = recovered.session(session.run.run_id).graph.all_states()
+    assert all(state == NodeState.DONE for state in states.values())
+    snapshot = RunStateStore(session.run).load()
+    assert snapshot is not None
+    assert snapshot.status == "completed"

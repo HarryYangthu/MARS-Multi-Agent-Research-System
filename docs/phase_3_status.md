@@ -42,7 +42,7 @@ PYTHONPATH=backend lint-imports           # → 4 kept, 0 broken
 PYTHONPATH=backend pytest backend/tests/  # → 183 passed
 PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8765 &
 curl -sX POST http://127.0.0.1:8765/api/runs -H 'Content-Type: application/json' \
-  -d '{"task":"e2e","project":"moe-pimc","entrypoint":"pipeline","user_request":"test"}'
+  -d '{"task":"e2e","project":"pimc","entrypoint":"pipeline","user_request":"test"}'
 # → {"run_id": "...", ...}
 curl -sX POST http://127.0.0.1:8765/api/runs/<RID>/start
 # wait ~3s

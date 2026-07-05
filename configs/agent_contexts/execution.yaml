@@ -1,0 +1,12 @@
+agent: execution
+research_sites:
+  - id: nvidia_docs
+    label: NVIDIA Developer Docs
+    url: https://docs.nvidia.com
+    enabled: true
+    source: default
+  - id: pytorch_performance
+    label: PyTorch Performance Tuning
+    url: https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+    enabled: true
+    source: default

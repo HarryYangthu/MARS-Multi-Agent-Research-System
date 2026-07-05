@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from app.settings import repo_root
+from app.storage.data_source_store import selection_summary
 
 RUN_SUBDIRS: tuple[str, ...] = (
     "input",
@@ -21,10 +22,12 @@ RUN_SUBDIRS: tuple[str, ...] = (
     "experiment",
     "coding",
     "execution",
+    "diagnosis",
     "writing",
     "diagnosis",
     "hitl",
     "events",
+    "memory",
 )
 
 _TASK_SLUG_RE = re.compile(r"[^a-z0-9_]+")
@@ -81,6 +84,7 @@ class RunStore:
         entrypoint: str = "pipeline",
         config_hash: str = "",
         user_request: str = "",
+        data_source: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> RunHandle:
         ts = _ts(now)
@@ -105,13 +109,36 @@ class RunStore:
             "config_hash": config_hash,
             "created_at": (now or datetime.now(tz=timezone.utc)).isoformat(),
         }
+        if data_source:
+            meta["data_source"] = data_source
         (root / "run_meta.json").write_text(
             json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
-        if user_request:
+        if user_request or data_source:
+            enriched_request = user_request
+            if data_source:
+                enriched_request = (
+                    f"{user_request.rstrip()}\n\n{selection_summary(data_source)}\n"
+                    if user_request.strip()
+                    else selection_summary(data_source) + "\n"
+                )
             (root / "input" / "user_request.md").write_text(
-                user_request, encoding="utf-8"
+                enriched_request, encoding="utf-8"
+            )
+        if data_source:
+            payload = json.dumps(data_source, indent=2, ensure_ascii=False)
+            (root / "input" / "selected_data_source.json").write_text(
+                payload,
+                encoding="utf-8",
+            )
+            (root / "context" / "selected_data_source.json").write_text(
+                payload,
+                encoding="utf-8",
+            )
+            (root / "context" / "selected_data_source.md").write_text(
+                selection_summary(data_source) + "\n",
+                encoding="utf-8",
             )
 
         return RunHandle(

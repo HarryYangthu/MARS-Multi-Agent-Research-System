@@ -1,7 +1,8 @@
-# Frontend P0 — UX reference
+# Frontend P0/P1 — UX reference
 
 > Maps PRODUCT.md §10 P0 list to the actual Next.js routes shipped in V0.
-> P1 items (GPU panel, LangSmith, advanced config drawer, i18n) are intentionally absent.
+> P1 adds operator visibility without making GPU, LangSmith, or external
+> services required for the mock-first demo.
 
 ## Routes
 
@@ -64,7 +65,7 @@ SKIPPED      slate-800
 | `run.<id>.hitl` | Highlight the relevant agent (review_required) |
 | `run.lifecycle` | Show "completed" toast (planned — V0 just appends to events list) |
 
-`runs/[id]/multi/page.tsx` polls `/api/execution/<id>/curves` every 2 s. WS streaming hooks for per-experiment ticks are wired but the panel itself is poll-based for simplicity in V0; switching to WS streaming is straight-line work in V1.
+`runs/[id]/multi/page.tsx` polls `/api/execution/<id>/curves` every 2 s. WS streaming hooks for per-experiment ticks are wired but the panel itself is poll-based for simplicity in V0; switching to WS streaming is straight-line work in V2.
 
 ## Validation badge contract
 
@@ -75,14 +76,20 @@ SKIPPED      slate-800
    - /metrics/primary: required
 ```
 
-The error list is exactly the structured `ValidationError(path, message)` from the backend's `validator.py`. Click a path → editor scrolls to the offending key (planned V1).
+The error list is exactly the structured `ValidationError(path, message)` from the backend's `validator.py`. Click a path → editor scrolls to the offending key (planned V2).
 
 ## Frontend not in V0 (P1 items)
 
-- GPU resource panel
-- LangSmith trace embedding
-- Server config advanced drawer
-- Multi-project switcher
-- i18n (frontend is English-only V0)
+- GPU resource panel — shipped as TopBar `Ops` drawer backed by
+  `GET /api/runtime/status`; no GPU returns a structured CPU/mock fallback.
+- LangSmith trace embedding — shipped as an optional `Ops` drawer embed/link
+  when LangSmith is enabled and configured; file-backed traces remain primary.
+- Server config advanced drawer — shipped as a sanitized read-only `Ops`
+  drawer with runtime, tools, context, provider-secret booleans, and MCP status.
+- Multi-project switcher — shipped in P2 as a TopBar selector backed by
+  `GET /api/projects`; selected project is stored locally and scopes run list,
+  Commander conversation creation, Context Workbench preview, readiness, and
+  runtime status.
+- i18n — base zh/en toggle exists; full copy coverage remains incremental.
 
 These are explicitly out per ACCEPTANCE.md §1 V0-不做 list.

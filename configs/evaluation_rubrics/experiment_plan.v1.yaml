@@ -1,0 +1,29 @@
+schema: experiment_plan.v1
+pass_threshold: 0.8
+warn_threshold: 0.65
+dimensions:
+  - id: variable_clarity
+    label: Variable Clarity
+    weight: 0.22
+    signals:
+      - Independent and dependent variables are explicit.
+  - id: metric_validity
+    label: Metric Validity
+    weight: 0.22
+    signals:
+      - Primary metric is defined, secondary metrics are useful when available.
+  - id: ablation_coverage
+    label: Ablation Coverage
+    weight: 0.22
+    signals:
+      - Ablation matrix has enough contrast to test the hypothesis.
+  - id: budget_realism
+    label: Budget Realism
+    weight: 0.16
+    signals:
+      - estimated_runs is consistent with configured ablations.
+  - id: baseline_reuse
+    label: Baseline Reuse
+    weight: 0.18
+    signals:
+      - baseline_ref records reuse/rerun/modify decision.

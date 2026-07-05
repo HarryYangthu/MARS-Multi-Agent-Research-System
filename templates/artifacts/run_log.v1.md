@@ -1,9 +1,9 @@
 ---
 schema: run_log.v1
-project: moe-pimc
+project: pimc
 agent: execution
 upstream_artifact: code_spec.approved.md
-run_id: "2026-05-04T2310_pimc_moe_ablation_run3"
+run_id: "2026-05-04T2310_pimc_ablation_run3"
 batch_size: 512
 gpu_used: ["L40S:1", "L40S:2"]
 duration_seconds: 3420
@@ -16,6 +16,6 @@ fingerprint_hash: "sha256:abcd1234deadbeef0000aaaa"
 is_mock: false
 ---
 
-# Run log
+# 执行日志
 
-Output summary, error counts, etc.
+正文使用中文总结执行批次、关键指标、错误数量、异常实验、资源占用和是否达到目标。run_id、metric、fingerprint_hash、文件路径等技术字段保持原样。

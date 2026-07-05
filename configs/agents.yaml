@@ -1,84 +1,125 @@
-# MARS V0 — Agent configuration.
-# All agents use DeepSeek (per user setup). Each agent picks its own model.
-# Multi-model debate uses different DeepSeek model versions per role so the
-# auto-degrade logic stays in REAL_MULTI_MODEL mode (all participants share
-# the deepseek provider).
-#
-# Model alias map (V0):
-#   deepseek-chat       → DeepSeek's strongest general chat model (current "V4")
-#   deepseek-reasoner   → DeepSeek-R1 long chain-of-thought reasoning
-#   deepseek-coder      → DeepSeek-Coder for code generation
-#
-# Missing API keys auto-fall back to mock_provider.
-
+commander:
+  enabled: true
+  output_schema: ''
+  model:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.2
+    max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
+  debate:
+    enabled: false
+  role: supervisor_react
+  tools:
+  - run.create
+  - run.start
+  - run.status
+  - run.feedback_loop
+  - artifact.read
+  - artifact.review
+  - metrics.evaluate
+  - diagnosis.failure_analysis
+  - user.approval
 idea:
   enabled: true
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-reasoner        # R1 — stream the chain-of-thought
+    model: deepseek-chat
     temperature: 0.7
     max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
-    enabled: false                  # demo: single streamed reasoner call per agent
+    enabled: true
     rounds: 1
     participants:
-      - role: proposer
-        provider: deepseek
-        model: deepseek-reasoner
-      - role: critic
-        provider: deepseek
-        model: deepseek-reasoner
-      - role: judge
-        provider: deepseek
-        model: deepseek-reasoner
+    - role: proposer
+      provider: deepseek
+      model: deepseek-chat
+    - role: critic
+      provider: deepseek
+      model: deepseek-reasoner
+    - role: judge
+      provider: deepseek
+      model: deepseek-chat
+  research:
+    required_tools: true
+    enable_network: true
+    source_downloads: true
+    source_download_limit: 1
+    web_search: true
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
-    - search.local_docs
-    - search.arxiv_search
-    - knowledge.kb_query
-    - knowledge.baseline_match
-    - code.repo_reader
-
+  - search.local_docs
+  - search.arxiv_search
+  - search.web_search
+  - search.fetch_sources
+  - knowledge.kb_query
+  - knowledge.baseline_match
+  - code.repo_reader
 experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
     provider: deepseek
-    model: deepseek-reasoner        # R1 — good for ablation matrix design
+    model: deepseek-reasoner
     temperature: 0.3
     max_tokens: 4096
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
-    - knowledge.kb_query
-    - knowledge.baseline_match
-    - knowledge.experiment_memory
-
+  - knowledge.kb_query
+  - knowledge.baseline_match
+  - knowledge.experiment_memory
 coding:
   enabled: true
   output_schema: code_spec.v1
   model:
     provider: deepseek
-    model: deepseek-reasoner        # R1 — reason through patch design
+    model: deepseek-chat
     temperature: 0.1
     max_tokens: 8192
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   post_training:
-    enabled: false
-    mode: load_only
-    adapter_path: ""
-    custom_endpoint: ""
-    fine_tuned_model_id: ""
-    live_checkpoint_path: ""
+    enabled: true
+    mode: endpoint
+    endpoint_provider: local_vllm
+    adapter_path: ''
+    custom_endpoint: http://127.0.0.1:8001/v1
+    model: mars-coding-posttrain
+    api_key_env: LOCAL_VLLM_API_KEY
+    fine_tuned_model_id: ''
+    live_checkpoint_path: ''
   language_tracks:
-    - python_research
-    - c_production
+  - python_research
+  - c_production
+  loop:
+    max_validation_repairs: 2
+    max_tool_steps: 4
   tools:
-    - code.repo_reader
-    - code.patch_generator
-    - code.test_runner
-    - code.lint
-    - knowledge.code_assets
-
+  - code.repo_reader
+  - code.patch_generator
+  - code.apply_patch
+  - code.write_file
+  - code.delete_file
+  - code.rollback_patch
+  - code.test_runner
+  - code.lint
+  - knowledge.code_assets
 execution:
   enabled: true
   output_schema: run_log.v1
@@ -86,15 +127,20 @@ execution:
     provider: deepseek
     model: deepseek-reasoner        # R1 — reason about which experiments to run
     temperature: 0.1
-    max_tokens: 4096
+    max_tokens: 2048
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 2
   tools:
-    - execution.simulation_runner
-    - execution.batch_runner
-    - execution.log_streamer
-    - execution.metrics_collector
-
+  - execution.simulation_runner
+  - execution.batch_runner
+  - execution.log_streamer
+  - execution.metrics_collector
 writing:
   enabled: true
   output_schema: report.v1
@@ -103,16 +149,22 @@ writing:
     model: deepseek-reasoner        # R1 — stream the report reasoning
     temperature: 0.4
     max_tokens: 8192
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
   debate:
     enabled: false                  # demo: single streamed reasoner call
     rounds: 1
     participants:
-      - role: critic
-        provider: deepseek
-        model: deepseek-reasoner
-      - role: positive_reviewer
-        provider: deepseek
-        model: deepseek-reasoner
+    - role: critic
+      provider: deepseek
+      model: deepseek-reasoner
+    - role: positive_reviewer
+      provider: deepseek
+      model: deepseek-chat
+  loop:
+    max_validation_repairs: 1
+    max_tool_steps: 3
   tools:
-    - knowledge.methodology
-    - knowledge.run_archive
+  - knowledge.methodology
+  - knowledge.run_archive

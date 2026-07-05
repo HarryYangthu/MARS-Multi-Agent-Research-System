@@ -1,20 +1,19 @@
 """Single-experiment runner.
 
-Two backends, chosen by ``configs/execution.yaml::backend``:
+For the pimc project this runs a REAL (lightweight) dual-carrier PIM
+cancellation simulation on CPU (see ``pim_cancellation.py``) — generating a
+real ~30k-point complex dual-carrier signal, fitting a memory-polynomial
+canceller, and emitting a real loss curve + RES/PIM/APE metrics.
 
-* ``mock`` — synthetic loss curve, zero external deps (V0 default, CLAUDE.md #9).
-* ``real`` — run the project repo's ``main.py`` as a CPU subprocess and parse
-  its ``metrics.json`` / ``loss.json`` output. Falls back to mock if the repo
-  or its ``main.py`` is missing, so the e2e demo never breaks.
+Falls back to the synthetic mock simulation when ``MARS_MOCK_MODE=always`` or
+for non-PIM projects. GPU training of the full 7-layer model is V2.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import shutil
-import sys
-import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,7 +23,7 @@ from loguru import logger
 
 from app.execution.config import get_execution_config
 from app.execution.mock_simulation import MockJob, MockResult, run_mock_simulation
-from app.settings import repo_root
+from app.settings import get_settings
 
 
 def gpu_available() -> bool:
@@ -41,32 +40,11 @@ class JobSpec:
     duration_seconds: float = 5.0
     seed: int | None = None
     template: str = "exponential_decay"
+    run_root: Path | None = None
+    plot_every_steps: int = 5
 
 
-def _resolve_repo_main(project: str) -> Path | None:
-    """Locate the project repo's main.py (real backend entrypoint).
-
-    Honours ``projects/<project>/repo_link.yaml::repo_path``; falls back to the
-    in-repo synthetic trainer ``workspace/repos/pimc-stub/main.py``.
-    """
-    root = repo_root()
-    proj_dir = root / "projects" / project
-    link = proj_dir / "repo_link.yaml"
-    if link.exists():
-        try:
-            data = yaml.safe_load(link.read_text(encoding="utf-8")) or {}
-            repo_path = str(data.get("repo_path", "") or "")
-            if repo_path:
-                candidate = (proj_dir / repo_path).resolve() / "main.py"
-                if candidate.exists():
-                    return candidate
-        except (OSError, yaml.YAMLError):
-            pass
-    fallback = root / "workspace" / "repos" / "pimc-stub" / "main.py"
-    return fallback if fallback.exists() else None
-
-
-def _real_seed(spec: JobSpec) -> int:
+def _seed_for(spec: JobSpec) -> int:
     if spec.seed is not None:
         return spec.seed
     return int(
@@ -75,91 +53,157 @@ def _real_seed(spec: JobSpec) -> int:
     )
 
 
-async def _run_real_experiment(
-    spec: JobSpec, *, bus_publish: Any | None, steps: int, timeout: float
+async def run_real_pim_simulation(
+    spec: JobSpec,
+    *,
+    bus_publish: Any | None = None,
+    sleep_per_tick: float = 0.05,
+    steps: int = 60,
 ) -> MockResult:
-    """Run the project's main.py as a subprocess and parse its output."""
-    main_py = _resolve_repo_main(spec.project)
-    if main_py is None:
-        raise FileNotFoundError(
-            f"real backend: no main.py for project '{spec.project}'"
-        )
-
-    channel = f"run.{spec.run_id}.experiment.{spec.experiment_id}"
-    seed = _real_seed(spec)
-    out_dir = Path(tempfile.mkdtemp(prefix=f"mars_{spec.experiment_id}_"))
-
-    cmd = [
-        sys.executable,
-        str(main_py),
-        "--experiment-id", spec.experiment_id,
-        "--config", json.dumps(spec.config or {}),
-        "--seed", str(seed),
-        "--output-dir", str(out_dir),
-        "--steps", str(steps),
-    ]
-    if bus_publish is not None:
-        await bus_publish(
-            channel, {"event": "execution.started", "experiment_id": spec.experiment_id}
-        )
-
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(main_py.parent),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    """Run the real dual-carrier PIM cancellation for one ablation."""
+    from app.execution.pim_cancellation import (
+        DEFAULT_N_POINTS,
+        plot_loss_curve,
+        run_pim_cancellation,
     )
 
-    async def _pump_stdout() -> None:
-        assert proc.stdout is not None
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").rstrip()
-            if line.startswith("@curve ") and bus_publish is not None:
-                parts = line.split()
-                if len(parts) == 3:  # @curve <step> <loss>
-                    await bus_publish(
-                        channel,
-                        {
-                            "event": "execution.curve_point",
-                            "experiment_id": spec.experiment_id,
-                            "step": int(parts[1]),
-                            "metric": "loss",
-                            "value": float(parts[2]),
-                        },
-                    )
-            elif bus_publish is not None:
+    started = time.monotonic()
+    seed = _seed_for(spec)
+    channel = f"run.{spec.run_id}.experiment.{spec.experiment_id}"
+    n_steps = max(steps, 60)
+    plot_dir = spec.run_root / "execution" / "live_plots" if spec.run_root is not None else None
+    plot_filename = f"{_safe_name(spec.experiment_id)}_loss.png"
+    plot_path = plot_dir / plot_filename if plot_dir is not None else None
+    plot_every = max(1, spec.plot_every_steps)
+
+    if bus_publish is not None:
+        await bus_publish(
+            channel,
+            {
+                "event": "execution.started",
+                "experiment_id": spec.experiment_id,
+                "kind": "real_pim",
+                "n_points": DEFAULT_N_POINTS,
+            },
+        )
+
+    loop = asyncio.get_running_loop()
+    step_queue: asyncio.Queue[tuple[int, float, list[float]]] = asyncio.Queue()
+
+    def _on_step(step: int, value: float, curve: list[float]) -> None:
+        loop.call_soon_threadsafe(step_queue.put_nowait, (step, value, curve))
+
+    def _run() -> Any:
+        return run_pim_cancellation(
+            n_points=DEFAULT_N_POINTS,
+            steps=n_steps,
+            ablation_config=dict(spec.config),
+            seed=seed,
+            on_step=_on_step,
+            step_delay_seconds=sleep_per_tick,
+        )
+
+    async def _write_live_plot(step: int, curve: list[float]) -> None:
+        if plot_path is None:
+            return
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            await asyncio.to_thread(
+                plot_loss_curve,
+                curve,
+                plot_path,
+                total_steps=n_steps,
+                experiment_id=spec.experiment_id,
+                title="Live PIM Cancellation Loss",
+            )
+        except Exception as exc:
+            if bus_publish is not None:
                 await bus_publish(
-                    channel, {"event": "execution.log_line", "line": line}
+                    channel,
+                    {
+                        "event": "execution.plot_failed",
+                        "experiment_id": spec.experiment_id,
+                        "metric": "loss",
+                        "step": step,
+                        "error": str(exc),
+                    },
                 )
+            return
+        if bus_publish is not None:
+            await bus_publish(
+                channel,
+                {
+                    "event": "execution.plot_updated",
+                    "experiment_id": spec.experiment_id,
+                    "metric": "loss",
+                    "step": step,
+                    "total_steps": n_steps,
+                    "filename": plot_filename,
+                    "plot_url": f"/api/execution/{spec.run_id}/plots/{plot_filename}",
+                    "cache_bust": time.time_ns(),
+                },
+            )
 
+    task = asyncio.create_task(asyncio.to_thread(_run))
+    last_plotted_step = -1
+    last_curve: list[float] = []
     try:
-        await asyncio.wait_for(
-            asyncio.gather(_pump_stdout(), proc.wait()), timeout=timeout
+        while True:
+            if task.done() and step_queue.empty():
+                break
+            try:
+                step, value, curve = await asyncio.wait_for(
+                    step_queue.get(),
+                    timeout=0.25,
+                )
+            except asyncio.TimeoutError:
+                continue
+            last_curve = curve
+            if bus_publish is not None:
+                await bus_publish(
+                    channel,
+                    {
+                        "event": "execution.curve_point",
+                        "experiment_id": spec.experiment_id,
+                        "step": step,
+                        "metric": "loss",
+                        "value": float(value),
+                    },
+                )
+            if step == 0 or (step + 1) % plot_every == 0 or step == n_steps - 1:
+                await _write_live_plot(step, curve)
+                last_plotted_step = step
+        _data, res = await task
+    except Exception as exc:
+        if bus_publish is not None:
+            await bus_publish(
+                channel,
+                {"event": "execution.failed", "experiment_id": spec.experiment_id, "error": str(exc)},
+            )
+        return MockResult(
+            run_id=spec.run_id,
+            experiment_id=spec.experiment_id,
+            duration_seconds=time.monotonic() - started,
+            status="failed",
+            metrics={},
+            fingerprint_hash="",
+            is_mock=False,
         )
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise TimeoutError(
-            f"experiment {spec.experiment_id} exceeded {timeout}s and was killed"
-        ) from None
+    if res.loss_curve and last_plotted_step != len(res.loss_curve) - 1:
+        await _write_live_plot(len(res.loss_curve) - 1, last_curve or res.loss_curve)
 
-    if proc.returncode != 0:
-        err = b""
-        if proc.stderr is not None:
-            err = await proc.stderr.read()
-        raise RuntimeError(
-            f"experiment {spec.experiment_id} failed (exit {proc.returncode}): "
-            f"{err.decode(errors='replace')[-500:]}"
-        )
-
-    metrics_path = out_dir / "metrics.json"
-    if not metrics_path.exists():
-        raise RuntimeError(f"experiment {spec.experiment_id} produced no metrics.json")
-    metrics = {k: float(v) for k, v in json.loads(metrics_path.read_text()).items()}
-
+    elapsed = time.monotonic() - started
+    metrics = {
+        "loss": float(res.final_loss),
+        "RES": float(res.res_db),
+        "PIM": float(res.pim_suppression_db),
+        "APE": float(res.ape_deg),
+        "n_basis": float(res.n_basis),
+    }
     fingerprint_hash = "sha256:" + hashlib.sha256(
-        f"{spec.project}:{spec.run_id}:{spec.experiment_id}:{spec.config}:real".encode()
+        f"{spec.project}:{spec.run_id}:{spec.experiment_id}:{spec.config}:pim".encode()
     ).hexdigest()[:24]
+
     if bus_publish is not None:
         await bus_publish(
             channel,
@@ -167,42 +211,33 @@ async def _run_real_experiment(
                 "event": "execution.completed",
                 "experiment_id": spec.experiment_id,
                 "fingerprint_hash": fingerprint_hash,
+                "metrics": metrics,
             },
         )
     return MockResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
-        duration_seconds=0.0,
+        duration_seconds=elapsed,
         status="completed",
         metrics=metrics,
         fingerprint_hash=fingerprint_hash,
         is_mock=False,
+        loss_curve=[float(v) for v in res.loss_curve],
     )
 
 
-async def run_one(
-    spec: JobSpec,
-    *,
-    bus_publish: Any | None = None,
-    steps: int = 30,
-    tick_seconds: float = 0.05,
-    backend: str | None = None,
-) -> MockResult:
-    cfg = get_execution_config()
-    chosen = (backend or cfg.backend).lower()
+async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int = 30) -> MockResult:
+    settings = get_settings()
+    if settings.is_production and settings.mars_execution_backend == "mock":
+        raise RuntimeError("production mode cannot use mock execution backend")
+    backend = settings.mars_execution_backend
+    use_real = settings.mars_mock_mode != "always" and spec.project == "pimc"
+    if use_real and backend == "paper_static":
+        from app.execution.paper_static_adapter import run_paper_static_simulation
 
-    if chosen == "real":
-        if _resolve_repo_main(spec.project) is not None:
-            return await _run_real_experiment(
-                spec,
-                bus_publish=bus_publish,
-                steps=steps,
-                timeout=cfg.job_timeout_seconds,
-            )
-        logger.warning(
-            "real backend requested but no main.py for '{}' — falling back to mock",
-            spec.project,
-        )
+        return await run_paper_static_simulation(spec, bus_publish=bus_publish, steps=steps)
+    if use_real and backend == "pim_cpu":
+        return await run_real_pim_simulation(spec, bus_publish=bus_publish, steps=steps)
 
     job = MockJob(
         run_id=spec.run_id,
@@ -213,6 +248,8 @@ async def run_one(
         template=spec.template,
         seed=spec.seed,
     )
-    return await run_mock_simulation(
-        job, bus_publish=bus_publish, sleep_per_tick=tick_seconds, steps=steps
-    )
+    return await run_mock_simulation(job, bus_publish=bus_publish, steps=steps)
+
+
+def _safe_name(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value) or "experiment"

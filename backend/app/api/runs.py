@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_event_bus, get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest
+from app.bridge.run_observability import build_run_observability
+from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
+from app.storage.data_source_store import DataSourceStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -21,13 +24,24 @@ class CreateRunPayload(BaseModel):
     entrypoint: str = Field(default="pipeline")
     standalone: bool = False
     user_request: str = ""
+    # When true, every agent auto-approves and the Commander self-heal loop
+    # auto-appends repair attempts — the run executes end-to-end without HITL
+    # clicks. Used for demos / autonomous runs; the UI default stays human-gated.
+    auto_approve: bool = False
     # Optional: pre-written markdown for the entrypoint Agent's first artifact.
     # When provided, the API validates it against the matching schema, drops
     # it as <agent>/<stem>.v1.md, and the orchestrator skips the LLM draft for
     # that node — the run goes straight into HITL review.
     seed_artifact: str | None = None
-    # Optional: dedupe double-submits — same key returns the same run.
-    idempotency_key: str | None = None
+    data_source: "DataSourceSelection | None" = None
+
+
+class DataSourceSelection(BaseModel):
+    id: str = Field(..., min_length=1)
+    fs_mhz: float | None = None
+    kind: str | None = None
+    channel_count: int | None = None
+    description: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -44,8 +58,23 @@ class RunDetail(RunSummary):
     run_status: str = "created"
 
 
+class RetryAgentPayload(BaseModel):
+    reason: str = ""
+
+
 @router.post("", response_model=RunDetail)
 async def create_run(payload: CreateRunPayload) -> RunDetail:
+    try:
+        assert_ready_for_run(project=payload.project)
+    except ProductionReadinessError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=exc.report.to_dict(),
+        ) from exc
+    data_source = _resolve_data_source_selection(
+        selection=payload.data_source,
+        project=payload.project,
+    )
     orch = get_orchestrator()
     request = RunRequest(
         task=payload.task,
@@ -53,8 +82,15 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         entrypoint=payload.entrypoint,  # type: ignore[arg-type]
         standalone=payload.standalone,
         user_request=payload.user_request,
+        auto_approve=payload.auto_approve,
+        data_source=data_source,
     )
-    session = orch.create_session(request, idempotency_key=payload.idempotency_key)
+    try:
+        session = orch.create_session(request)
+    except ProductionReadinessError as exc:
+        raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # If the caller supplied a seed artifact, validate + persist it under the
     # entrypoint Agent's directory as v1.md. The orchestrator's agent_runner
@@ -104,9 +140,34 @@ def _detail(session: Any) -> RunDetail:
     )
 
 
+def _resolve_data_source_selection(
+    selection: DataSourceSelection | None,
+    *,
+    project: str,
+) -> dict[str, Any] | None:
+    store = DataSourceStore()
+    if selection is None:
+        return store.default_profile(project)
+    try:
+        profile = store.load(selection.id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="selected data source not found") from exc
+    if selection.fs_mhz is not None:
+        profile["fs_mhz"] = selection.fs_mhz
+        profile["sample_rate_hz"] = selection.fs_mhz * 1_000_000.0
+    if selection.kind is not None:
+        profile["kind"] = selection.kind
+    if selection.channel_count is not None:
+        profile["channel_count"] = selection.channel_count
+    if selection.description is not None:
+        profile["description"] = selection.description
+    return profile
+
+
 @router.get("", response_model=list[RunSummary])
-async def list_runs() -> list[RunSummary]:
+async def list_runs(project: str = "") -> list[RunSummary]:
     store = get_run_store()
+    project_filter = project.strip()
     return [
         RunSummary(
             run_id=r.run_id,
@@ -116,6 +177,7 @@ async def list_runs() -> list[RunSummary]:
             created_at=r.created_at,
         )
         for r in store.list()
+        if not project_filter or r.project == project_filter
     ]
 
 
@@ -137,42 +199,72 @@ def _require_session(run_id: str) -> Any:
     return session
 
 
+@router.get("/{run_id}/observability")
+async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return build_run_observability(run, limit=max(1, min(limit, 500)))
+
+
+@router.get("/{run_id}/health")
+async def get_run_health(run_id: str) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    view = build_run_observability(run, limit=20)
+    return {
+        "run_id": run_id,
+        "status": view["status"],
+        "health": view["health"],
+        "latest_event_at": view["latest_event_at"],
+    }
+
+
 @router.post("/{run_id}/start", status_code=202)
 async def start_run(run_id: str) -> dict[str, str]:
     orch = get_orchestrator()
-    _require_session(run_id)
+    try:
+        session = orch.session(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    try:
+        assert_ready_for_run(project=session.run.project)
+    except ProductionReadinessError as exc:
+        raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
     asyncio.create_task(orch.run(run_id), name=f"run:{run_id}")
     return {"status": "started", "run_id": run_id}
 
 
-@router.post("/{run_id}/pause", status_code=202)
-async def pause_run(run_id: str) -> dict[str, str]:
-    _require_session(run_id)
-    get_orchestrator().request_pause(run_id)
-    return {"status": "pause_requested", "run_id": run_id}
-
-
-@router.post("/{run_id}/cancel", status_code=202)
-async def cancel_run(run_id: str) -> dict[str, str]:
-    _require_session(run_id)
-    get_orchestrator().request_cancel(run_id)
-    return {"status": "cancel_requested", "run_id": run_id}
-
-
-@router.post("/{run_id}/retry", status_code=202)
-async def retry_run(run_id: str) -> dict[str, str]:
+@router.post("/{run_id}/agents/{agent}/retry", status_code=202)
+async def retry_agent(
+    run_id: str,
+    agent: str,
+    payload: RetryAgentPayload,
+) -> dict[str, str]:
     orch = get_orchestrator()
-    _require_session(run_id)
-    orch.prepare_retry(run_id)
-    asyncio.create_task(orch.run(run_id), name=f"retry:{run_id}")
-    return {"status": "retrying", "run_id": run_id}
+    reason = payload.reason.strip() or "人工请求重试失败 Agent。"
+    try:
+        result = await orch.request_artifact_revision(
+            run_id=run_id,
+            agent=agent,
+            reason=reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result)
+    return {
+        "status": str(result.get("status") or "revision_started"),
+        "run_id": run_id,
+        "agent": agent,
+        "node": str(result.get("node") or agent),
+    }
 
 
 @router.post("/{run_id}/stop", status_code=202)
 async def stop_run(run_id: str) -> dict[str, str]:
-    # Back-compat alias for cancel.
-    _require_session(run_id)
-    get_orchestrator().request_cancel(run_id)
+    # V0 has no cancellation hook; placeholder for V2.
     return {"status": "stop_requested", "run_id": run_id}
 
 

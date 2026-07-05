@@ -1,0 +1,29 @@
+schema: code_spec.v1
+pass_threshold: 0.82
+warn_threshold: 0.66
+dimensions:
+  - id: patch_minimality
+    label: Patch Minimality
+    weight: 0.18
+    signals:
+      - File changes are focused and avoid broad rewrites.
+  - id: test_adequacy
+    label: Test Adequacy
+    weight: 0.22
+    signals:
+      - Unit tests or baseline smoke test evidence is present.
+  - id: baseline_preservation
+    label: Baseline Preservation
+    weight: 0.25
+    signals:
+      - baseline_compat.preserved is true with rationale.
+  - id: risk_clarity
+    label: Risk Clarity
+    weight: 0.18
+    signals:
+      - files_changed entries carry low/medium/high risk.
+  - id: dependency_discipline
+    label: Dependency Discipline
+    weight: 0.17
+    signals:
+      - New dependencies are absent or clearly bounded.

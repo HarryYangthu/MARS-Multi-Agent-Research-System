@@ -1,12 +1,12 @@
 ---
 schema: code_spec.v1
-project: moe-pimc
+project: pimc
 agent: coding
 upstream_artifact: experiment_plan.approved.md
 target_lang: python
 baseline_compat:
   preserved: true
-  rationale: "forward(x, stream_label) signature unchanged; new Paper_Router_v2 added alongside existing Paper_Total_0327."
+  rationale: "保持 forward(x, stream_label) 接口不变；新增 Paper_Router_v2，并与现有 Paper_Total_0327 并行保留。"
 files_changed:
   - path: "libs/Model.py"
     type: modified
@@ -20,6 +20,6 @@ test_coverage:
   baseline_smoke_test: pass
 ---
 
-# Code spec
+# 代码规格
 
-Describes the patch.
+正文使用中文描述补丁目标、涉及文件、兼容性保护、测试覆盖、风险等级与回滚方式。函数签名、类名、文件路径、命令和指标名保持原样。

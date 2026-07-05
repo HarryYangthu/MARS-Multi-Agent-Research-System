@@ -11,6 +11,7 @@ import pytest
 
 from app.harness.kb.baseline_matcher import find_match
 from app.harness.kb.embedder import embed
+from app.harness.kb.profiles import write_baseline_current
 from app.harness.kb.stores import KBRecord, KBStores, reset_for_tests
 
 
@@ -18,7 +19,7 @@ def _seed(stores: KBStores, n: int = 10) -> None:
     zone = stores.zone("run_archive")
     for i in range(n):
         sig = (
-            f"project=moe-pimc | variables={{'independent': ['expert_count_{i}']}} "
+            f"project=pimc | variables={{'independent': ['expert_count_{i}']}} "
             f"| metrics={{'primary': 'RES_{i}'}} | ablations=[{i}]"
         )
         zone.add(
@@ -36,7 +37,7 @@ def test_high_similarity_finds_match(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
     _seed(stores, n=10)
     plan = {
-        "project": "moe-pimc",
+        "project": "pimc",
         "variables": {"independent": ["expert_count_3"]},
         "metrics": {"primary": "RES_3"},
         "ablations": [3],
@@ -61,6 +62,42 @@ def test_low_similarity_no_match(tmp_path: Path) -> None:
     assert match.record is None
 
 
+def test_baseline_current_profile_takes_priority(tmp_path: Path) -> None:
+    stores = reset_for_tests(base=tmp_path)
+    write_baseline_current(
+        "pimc",
+        {
+            "run_id": "profile_baseline",
+            "signature": (
+                "project=pimc | variables={'independent': ['profile_axis']} "
+                "| metrics={'primary': 'RES_profile'} | ablations=[7]"
+            ),
+        },
+        base=tmp_path,
+    )
+    zone = stores.zone("run_archive")
+    zone.add(
+        KBRecord(
+            id="archive-baseline",
+            zone="run_archive",
+            text="project=pimc | variables={'independent': ['profile_axis']} | metrics={'primary': 'RES_profile'} | ablations=[7]",
+            metadata={"run_id": "archive_should_not_win"},
+            embedding=embed("profile_axis RES_profile"),
+        )
+    )
+    plan = {
+        "project": "pimc",
+        "variables": {"independent": ["profile_axis"]},
+        "metrics": {"primary": "RES_profile"},
+        "ablations": [7],
+    }
+
+    match = find_match(plan=plan, threshold=0.1, stores=stores)
+
+    assert match.matched_run_id == "profile_baseline"
+    assert match.record is None
+
+
 def test_recall_and_precision_targets(tmp_path: Path) -> None:
     """Run a small test set and verify ≥80% recall / ≥90% precision."""
     stores = reset_for_tests(base=tmp_path)
@@ -68,7 +105,7 @@ def test_recall_and_precision_targets(tmp_path: Path) -> None:
 
     positives = [
         {
-            "project": "moe-pimc",
+            "project": "pimc",
             "variables": {"independent": [f"expert_count_{i}"]},
             "metrics": {"primary": f"RES_{i}"},
             "ablations": [i],
@@ -77,7 +114,7 @@ def test_recall_and_precision_targets(tmp_path: Path) -> None:
     ]
     negatives = [
         {
-            "project": "moe-pimc",
+            "project": "pimc",
             "variables": {"independent": ["unique_axis"]},
             "metrics": {"primary": "AAA"},
             "ablations": [-1],

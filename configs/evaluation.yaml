@@ -1,0 +1,47 @@
+version: 1
+
+defaults:
+  artifact_quality:
+    enabled: true
+    pass_threshold: 0.8
+    warn_threshold: 0.65
+    llm_judge: false
+
+scopes:
+  artifact:
+    enabled_evaluators:
+      - contract.schema_validity
+      - contract.provenance
+      - artifact_quality.rubric
+
+policy:
+  artifact:
+    pass_min_score: 0.8
+    revise_below_score: 0.65
+    block_below_score: 0.4
+    auto_approval:
+      enabled: true
+      enforce: false
+      allow_gates: [pass, warn]
+      min_score: 0.65
+  review_priority:
+    pass: normal
+    warn: elevated
+    revise: high
+    block: critical
+  run:
+    pass_min_score: 0.75
+    warn_below_score: 0.75
+    fail_below_score: 0.5
+    max_allowed_decision: warn
+    fail_on_blocking: true
+    completion_gate:
+      mode: audit_only
+
+post_training_export:
+  enabled: true
+  destination: events/post_training_export.jsonl
+  include_drafts: false
+  include_body_chars: 6000
+  min_artifact_score: 0.65
+  allowed_decisions: [pass, warn]

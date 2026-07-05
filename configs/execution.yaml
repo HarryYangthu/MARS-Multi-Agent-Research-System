@@ -1,28 +1,65 @@
-# MARS — execution / simulation scheduling config.
-#
-# Governs how Execution Agent runs simulation jobs. In V0 these jobs are mock
-# (see app/execution/mock_simulation.py); the same knobs drive the real
-# subprocess/GPU backend in V1. Source of truth for concurrency — do NOT
-# hardcode these values in code (CLAUDE.md style rule: 配置统一用 YAML).
-# Which execution backend to use:
-#   mock — synthetic loss curves, zero external deps (V0 default, CLAUDE.md #9)
-#   real — run the project repo's main.py as a CPU subprocess (Phase C)
-# Falls back to mock automatically if the repo / main.py is missing.
-backend: mock
-job_timeout_seconds: 120   # kill a single experiment subprocess after this many seconds
+# Execution / simulation scheduling for the dual-carrier PIM cancellation sweep.
+# `backend: mock` selects the mock curve template; the real-vs-mock simulator is
+# chosen at runtime by MARS_EXECUTION_BACKEND (`pim_cpu` runs the in-repo numpy
+# memory-polynomial canceller; `paper_static` runs Harry's external static PIMC
+# training code against the real .pth capture). MARS-compatible RES is lower is
+# better and the pass gate lives in projects/pimc/diagnostics.yaml.
+execution:
+  backend: mock
+  max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
+  batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
+  command_timeout_seconds: 60
+  allow_real_patch_apply: true
+  paper_static:
+    enabled: true
+    python: /opt/anaconda3/bin/python
+    repo_path: /Users/harry/Documents/20_paper/code
+    config_path: configs/static.yaml
+    data_path: /Users/harry/Documents/20_paper/data/static/pim_16t_221110_38dBm_fr4_rnd32_1.pth
+    # Minimum real-metric smoke: loads the 333MB capture, trains one epoch, writes
+    # summary.json, and maps paper_APE_db to MARS-compatible loss/RES. Increase
+    # max_iters or set dry_run=false in experiment config for longer training.
+    default_dry_run: false
+    default_max_iters: 1
+    batch_experiments: 1
+    max_concurrency: 1
+    timeout_seconds: 900
+    allowed_overrides:
+      - Etotal
+      - Epoch
+      - epoch
+      - lr_init
+      - if_scheduler
+      - step_size
+      - model.lut_n_spline
+      - model.lut_rmax
+      - model.lut_init
+  # Smoke-test stub only: used when a tool call explicitly requests
+  # backend=local_command. Values are a believable deep-canceller point
+  # (loss≈10^(RES/10), RES below the -26 dB gate); the real metrics come from
+  # the pim_cpu backend. Commands run without a shell and must match the
+  # configs/tools.yaml allowlist.
+  local_commands:
+    - id: python_metric_echo
+      label: Python metric echo (smoke-test stub)
+      argv:
+        - python
+        - -c
+        - 'import json; print(json.dumps({"metrics": {"loss": 0.0019, "RES": -27.2, "PIM": 27.2, "APE": 23.4}}))'
+  remote_gpu:
+    enabled: false             # V2: real L40S training endpoint; CPU/mock for the demo
+    endpoint: ""
 
-concurrency:
-  max_concurrent: 16       # max parallel simulation jobs (asyncio semaphore cap)
-
-simulation:
-  default_steps: 30        # mock training steps per job (loss-curve resolution)
-  agent_batch_steps: 90    # steps per job (more points = smoother + longer curves)
-  planned_experiments: 16  # demo: target size of the experiment grid
-  tick_seconds: 0.8        # seconds between curve points → demo sim ≈ steps × tick (~72s)
-
-feedback_loop:
-  max_attempts: 2          # self-heal re-routes per run before halting (Phase D)
-
-gpu:
-  devices: 4               # NVIDIA L40S count on the target box (informational in V0)
-  per_job_gpus: 1          # GPUs reserved per simulation job (V1 scheduler input)
+code_checks:
+  lint:
+    enabled: true
+    commands:
+      - id: python_compile
+        label: Python compile check
+        argv: ["python", "-m", "compileall", "-q", "."]
+  test:
+    enabled: true
+    commands:
+      - id: pytest_quick
+        label: Pytest quick suite
+        argv: ["python", "-m", "pytest", "-q"]

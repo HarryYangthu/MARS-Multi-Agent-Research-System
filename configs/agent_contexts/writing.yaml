@@ -1,0 +1,12 @@
+agent: writing
+research_sites:
+  - id: arxiv
+    label: arXiv
+    url: https://arxiv.org
+    enabled: true
+    source: default
+  - id: acl_anthology
+    label: ACL Anthology
+    url: https://aclanthology.org
+    enabled: false
+    source: default

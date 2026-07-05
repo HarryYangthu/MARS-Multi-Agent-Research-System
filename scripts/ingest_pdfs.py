@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         default=str(REPO_ROOT / "workspace" / "uploads" / "papers"),
         help="directory containing *.pdf files",
     )
-    ap.add_argument("--project", default="moe-pimc")
+    ap.add_argument("--project", default="pimc")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 

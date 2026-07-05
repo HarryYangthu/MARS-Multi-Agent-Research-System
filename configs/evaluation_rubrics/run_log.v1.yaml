@@ -1,0 +1,29 @@
+schema: run_log.v1
+pass_threshold: 0.8
+warn_threshold: 0.65
+dimensions:
+  - id: metric_completeness
+    label: Metric Completeness
+    weight: 0.26
+    signals:
+      - Metrics include enough values for downstream diagnosis/reporting.
+  - id: reproducibility
+    label: Reproducibility
+    weight: 0.22
+    signals:
+      - run_id and fingerprint_hash are present.
+  - id: failure_isolation
+    label: Failure Isolation
+    weight: 0.18
+    signals:
+      - Failed/interrupted status is explicit and inspectable.
+  - id: resource_trace
+    label: Resource Trace
+    weight: 0.18
+    signals:
+      - Duration, GPU use, or mock marker is recorded.
+  - id: mock_real_parity
+    label: Mock/Real Parity
+    weight: 0.16
+    signals:
+      - Mock status is explicit when applicable.
