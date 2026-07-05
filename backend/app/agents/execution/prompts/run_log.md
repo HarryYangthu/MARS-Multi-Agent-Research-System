@@ -12,6 +12,8 @@ memory-polynomial canceller（可选 router）在 fs=184.32 MHz、双载波 f1=3
   `expert_count`（→ canceller memory taps，真实 PIM memory ≈ 12 taps）、
   `order ∈ {1,3,5,7,9}`（odd）、`router_type ∈ {soft, hard-topk/hard-top2}`、
   `snr_db`、`learning_rate`。
+  数量必须服从用户意图和已批准的 `experiment_plan`：用户明确说“一组/1组/一个实验”
+  时只写一组，只有明确要求 sweep/grid/消融矩阵/多组对比时才展开多组。
 - `status`：每条 `completed / failed / skipped`，失败给 traceback 头部。
 - `metrics`：**RES（dB，越低越好，gate 为 batch mean RES ≤ -26 dB）**、
   `loss`（max ≤ 0.04）、PIM suppression dB（= -RES，越高越好）、APE（残余相位误差，度）。

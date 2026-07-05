@@ -18,7 +18,9 @@ Pure numpy. ~30k complex points trains in well under a second on CPU.
 from __future__ import annotations
 
 import os
+import json
 import struct
+import subprocess
 import tempfile
 import threading
 import time as wall_time
@@ -30,6 +32,8 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
+
+from app.settings import repo_root
 
 DEFAULT_N_POINTS = 30720  # matches the real code's length_case
 FS = 184.32               # MHz, matches configs/base.yaml
@@ -311,10 +315,21 @@ def plot_loss_curve(
     total_steps: int | None = None,
     experiment_id: str | None = None,
 ) -> None:
-    """Save a polished training curve plot for local inspection."""
+    """Save a paper-style residual training curve for local inspection."""
     try:
         plt = _load_pyplot()
     except ImportError as exc:  # pragma: no cover - optional CLI utility
+        if _plot_with_external_matplotlib(
+            mode="single",
+            payload={
+                "loss_curve": [float(v) for v in loss_curve],
+                "title": title,
+                "total_steps": total_steps,
+                "experiment_id": experiment_id or "",
+            },
+            path=path,
+        ):
+            return
         if threading.current_thread() is threading.main_thread():
             raise RuntimeError("matplotlib is required to plot the loss curve") from exc
         _write_simple_loss_png(loss_curve=loss_curve, path=path)
@@ -326,36 +341,115 @@ def plot_loss_curve(
     max_step = max(len(loss_curve), total_steps or len(loss_curve))
 
     with _PLOT_LOCK:
-        fig, ax = plt.subplots(figsize=(10.5, 5.8), dpi=180)
-        ax.plot(steps, loss_db, color="#2563eb", linewidth=1.8, label="Observed mini-batch loss")
-        ax.scatter(
-            steps[:: max(1, len(steps) // 14)],
-            loss_db[:: max(1, len(steps) // 14)],
-            s=14,
-            color="#1d4ed8",
-            alpha=0.9,
-        )
-        ax.fill_between(steps, loss_db, np.min(loss_db) - 1.5, color="#2563eb", alpha=0.08)
+        fig, ax = plt.subplots(figsize=(14, 6), dpi=180)
+        ax.plot(steps, loss_db, color="red", linewidth=1.9, label="RES")
         ax.set_title(title)
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Residual Power Ratio (dB)")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("dB")
         ax.set_xlim(0, max(1, max_step - 1))
         ax.set_ylim(min(-32.0, float(np.min(loss_db)) - 2.0), max(2.0, float(np.max(loss_db)) + 1.0))
-        ax.grid(True, which="major", alpha=0.28)
-        ax.grid(True, which="minor", alpha=0.12)
-        ax.minorticks_on()
-        ax.legend(loc="upper right", frameon=True)
+        ax.grid(True, alpha=0.32)
+        ax.legend(loc="best", frameon=True)
         if total_steps is not None:
-            ax.axvline(len(loss_curve) - 1, color="#0f172a", linestyle="--", linewidth=0.8, alpha=0.35)
+            ax.axvline(
+                len(loss_curve) - 1,
+                color="#525252",
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.42,
+            )
         ax.text(
             0.02,
             0.05,
-            f"{experiment_id + ' · ' if experiment_id else ''}iter {len(loss_curve)}/{max_step} · latest {loss_db[-1]:.2f} dB",
+            f"{experiment_id + ' · ' if experiment_id else ''}"
+            f"epoch {len(loss_curve)}/{max_step} · RES {loss_db[-1]:.2f} dB",
             transform=ax.transAxes,
-            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "white",
+                "edgecolor": "#d1d5db",
+                "alpha": 0.92,
+            },
         )
         fig.tight_layout()
         _save_figure(fig, plt, path)
+
+
+def plot_paper_metric_curve(
+    *,
+    pim_db: Sequence[float],
+    res_db: Sequence[float],
+    ape_db: Sequence[float] | None,
+    path: str | Path,
+    title: str = "Paper Static Training Metrics",
+) -> None:
+    """Save PIM/RES/APE curves in the same style as the external paper code."""
+    if len(pim_db) == 0 and len(res_db) == 0 and (ape_db is None or len(ape_db) == 0):
+        raise ValueError("at least one metric curve is required")
+    try:
+        plt = _load_pyplot()
+    except ImportError:
+        if _plot_with_external_matplotlib(
+            mode="metrics",
+            payload={
+                "pim_db": [float(v) for v in pim_db],
+                "res_db": [float(v) for v in res_db],
+                "ape_db": [float(v) for v in (ape_db or [])],
+                "title": title,
+            },
+            path=path,
+        ):
+            return
+        source = res_db if len(res_db) > 0 else pim_db
+        fallback = [10.0 ** (float(value) / 10.0) for value in source]
+        _write_simple_loss_png(loss_curve=fallback, path=path)
+        return
+
+    with _PLOT_LOCK:
+        fig, ax = plt.subplots(figsize=(14, 6), dpi=180)
+        if len(pim_db) > 0:
+            ax.plot(np.arange(len(pim_db)), list(pim_db), color="green", linewidth=1.7, label="PIM")
+        if len(res_db) > 0:
+            ax.plot(np.arange(len(res_db)), list(res_db), color="red", linewidth=1.7, label="RES")
+        if ape_db is not None and len(ape_db) > 0:
+            ax.plot(np.arange(len(ape_db)), list(ape_db), color="blue", linewidth=1.7, label="APE")
+        ax.set_title(title)
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("dB")
+        ax.grid(True, alpha=0.32)
+        ax.legend(loc="best", frameon=True)
+        ax.text(
+            0.02,
+            0.05,
+            _metric_summary_text(pim_db=pim_db, res_db=res_db, ape_db=ape_db),
+            transform=ax.transAxes,
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "white",
+                "edgecolor": "#d1d5db",
+                "alpha": 0.92,
+            },
+        )
+        fig.tight_layout()
+        _save_figure(fig, plt, path)
+
+
+def _metric_summary_text(
+    *,
+    pim_db: Sequence[float],
+    res_db: Sequence[float],
+    ape_db: Sequence[float] | None,
+) -> str:
+    parts: list[str] = []
+    epochs = max(len(pim_db), len(res_db), len(ape_db or []))
+    parts.append(f"epoch {epochs}")
+    if len(pim_db) > 0:
+        parts.append(f"PIM {float(pim_db[-1]):.2f} dB")
+    if len(res_db) > 0:
+        parts.append(f"RES {float(res_db[-1]):.2f} dB")
+    if ape_db is not None and len(ape_db) > 0:
+        parts.append(f"APE {float(ape_db[-1]):.2f} dB")
+    return " · ".join(parts)
 
 
 def plot_loss_curves(
@@ -370,11 +464,23 @@ def plot_loss_curves(
     try:
         plt = _load_pyplot()
     except ImportError:
+        if _plot_with_external_matplotlib(
+            mode="batch",
+            payload={
+                "loss_curves": {
+                    str(name): [float(v) for v in curve]
+                    for name, curve in loss_curves.items()
+                },
+                "title": title,
+            },
+            path=path,
+        ):
+            return
         _write_simple_loss_png(loss_curve=_aggregate_loss_curve(loss_curves), path=path)
         return
 
     with _PLOT_LOCK:
-        fig, ax = plt.subplots(figsize=(13.0, 7.2), dpi=220)
+        fig, ax = plt.subplots(figsize=(14, 6), dpi=220)
         colors = plt.get_cmap("tab20")
         all_db: list[float] = []
         final_db: list[float] = []
@@ -391,21 +497,26 @@ def plot_loss_curves(
             ax.plot(
                 steps,
                 loss_db,
-                linewidth=1.35,
+                linewidth=1.45,
                 alpha=0.9,
                 color=colors(index % 20),
                 label=experiment_id,
             )
+            ax.scatter(
+                [steps[-1]],
+                [loss_db[-1]],
+                s=16,
+                color=colors(index % 20),
+                alpha=0.95,
+            )
         if not all_db:
             raise ValueError("loss_curves contains no points")
         ax.set_title(title)
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Residual Power Ratio (dB)")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("dB")
         ax.set_xlim(0, max(1, max_len - 1))
         ax.set_ylim(min(-34.0, min(all_db) - 2.0), max(2.0, max(all_db) + 1.0))
-        ax.grid(True, which="major", alpha=0.3)
-        ax.grid(True, which="minor", alpha=0.12)
-        ax.minorticks_on()
+        ax.grid(True, alpha=0.32)
         ax.legend(
             loc="center left",
             bbox_to_anchor=(1.01, 0.5),
@@ -416,7 +527,8 @@ def plot_loss_curves(
         ax.text(
             0.01,
             0.02,
-            f"{len(loss_curves)} experiments · {max_len} iterations · final range {min(final_db):.2f} to {max(final_db):.2f} dB",
+            f"{len(loss_curves)} experiments · {max_len} epochs · "
+            f"final RES {min(final_db):.2f} to {max(final_db):.2f} dB",
             transform=ax.transAxes,
             fontsize=8.5,
             bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
@@ -448,6 +560,194 @@ def _load_pyplot() -> Any:
     import matplotlib.pyplot as plt
 
     return plt
+
+
+def _plot_with_external_matplotlib(
+    *,
+    mode: str,
+    payload: dict[str, Any],
+    path: str | Path,
+) -> bool:
+    python = _external_plot_python()
+    if not python:
+        return False
+    candidate = Path(python).expanduser()
+    if candidate.is_absolute() and not candidate.exists():
+        return False
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload_path = target.with_name(f".{target.name}.{wall_time.time_ns()}.json")
+    tmp_image = target.with_name(f".{target.stem}.{wall_time.time_ns()}.png")
+    payload_path.write_text(
+        json.dumps({"mode": mode, **payload}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    script = r"""
+import json
+import sys
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+payload_path = sys.argv[1]
+target = sys.argv[2]
+with open(payload_path, "r", encoding="utf-8") as fh:
+    payload = json.load(fh)
+mode = payload.get("mode")
+
+def db_from_loss(curve):
+    arr = np.maximum(np.asarray(curve, dtype=np.float64), 1e-12)
+    return 10.0 * np.log10(arr)
+
+def finish(fig):
+    fig.tight_layout()
+    fig.savefig(target)
+    plt.close(fig)
+
+if mode == "single":
+    curve = payload.get("loss_curve") or []
+    if not curve:
+        raise SystemExit(2)
+    loss_db = db_from_loss(curve)
+    steps = np.arange(len(loss_db))
+    max_step = max(len(loss_db), int(payload.get("total_steps") or len(loss_db)))
+    fig, ax = plt.subplots(figsize=(14, 6), dpi=180)
+    ax.plot(steps, loss_db, color="red", linewidth=1.9, label="RES")
+    ax.set_title(payload.get("title") or "Execution RES Training Curve")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("dB")
+    ax.set_xlim(0, max(1, max_step - 1))
+    ax.set_ylim(min(-32.0, float(np.min(loss_db)) - 2.0), max(2.0, float(np.max(loss_db)) + 1.0))
+    ax.grid(True, alpha=0.32)
+    ax.legend(loc="best", frameon=True)
+    exp = payload.get("experiment_id") or ""
+    prefix = f"{exp} · " if exp else ""
+    ax.text(0.02, 0.05, f"{prefix}epoch {len(loss_db)}/{max_step} · RES {loss_db[-1]:.2f} dB",
+            transform=ax.transAxes,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92})
+    finish(fig)
+elif mode == "batch":
+    curves = payload.get("loss_curves") or {}
+    fig, ax = plt.subplots(figsize=(14, 6), dpi=220)
+    colors = plt.get_cmap("tab20")
+    all_db = []
+    final_db = []
+    max_len = 0
+    for index, (name, curve) in enumerate(sorted(curves.items())):
+        if not curve:
+            continue
+        loss_db = db_from_loss(curve)
+        steps = np.arange(len(loss_db))
+        all_db.extend(float(v) for v in loss_db)
+        final_db.append(float(loss_db[-1]))
+        max_len = max(max_len, len(loss_db))
+        ax.plot(steps, loss_db, linewidth=1.45, alpha=0.9, color=colors(index % 20), label=name)
+        ax.scatter([steps[-1]], [loss_db[-1]], s=16, color=colors(index % 20), alpha=0.95)
+    if not all_db:
+        raise SystemExit(2)
+    ax.set_title(payload.get("title") or "Execution Loss Sweep")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("dB")
+    ax.set_xlim(0, max(1, max_len - 1))
+    ax.set_ylim(min(-34.0, min(all_db) - 2.0), max(2.0, max(all_db) + 1.0))
+    ax.grid(True, alpha=0.32)
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True, fontsize=7.5, title="Experiment")
+    ax.text(0.01, 0.02,
+            f"{len(curves)} experiments · {max_len} epochs · final RES {min(final_db):.2f} to {max(final_db):.2f} dB",
+            transform=ax.transAxes, fontsize=8.5,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92})
+    finish(fig)
+elif mode == "metrics":
+    fig, ax = plt.subplots(figsize=(14, 6), dpi=180)
+    pim = payload.get("pim_db") or []
+    res = payload.get("res_db") or []
+    ape = payload.get("ape_db") or []
+    if pim:
+        ax.plot(np.arange(len(pim)), pim, color="green", linewidth=1.7, label="PIM")
+    if res:
+        ax.plot(np.arange(len(res)), res, color="red", linewidth=1.7, label="RES")
+    if ape:
+        ax.plot(np.arange(len(ape)), ape, color="blue", linewidth=1.7, label="APE")
+    if not (pim or res or ape):
+        raise SystemExit(2)
+    ax.set_title(payload.get("title") or "Paper Static Training Metrics")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("dB")
+    ax.grid(True, alpha=0.32)
+    ax.legend(loc="best", frameon=True)
+    parts = [f"epoch {max(len(pim), len(res), len(ape))}"]
+    if pim:
+        parts.append(f"PIM {float(pim[-1]):.2f} dB")
+    if res:
+        parts.append(f"RES {float(res[-1]):.2f} dB")
+    if ape:
+        parts.append(f"APE {float(ape[-1]):.2f} dB")
+    ax.text(0.02, 0.05, " · ".join(parts), transform=ax.transAxes,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92})
+    finish(fig)
+else:
+    raise SystemExit(2)
+"""
+    try:
+        result = subprocess.run(
+            [python, "-c", script, str(payload_path), str(tmp_image)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            tmp_image.unlink()
+        except OSError:
+            pass
+        return False
+    finally:
+        try:
+            payload_path.unlink()
+        except OSError:
+            pass
+    if result.returncode != 0 or not _looks_like_png(tmp_image):
+        try:
+            tmp_image.unlink()
+        except OSError:
+            pass
+        return False
+    tmp_image.replace(target)
+    return _looks_like_png(target)
+
+
+def _looks_like_png(path: Path) -> bool:
+    try:
+        if path.stat().st_size < 64:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(8) == b"\x89PNG\r\n\x1a\n"
+    except OSError:
+        return False
+
+
+def _external_plot_python() -> str:
+    for key in ("MARS_PLOT_PYTHON", "MARS_PAPER_STATIC_PYTHON"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    config_path = repo_root() / "configs" / "execution.yaml"
+    if not config_path.is_file():
+        return ""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ""
+    execution = raw.get("execution", {}) if isinstance(raw, dict) else {}
+    paper = execution.get("paper_static", {}) if isinstance(execution, dict) else {}
+    if not isinstance(paper, dict):
+        return ""
+    return str(paper.get("python") or "")
 
 
 def _save_figure(fig: Any, plt: Any, path: str | Path) -> None:

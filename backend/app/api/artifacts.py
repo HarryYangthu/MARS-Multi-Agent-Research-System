@@ -1,6 +1,8 @@
 """REST endpoints for artifact viewing / editing / approval."""
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,7 @@ class PatchView(BaseModel):
     path: str
     text: str
     approved: bool
+    application: dict[str, Any] | None = None
 
 
 class WorkspaceFileView(BaseModel):
@@ -246,6 +249,37 @@ def _patch_path(run_id: str, version: str) -> Path:
     return path
 
 
+def _patch_application_result(path: Path, version: str) -> dict[str, Any] | None:
+    marker = path.parent / f"patch.{version}.approved.json"
+    if not marker.exists():
+        return None
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {
+            "applied": False,
+            "error": f"invalid patch approval marker: {marker.name}",
+        }
+    return data if isinstance(data, dict) else None
+
+
+def _patch_application_succeeded(path: Path, version: str) -> bool:
+    result = _patch_application_result(path, version)
+    return bool(result and result.get("applied") is True)
+
+
+def _patch_version_from_artifact(run_id: str, stem: str, version: str) -> str | None:
+    artifact = _resolve(run_id, "coding", stem, version)
+    parsed = fm_parse(artifact.read_text(encoding="utf-8"))
+    backend = parsed.metadata.get("coding_backend")
+    if isinstance(backend, dict):
+        diff_path = str(backend.get("diff") or "")
+        match = re.search(r"patch\.(v\d+)\.diff$", diff_path)
+        if match:
+            return match.group(1)
+    return version if version.startswith("v") else f"v{version}"
+
+
 def _extract_diff_paths(diff: str) -> list[str]:
     paths: list[str] = []
     for line in diff.splitlines():
@@ -261,7 +295,7 @@ def _extract_diff_paths(diff: str) -> list[str]:
     return paths
 
 
-async def _apply_patch_if_present(run_id: str, version: str) -> None:
+async def _apply_patch_or_raise(run_id: str, version: str) -> None:
     store = get_run_store()
     run = store.get(run_id)
     if run is None:
@@ -269,6 +303,14 @@ async def _apply_patch_if_present(run_id: str, version: str) -> None:
     normalized = version if version.startswith("v") else f"v{version}"
     patch_path = run.subdir("coding") / f"patch.{normalized}.diff"
     if not patch_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": f"coding approval requires patch.{normalized}.diff, but it was not generated",
+                "patch_version": normalized,
+            },
+        )
+    if _patch_application_succeeded(patch_path, normalized):
         return
     diff = patch_path.read_text(encoding="utf-8")
     result = await get_tool_registry().dispatch(
@@ -279,14 +321,21 @@ async def _apply_patch_if_present(run_id: str, version: str) -> None:
             "diff": diff,
             "files": [{"path": p} for p in _extract_diff_paths(diff)],
         },
-        ToolContext(run_id=run_id, project=run.project, agent="coding"),
+        ToolContext(
+            run_id=run_id,
+            project=run.project,
+            agent="coding",
+            extra={"run_root": str(run.root)},
+        ),
     )
     if not result.ok:
         raise HTTPException(
             status_code=409,
             detail={
-                "error": result.error,
+                "error": result.error or "patch application failed",
+                "patch_version": normalized,
                 "blocked_by_gate": result.blocked_by_gate,
+                "command_result": result.output if isinstance(result.output, dict) else None,
             },
         )
 
@@ -295,24 +344,36 @@ async def _apply_patch_if_present(run_id: str, version: str) -> None:
 async def get_patch(run_id: str, version: str) -> PatchView:
     path = _patch_path(run_id, version)
     normalized = version if version.startswith("v") else f"v{version}"
-    approved = (path.parent / f"patch.{normalized}.approved.json").exists()
+    application = _patch_application_result(path, normalized)
+    approved = bool(application and application.get("applied") is True)
     return PatchView(
         run_id=run_id,
         version=normalized,
         path=str(path),
         text=path.read_text(encoding="utf-8"),
         approved=approved,
+        application=application,
     )
 
 
 @router.post("/{run_id}/coding/patch/{version}/approve", response_model=ArtifactView)
 async def approve_patch(run_id: str, version: str) -> ArtifactView:
-    await _apply_patch_if_present(run_id, version)
+    await _apply_patch_or_raise(run_id, version)
     normalized = version if version.startswith("v") else f"v{version}"
     review = get_review_registry().get(run_id, "coding")
     if review is not None:
         bus = get_event_bus()
         approved = await do_approve(session=review, bus=bus)
+        resume = await get_orchestrator().resume_after_artifact_approval(
+            run_id=run_id,
+            agent="coding",
+        )
+        if not resume.get("ok"):
+            logger.warning(
+                "patch approval did not resume run: run={} status={}",
+                run_id,
+                resume,
+            )
         return _read_view(run_id, "coding", "code_spec", approved.version)
 
     store = get_run_store()
@@ -464,7 +525,13 @@ async def approve_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
     if agent_dir == "coding":
-        await _apply_patch_if_present(run_id, version)
+        patch_version = _patch_version_from_artifact(run_id, stem, version)
+        if patch_version is None:
+            raise HTTPException(
+                status_code=409,
+                detail="coding approval requires a patch reference in coding_backend.diff",
+            )
+        await _apply_patch_or_raise(run_id, patch_version)
     review = get_review_registry().get(run_id, agent_dir)
     if review is None:
         # No active review; promote inline.
@@ -493,6 +560,17 @@ async def approve_artifact(
         return _read_view(run_id, agent_dir, stem, approved.version)
     bus = get_event_bus()
     approved = await do_approve(session=review, bus=bus)
+    resume = await get_orchestrator().resume_after_artifact_approval(
+        run_id=run_id,
+        agent=agent_dir,
+    )
+    if not resume.get("ok"):
+        logger.warning(
+            "approval did not resume run: run={} agent={} status={}",
+            run_id,
+            agent_dir,
+            resume,
+        )
     return _read_view(run_id, agent_dir, stem, approved.version)
 
 

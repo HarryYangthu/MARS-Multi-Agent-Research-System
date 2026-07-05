@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
+import { ChatPanel } from "@/components/ChatPanel";
 import {
   type GraphNode,
   approveArtifact,
@@ -79,10 +80,12 @@ function tierLabelKey(tier: number): string {
 }
 
 export function PipelineOverview({
+  onLinkRun,
   selectedRunId,
   stats,
   readiness,
 }: {
+  onLinkRun?: (runId: string) => void;
   selectedRunId: string | null;
   stats?: Stats | null;
   readiness?: Readiness | null;
@@ -177,6 +180,7 @@ export function PipelineOverview({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-auto bg-mars-bg/40 p-4">
       <StateMachineRibbon run={focusRun} />
+      <CommanderCenterPanel onLinkRun={onLinkRun} />
       <SystemBar stats={stats ?? null} readiness={readiness ?? null} />
       {TIERS.map((tier, i) => {
         const stage = tierStage(tier);
@@ -251,7 +255,27 @@ export function PipelineOverview({
   );
 }
 
+function CommanderCenterPanel({
+  onLinkRun,
+}: {
+  onLinkRun?: (runId: string) => void;
+}): JSX.Element {
+  return (
+    <section className="rounded border border-cyan-500/35 bg-cyan-500/[0.06] p-3 shadow-[0_0_28px_-18px_rgba(34,211,238,0.8)]">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] tracking-[0.18em] text-cyan-300/70">COMMAND CENTER</p>
+          <h2 className="mt-0.5 text-sm font-semibold text-cyan-50">Commander Agent</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">主控命令与任务入口</p>
+        </div>
+      </div>
+      <ChatPanel onLinkRun={onLinkRun} variant="center" />
+    </section>
+  );
+}
+
 function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
+  const [expanded, setExpanded] = useState(true);
   const activeNode = run ? currentGraphNode(run) : null;
   const activeStage = activeNode ? stageFromNode(activeNode) : null;
   const activeState = activeNode && run ? stateForNode(run, activeNode) : "pending";
@@ -268,9 +292,17 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
     : "等待启动";
   const commanderState = run ? "configured" : "pending";
   return (
-    <section className="rounded border border-mars-border bg-mars-panel/80 px-3 py-3 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+    <section className="relative rounded border border-mars-border bg-mars-panel/80 px-3 py-3 shadow-sm">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="absolute right-3 top-3 rounded border border-mars-border bg-mars-bg/80 px-2.5 py-1 text-[11px] text-slate-300 shadow-sm transition hover:border-cyan-500/50 hover:bg-cyan-500/10 hover:text-cyan-100"
+      >
+        {expanded ? "收起状态机" : "展开状态机"}
+      </button>
+      <div className={`${expanded ? "mb-3" : ""} flex flex-wrap items-start justify-between gap-3 pr-28`}>
+        <div className="min-w-0 flex-1">
           <p className="text-[10px] tracking-[0.18em] text-slate-500">状态机</p>
           <h2 className="mt-1 truncate text-sm font-semibold text-slate-100">
             {run ? run.task || run.run_id : "等待 Run 数据"}
@@ -279,157 +311,167 @@ function StateMachineRibbon({ run }: { run: RunDetail | null }): JSX.Element {
             {run ? `${run.project} · ${run.run_id}` : "创建或选择一个 Run 后展示状态机"}
           </p>
         </div>
-        <div className="grid min-w-[220px] gap-1 text-[11px] text-slate-400 sm:text-right">
-          <p>
-            当前节点：
-            <span className="font-mono text-cyan-200">
-              {activeNode ? nodeAgentLabel(activeNode) : "无"}
-            </span>
-          </p>
-          <p>
-            当前动作：
-            <span className="text-slate-200">
-              {activeStage ? currentWorkText(activeStage, activeState) : "暂无运行"}
-            </span>
-          </p>
-          <p>
-            通信对象：
-            <span className="font-mono text-cyan-200">
-              {communication ? communication.routeLabel : "无"}
-            </span>
-          </p>
-          <p>
-            观测细节：
-            <span className="text-slate-200">
-              {activeStage ? thinkingText(activeStage, activeState) : "等待事件、Trace、上下文清单"}
-            </span>
-          </p>
+        <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+          <div className="grid min-w-[220px] gap-1 text-[11px] text-slate-400 sm:text-right">
+            <p>
+              当前节点：
+              <span className="font-mono text-cyan-200">
+                {activeNode ? nodeAgentLabel(activeNode) : "无"}
+              </span>
+            </p>
+            <p>
+              当前动作：
+              <span className="text-slate-200">
+                {activeStage ? currentWorkText(activeStage, activeState) : "暂无运行"}
+              </span>
+            </p>
+            {expanded ? (
+              <>
+                <p>
+                  通信对象：
+                  <span className="font-mono text-cyan-200">
+                    {communication ? communication.routeLabel : "无"}
+                  </span>
+                </p>
+                <p>
+                  观测细节：
+                  <span className="text-slate-200">
+                    {activeStage ? thinkingText(activeStage, activeState) : "等待事件、Trace、上下文清单"}
+                  </span>
+                </p>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div className="mb-3 flex flex-col items-center">
-        {(() => {
-          const commanderCard = (
-            <div
-              className={`mars-node-card w-full max-w-md rounded-lg border-2 px-4 py-3 transition ${
-                run
-                  ? "mars-node-active border-cyan-400/80 bg-cyan-500/15 shadow-[0_0_26px_-6px_rgba(34,211,238,0.65)] hover:border-cyan-300"
-                  : "border-cyan-500/30 bg-cyan-500/5"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2">
-                  <span className="font-semibold text-cyan-50">Commander Agent</span>
-                  <span className="rounded bg-cyan-500/25 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-cyan-100">
-                    主控
-                  </span>
-                </span>
-                <span className={`h-2.5 w-2.5 rounded-full ${stateDotClass(commanderState, Boolean(run))}`} />
-              </div>
-              <p className="mt-1.5 truncate text-[11px] text-cyan-100/80">
-                {communication ? `正在通信：${nodeAgentLabel(communication.targetNode)}` : "主控调度 · 状态监督 · 诊断与反馈回路"}
-              </p>
-              <p className="mt-0.5 truncate text-[9px] text-cyan-200/50">
-                {communication ? communication.detail : run ? "点击进入主控页 · entry / routing / gate orchestration" : "entry · routing · gate orchestration"}
-              </p>
-            </div>
-          );
-          return run ? (
-            <Link href={`/runs/${run.run_id}?agent=commander`} className="w-full max-w-md">
-              {commanderCard}
-            </Link>
-          ) : (
-            commanderCard
-          );
-        })()}
-        <CommanderConnectionField communication={communication} />
-      </div>
-
-      <div className="mars-agent-map">
-        <AgentConnectionField run={run} activeNode={activeNode} previousNode={previousNode} />
-        <div className="mars-agent-grid grid grid-cols-5 gap-4">
-          {STAGE_ORDER.map((stage) => {
-            const node = run ? latestNodeForStage(run, stage) : null;
-            const state = run && node ? stateForNode(run, node) : "pending";
-            const isActive = activeNode?.key === node?.key;
-            const isCommunicationTarget = Boolean(
-              communication && node && communication.targetNode.key === node.key,
-            );
-            const isWorking = isActive || isCommunicationTarget || state === "running";
-            const isDone = state === "done" || state === "approved";
-            return (
-              <div key={stage} className="min-w-0">
+      {expanded ? (
+        <>
+          <div className="mb-3 flex flex-col items-center">
+            {(() => {
+              const commanderCard = (
                 <div
-                  className={`mars-node-card ${isActive ? "mars-node-active" : ""} ${isWorking ? "mars-node-working" : ""} ${isCommunicationTarget ? "mars-node-comm-target" : ""} rounded border px-2 py-2 ${
-                    isActive
-                      ? "border-cyan-400/60 bg-cyan-500/10"
-                      : isDone
-                        ? "border-emerald-500/35 bg-emerald-500/10"
-                        : state === "failed"
-                          ? "border-red-500/40 bg-red-500/10"
-                          : "border-mars-border bg-mars-bg/45"
+                  className={`mars-node-card w-full max-w-md rounded-lg border-2 px-4 py-3 transition ${
+                    run
+                      ? "mars-node-active border-cyan-400/80 bg-cyan-500/15 shadow-[0_0_26px_-6px_rgba(34,211,238,0.65)] hover:border-cyan-300"
+                      : "border-cyan-500/30 bg-cyan-500/5"
                   }`}
                 >
-                  {isWorking ? <NodeBorderFlow /> : null}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate font-mono text-[11px] text-slate-100">
-                      {agentName(stage)}
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold text-cyan-50">Commander Agent</span>
+                      <span className="rounded bg-cyan-500/25 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-cyan-100">
+                        主控
+                      </span>
                     </span>
-                    <span className="flex items-center gap-1">
-                      {isCommunicationTarget ? (
-                        <span className="rounded bg-cyan-500/20 px-1 py-0.5 text-[8px] text-cyan-100">
-                          通信中
-                        </span>
-                      ) : null}
-                      <span className={`h-2 w-2 rounded-full ${stateDotClass(state, isActive || isCommunicationTarget)}`} />
-                    </span>
+                    <span className={`h-2.5 w-2.5 rounded-full ${stateDotClass(commanderState, Boolean(run))}`} />
                   </div>
-                  <p className="mt-1 truncate text-[10px] text-slate-400">
-                    {stateShortLabel(state)}
+                  <p className="mt-1.5 truncate text-[11px] text-cyan-100/80">
+                    {communication ? `正在通信：${nodeAgentLabel(communication.targetNode)}` : "主控调度 · 状态监督 · 诊断与反馈回路"}
                   </p>
-                  <p className="mt-1 truncate text-[9px] text-slate-600">
-                    {node ? node.key : stage}
+                  <p className="mt-0.5 truncate text-[9px] text-cyan-200/50">
+                    {communication ? communication.detail : run ? "点击进入主控页 · entry / routing / gate orchestration" : "entry · routing · gate orchestration"}
                   </p>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+              );
+              return run ? (
+                <Link href={`/runs/${run.run_id}?agent=commander`} className="w-full max-w-md">
+                  {commanderCard}
+                </Link>
+              ) : (
+                commanderCard
+              );
+            })()}
+            <CommanderConnectionField communication={communication} />
+          </div>
 
-      {retryNodes.length > 0 ? (
-        <div className="mt-3 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-amber-100">
-              Commander Agent 回溯链路
-            </span>
-            <span className="font-mono text-[10px] text-amber-200">
-              {retryNodes.length} 个动态节点
-            </span>
+          <div className="mars-agent-map">
+            <AgentConnectionField run={run} activeNode={activeNode} previousNode={previousNode} />
+            <div className="mars-agent-grid grid grid-cols-5 gap-4">
+              {STAGE_ORDER.map((stage) => {
+                const node = run ? latestNodeForStage(run, stage) : null;
+                const state = run && node ? stateForNode(run, node) : "pending";
+                const isActive = activeNode?.key === node?.key;
+                const isCommunicationTarget = Boolean(
+                  communication && node && communication.targetNode.key === node.key,
+                );
+                const isWorking = isActive || isCommunicationTarget || state === "running";
+                const isDone = state === "done" || state === "approved";
+                return (
+                  <div key={stage} className="min-w-0">
+                    <div
+                      className={`mars-node-card ${isActive ? "mars-node-active" : ""} ${isWorking ? "mars-node-working" : ""} ${isCommunicationTarget ? "mars-node-comm-target" : ""} rounded border px-2 py-2 ${
+                        isActive
+                          ? "border-cyan-400/60 bg-cyan-500/10"
+                          : isDone
+                            ? "border-emerald-500/35 bg-emerald-500/10"
+                            : state === "failed"
+                              ? "border-red-500/40 bg-red-500/10"
+                              : "border-mars-border bg-mars-bg/45"
+                      }`}
+                    >
+                      {isWorking ? <NodeBorderFlow /> : null}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-[11px] text-slate-100">
+                          {agentName(stage)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          {isCommunicationTarget ? (
+                            <span className="rounded bg-cyan-500/20 px-1 py-0.5 text-[8px] text-cyan-100">
+                              通信中
+                            </span>
+                          ) : null}
+                          <span className={`h-2 w-2 rounded-full ${stateDotClass(state, isActive || isCommunicationTarget)}`} />
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-[10px] text-slate-400">
+                        {stateShortLabel(state)}
+                      </p>
+                      <p className="mt-1 truncate text-[9px] text-slate-600">
+                        {node ? node.key : stage}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-            {retryNodes.map((node, index) => (
-              <div key={`${node.key}-${index}`} className="min-w-0 rounded border border-amber-500/20 bg-mars-bg/50 px-2 py-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-[10px] text-amber-100">
-                    {nodeAgentLabel(node)}
-                  </span>
-                  <span className={`h-2 w-2 rounded-full ${stateDotClass(run ? stateForNode(run, node) : "pending", activeNode?.key === node.key)}`} />
-                </div>
-                <p className="mt-1 truncate text-[9px] text-slate-500">
-                  {node.key} · {run ? stateShortLabel(stateForNode(run, node)) : "待处理"}
-                </p>
+
+          {retryNodes.length > 0 ? (
+            <div className="mt-3 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-amber-100">
+                  Commander Agent 回溯链路
+                </span>
+                <span className="font-mono text-[10px] text-amber-200">
+                  {retryNodes.length} 个动态节点
+                </span>
               </div>
-            ))}
+              <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+                {retryNodes.map((node, index) => (
+                  <div key={`${node.key}-${index}`} className="min-w-0 rounded border border-amber-500/20 bg-mars-bg/50 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-mono text-[10px] text-amber-100">
+                        {nodeAgentLabel(node)}
+                      </span>
+                      <span className={`h-2 w-2 rounded-full ${stateDotClass(run ? stateForNode(run, node) : "pending", activeNode?.key === node.key)}`} />
+                    </div>
+                    <p className="mt-1 truncate text-[9px] text-slate-500">
+                      {node.key} · {run ? stateShortLabel(stateForNode(run, node)) : "待处理"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-3">
+            <DetailPill label="上一跳" value={previousHop} />
+            <DetailPill label="当前状态" value={activeNode ? `${nodeAgentLabel(activeNode)} · ${stateShortLabel(activeState)}` : "未开始"} />
+            <DetailPill label="下一步" value={nextNode && run ? `${nodeAgentLabel(nextNode)} · ${stateShortLabel(stateForNode(run, nextNode))}` : "沉淀归档"} />
           </div>
-        </div>
+        </>
       ) : null}
-
-      <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-3">
-        <DetailPill label="上一跳" value={previousHop} />
-        <DetailPill label="当前状态" value={activeNode ? `${nodeAgentLabel(activeNode)} · ${stateShortLabel(activeState)}` : "未开始"} />
-        <DetailPill label="下一步" value={nextNode && run ? `${nodeAgentLabel(nextNode)} · ${stateShortLabel(stateForNode(run, nextNode))}` : "沉淀归档"} />
-      </div>
     </section>
   );
 }

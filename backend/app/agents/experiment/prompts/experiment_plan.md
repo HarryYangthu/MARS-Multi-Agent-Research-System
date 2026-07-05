@@ -16,7 +16,8 @@
   - 辅助:`PIM_suppression_dB = -RES`(越高越好)、`APE`(残差相位误差,度)。
   - 禁止把 RES 描述成"越高越好"。
 - **最小消融**:先一条 falsifiable 主轴(通常是 `expert_count` → canceller memory taps),
-  再扩 grid。真实 PIM memory ≈ 12 taps,taps 不足必然 RES 偏高。
+  再扩 grid。真实 PIM memory ≈ 12 taps,taps 不足必然 RES 偏高。若用户明确要求
+  “一组/1组/一个实验”, `ablations` 只给一组代表性配置,不要自动扩成 16 组。
 - **预算**:GPU / CPU / mock。CPU mock 用 `projects/pimc/data_gen.py` 合成双载波数据,
   ~30k complex points,单 ablation 亚秒级。
 - **baseline 兼容检查**:实验不得要求改 `Paper_Total_0327` / `forward(x, stream_label)`;

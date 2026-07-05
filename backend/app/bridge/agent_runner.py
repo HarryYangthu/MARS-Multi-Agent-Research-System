@@ -7,6 +7,7 @@ already inside the registry by the time this runs.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any
 
@@ -15,8 +16,14 @@ from loguru import logger
 from app.bridge.agent_registry import get_registry
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
+from app.harness.execution_intent import (
+    default_experiment_count,
+    requested_experiment_count,
+    wants_execution_sweep,
+)
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
+from app.storage.data_source_store import selection_summary
 from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 from app.storage.run_store import RunHandle
 
@@ -76,6 +83,9 @@ async def run_agent_node(
 
     # Pick up upstream approved artifacts as handoff.
     upstream: dict[str, str] = {}
+    selected_data_source = _load_selected_data_source(run)
+    if selected_data_source:
+        upstream["input.selected_data_source"] = selection_summary(selected_data_source)
     for sub in ("idea", "experiment", "coding", "execution", "diagnosis"):
         if sub == stage:
             break
@@ -97,6 +107,7 @@ async def run_agent_node(
         if feedback_context is not None:
             upstream["commander_feedback"] = str(feedback_context["text"])
     if stage == "writing":
+        upstream.update(_execution_result_handoffs(run))
         diagnosis_versions = sorted(run.subdir("diagnosis").glob("diagnosis.v*.md"))
         if diagnosis_versions:
             latest_diagnosis = diagnosis_versions[-1]
@@ -374,6 +385,195 @@ def _handoff_summary(*, text: str, source_ref: str) -> str:
         return text[:3000]
 
 
+def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
+    """Summarize actual execution outputs for the Writing Agent.
+
+    ``run_log.approved.md`` is the human-approved execution plan, not the
+    measured result. Writing must also see the post-run JSON evidence so it
+    cannot accidentally report "not yet executed" after a batch has finished.
+    """
+    execution_dir = run.subdir("execution")
+    out: dict[str, str] = {}
+
+    metrics_path = execution_dir / "metrics.json"
+    if metrics_path.exists():
+        try:
+            rows_raw = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            rows_raw = []
+        rows = rows_raw if isinstance(rows_raw, list) else []
+        out["execution.metrics.json"] = _summarize_execution_metrics(
+            rows=rows,
+            source_ref=metrics_path.relative_to(run.root).as_posix(),
+        )
+
+    batch_path = execution_dir / "batch_summary.json"
+    if batch_path.exists():
+        try:
+            batch_raw = json.loads(batch_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            batch_raw = {}
+        batch = batch_raw if isinstance(batch_raw, dict) else {}
+        out["execution.batch_summary.json"] = _summarize_execution_batch(
+            batch=batch,
+            source_ref=batch_path.relative_to(run.root).as_posix(),
+        )
+
+    curves_path = execution_dir / "loss_curves_16.png"
+    if curves_path.exists():
+        out["execution.loss_curves_16.png"] = (
+            "# Actual execution plot\n"
+            f"source: {curves_path.relative_to(run.root).as_posix()}\n"
+            "This PNG is the generated loss curve panel from the completed "
+            "Execution Agent batch. Cite it as visual evidence when discussing convergence."
+        )
+    return out
+
+
+def _load_selected_data_source(run: RunHandle) -> dict[str, Any]:
+    path = run.subdir("input") / "selected_data_source.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str:
+    experiments = batch.get("experiments")
+    failures = batch.get("failures")
+    return (
+        "# Actual execution batch summary\n"
+        f"source: {source_ref}\n"
+        "This is post-run evidence, not the execution plan.\n"
+        f"- attempt: {batch.get('attempt', 'unknown')}\n"
+        f"- total: {batch.get('total', 'unknown')}\n"
+        f"- max_concurrency: {batch.get('max_concurrency', 'unknown')}\n"
+        f"- plan_source: {batch.get('plan_source', 'unknown')}\n"
+        f"- intent_experiment_count: {batch.get('intent_experiment_count', 'not explicit')}\n"
+        f"- planned_before_intent_count: {batch.get('planned_before_intent_count', 'unknown')}\n"
+        f"- failures: {len(failures) if isinstance(failures, list) else 'unknown'}\n"
+        f"- experiments: {', '.join(str(item) for item in experiments[:16]) if isinstance(experiments, list) else '(unavailable)'}"
+    )
+
+
+def _summarize_execution_metrics(*, rows: list[Any], source_ref: str) -> str:
+    metric_rows: list[dict[str, Any]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        metrics = item.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        metric_rows.append(
+            {
+                "run_id": item.get("run_id", ""),
+                "metrics": metrics,
+                "duration_seconds": item.get("duration_seconds"),
+            }
+        )
+    numeric: dict[str, list[float]] = {}
+    for item in metric_rows:
+        metrics = item["metrics"]
+        if not isinstance(metrics, dict):
+            continue
+        for key, value in metrics.items():
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            numeric.setdefault(str(key), []).append(number)
+
+    lines = [
+        "# Actual execution metrics",
+        f"source: {source_ref}",
+        "This is measured post-run evidence. Do not describe the batch as unexecuted if this section is present.",
+        f"- rows: {len(metric_rows)}",
+    ]
+    for key in sorted(numeric):
+        values = numeric[key]
+        if not values:
+            continue
+        mean = sum(values) / len(values)
+        lines.append(
+            f"- {key}: min={min(values):.6g}, max={max(values):.6g}, mean={mean:.6g}"
+        )
+
+    best_res = _best_metric_row(metric_rows, metric="RES", lower_is_better=True)
+    if best_res is not None:
+        lines.append(
+            "- best_RES: run_id={run_id}, RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
+                run_id=best_res.get("run_id", ""),
+                res=_metric_value(best_res, "RES"),
+                loss=_metric_value(best_res, "loss"),
+                pim=_metric_value(best_res, "PIM"),
+                ape=_metric_value(best_res, "APE"),
+            )
+        )
+    top_rows = sorted(
+        metric_rows,
+        key=lambda item: float(_metric_value(item, "RES", default=999999.0)),
+    )[:5]
+    if top_rows:
+        lines.append("## Top rows by lower RES")
+        for item in top_rows:
+            lines.append(
+                "- {run_id}: RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
+                    run_id=item.get("run_id", ""),
+                    res=_metric_value(item, "RES"),
+                    loss=_metric_value(item, "loss"),
+                    pim=_metric_value(item, "PIM"),
+                    ape=_metric_value(item, "APE"),
+                )
+            )
+    return "\n".join(lines)
+
+
+def _best_metric_row(
+    rows: list[dict[str, Any]],
+    *,
+    metric: str,
+    lower_is_better: bool,
+) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in rows
+        if _metric_value(item, metric, default=None) is not None
+    ]
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda item: float(_metric_value(item, metric, default=0.0)),
+        reverse=not lower_is_better,
+    )[0]
+
+
+def _metric_value(
+    row: dict[str, Any],
+    metric: str,
+    *,
+    default: Any = "n/a",
+) -> Any:
+    metrics = row.get("metrics")
+    if not isinstance(metrics, dict):
+        return default
+    return metrics.get(metric, default)
+
+
+def _execution_intent_text(run: RunHandle) -> str:
+    parts = [run.task]
+    raw_request = run.meta.get("user_request")
+    if isinstance(raw_request, str) and raw_request.strip():
+        parts.append(raw_request)
+    request_path = run.subdir("input") / "user_request.md"
+    if request_path.exists():
+        parts.append(request_path.read_text(encoding="utf-8"))
+    return "\n\n".join(part for part in parts if part.strip())
+
+
 async def _run_execution_batch(
     *, run: RunHandle, node_key: str, bus: Any | None = None
 ) -> None:
@@ -399,6 +599,10 @@ async def _run_execution_batch(
     attempt = parse_node_key(node_key).attempt
     approved_execution_path = run.subdir("execution") / "run_log.approved.md"
     plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
+    intent_text = _execution_intent_text(run)
+    intent_count = requested_experiment_count(intent_text)
+    intent_wants_sweep = wants_execution_sweep(intent_text)
+    plan_source = "none"
     # Parse ablations as (name, config) so the execution backend gets supported knobs.
     abl_specs: list[tuple[str, dict[str, Any]]] = []
     if approved_execution_path.exists():
@@ -416,6 +620,8 @@ async def _run_execution_batch(
                             dict(cfg) if isinstance(cfg, dict) else {},
                         )
                     )
+            if abl_specs:
+                plan_source = "execution_run_log"
         except Exception:
             abl_specs = []
     if plan_path.exists():
@@ -430,22 +636,41 @@ async def _run_execution_batch(
                             (str(a.get("name") or f"ablation_{i}"),
                              dict(cfg) if isinstance(cfg, dict) else {}),
                         )
+                if abl_specs:
+                    plan_source = "experiment_plan"
         except Exception:
             abl_specs = []
+    planned_before_intent = len(abl_specs)
     if not abl_specs:
-        abl_specs = _default_execution_specs()
-    elif len(abl_specs) < 16:
-        seen = {name for name, _cfg in abl_specs}
-        for name, cfg in _default_execution_specs():
-            if name in seen:
-                continue
-            abl_specs.append((name, cfg))
-            if len(abl_specs) >= 16:
-                break
-    abl_specs = abl_specs[:16]
+        default_count = default_experiment_count(intent_text)
+        abl_specs = _default_execution_specs(limit=default_count)
+        plan_source = "default_sweep" if intent_wants_sweep else "default_single"
+    elif intent_count is not None and len(abl_specs) > intent_count:
+        abl_specs = abl_specs[:intent_count]
+        plan_source = f"{plan_source}_intent_capped"
+    selected_data_source = _load_selected_data_source(run)
+    if selected_data_source:
+        data_path = str(selected_data_source.get("stored_path") or "")
+        data_source_id = str(selected_data_source.get("id") or "")
+        fs_mhz = selected_data_source.get("fs_mhz")
+        channel_count = selected_data_source.get("channel_count")
+        injected_specs: list[tuple[str, dict[str, Any]]] = []
+        for name, cfg in abl_specs:
+            next_cfg = dict(cfg)
+            if data_path:
+                next_cfg["data_path"] = data_path
+            if data_source_id:
+                next_cfg["data_source_id"] = data_source_id
+            if fs_mhz not in (None, ""):
+                next_cfg["fs_mhz"] = fs_mhz
+            if channel_count not in (None, ""):
+                next_cfg["channel_count"] = channel_count
+            injected_specs.append((name, next_cfg))
+        abl_specs = injected_specs
     execution_raw = load_execution_config().get("execution", {})
     execution_cfg = execution_raw if isinstance(execution_raw, dict) else {}
     backend = str(execution_cfg.get("backend", "mock") or "mock")
+    runtime_backend = get_settings().mars_execution_backend
     if backend == "mock" or os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
         # Mock/demo-only shaping. Real backends consume the approved run config unchanged.
         abl_specs = [(name, _capacity_for_attempt(cfg, attempt)) for name, cfg in abl_specs]
@@ -454,7 +679,7 @@ async def _run_execution_batch(
         if bus is not None:
             await bus.publish(channel, payload)
             # Mirror per-experiment events onto a single consolidated run channel
-            # so one run-level socket can drive the live 16-curve wall without
+            # so one run-level socket can drive the live curve wall without
             # knowing the (dynamic, per-attempt) experiment ids in advance.
             if ".experiment." in channel:
                 await bus.publish(
@@ -463,7 +688,8 @@ async def _run_execution_batch(
                 )
         run.write_event("websocket_events", {"channel": channel, **payload})
 
-    max_concurrency = _positive_int(execution_cfg.get("max_concurrency"), 16)
+    configured_max_concurrency = _positive_int(execution_cfg.get("max_concurrency"), 16)
+    max_concurrency = configured_max_concurrency
     batch_steps = _positive_int(execution_cfg.get("batch_steps"), 120)
     if backend == "paper_static":
         paper_cfg_raw = execution_cfg.get("paper_static", {})
@@ -475,6 +701,7 @@ async def _run_execution_batch(
         batch_steps = _positive_int(paper_cfg.get("default_max_iters"), 1)
         experiment_limit = _positive_int(paper_cfg.get("batch_experiments"), 1)
         abl_specs = abl_specs[:experiment_limit]
+    max_concurrency = min(max_concurrency, max(1, len(abl_specs)))
 
     specs = [
         JobSpec(
@@ -521,7 +748,7 @@ async def _run_execution_batch(
         plot_loss_curves(
             batch_plot_curves,
             run.subdir("execution") / "loss_curves_16.png",
-            title="16-way PIM Cancellation Loss Sweep",
+            title=f"{len(batch_plot_curves)}-experiment PIM Cancellation Loss",
         )
     write_metrics_json(run_root=run.root, results=outcome.results)
 
@@ -530,18 +757,45 @@ async def _run_execution_batch(
         "experiments": [r.experiment_id for r in outcome.results],
         "failures": outcome.failures,
         "max_concurrency": max_concurrency,
+        "configured_max_concurrency": configured_max_concurrency,
         "attempt": attempt,
         "total": len(outcome.results),
+        "plan_source": plan_source,
+        "planned_before_intent_count": planned_before_intent,
+        "intent_experiment_count": intent_count,
+        "intent_requested_sweep": intent_wants_sweep,
+        "configured_backend": backend,
+        "runtime_backend": runtime_backend,
+        "data_source": selected_data_source or {},
+        "data_source_consumed_by_backend": bool(
+            selected_data_source and runtime_backend == "paper_static"
+        ),
     }
     (run.subdir("execution") / "batch_summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
 
 
-def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
+def _representative_execution_spec() -> tuple[str, dict[str, Any]]:
+    return (
+        "mem_16_lr_0p065",
+        {
+            "expert_count": 16,
+            "learning_rate": 0.065,
+            "plot_every_steps": 5,
+        },
+    )
+
+
+def _default_execution_specs(
+    *, limit: int | None = None
+) -> list[tuple[str, dict[str, Any]]]:
     # Generic mock/demo exploration grid. Real-project capacity, channel count,
     # and file format come from the approved config and the connected code.
-    memories = [2, 3, 4, 6]
+    if limit == 1:
+        return [_representative_execution_spec()]
+
+    memories = [2, 4, 8, 16]
     learning_rates = [0.045, 0.055, 0.065, 0.08]
     out: list[tuple[str, dict[str, Any]]] = []
     for memory in memories:
@@ -556,6 +810,8 @@ def _default_execution_specs() -> list[tuple[str, dict[str, Any]]]:
                     },
                 )
             )
+    if limit is not None:
+        return out[:limit]
     return out
 
 

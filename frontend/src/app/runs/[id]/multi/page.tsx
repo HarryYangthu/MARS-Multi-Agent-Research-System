@@ -155,7 +155,7 @@ export default function MultiExperimentView({
     <main className="container mx-auto max-w-7xl px-6 py-8">
       <header className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">多实验仿真视图 · 16 路并发</h1>
+          <h1 className="text-2xl font-bold">多实验仿真视图</h1>
           <p className="text-sm text-slate-400">
             Run <code>{runId}</code> · {summary?.total ?? 0} 组实验
             {summary?.max_concurrency ? ` · 最大并发 ${summary.max_concurrency}` : ""}
@@ -178,7 +178,7 @@ export default function MultiExperimentView({
           <section key={attempt} className="mb-8">
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="text-sm font-semibold uppercase text-slate-300">
-                第 {attempt} 轮 · {count} 路并发仿真
+                第 {attempt} 轮 · {count} 组仿真
               </h2>
               <span
                 className={`rounded px-2 py-0.5 text-[11px] font-medium ${
@@ -234,6 +234,21 @@ export default function MultiExperimentView({
 }
 
 function LivePlotPanel({ plot }: { plot: ExecutionPlot }): JSX.Element {
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    setFailed(false);
+    setRetry(0);
+  }, [plot.filename, plot.updated_at]);
+  useEffect(() => {
+    if (!failed) return;
+    const timeout = window.setTimeout(() => {
+      setRetry((value) => value + 1);
+      setFailed(false);
+    }, 1800);
+    return () => window.clearTimeout(timeout);
+  }, [failed]);
+  const src = `${executionPlotUrl(plot)}&retry=${retry}`;
   return (
     <figure className="overflow-hidden rounded border border-mars-border bg-mars-panel">
       <div className="flex items-center justify-between border-b border-mars-border px-4 py-2">
@@ -244,11 +259,20 @@ function LivePlotPanel({ plot }: { plot: ExecutionPlot }): JSX.Element {
           {plot.metric} · {new Date(plot.updated_at * 1000).toLocaleTimeString()}
         </span>
       </div>
-      <img
-        src={executionPlotUrl(plot)}
-        alt={`${plot.experiment_id} live ${plot.metric} plot`}
-        className="w-full bg-white object-contain"
-      />
+      {failed ? (
+        <div className="flex min-h-48 items-center justify-center bg-mars-bg/70 text-xs text-slate-500">
+          图片正在生成，稍后自动重试…
+        </div>
+      ) : (
+        <img
+          src={src}
+          alt={`${plot.experiment_id} live ${plot.metric} plot`}
+          className="w-full bg-white object-contain"
+          loading="lazy"
+          onError={() => setFailed(true)}
+          onLoad={() => setFailed(false)}
+        />
+      )}
     </figure>
   );
 }

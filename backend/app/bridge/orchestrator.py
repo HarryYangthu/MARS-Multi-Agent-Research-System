@@ -44,6 +44,7 @@ class RunRequest:
     standalone: bool = False
     user_request: str = ""
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
+    data_source: dict[str, Any] | None = None
 
 
 @dataclass
@@ -84,6 +85,7 @@ class Orchestrator:
             project=request.project,
             entrypoint=request.entrypoint,
             user_request=request.user_request,
+            data_source=request.data_source,
         )
         graph = (
             build_standalone(request.entrypoint)
@@ -426,9 +428,11 @@ class Orchestrator:
                 )
                 continue
 
+            current_state = session.graph.state(node_key)
             if review.rejection_event.is_set():
-                await self._transition(session, node_key, NodeState.FAILED)
-            else:
+                if current_state == NodeState.WAITING_REVIEW:
+                    await self._transition(session, node_key, NodeState.FAILED)
+            elif current_state == NodeState.WAITING_REVIEW:
                 await self._transition(session, node_key, NodeState.APPROVED)
             await get_review_registry().unregister(session.run.run_id, stage)
             return

@@ -11,6 +11,7 @@ from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest
 from app.bridge.run_observability import build_run_observability
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
+from app.storage.data_source_store import DataSourceStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -30,6 +31,15 @@ class CreateRunPayload(BaseModel):
     # it as <agent>/<stem>.v1.md, and the orchestrator skips the LLM draft for
     # that node — the run goes straight into HITL review.
     seed_artifact: str | None = None
+    data_source: "DataSourceSelection | None" = None
+
+
+class DataSourceSelection(BaseModel):
+    id: str = Field(..., min_length=1)
+    fs_mhz: float | None = None
+    kind: str | None = None
+    channel_count: int | None = None
+    description: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -58,6 +68,10 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
             status_code=503,
             detail=exc.report.to_dict(),
         ) from exc
+    data_source = _resolve_data_source_selection(
+        selection=payload.data_source,
+        project=payload.project,
+    )
     orch = get_orchestrator()
     request = RunRequest(
         task=payload.task,
@@ -66,6 +80,7 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         standalone=payload.standalone,
         user_request=payload.user_request,
         auto_approve=payload.auto_approve,
+        data_source=data_source,
     )
     try:
         session = orch.create_session(request)
@@ -115,6 +130,30 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         states={k: s.value for k, s in session.graph.all_states().items()},
         graph=session.graph.to_dict(),
     )
+
+
+def _resolve_data_source_selection(
+    selection: DataSourceSelection | None,
+    *,
+    project: str,
+) -> dict[str, Any] | None:
+    store = DataSourceStore()
+    if selection is None:
+        return store.default_profile(project)
+    try:
+        profile = store.load(selection.id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="selected data source not found") from exc
+    if selection.fs_mhz is not None:
+        profile["fs_mhz"] = selection.fs_mhz
+        profile["sample_rate_hz"] = selection.fs_mhz * 1_000_000.0
+    if selection.kind is not None:
+        profile["kind"] = selection.kind
+    if selection.channel_count is not None:
+        profile["channel_count"] = selection.channel_count
+    if selection.description is not None:
+        profile["description"] = selection.description
+    return profile
 
 
 @router.get("", response_model=list[RunSummary])

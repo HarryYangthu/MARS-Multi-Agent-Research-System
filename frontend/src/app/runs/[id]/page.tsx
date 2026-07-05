@@ -18,7 +18,6 @@ import {
   approveArtifact,
   approveMemoryCandidate,
   approveSelfEvolutionMutation,
-  approvePatch,
   createPostTrainingExport,
   createSelfEvolutionMutation,
   editArtifact,
@@ -59,7 +58,6 @@ import {
   rejectSelfEvolutionMutation,
   rejectToolCall,
   rejectMemoryCandidate,
-  rejectPatch,
   rollbackToolCall,
   retryAgent,
   startFeedbackLoop,
@@ -123,6 +121,54 @@ const STAGE_TO_STEM: Record<string, { stem: string; agentDir: string }> = {
 };
 const PIPELINE_STAGES = ["idea", "experiment", "coding", "execution", "writing"] as const;
 const AGENT_NAV = ["commander", ...PIPELINE_STAGES] as const;
+
+type FeedbackNotice = {
+  version: string;
+  target: string;
+  action: string;
+  confidence: string;
+  feedbackRef: string;
+};
+
+function stageFromNodeKey(nodeKey: string): string {
+  const match = /^(.*)_attempt_\d+$/.exec(nodeKey);
+  return match?.[1] ?? nodeKey;
+}
+
+function attemptFromNodeKey(nodeKey: string): number {
+  const match = /_attempt_(\d+)$/.exec(nodeKey);
+  if (!match) return 1;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
+function latestStateForStage(
+  states: Record<string, string> | undefined,
+  stage: string,
+): string {
+  if (!states) return "pending";
+  let latestAttempt = 0;
+  let latestState = states[stage] ?? "pending";
+  for (const [nodeKey, state] of Object.entries(states)) {
+    if (stageFromNodeKey(nodeKey) !== stage) continue;
+    const attempt = attemptFromNodeKey(nodeKey);
+    if (attempt >= latestAttempt) {
+      latestAttempt = attempt;
+      latestState = state;
+    }
+  }
+  return latestState;
+}
+
+function firstStageInState(
+  states: Record<string, string> | undefined,
+  wantedState: string,
+): string | null {
+  return (
+    PIPELINE_STAGES.find((stage) => latestStateForStage(states, stage) === wantedState) ??
+    null
+  );
+}
 
 function splitFrontmatter(text: string): { frontmatter: string; body: string } {
   const match = /^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(text);
@@ -206,6 +252,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   const [revisionReason, setRevisionReason] = useState("");
   const [revisionSaveFirst, setRevisionSaveFirst] = useState(true);
   const [revisionSubmitting, setRevisionSubmitting] = useState(false);
+  const activeAgentState = latestStateForStage(run?.states, activeAgent);
 
   useEffect(() => {
     setActiveAgent(initialAgent);
@@ -388,14 +435,14 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
     const stem = STAGE_TO_STEM[activeAgent];
     if (!stem) return;
     void loadLatest(stem.agentDir, stem.stem);
-  }, [activeAgent, run?.states[activeAgent], runId]);
+  }, [activeAgent, activeAgentState, runId]);
 
   useEffect(() => {
     if (!run) return;
     if (activeAgent === "commander") return;
-    if ((run.states[activeAgent] ?? "pending") !== "skipped") return;
+    if (latestStateForStage(run.states, activeAgent) !== "skipped") return;
     const next = PIPELINE_STAGES.find((stage) => {
-      const state = run.states[stage];
+      const state = latestStateForStage(run.states, stage);
       return state !== undefined && state !== "skipped";
     });
     if (next && next !== activeAgent) {
@@ -477,7 +524,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
           if (!alive) return;
           setDebate(d);
           // auto-open whenever transcript exists during running/waiting_review
-          if (d.exists && (run?.states[activeAgent] === "running")) {
+          if (d.exists && activeAgentState === "running") {
             setDebateOpen(true);
           }
         })
@@ -485,13 +532,13 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
     };
     fetchDebate();
     // Aggressive polling while running (1.5s); slower otherwise (5s).
-    const interval = run?.states[activeAgent] === "running" ? 1500 : 5000;
+    const interval = activeAgentState === "running" ? 1500 : 5000;
     const iv = setInterval(fetchDebate, interval);
     return () => {
       alive = false;
       clearInterval(iv);
     };
-  }, [activeAgent, run?.states[activeAgent], runId]);
+  }, [activeAgent, activeAgentState, runId]);
 
   useEffect(() => {
     let alive = true;
@@ -578,19 +625,52 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       setToolActionMessage(reviewActionHint);
       return;
     }
-    if (run?.states[artifact.agent_dir] !== "waiting_review") {
+    if (latestStateForStage(run?.states, artifact.agent_dir) !== "waiting_review") {
       setToolActionMessage(reviewActionHint);
       return;
     }
     try {
-      const next =
-        artifact.agent_dir === "coding" && patch
-          ? await approvePatch(runId, artifact.version)
-          : await approveArtifact(runId, artifact.agent_dir, artifact.stem, artifact.version);
+      const next = await approveArtifact(
+        runId,
+        artifact.agent_dir,
+        artifact.stem,
+        artifact.version,
+      );
       setArtifact(next);
-      setToolActionMessage(`${agentLabel(artifact.agent_dir)} 已批准，正在推进执行流。`);
-      const nextRun = await getRun(runId);
-      setRun(nextRun);
+      const [
+        nextRun,
+        nextDiagnoses,
+        nextPackets,
+        nextCommanderObservability,
+        nextRunObservability,
+      ] = await Promise.all([
+        getRun(runId).catch(() => null),
+        listDiagnoses(runId).catch(() => diagnoses),
+        listFeedbackPackets(runId).catch(() => feedbackPackets),
+        getCommanderObservability(runId).catch(() => null),
+        getRunObservability(runId).catch(() => null),
+      ]);
+      if (nextRun) setRun(nextRun);
+      setDiagnoses(nextDiagnoses);
+      setFeedbackPackets(nextPackets);
+      setCommanderObservability(nextCommanderObservability);
+      setRunObservability(nextRunObservability);
+
+      const latestDiagnosis =
+        nextDiagnoses.length > 0 ? nextDiagnoses[nextDiagnoses.length - 1] : null;
+      const enteredFeedback =
+        nextRunObservability?.status === "waiting_feedback" &&
+        latestDiagnosis?.metadata.passed !== true;
+      if (enteredFeedback && latestDiagnosis) {
+        const target = metaText(latestDiagnosis.metadata, "recommended_target", "commander");
+        const action = metaText(latestDiagnosis.metadata, "recommended_action", "请启动反馈回路。");
+        setToolActionMessage(
+          `${agentLabel(artifact.agent_dir)} 已批准；Commander 诊断还未达标，建议回到 ${agentLabel(target)}：${action}`,
+        );
+        selectAgent("commander");
+      } else {
+        setToolActionMessage(`${agentLabel(artifact.agent_dir)} 已批准，正在推进执行流。`);
+      }
     } catch (error) {
       setToolActionMessage(error instanceof Error ? error.message : "批准失败");
     }
@@ -614,12 +694,6 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
         }
       }
       const reason = revisionReason.trim() || "请基于人工审阅意见返工，并生成一个新的可审核版本。";
-      if (target.agent_dir === "coding" && patch) {
-        await rejectPatch(runId, target.version, reason);
-        setToolActionMessage("已驳回 patch，等待 Coding Agent 返工。");
-        setRevisionDialogOpen(false);
-        return;
-      }
       const result = await rejectArtifact(
         runId,
         target.agent_dir,
@@ -676,20 +750,27 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   async function startLatestFeedbackLoop(): Promise<void> {
     const latest = diagnoses.length > 0 ? diagnoses[diagnoses.length - 1] : null;
     if (!latest) return;
-    const result = await startFeedbackLoop(runId, latest.version);
-    setFeedbackAction(result);
-    const [nextRun, nextDiagnoses, nextPackets] = await Promise.all([
-      getRun(runId).catch(() => null),
-      listDiagnoses(runId).catch(() => diagnoses),
-      listFeedbackPackets(runId).catch(() => feedbackPackets),
-    ]);
-    if (nextRun) setRun(nextRun);
-    setDiagnoses(nextDiagnoses);
-    setFeedbackPackets(nextPackets);
-    const nextObservability = await getCommanderObservability(runId).catch(() => null);
-    setCommanderObservability(nextObservability);
-    const nextRunObservability = await getRunObservability(runId).catch(() => null);
-    setRunObservability(nextRunObservability);
+    try {
+      const result = await startFeedbackLoop(runId, latest.version);
+      setFeedbackAction(result);
+      setToolActionMessage(
+        `已启动反馈回路：${agentLabel(result.target ?? "commander")} 第 ${result.attempt ?? "-"} 轮。`,
+      );
+      const [nextRun, nextDiagnoses, nextPackets] = await Promise.all([
+        getRun(runId).catch(() => null),
+        listDiagnoses(runId).catch(() => diagnoses),
+        listFeedbackPackets(runId).catch(() => feedbackPackets),
+      ]);
+      if (nextRun) setRun(nextRun);
+      setDiagnoses(nextDiagnoses);
+      setFeedbackPackets(nextPackets);
+      const nextObservability = await getCommanderObservability(runId).catch(() => null);
+      setCommanderObservability(nextObservability);
+      const nextRunObservability = await getRunObservability(runId).catch(() => null);
+      setRunObservability(nextRunObservability);
+    } catch (error) {
+      setToolActionMessage(error instanceof Error ? error.message : "启动反馈回路失败");
+    }
   }
 
   async function exportPostTrainingData(): Promise<void> {
@@ -837,9 +918,20 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   const isWorkspaceView = viewMode === "workspace";
   const isTimelineView = viewMode === "timeline";
   const isReportsView = viewMode === "reports";
-  const activeAgentState = run?.states[activeAgent] ?? "pending";
-  const firstWaitingReviewAgent =
-    PIPELINE_STAGES.find((stage) => run?.states[stage] === "waiting_review") ?? null;
+  const latestDiagnosis = diagnoses.length > 0 ? diagnoses[diagnoses.length - 1] : null;
+  const feedbackNotice: FeedbackNotice | null =
+    runObservability?.status === "waiting_feedback" &&
+    latestDiagnosis !== null &&
+    latestDiagnosis.metadata.passed !== true
+      ? {
+          version: latestDiagnosis.version,
+          target: metaText(latestDiagnosis.metadata, "recommended_target", "commander"),
+          action: metaText(latestDiagnosis.metadata, "recommended_action", "请启动反馈回路。"),
+          confidence: metaText(latestDiagnosis.metadata, "confidence", "0"),
+          feedbackRef: metaText(latestDiagnosis.metadata, "feedback_packet_ref"),
+        }
+      : null;
+  const firstWaitingReviewAgent = firstStageInState(run?.states, "waiting_review");
   const activeAgentIsWaitingReview = activeAgentState === "waiting_review";
   const reviewTargetAgent = activeAgentIsWaitingReview ? activeAgent : firstWaitingReviewAgent;
   const canReviewCurrentAgent = Boolean(artifact && activeAgentIsWaitingReview);
@@ -919,7 +1011,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
 
         <ul className="space-y-1">
           {PIPELINE_STAGES.map((s) => {
-            const state = run?.states[s] ?? "pending";
+            const state = latestStateForStage(run?.states, s);
             const isActive = activeAgent === s;
             const stageEvaluation = stageEvaluationBadge(s, scorecard, liveEvaluationSummaries);
             return (
@@ -1140,6 +1232,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
               canReviewCurrentAgent={canReviewCurrentAgent}
               reviewActionHint={reviewActionHint}
               reviewTargetAgent={reviewTargetAgent}
+              feedbackNotice={feedbackNotice}
               onEdit={setEditing}
               onSave={save}
               onApprove={approve}
@@ -1149,6 +1242,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
               }}
               onGoToReviewAgent={selectAgent}
               onRetryAgent={retryActiveAgent}
+              onStartFeedback={startLatestFeedbackLoop}
               onOpenTimeline={() => setViewMode("timeline")}
               onOpenCommander={() => selectAgent("commander")}
             />
@@ -1228,7 +1322,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
                 </>
               ) : (
                 <RunningOrEmpty
-                  agentState={run?.states[activeAgent] ?? "pending"}
+                  agentState={activeAgentState}
                   debate={debate}
                   open={debateOpen}
                   onToggle={() => setDebateOpen((o) => !o)}
@@ -1241,7 +1335,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
               trace={trace}
               toolCalls={toolCalls}
               activeAgent={activeAgent}
-              agentState={run?.states[activeAgent] ?? "pending"}
+              agentState={activeAgentState}
               events={events}
             />
           ) : null}
@@ -3007,12 +3101,14 @@ function AgentWorkbench({
   canReviewCurrentAgent,
   reviewActionHint,
   reviewTargetAgent,
+  feedbackNotice,
   onEdit,
   onSave,
   onApprove,
   onReject,
   onGoToReviewAgent,
   onRetryAgent,
+  onStartFeedback,
   onOpenTimeline,
   onOpenCommander,
 }: {
@@ -3031,16 +3127,18 @@ function AgentWorkbench({
   canReviewCurrentAgent: boolean;
   reviewActionHint: string;
   reviewTargetAgent: string | null;
+  feedbackNotice: FeedbackNotice | null;
   onEdit: (value: string) => void;
   onSave: () => Promise<void>;
   onApprove: () => Promise<void>;
   onReject: () => Promise<void>;
   onGoToReviewAgent: (agent: string) => void;
   onRetryAgent: () => Promise<void>;
+  onStartFeedback: () => Promise<void>;
   onOpenTimeline: () => void;
   onOpenCommander: () => void;
 }): JSX.Element {
-  const state = run?.states[agent] ?? "pending";
+  const state = latestStateForStage(run?.states, agent);
   const copy = AGENT_WORK_COPY[agent] ?? {
     title: "Agent 工作区",
     purpose: "查看当前 Agent 的产物、上下文、评估和运行证据。",
@@ -3354,6 +3452,42 @@ function AgentWorkbench({
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto p-3">
+          {feedbackNotice ? (
+            <div className="mb-3 rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">
+                    Commander 正在等待反馈回路确认
+                  </div>
+                  <p className="mt-1 leading-relaxed text-amber-50/90">
+                    执行结果没有直接进入 Writing，因为诊断建议回到{" "}
+                    <span className="font-semibold">{agentLabel(feedbackNotice.target)}</span>
+                    ：{feedbackNotice.action}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-[10px] text-amber-200/80">
+                    diagnosis={feedbackNotice.version} · confidence={feedbackNotice.confidence}
+                    {feedbackNotice.feedbackRef ? ` · packet=${feedbackNotice.feedbackRef}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onOpenCommander}
+                    className="rounded border border-amber-500/40 px-2 py-1 font-medium hover:bg-amber-500/15"
+                  >
+                    打开 Commander
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onStartFeedback()}
+                    className="rounded bg-amber-500/80 px-2 py-1 font-semibold text-slate-950 hover:bg-amber-400"
+                  >
+                    启动反馈回路
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {!canReviewCurrentAgent && reviewTargetAgent && reviewTargetAgent !== agent ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
               <span>{reviewActionHint}</span>
@@ -5865,7 +5999,7 @@ function AgentWorkSummary({
   onOpenTimeline: () => void;
   onOpenCommander: () => void;
 }): JSX.Element {
-  const state = run?.states[agent] ?? "pending";
+  const state = latestStateForStage(run?.states, agent);
   const copy = AGENT_WORK_COPY[agent] ?? {
     title: "Agent 工作区",
     purpose: "查看当前 Agent 的产物、上下文、评估和运行证据。",
@@ -7398,6 +7532,16 @@ function PatchPanel({ patch }: { patch: PatchView }): JSX.Element {
   const files = parsePatchFiles(patch.text);
   const insertions = files.reduce((total, file) => total + file.insertions, 0);
   const deletions = files.reduce((total, file) => total + file.deletions, 0);
+  const application = asRecord(patch.application);
+  const hasApplication = patch.application !== null;
+  const applied = application["applied"] === true;
+  const applicationError = metaText(application, "error");
+  const statusLabel = applied ? "已应用" : hasApplication ? "应用失败" : t("patch.status.pending");
+  const statusClassName = applied
+    ? "text-emerald-200"
+    : hasApplication
+      ? "text-red-200"
+      : "text-cyan-200";
   return (
     <section className="rounded border border-cyan-500/30 bg-cyan-500/5">
       <div className="flex items-center justify-between border-b border-cyan-500/20 px-3 py-2">
@@ -7415,11 +7559,21 @@ function PatchPanel({ patch }: { patch: PatchView }): JSX.Element {
           <span className="max-w-72 truncate rounded bg-mars-bg/70 px-2 py-0.5 font-mono text-[10px] text-slate-400" title={patch.path}>
             {patch.path}
           </span>
-          <span className="rounded bg-mars-bg/70 px-2 py-0.5 text-[10px] uppercase text-cyan-200">
-            {patch.approved ? t("patch.status.approved") : t("patch.status.pending")}
+          <span className={`rounded bg-mars-bg/70 px-2 py-0.5 text-[10px] uppercase ${statusClassName}`}>
+            {patch.approved ? t("patch.status.approved") : statusLabel}
           </span>
         </div>
       </div>
+      {hasApplication && !applied ? (
+        <div className="border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+          <span className="font-semibold">Patch 未落地。</span>
+          {applicationError ? (
+            <span className="ml-2 font-mono text-red-200">{applicationError}</span>
+          ) : (
+            <span className="ml-2 text-red-200">请查看 patch apply result。</span>
+          )}
+        </div>
+      ) : null}
       {files.length > 0 ? (
         <div className="max-h-[34rem] overflow-auto">
           {files.map((file) => (
@@ -7623,6 +7777,21 @@ function LivePlotCard({
   plot: ExecutionPlot;
   compact?: boolean;
 }): JSX.Element {
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    setFailed(false);
+    setRetry(0);
+  }, [plot.filename, plot.updated_at]);
+  useEffect(() => {
+    if (!failed) return;
+    const timeout = window.setTimeout(() => {
+      setRetry((value) => value + 1);
+      setFailed(false);
+    }, 1800);
+    return () => window.clearTimeout(timeout);
+  }, [failed]);
+  const src = `${executionPlotUrl(plot)}&retry=${retry}`;
   return (
     <figure className="overflow-hidden rounded border border-mars-border bg-mars-bg/60">
       <div className="flex items-center justify-between border-b border-mars-border px-2 py-1">
@@ -7633,11 +7802,24 @@ function LivePlotCard({
           {plot.metric} · {new Date(plot.updated_at * 1000).toLocaleTimeString()}
         </span>
       </div>
-      <img
-        src={executionPlotUrl(plot)}
-        alt={`${plot.experiment_id} live ${plot.metric} plot`}
-        className={`w-full bg-white object-contain ${compact ? "max-h-56" : "max-h-72"}`}
-      />
+      {failed ? (
+        <div
+          className={`flex items-center justify-center bg-mars-bg/70 text-[10px] text-slate-500 ${
+            compact ? "min-h-32" : "min-h-44"
+          }`}
+        >
+          图片正在生成，稍后自动重试…
+        </div>
+      ) : (
+        <img
+          src={src}
+          alt={`${plot.experiment_id} live ${plot.metric} plot`}
+          className={`w-full bg-white object-contain ${compact ? "max-h-56" : "max-h-72"}`}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          onLoad={() => setFailed(false)}
+        />
+      )}
     </figure>
   );
 }

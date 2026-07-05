@@ -10,6 +10,84 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+body.mars-resizing,
+body.mars-resizing * {
+  user-select: none !important;
+}
+
+.mars-resize-handle {
+  background: rgba(19, 22, 29, 0.62);
+  outline: none;
+  position: relative;
+  touch-action: none;
+  z-index: 20;
+}
+
+.mars-resize-handle::before,
+.mars-resize-handle::after {
+  content: "";
+  opacity: 0;
+  position: absolute;
+  transition: opacity 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.mars-resize-handle-vertical {
+  cursor: col-resize;
+  min-width: 8px;
+}
+
+.mars-resize-handle-horizontal {
+  cursor: row-resize;
+  min-height: 8px;
+}
+
+.mars-resize-handle-vertical::before {
+  background: rgba(34, 211, 238, 0.34);
+  bottom: 0;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 1px;
+}
+
+.mars-resize-handle-vertical::after {
+  background: rgba(103, 232, 249, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.55);
+  height: 42px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+}
+
+.mars-resize-handle-horizontal::before {
+  background: rgba(34, 211, 238, 0.34);
+  height: 1px;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.mars-resize-handle-horizontal::after {
+  background: rgba(103, 232, 249, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.55);
+  height: 3px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 42px;
+}
+
+.mars-resize-handle:hover::before,
+.mars-resize-handle:hover::after,
+.mars-resize-handle:focus-visible::before,
+.mars-resize-handle:focus-visible::after {
+  opacity: 1;
+}
+
 .mars-flow-line {
   position: relative;
   overflow: hidden;

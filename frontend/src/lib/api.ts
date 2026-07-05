@@ -45,6 +45,36 @@ export type RunDetail = RunSummary & {
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; entrypoints: string[] };
 };
 
+export type DataSourceProfile = {
+  id: string;
+  project: string;
+  kind: string;
+  original_name: string;
+  stored_path: string;
+  size_bytes: number;
+  checksum: string;
+  fs_mhz: number | null;
+  sample_rate_hz: number | null;
+  channel_count: number | null;
+  description: string;
+  format: string;
+  shape: number[] | null;
+  dtype: string | null;
+  preview_key: string;
+  sample_points: number;
+  dict_entries: {
+    key: string;
+    shape?: number[] | null;
+    dtype?: string | null;
+    sample_points?: number;
+  }[];
+  spectrum_available: boolean;
+  spectrum_path: string;
+  warnings: string[];
+  created_at: string;
+  is_default: boolean;
+};
+
 export type ArtifactView = {
   run_id: string;
   agent_dir: string;
@@ -214,6 +244,7 @@ export type PatchView = {
   path: string;
   text: string;
   approved: boolean;
+  application: Record<string, unknown> | null;
 };
 
 export type TraceSpan = {
@@ -958,10 +989,39 @@ export type AgentLlmUpdateRow = {
   base_url_env: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorDetailText(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    const detail = isRecord(parsed) ? parsed.detail : parsed;
+    if (typeof detail === "string") return `HTTP ${status}: ${detail}`;
+    if (isRecord(detail)) {
+      const error = typeof detail.error === "string" ? detail.error.trim() : "";
+      const patchVersion =
+        typeof detail.patch_version === "string" ? `patch ${detail.patch_version}: ` : "";
+      const blockedByGate =
+        typeof detail.blocked_by_gate === "string" && detail.blocked_by_gate
+          ? ` blocked by ${detail.blocked_by_gate}.`
+          : "";
+      const command = isRecord(detail.command_result) ? detail.command_result : null;
+      const stderr = typeof command?.stderr === "string" ? command.stderr.trim() : "";
+      const stdout = typeof command?.stdout === "string" ? command.stdout.trim() : "";
+      const message = error || stderr || stdout || body;
+      return `HTTP ${status}: ${patchVersion}${message}${blockedByGate}`;
+    }
+  } catch {
+    // Fall through to the raw body.
+  }
+  return `HTTP ${status}: ${body}`;
+}
+
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   if (!r.ok) {
     const text = await r.text();
-    throw new Error(`HTTP ${r.status}: ${text}`);
+    throw new Error(errorDetailText(r.status, text));
   }
   return (await r.json()) as T;
 }
@@ -984,6 +1044,13 @@ export async function createRun(body: {
   user_request?: string;
   standalone?: boolean;
   seed_artifact?: string;
+  data_source?: {
+    id: string;
+    fs_mhz?: number | null;
+    kind?: string | null;
+    channel_count?: number | null;
+    description?: string | null;
+  };
 }): Promise<RunDetail> {
   return jsonOrThrow(
     await fetch(`${BASE}/api/runs`, {
@@ -1000,6 +1067,93 @@ export async function createRun(body: {
 }
 export async function startRun(runId: string): Promise<{ status: string }> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/start`, { method: "POST" }));
+}
+
+export async function uploadDataSource(params: {
+  file: File;
+  project: string;
+  fsMhz?: number | null;
+  kind?: string;
+  channelCount?: number | null;
+  description?: string;
+}): Promise<DataSourceProfile> {
+  const url = apiUrl(`${BASE}/api/data-sources/upload`);
+  url.searchParams.set("filename", params.file.name);
+  url.searchParams.set("project", params.project);
+  if (params.fsMhz !== undefined && params.fsMhz !== null) {
+    url.searchParams.set("fs_mhz", String(params.fsMhz));
+  }
+  if (params.kind) {
+    url.searchParams.set("kind", params.kind);
+  }
+  if (params.channelCount !== undefined && params.channelCount !== null) {
+    url.searchParams.set("channel_count", String(params.channelCount));
+  }
+  if (params.description) {
+    url.searchParams.set("description", params.description);
+  }
+  return jsonOrThrow(
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: params.file,
+    }),
+  );
+}
+
+export async function listDataSources(project?: string): Promise<DataSourceProfile[]> {
+  const url = apiUrl(`${BASE}/api/data-sources`);
+  if (project) {
+    url.searchParams.set("project", project);
+  }
+  return jsonOrThrow(await fetch(url));
+}
+
+export async function getDataSource(id: string): Promise<DataSourceProfile> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/data-sources/${encodeURIComponent(id)}`),
+  );
+}
+
+export async function getDefaultDataSource(project: string): Promise<DataSourceProfile> {
+  const url = apiUrl(`${BASE}/api/data-sources/default`);
+  url.searchParams.set("project", project);
+  return jsonOrThrow(await fetch(url));
+}
+
+export async function setDefaultDataSource(
+  project: string,
+  id: string,
+): Promise<DataSourceProfile> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/data-sources/default`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project, id }),
+    }),
+  );
+}
+
+export async function updateDataSource(
+  id: string,
+  body: {
+    fs_mhz?: number | null;
+    kind?: string | null;
+    channel_count?: number | null;
+    description?: string | null;
+  },
+): Promise<DataSourceProfile> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/data-sources/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export function dataSourceSpectrumUrl(id: string): string {
+  return `${BASE}/api/data-sources/${encodeURIComponent(id)}/spectrum`;
 }
 
 export async function retryAgent(

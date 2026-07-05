@@ -218,6 +218,36 @@ class _CaptureCodingAgent(BaseAgent):
         return await self.run_loop(request, context)
 
 
+class _CaptureWritingAgent(BaseAgent):
+    name = "writing"
+    output_schema = "report.v1"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.captured_upstream: dict[str, str] = {}
+
+    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
+        self.captured_upstream = dict(request.upstream_artifacts)
+        metadata = {
+            "schema": "report.v1",
+            "project": request.project,
+            "agent": "writing",
+            "deliverable_type": "research_report",
+            "target_audience": "phd_advisor",
+            "chain_refs": {"proposal": "idea_proposal.approved.md"},
+        }
+        body = "# captured report\n"
+        return Artifact(
+            text=fm_dumps(metadata, body),
+            schema_id="report.v1",
+            metadata=metadata,
+            body=body,
+        )
+
+    async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
+        return await self.run_loop(request, context)
+
+
 @pytest.mark.asyncio
 async def test_agent_runner_injects_commander_feedback_only_for_target(
     tmp_path: Path,
@@ -234,6 +264,40 @@ async def test_agent_runner_injects_commander_feedback_only_for_target(
 
         assert "commander_feedback" in agent.captured_upstream
         assert "diagnosis.v1.md" not in agent.captured_upstream
+    finally:
+        reset_registry_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_injects_execution_results_for_writing(
+    tmp_path: Path,
+) -> None:
+    reset_registry_for_tests()
+    try:
+        run = RunStore(tmp_path).create(task="runner", project="pimc")
+        _write_metrics_and_artifacts(run, loss=0.031)
+        (run.subdir("execution") / "batch_summary.json").write_text(
+            json.dumps(
+                {
+                    "experiments": ["mem_16_lr_0p08"],
+                    "failures": [],
+                    "max_concurrency": 16,
+                    "attempt": 2,
+                    "total": 1,
+                }
+            ),
+            encoding="utf-8",
+        )
+        agent = _CaptureWritingAgent()
+        get_registry().register("writing", agent)
+
+        await run_agent_node(run, "writing")
+
+        assert "execution.metrics.json" in agent.captured_upstream
+        assert "measured post-run evidence" in agent.captured_upstream["execution.metrics.json"]
+        assert "RES: min=-42" in agent.captured_upstream["execution.metrics.json"]
+        assert "execution.batch_summary.json" in agent.captured_upstream
+        assert "This is post-run evidence" in agent.captured_upstream["execution.batch_summary.json"]
     finally:
         reset_registry_for_tests()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -222,9 +223,21 @@ def test_opencode_worktree_fallback_diff_uses_edited_files_only(tmp_path: Path) 
     ]
     assert diff.insertions == 4
     assert diff.deletions == 0
-    assert "--- a/libs/model.py" in diff.text
-    assert "--- a/tests/test_order_aware_routing.py" in diff.text
+    assert "diff --git a/libs/model.py b/libs/model.py" in diff.text
+    assert "--- /dev/null" in diff.text
+    assert "+++ b/libs/model.py" in diff.text
+    assert "diff --git a/tests/test_order_aware_routing.py b/tests/test_order_aware_routing.py" in diff.text
     assert "libs/config.py" not in diff.text
+    apply_root = tmp_path / "apply_target"
+    apply_root.mkdir()
+    apply_check = subprocess.run(
+        ["git", "-C", str(apply_root), "apply", "--check"],
+        input=diff.text,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert apply_check.returncode == 0, apply_check.stderr
 
 
 def test_allowed_worktree_fallback_scans_allowed_text_files(tmp_path: Path) -> None:

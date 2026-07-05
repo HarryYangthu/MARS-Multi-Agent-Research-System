@@ -76,6 +76,8 @@ async def list_plots(run_id: str) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
     for p in sorted(d.glob("*.png")):
+        if not _ready_png(p):
+            continue
         stat = p.stat()
         out.append(
             {
@@ -98,6 +100,16 @@ async def get_plot(run_id: str, name: str) -> FileResponse:
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     p = run.subdir("execution") / "live_plots" / name
-    if not p.exists():
+    if not _ready_png(p):
         raise HTTPException(status_code=404, detail=f"plot {name} not found")
     return FileResponse(p, media_type="image/png")
+
+
+def _ready_png(path: Path) -> bool:
+    try:
+        if path.stat().st_size < 64:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(8) == b"\x89PNG\r\n\x1a\n"
+    except OSError:
+        return False

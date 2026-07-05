@@ -7,10 +7,25 @@ and the multi-experiment WS plumbing.
 from __future__ import annotations
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
+from app.harness.execution_intent import default_experiment_count, wants_execution_sweep
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 
 
-def _default_execution_plan() -> list[dict[str, object]]:
+def _representative_execution_plan() -> dict[str, object]:
+    return {
+        "name": "mem_16_lr_0p065",
+        "config": {
+            "expert_count": 16,
+            "learning_rate": 0.065,
+            "plot_every_steps": 5,
+        },
+    }
+
+
+def _default_execution_plan(*, limit: int | None = None) -> list[dict[str, object]]:
+    if limit == 1:
+        return [_representative_execution_plan()]
+
     memories = [2, 4, 8, 16]
     learning_rates = [0.045, 0.055, 0.065, 0.08]
     out: list[dict[str, object]] = []
@@ -26,6 +41,8 @@ def _default_execution_plan() -> list[dict[str, object]]:
                     },
                 }
             )
+    if limit is not None:
+        return out[:limit]
     return out
 
 
@@ -41,7 +58,11 @@ class ExecutionAgent(BaseAgent):
     async def draft(
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:
-        experiments = _default_execution_plan()
+        intent_text = f"{request.user_request}\n\n{context.task}"
+        experiment_count = default_experiment_count(intent_text)
+        experiments = _default_execution_plan(limit=experiment_count)
+        max_concurrency = min(16, max(1, len(experiments)))
+        plan_kind = "参数扫描" if wants_execution_sweep(intent_text) else "按任务意图"
         metadata = {
             "schema": self.output_schema,
             "project": request.project,
@@ -54,7 +75,7 @@ class ExecutionAgent(BaseAgent):
             "status": "interrupted",
             "metrics": {
                 "planned_experiments": len(experiments),
-                "max_concurrency": 16,
+                "max_concurrency": max_concurrency,
                 "plot_every_steps": 5,
             },
             "fingerprint_hash": "sha256:0000000000000000",
@@ -77,12 +98,13 @@ class ExecutionAgent(BaseAgent):
         )
         body = (
             "# 执行计划\n\n"
-            "Execution Agent 将在人工批准后运行以下 16 组 PIM cancellation CPU 仿真。\n"
+            f"Execution Agent 将在人工批准后运行以下 {len(experiments)} 组 PIM cancellation CPU 仿真"
+            f"（{plan_kind}）。\n"
             "每组仿真每 5 次迭代覆盖刷新一次 loss PNG，前端可以在执行过程中看到曲线逐步下降。\n\n"
             "| # | 实验 | Expert / memory taps | Learning rate |\n"
             "|---:|---|---:|---:|\n"
             f"{rows}\n\n"
-            "批准该产物后，将启动完整的 16 组仿真批处理。"
+            f"批准该产物后，将启动 {len(experiments)} 组仿真批处理。"
         )
         return Artifact(
             text=fm_dumps(metadata, body),

@@ -332,21 +332,20 @@ def _diff_snapshots(
         if old == new:
             continue
         change_type = "modified"
+        original = old
+        updated = new
         if old is None:
             change_type = "added"
-            old = ""
+            original = ""
         if new is None:
             change_type = "deleted"
-            new = ""
+            updated = ""
         files_changed.append({"path": path, "type": change_type, "risk": _risk_for(path, project_repo)})
-        lines = list(
-            difflib.unified_diff(
-                old.splitlines(),
-                new.splitlines(),
-                fromfile=f"a/{path}",
-                tofile=f"b/{path}",
-                lineterm="",
-            )
+        lines = _git_style_file_diff(
+            path=path,
+            old_text=original or "",
+            new_text=updated or "",
+            change_type=change_type,
         )
         for line in lines:
             if line.startswith("+") and not line.startswith("+++"):
@@ -361,6 +360,32 @@ def _diff_snapshots(
         insertions=insertions,
         deletions=deletions,
     )
+
+
+def _git_style_file_diff(
+    *,
+    path: str,
+    old_text: str,
+    new_text: str,
+    change_type: str,
+) -> list[str]:
+    fromfile = "/dev/null" if change_type == "added" else f"a/{path}"
+    tofile = "/dev/null" if change_type == "deleted" else f"b/{path}"
+    header = [f"diff --git a/{path} b/{path}"]
+    if change_type == "added":
+        header.append("new file mode 100644")
+    elif change_type == "deleted":
+        header.append("deleted file mode 100644")
+    body = list(
+        difflib.unified_diff(
+            old_text.splitlines(),
+            new_text.splitlines(),
+            fromfile=fromfile,
+            tofile=tofile,
+            lineterm="",
+        )
+    )
+    return header + body
 
 
 def _worktree_diff_for_opencode_edits(

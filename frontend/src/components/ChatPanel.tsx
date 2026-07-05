@@ -44,7 +44,13 @@ const STATE_COLOR: Record<string, string> = {
 
 const LS_KEY = "mars.commander.conv";
 
-export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }): JSX.Element {
+export function ChatPanel({
+  onLinkRun,
+  variant = "compact",
+}: {
+  onLinkRun?: (runId: string) => void;
+  variant?: "compact" | "center";
+}): JSX.Element {
   const { t, lang } = useI18n();
   const { selectedProject } = useProject();
   const [conv, setConv] = useState<Conversation | null>(null);
@@ -155,12 +161,17 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
 
   const stateLabel = (s: string): string =>
     (lang === "zh" ? STATE_LABEL_ZH : STATE_LABEL_EN)[s] ?? s;
+  const isCenter = variant === "center";
 
   return (
-    <div className="flex max-h-[300px] min-h-[220px] flex-col rounded border border-mars-border bg-mars-bg/40">
+    <div
+      className={`flex flex-col rounded border border-mars-border bg-mars-bg/40 ${
+        isCenter ? "min-h-[260px] max-h-[420px]" : "min-h-[220px] max-h-[300px]"
+      }`}
+    >
       {/* header */}
-      <div className="flex items-center justify-between gap-1 border-b border-mars-border px-2 py-1.5">
-        <span className="text-xs font-semibold text-slate-200">🧭 {t("chat.title")}</span>
+      <div className={`flex items-center justify-between gap-1 border-b border-mars-border ${isCenter ? "px-3 py-2" : "px-2 py-1.5"}`}>
+        <span className={`${isCenter ? "text-sm" : "text-xs"} font-semibold text-slate-200`}>🧭 {t("chat.title")}</span>
         <div className="flex items-center gap-1">
           {conv ? (
             <span className={`rounded px-1.5 py-0.5 text-[9px] ${STATE_COLOR[conv.state] ?? "bg-slate-600"}`}>
@@ -196,7 +207,7 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
 
       {/* input — pinned to the top so it doesn't get pushed down by an empty
           message area (command-console style) */}
-      <div className="border-b border-mars-border p-2">
+      <div className={`border-b border-mars-border ${isCenter ? "p-3" : "p-2"}`}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -206,14 +217,18 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
               void send();
             }
           }}
-          rows={2}
+          rows={isCenter ? 3 : 2}
           placeholder={t("chat.placeholder")}
-          className="w-full resize-none rounded border border-mars-border bg-mars-bg px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-mars-accent"
+          className={`w-full resize-none rounded border border-mars-border bg-mars-bg px-2 py-1 text-slate-100 outline-none focus:border-mars-accent ${
+            isCenter ? "text-xs" : "text-[11px]"
+          }`}
         />
         <button
           onClick={send}
           disabled={busy || !input.trim()}
-          className="mt-1 w-full rounded bg-mars-accent py-1 text-[11px] font-medium text-white hover:bg-mars-accent2 disabled:opacity-50"
+          className={`mt-2 w-full rounded bg-mars-accent font-medium text-white hover:bg-mars-accent2 disabled:opacity-50 ${
+            isCenter ? "py-1.5 text-xs" : "py-1 text-[11px]"
+          }`}
         >
           {busy ? t("chat.thinking") : t("chat.send")}
         </button>
@@ -222,7 +237,7 @@ export function ChatPanel({ onLinkRun }: { onLinkRun?: (runId: string) => void }
       {err ? <p className="px-2 pt-1 text-[10px] text-red-300">{err}</p> : null}
 
       {/* messages / history below the input */}
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-auto p-2">
+      <div ref={scrollRef} className={`min-h-0 flex-1 space-y-2 overflow-auto ${isCenter ? "p-3" : "p-2"}`}>
         {!conv ? (
           <p className="text-[11px] text-slate-500">{t("common.loading")}</p>
         ) : conv.messages.length === 0 ? (

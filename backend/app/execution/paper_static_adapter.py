@@ -47,7 +47,10 @@ async def run_paper_static_simulation(
     try:
         repo_path = _resolve_path(str(cfg.get("repo_path", "")), repo_root())
         config_path = _resolve_path(str(cfg.get("config_path", "configs/static.yaml")), repo_path)
-        data_path = _resolve_path(str(cfg.get("data_path", "")), repo_path)
+        data_path = _resolve_path(
+            str(spec.config.get("data_path") or cfg.get("data_path", "")),
+            repo_path,
+        )
         python = _python_from_config(cfg)
     except ValueError as exc:
         _write_failure_log(log_path, str(exc))
@@ -106,6 +109,9 @@ async def run_paper_static_simulation(
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     loss_curve: list[float] = []
+    pim_db_curve: list[float] = []
+    res_db_curve: list[float] = []
+    ape_db_curve: list[float] = []
     done_path: Path | None = None
     returncode = -1
     timed_out = False
@@ -130,6 +136,9 @@ async def run_paper_static_simulation(
                 if parsed is not None:
                     step = len(loss_curve)
                     loss_curve.append(parsed["loss"])
+                    pim_db_curve.append(parsed["paper_PIM_db"])
+                    res_db_curve.append(parsed["paper_RES_db"])
+                    ape_db_curve.append(parsed["paper_APE_db"])
                     if bus_publish is not None:
                         await bus_publish(
                             channel,
@@ -186,6 +195,24 @@ async def run_paper_static_simulation(
     if loss_curve == [] and "loss" in metrics:
         loss_curve = [float(metrics["loss"])]
 
+    paper_metrics_plot_path: Path | None = None
+    if pim_db_curve or res_db_curve or ape_db_curve:
+        try:
+            from app.execution.pim_cancellation import plot_paper_metric_curve
+
+            candidate = output_root / "paper_metrics_curve.png"
+            plot_paper_metric_curve(
+                pim_db=pim_db_curve,
+                res_db=res_db_curve,
+                ape_db=ape_db_curve,
+                path=candidate,
+                title=f"{spec.experiment_id} Training Metrics",
+            )
+            if candidate.is_file():
+                paper_metrics_plot_path = candidate
+        except Exception as exc:
+            stderr_lines.append(f"paper metrics plot failed: {exc}")
+
     _write_log(
         log_path=log_path,
         argv=argv,
@@ -203,10 +230,15 @@ async def run_paper_static_simulation(
             "repo_path": str(repo_path),
             "config_path": str(config_path),
             "data_path": str(data_path),
+            "data_source_id": str(spec.config.get("data_source_id") or ""),
+            "fs_mhz": spec.config.get("fs_mhz"),
             "python": python,
             "output_root": str(output_root),
             "summary_path": str(summary_path) if summary_path is not None else "",
             "log_path": str(log_path),
+            "paper_metrics_plot_path": (
+                str(paper_metrics_plot_path) if paper_metrics_plot_path is not None else ""
+            ),
             "returncode": returncode,
             "status": status,
             "dry_run": dry_run,

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { ChatPanel } from "@/components/ChatPanel";
 import {
   getStats,
   listRuns,
@@ -18,7 +17,6 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
   const { selectedProject } = useProject();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [showCommander, setShowCommander] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -52,27 +50,6 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
         <span className="text-[10px] text-slate-500">
           {selectedProject} · {runs.length} · {stats?.runs_running ?? 0} {t("sidebar.running")}
         </span>
-      </div>
-
-      <div className="shrink-0 rounded border border-mars-border bg-mars-bg/35">
-        <button
-          type="button"
-          onClick={() => setShowCommander((v) => !v)}
-          className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left transition hover:bg-mars-subtle/60"
-        >
-          <span className="min-w-0">
-            <span className="block text-xs font-semibold text-slate-200">Commander Agent</span>
-            <span className="block truncate text-[10px] text-slate-500">主控命令与任务入口</span>
-          </span>
-          <span className="shrink-0 rounded bg-mars-subtle px-1.5 py-0.5 text-[10px] text-slate-300">
-            {showCommander ? "收起" : "展开"}
-          </span>
-        </button>
-        {showCommander ? (
-          <div className="border-t border-mars-border p-2">
-            <ChatPanel onLinkRun={onSelectRun} />
-          </div>
-        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 space-y-1.5 overflow-auto pr-1">
