@@ -103,7 +103,9 @@ def read_reports_for_artifact(
 
 def read_all_reports(*, run_root: Path) -> list[dict[str, Any]]:
     reports: list[dict[str, Any]] = []
-    for path in sorted(run_root.glob("*/evals/*.eval.md")):
+    paths = set(run_root.glob("*/evals/*.eval.md"))
+    paths.update(run_root.glob("events/evals/*.eval.md"))
+    for path in sorted(paths):
         item = _read_report(path=path, run_root=run_root)
         if item is not None:
             reports.append(item)

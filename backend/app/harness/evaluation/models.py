@@ -15,6 +15,7 @@ from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 EvaluationScope = Literal["artifact", "run", "benchmark", "model_backend"]
 EvaluationDecision = Literal["pass", "warn", "revise", "block", "fail"]
 EvaluationSeverity = Literal["info", "low", "medium", "high", "blocker"]
+GraderType = Literal["code", "llm", "human"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,10 @@ class EvaluationReport:
     evaluator_version: int
     decision: EvaluationDecision
     blocking: bool
+    grader_type: GraderType = "code"
+    advisory: bool = False
+    requires_human_review: bool = False
+    calibration_role: str = ""
     target_schema: str | None = None
     overall_score: float | None = None
     scores: dict[str, float] = field(default_factory=dict)
@@ -72,6 +77,10 @@ class EvaluationReport:
             "target_schema": self.target_schema,
             "evaluator": self.evaluator,
             "evaluator_version": self.evaluator_version,
+            "grader_type": self.grader_type,
+            "advisory": self.advisory,
+            "requires_human_review": self.requires_human_review,
+            "calibration_role": self.calibration_role,
             "decision": self.decision,
             "overall_score": self.overall_score,
             "blocking": self.blocking,

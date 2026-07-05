@@ -39,7 +39,8 @@ def build_scorecard(
     decisions = [
         decision
         for item in report_items
-        if _is_decision(decision := item.get("decision"))
+        if not bool(item.get("advisory"))
+        and _is_decision(decision := item.get("decision"))
     ]
     overall_decision = (
         max(decisions, key=lambda d: _RANK[d]) if decisions else "pass"
@@ -47,9 +48,25 @@ def build_scorecard(
     scores = [
         float(item["overall_score"])
         for item in report_items
-        if isinstance(item.get("overall_score"), (int, float))
+        if not bool(item.get("advisory"))
+        and isinstance(item.get("overall_score"), (int, float))
+    ]
+    advisory_scores = [
+        float(item["overall_score"])
+        for item in report_items
+        if bool(item.get("advisory"))
+        and isinstance(item.get("overall_score"), (int, float))
     ]
     counts = {decision: decisions.count(decision) for decision in _RANK}
+    grader_counts = {
+        "code": sum(1 for item in report_items if item.get("grader_type") == "code"),
+        "llm": sum(1 for item in report_items if item.get("grader_type") == "llm"),
+        "human": sum(1 for item in report_items if item.get("grader_type") == "human"),
+        "advisory": sum(1 for item in report_items if bool(item.get("advisory"))),
+        "requires_human_review": sum(
+            1 for item in report_items if bool(item.get("requires_human_review"))
+        ),
+    }
     findings = _top_findings(report_items)
     return {
         "schema": "evaluation_scorecard.v1",
@@ -58,7 +75,13 @@ def build_scorecard(
         "created": datetime.now(tz=timezone.utc).isoformat(),
         "overall_decision": overall_decision,
         "overall_score": round(sum(scores) / len(scores), 6) if scores else None,
+        "advisory_score": (
+            round(sum(advisory_scores) / len(advisory_scores), 6)
+            if advisory_scores
+            else None
+        ),
         "counts": counts,
+        "grader_counts": grader_counts,
         "report_count": len(report_items),
         "finding_count": sum(len(item["findings"]) for item in report_items),
         "top_findings": findings,
@@ -89,6 +112,10 @@ def _scorecard_item(report: dict[str, Any]) -> dict[str, Any]:
         "evaluator": metadata.get("evaluator"),
         "decision": metadata.get("decision"),
         "blocking": bool(metadata.get("blocking")),
+        "grader_type": metadata.get("grader_type", "code"),
+        "advisory": bool(metadata.get("advisory", False)),
+        "requires_human_review": bool(metadata.get("requires_human_review", False)),
+        "calibration_role": metadata.get("calibration_role", ""),
         "overall_score": metadata.get("overall_score"),
         "findings": findings if isinstance(findings, list) else [],
     }

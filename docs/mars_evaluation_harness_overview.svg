@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1256" viewBox="0 0 2048 1256">
+  <defs>
+    <style>
+      .bg{fill:#f7f6ef}
+      .title{font:700 62px Arial,sans-serif;fill:#0b0b0b}
+      .h1{font:700 36px Arial,sans-serif;fill:#1f2937}
+      .h2{font:700 28px Arial,sans-serif;fill:#1f2937}
+      .txt{font:500 22px Arial,sans-serif;fill:#4b5563}
+      .small{font:700 18px Arial,sans-serif;fill:#4b5563}
+      .micro{font:700 16px Arial,sans-serif}
+      .mono{font:700 20px Menlo,Consolas,monospace}
+      .outer{fill:#fff;stroke:#7b7f78;stroke-width:4}
+      .suite{fill:#f0efff;stroke:#7b7f78;stroke-width:4}
+      .task{fill:#fffdf8;stroke:#f4a62a;stroke-width:4}
+      .taskGhost{fill:#fbfaff;stroke:#f4a62a;stroke-width:4;opacity:.45}
+      .trial{fill:#e9fbf5;stroke:#20b486;stroke-width:4}
+      .trialGhost{fill:#e9fbf5;stroke:#20b486;stroke-width:4;opacity:.28}
+      .grader{fill:#fff4f8;stroke:#e6578b;stroke-width:4}
+      .metric{fill:#eef7ff;stroke:#2f8ed8;stroke-width:4}
+      .outcome{fill:#f5f3ff;stroke:#7b7f78;stroke-width:4}
+      .run{fill:#f7f6ef;stroke:#7b7f78;stroke-width:4}
+      .arrow{stroke:#737373;stroke-width:4;fill:none;marker-end:url(#arrow)}
+      .dash{stroke-dasharray:10 10}
+    </style>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2,2 L12,7 L2,12 Z" fill="#737373"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="2048" height="1256"/>
+  <text x="1024" y="104" text-anchor="middle" class="title">MARS Evaluation Harness</text>
+
+  <rect x="50" y="165" width="1948" height="1000" rx="34" class="outer"/>
+  <text x="96" y="235" class="h1">Run-centered evaluation layer inside MARS repo</text>
+  <text x="96" y="282" class="txt">Source of truth: runs/&lt;run_id&gt; artifacts, events, context manifests, tool audit, metrics, HITL and memory.</text>
+
+  <rect x="114" y="330" width="1370" height="600" rx="12" class="suite"/>
+  <text x="160" y="400" class="h1">Evaluation Suite</text>
+
+  <rect x="172" y="450" width="920" height="465" rx="12" class="task"/>
+  <text x="210" y="507" class="h1">Task</text>
+  <text x="305" y="508" class="small">PIMC full run replay</text>
+
+  <text x="210" y="555" class="h2">Graders</text>
+  <rect x="210" y="585" width="260" height="66" rx="10" class="grader"/>
+  <text x="340" y="626" text-anchor="middle" class="mono" fill="#d9467a">run_integrity</text>
+  <rect x="495" y="585" width="260" height="66" rx="10" class="grader"/>
+  <text x="625" y="626" text-anchor="middle" class="mono" fill="#d9467a">trajectory</text>
+  <rect x="780" y="585" width="260" height="66" rx="10" class="grader"/>
+  <text x="910" y="626" text-anchor="middle" class="mono" fill="#d9467a">outcome</text>
+
+  <text x="210" y="700" class="h2">Tracked metrics</text>
+  <rect x="210" y="730" width="170" height="60" rx="10" class="metric"/>
+  <text x="295" y="768" text-anchor="middle" class="mono" fill="#2478bd">n_turns</text>
+  <rect x="405" y="730" width="210" height="60" rx="10" class="metric"/>
+  <text x="510" y="768" text-anchor="middle" class="mono" fill="#2478bd">n_toolcalls</text>
+  <rect x="640" y="730" width="155" height="60" rx="10" class="metric"/>
+  <text x="718" y="768" text-anchor="middle" class="mono" fill="#2478bd">tokens</text>
+  <rect x="820" y="730" width="165" height="60" rx="10" class="metric"/>
+  <text x="903" y="768" text-anchor="middle" class="mono" fill="#2478bd">latency</text>
+
+  <text x="210" y="827" class="h2">Trials</text>
+  <rect x="238" y="832" width="420" height="60" rx="10" class="trialGhost"/>
+  <rect x="228" y="840" width="420" height="60" rx="10" class="trialGhost"/>
+  <rect x="218" y="848" width="420" height="60" rx="10" class="trial"/>
+  <text x="242" y="875" class="mono" fill="#13966d">Trial #4 = one run_id</text>
+  <text x="242" y="900" class="micro" fill="#13966d">Trajectory = events/tools/context/artifacts/metrics</text>
+
+  <rect x="1118" y="450" width="198" height="420" rx="12" class="taskGhost"/>
+  <text x="1140" y="505" class="h1" fill="#999">Task</text>
+  <text x="1140" y="552" class="txt" fill="#999">...</text>
+  <rect x="1340" y="450" width="104" height="420" rx="12" class="taskGhost"/>
+
+  <rect x="1620" y="548" width="268" height="104" rx="12" class="run"/>
+  <text x="1754" y="612" text-anchor="middle" class="h1">MARS Run</text>
+  <path d="M1484 600 H1614" class="arrow dash"/>
+  <path d="M1614 640 H1484" class="arrow dash"/>
+
+  <path d="M805 930 V995" class="arrow"/>
+  <rect x="625" y="995" width="390" height="108" rx="12" class="outcome"/>
+  <text x="820" y="1045" text-anchor="middle" class="h1">Outcome</text>
+  <text x="820" y="1080" text-anchor="middle" class="txt">approved artifacts + metrics</text>
+
+  <rect x="1100" y="995" width="440" height="108" rx="12" class="grader"/>
+  <text x="1320" y="1045" text-anchor="middle" class="h1">Grader Evaluate</text>
+  <text x="1320" y="1080" text-anchor="middle" class="txt">trajectory + outcome -&gt; scores</text>
+  <path d="M1015 1048 H1094" class="arrow"/>
+
+  <rect x="1612" y="895" width="315" height="208" rx="12" class="outer"/>
+  <text x="1769" y="946" text-anchor="middle" class="h2">Outputs</text>
+  <text x="1655" y="995" class="small">evaluation_report.md</text>
+  <text x="1655" y="1040" class="small">evaluation_scorecard.json</text>
+  <text x="1655" y="1085" class="small">self_evolution_candidates</text>
+  <path d="M1540 1048 H1606" class="arrow"/>
+</svg>

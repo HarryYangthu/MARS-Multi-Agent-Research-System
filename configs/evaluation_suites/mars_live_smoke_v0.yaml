@@ -1,0 +1,59 @@
+id: mars_live_smoke_v0
+mode: live
+description: >
+  Fast live smoke suite. It creates a fresh MARS run through the API and starts
+  at the execution node so live evaluation can verify orchestration, tool audit,
+  metrics, reports, and self-evolution export without waiting for a full
+  multi-agent research pipeline.
+
+tasks:
+  - id: execution_live_smoke
+    task: staticpimc_eval_smoke
+    project: pimc
+    entrypoint: execution
+    standalone: true
+    trials: 1
+    input:
+      user_request: >
+        Run the mock/static PIMC execution path and produce a schema-valid
+        run log, metrics, curves, and tool audit.
+
+expected_outcome:
+  required_dirs:
+    - input
+    - context
+    - execution
+    - hitl
+    - events
+    - memory
+  required_artifacts:
+    - execution/run_log.approved.md
+  required_event_files:
+    - events/tool_calls.jsonl
+    - events/evaluation_events.jsonl
+  require_context_manifest: true
+  require_tool_audit: true
+  require_execution_metrics: true
+  require_report_chain_refs: false
+  expected_gates: []
+  expected_entrypoint: execution
+  expected_stages:
+    - execution
+
+graders:
+  - run_integrity.required_outcome
+  - trajectory.audit_coverage
+  - outcome.execution_and_report
+  - gate_behavior.expected
+  - multi_agent.collaboration_quality
+  - llm_rubric.advisory
+  - human_review.queue
+
+metrics:
+  - n_toolcalls
+  - context_manifest_coverage
+  - execution_metrics
+  - advisory_score
+  - human_review_queue_count
+  - pass_at_k
+  - pass_power_k

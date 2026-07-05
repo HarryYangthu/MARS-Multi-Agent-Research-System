@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.harness.kb.memory_writer import write_to_zone
+from app.harness.kb.models import memory_from_kb_record
 from app.harness.kb.retriever import query as kb_query
 from app.harness.kb.stores import MAIN_ZONES, QUARANTINE_ZONE, get_stores
 
@@ -32,6 +34,13 @@ class KBItem(BaseModel):
 class SearchHit(BaseModel):
     score: float
     item: KBItem
+
+
+class QuarantineReviewRequest(BaseModel):
+    action: str
+    target_zone: str | None = None
+    reviewer_note: str = ""
+    superseded_by: str = ""
 
 
 _LABELS_ZH: dict[str, str] = {
@@ -134,6 +143,80 @@ async def search_quarantine(
     return [SearchHit(score=h.score, item=_to_item(h.record)) for h in hits]
 
 
+@router.post("/quarantine/{record_id}/review", response_model=KBItem)
+async def review_quarantine_item(
+    record_id: str,
+    payload: QuarantineReviewRequest,
+) -> KBItem:
+    action = payload.action.strip().lower()
+    if action not in {"approve", "reject", "stale", "supersede"}:
+        raise HTTPException(status_code=400, detail=f"unsupported action '{payload.action}'")
+    s = get_stores()
+    records = s.zone(QUARANTINE_ZONE).all(exclude_mock=False, exclude_superseded=False)
+    record = next((item for item in records if item.id == record_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"quarantine record '{record_id}' not found")
+    if action == "approve":
+        memory = memory_from_kb_record(
+            record_id=record.id,
+            zone=record.zone,
+            text=record.text,
+            metadata=record.metadata,
+        )
+        if memory.is_mock:
+            raise HTTPException(status_code=409, detail="mock memory cannot be promoted to main zones")
+        target_zone = payload.target_zone or _target_zone_from_metadata(record.metadata)
+        if target_zone not in MAIN_ZONES:
+            raise HTTPException(status_code=400, detail=f"invalid target zone '{target_zone}'")
+        metadata = {
+            **record.metadata,
+            "approved": True,
+            "review_status": "approved",
+            "reviewer_note": payload.reviewer_note,
+        }
+        write_to_zone(
+            zone=target_zone,
+            text=record.text,
+            metadata=metadata,
+            memory_type=memory.memory_type,
+            source_path=memory.source_path,
+            run_id=memory.run_id,
+            agent=memory.agent,
+            schema=memory.schema,
+            is_mock=False,
+            confidence=memory.confidence,
+            eval_status=memory.eval_status,
+            salience=memory.salience,
+            ttl_days=memory.ttl_days,
+            approved=True,
+        )
+        s.update_metadata(
+            QUARANTINE_ZONE,
+            record.id,
+            {"review_status": "approved", "superseded_by": f"promoted:{target_zone}"},
+        )
+    else:
+        patch: dict[str, Any] = {
+            "review_status": action,
+            "reviewer_note": payload.reviewer_note,
+            "approved": False,
+        }
+        if action == "supersede" and payload.superseded_by:
+            patch["superseded_by"] = payload.superseded_by
+        s.update_metadata(QUARANTINE_ZONE, record.id, patch)
+    refreshed = next(
+        (
+            item
+            for item in s.zone(QUARANTINE_ZONE).all(
+                exclude_mock=False, exclude_superseded=False
+            )
+            if item.id == record_id
+        ),
+        record,
+    )
+    return _to_item(refreshed)
+
+
 @router.get("/{zone}/items", response_model=list[KBItem])
 async def list_items(zone: str, limit: int = 20) -> list[KBItem]:
     s = get_stores()
@@ -190,3 +273,17 @@ def _filters(
     if memory_type:
         filters["memory_type"] = memory_type
     return filters or None
+
+
+def _target_zone_from_metadata(metadata: dict[str, Any]) -> str:
+    raw_zone = str(metadata.get("target_zone", "") or metadata.get("original_zone", "") or "")
+    if raw_zone in MAIN_ZONES:
+        return raw_zone
+    kind = str(metadata.get("kind", "") or "").lower()
+    if "code" in kind:
+        return "code_assets"
+    if "run" in kind or "execution" in kind:
+        return "run_archive"
+    if "literature" in kind or "paper" in kind:
+        return "literature"
+    return "methodology"

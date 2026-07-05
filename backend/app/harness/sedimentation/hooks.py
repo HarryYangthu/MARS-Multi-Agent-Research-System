@@ -13,6 +13,7 @@ from app.harness.evaluation.runner import EvaluationRunner
 from app.harness.kb.config import MemoryProfile, current_profile, lifecycle_config, mock_policy, write_gate
 from app.harness.kb.models import EvalStatus, infer_memory_type
 from app.harness.kb.stores import QUARANTINE_ZONE
+from app.harness.memory.importance import calculate_importance
 from app.harness.schema.frontmatter_parser import parse as fm_parse
 from app.harness.sedimentation.asset_metadata import make as make_metadata
 from app.harness.sedimentation.extractors import run_extractor
@@ -85,6 +86,9 @@ def sediment_approved_artifact(
     if is_mock:
         target_zone_override = str(mock_policy().get("zone", QUARANTINE_ZONE) or QUARANTINE_ZONE)
         blocked_reason = "mock_quarantine"
+    elif bool(gate.get("require_real_execution", False)) and _requires_real_execution(run=run):
+        target_zone_override = QUARANTINE_ZONE
+        blocked_reason = "real_execution_required"
     elif bool(gate.get("require_eval_pass", False)) and not eval_passed:
         target_zone_override = QUARANTINE_ZONE
         blocked_reason = "eval_not_passed"
@@ -301,14 +305,21 @@ def _detect_mock(*, text: str, metadata: dict[str, Any], run: RunLike) -> bool:
 
 
 def _salience(*, agent: str, metadata: dict[str, Any], text: str) -> float:
+    importance = calculate_importance(agent=agent, metadata=metadata, text=text)
+    base = importance.score
     if metadata.get("quality_warnings"):
-        return 0.65
+        base = max(base, 0.65)
     if agent == "execution":
-        return 0.8
-    lowered = text.lower()
-    if "fail" in lowered or "失败" in text or "意外" in text:
-        return 0.85
-    return 0.55
+        base = max(base, 0.8)
+    return max(0.0, min(1.0, base))
+
+
+def _requires_real_execution(*, run: RunLike) -> bool:
+    raw_mock = str(run.meta.get("mock", "")).lower()
+    if raw_mock in {"1", "true", "yes"}:
+        return True
+    raw_execution = str(run.meta.get("execution_mode", "")).lower()
+    return raw_execution in {"mock", "mock_simulation"}
 
 
 def _relative_to_repo_or_run(*, run: RunLike, path: Path) -> str:

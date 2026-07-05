@@ -30,6 +30,8 @@ def select_memory(
     project: str | None = None,
     include_mock: bool = False,
     include_superseded: bool = False,
+    approved_only: bool = True,
+    update_access: bool = True,
     stores: KBStores | None = None,
 ) -> list[MemoryHit]:
     selected_zones = list(zones or MAIN_ZONES)
@@ -39,12 +41,15 @@ def select_memory(
     weights = weights_raw if isinstance(weights_raw, dict) else {}
     q_vec = embed(query)
     q_terms = set(tokenize(query))
+    graph_related = _graph_related_ids(query=query, stores=s)
     hits: list[MemoryHit] = []
     filters: dict[str, Any] = {}
     if memory_type:
         filters["memory_type"] = memory_type
     if project:
         filters["project"] = project
+    if approved_only:
+        filters["approved"] = True
     for zone in selected_zones:
         for record in s.zone(zone).all(
             filters=filters,
@@ -60,8 +65,10 @@ def select_memory(
             sim = cosine(q_vec, record.embedding)
             lexical = _lexical_overlap(q_terms, set(tokenize(record.text)))
             combined_similarity = min(1.0, max(0.0, sim + lexical * 0.1))
+            graph_bonus = 0.08 if record.id in graph_related else 0.0
             score = (
-                combined_similarity * _weight(weights, "similarity", 0.4)
+                min(1.0, combined_similarity + graph_bonus)
+                * _weight(weights, "similarity", 0.4)
                 + _recency(memory.valid_from) * _weight(weights, "recency", 0.2)
                 + memory.confidence * _weight(weights, "confidence", 0.2)
                 + (1.0 if memory.eval_status.passed else 0.0)
@@ -78,7 +85,10 @@ def select_memory(
                 )
             )
     hits.sort(key=lambda hit: hit.score, reverse=True)
-    return hits[:top_k]
+    selected = hits[:top_k]
+    if update_access:
+        _record_access(selected, stores=s)
+    return selected
 
 
 def default_include_mock() -> bool:
@@ -105,3 +115,30 @@ def _recency(valid_from: str) -> float:
         return 0.4
     age_days = max(0.0, (datetime.now(tz=timezone.utc) - dt).total_seconds() / 86400)
     return math.exp(-age_days / 180.0)
+
+
+def _record_access(hits: list[MemoryHit], *, stores: KBStores) -> None:
+    now = datetime.now(tz=timezone.utc).isoformat()
+    for hit in hits:
+        raw_count = hit.record.metadata.get("access_count", 0)
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+        stores.update_metadata(
+            hit.record.zone,
+            hit.record.id,
+            {
+                "access_count": count + 1,
+                "last_accessed_at": now,
+            },
+        )
+
+
+def _graph_related_ids(*, query: str, stores: KBStores) -> set[str]:
+    try:
+        from app.harness.memory.semantic import related_record_ids
+
+        return set(related_record_ids(base=stores.base, query=query))
+    except Exception:
+        return set()
