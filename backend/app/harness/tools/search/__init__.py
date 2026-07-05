@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx as httpx
 
 from app.harness.kb.memory_writer import write_to_zone
 from app.harness.tools.registry import ToolContext, ToolResult

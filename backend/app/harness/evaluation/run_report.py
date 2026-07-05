@@ -10,12 +10,12 @@ from typing import Any
 from app.harness.evaluation.aggregation import write_scorecard
 from app.harness.evaluation.artifacts import evaluator_slug, write_report
 from app.harness.evaluation.models import EvaluationReport
+from app.harness.evaluation.run_types import EvaluationRun
 from app.harness.evaluation.run_evaluators import (
     RunEvaluator,
     default_run_evaluators,
 )
 from app.harness.evaluation.suites import EvaluationSuite, load_suite
-from app.storage.run_store import RunHandle
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class RunEvaluationResult:
 
 def evaluate_run_replay(
     *,
-    run: RunHandle,
+    run: EvaluationRun,
     suite: EvaluationSuite | None = None,
     evaluators: tuple[RunEvaluator, ...] | None = None,
 ) -> RunEvaluationResult:
@@ -74,7 +74,7 @@ def evaluate_run_replay(
     )
 
 
-def _write_run_eval_report(*, run: RunHandle, report: EvaluationReport) -> Path:
+def _write_run_eval_report(*, run: EvaluationRun, report: EvaluationReport) -> Path:
     path = (
         run.root
         / "events"
@@ -86,7 +86,7 @@ def _write_run_eval_report(*, run: RunHandle, report: EvaluationReport) -> Path:
 
 def _write_markdown_report(
     *,
-    run: RunHandle,
+    run: EvaluationRun,
     suite: EvaluationSuite,
     reports: tuple[EvaluationReport, ...],
     scorecard_path: Path,
@@ -168,7 +168,7 @@ def _write_markdown_report(
 
 def _write_human_review_queue(
     *,
-    run: RunHandle,
+    run: EvaluationRun,
     suite: EvaluationSuite,
     reports: tuple[EvaluationReport, ...],
 ) -> Path:
@@ -212,7 +212,7 @@ def _write_human_review_queue(
 
 def _write_self_evolution_candidates(
     *,
-    run: RunHandle,
+    run: EvaluationRun,
     suite: EvaluationSuite,
     reports: tuple[EvaluationReport, ...],
 ) -> Path:

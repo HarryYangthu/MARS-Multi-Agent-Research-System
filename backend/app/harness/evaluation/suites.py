@@ -8,10 +8,22 @@ from typing import Any
 import yaml
 
 from app.settings import repo_root
-from app.storage.run_store import RUN_SUBDIRS
 
 
 DEFAULT_REPLAY_SUITE = "configs/evaluation_suites/mars_run_replay_v0.yaml"
+DEFAULT_RUN_SUBDIRS: tuple[str, ...] = (
+    "input",
+    "context",
+    "idea",
+    "experiment",
+    "coding",
+    "execution",
+    "diagnosis",
+    "writing",
+    "hitl",
+    "events",
+    "memory",
+)
 
 
 @dataclass(frozen=True)
@@ -27,7 +39,7 @@ class EvaluationTask:
 
 @dataclass(frozen=True)
 class ExpectedOutcome:
-    required_dirs: tuple[str, ...] = RUN_SUBDIRS
+    required_dirs: tuple[str, ...] = DEFAULT_RUN_SUBDIRS
     required_artifacts: tuple[str, ...] = ()
     required_event_files: tuple[str, ...] = ()
     require_context_manifest: bool = True
@@ -70,7 +82,7 @@ def load_suite(path: Path | None = None) -> EvaluationSuite:
         expected=ExpectedOutcome(
             required_dirs=_str_tuple(
                 expected_raw.get("required_dirs"),
-                default=RUN_SUBDIRS,
+                default=DEFAULT_RUN_SUBDIRS,
             ),
             required_artifacts=_str_tuple(expected_raw.get("required_artifacts")),
             required_event_files=_str_tuple(expected_raw.get("required_event_files")),

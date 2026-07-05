@@ -18,16 +18,16 @@ from app.harness.evaluation.models import (
     EvaluationReport,
     EvaluationSeverity,
 )
+from app.harness.evaluation.run_types import EvaluationRun
 from app.harness.evaluation.suites import EvaluationSuite
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
-from app.storage.run_store import RunHandle
 
 
 class RunEvaluator(Protocol):
     id: str
     version: int
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         """Evaluate a run and return a normalized report."""
 
 
@@ -36,7 +36,7 @@ class RunIntegrityEvaluator:
     id: str = "run_integrity.required_outcome"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
 
@@ -141,7 +141,7 @@ class TrajectoryAuditEvaluator:
     id: str = "trajectory.audit_coverage"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
 
@@ -256,7 +256,7 @@ class OutcomeEvaluator:
     id: str = "outcome.execution_and_report"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
 
@@ -357,7 +357,7 @@ class GateBehaviorEvaluator:
     id: str = "gate_behavior.expected"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         tool_calls = _read_jsonl(run.root / "events" / "tool_calls.jsonl")
         tool_events = _read_jsonl(run.root / "events" / "tool_events.jsonl")
         all_events = tool_calls + tool_events
@@ -416,7 +416,7 @@ class MultiAgentCollaborationEvaluator:
     id: str = "multi_agent.collaboration_quality"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
 
@@ -563,7 +563,7 @@ class LLMRubricEvaluator:
     id: str = "llm_rubric.advisory"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         report_text = _approved_report_text(run.root)
         artifact_text = _approved_artifact_text(run.root)
         evidence_text = "\n\n".join(part for part in (report_text, artifact_text) if part)
@@ -654,7 +654,7 @@ class HumanReviewQueueEvaluator:
     id: str = "human_review.queue"
     version: int = 1
 
-    def evaluate_run(self, *, run: RunHandle, suite: EvaluationSuite) -> EvaluationReport:
+    def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         labels = _read_jsonl(run.root / "events" / "human_review_labels.jsonl")
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
@@ -721,7 +721,7 @@ def default_run_evaluators() -> tuple[RunEvaluator, ...]:
 
 def _report(
     *,
-    run: RunHandle,
+    run: EvaluationRun,
     evaluator: str,
     version: int,
     decision: EvaluationDecision,

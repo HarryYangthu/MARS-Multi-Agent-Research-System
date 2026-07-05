@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.harness.evaluation.run_report import RunEvaluationResult
+from app.harness.evaluation.run_types import EvaluationRun
 from app.harness.evaluation.self_evolution import (
     build_suite_self_evolution_export,
     load_run_candidates,
@@ -15,14 +16,13 @@ from app.harness.evaluation.self_evolution import (
 )
 from app.harness.evaluation.suites import EvaluationSuite
 from app.settings import repo_root
-from app.storage.run_store import RunHandle
 
 _DECISION_RANK = {"pass": 0, "warn": 1, "revise": 2, "block": 3, "fail": 4}
 
 
 @dataclass(frozen=True)
 class SuiteTrialResult:
-    run: RunHandle
+    run: EvaluationRun
     evaluation: RunEvaluationResult
 
 
