@@ -108,6 +108,9 @@ class Orchestrator:
             return recovered
         return self._sessions[run_id]
 
+    def discard_session(self, run_id: str) -> None:
+        self._sessions.pop(run_id, None)
+
     # ---------------------------------------------------------------- drive
 
     async def run(self, run_id: str) -> None:

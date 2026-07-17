@@ -50,6 +50,12 @@ class RunSummary(BaseModel):
     created_at: str
 
 
+class TrashRunSummary(RunSummary):
+    deleted_at: str
+    expires_at: str
+    days_remaining: int
+
+
 class RunDetail(RunSummary):
     states: dict[str, str]
     graph: dict[str, Any]
@@ -57,6 +63,15 @@ class RunDetail(RunSummary):
 
 class RetryAgentPayload(BaseModel):
     reason: str = ""
+
+
+def _ensure_active_run(run_id: str) -> None:
+    try:
+        run = get_run_store().get(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
 
 
 @router.post("", response_model=RunDetail)
@@ -173,8 +188,29 @@ async def list_runs(project: str = "") -> list[RunSummary]:
     ]
 
 
+@router.get("/trash", response_model=list[TrashRunSummary])
+async def list_trashed_runs(project: str = "") -> list[TrashRunSummary]:
+    store = get_run_store()
+    project_filter = project.strip()
+    return [
+        TrashRunSummary(
+            run_id=r.run_id,
+            project=r.project,
+            task=r.task,
+            entrypoint=r.entrypoint,
+            created_at=r.created_at,
+            deleted_at=r.deleted_at,
+            expires_at=r.expires_at,
+            days_remaining=r.days_remaining,
+        )
+        for r in store.list_trashed()
+        if not project_filter or r.project == project_filter
+    ]
+
+
 @router.get("/{run_id}", response_model=RunDetail)
 async def get_run(run_id: str) -> RunDetail:
+    _ensure_active_run(run_id)
     orch = get_orchestrator()
     try:
         session = orch.session(run_id)
@@ -189,6 +225,61 @@ async def get_run(run_id: str) -> RunDetail:
         states={k: s.value for k, s in session.graph.all_states().items()},
         graph=session.graph.to_dict(),
     )
+
+
+@router.delete("/{run_id}", response_model=TrashRunSummary)
+async def delete_run(run_id: str) -> TrashRunSummary:
+    store = get_run_store()
+    try:
+        trashed = store.trash(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    get_orchestrator().discard_session(run_id)
+    return TrashRunSummary(
+        run_id=trashed.run_id,
+        project=trashed.project,
+        task=trashed.task,
+        entrypoint=trashed.entrypoint,
+        created_at=trashed.created_at,
+        deleted_at=trashed.deleted_at,
+        expires_at=trashed.expires_at,
+        days_remaining=trashed.days_remaining,
+    )
+
+
+@router.post("/{run_id}/restore", response_model=RunSummary)
+async def restore_run(run_id: str) -> RunSummary:
+    store = get_run_store()
+    try:
+        restored = store.restore(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found in trash") from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RunSummary(
+        run_id=restored.run_id,
+        project=restored.project,
+        task=restored.task,
+        entrypoint=restored.entrypoint,
+        created_at=restored.created_at,
+    )
+
+
+@router.delete("/trash/{run_id}", status_code=204)
+async def permanently_delete_run(run_id: str) -> None:
+    store = get_run_store()
+    try:
+        store.delete_trashed(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run not found in trash") from exc
 
 
 @router.get("/{run_id}/observability")
@@ -215,6 +306,7 @@ async def get_run_health(run_id: str) -> dict[str, Any]:
 
 @router.post("/{run_id}/start", status_code=202)
 async def start_run(run_id: str) -> dict[str, str]:
+    _ensure_active_run(run_id)
     orch = get_orchestrator()
     try:
         session = orch.session(run_id)
@@ -234,6 +326,7 @@ async def retry_agent(
     agent: str,
     payload: RetryAgentPayload,
 ) -> dict[str, str]:
+    _ensure_active_run(run_id)
     orch = get_orchestrator()
     reason = payload.reason.strip() or "人工请求重试失败 Agent。"
     try:
@@ -256,5 +349,6 @@ async def retry_agent(
 
 @router.post("/{run_id}/stop", status_code=202)
 async def stop_run(run_id: str) -> dict[str, str]:
+    _ensure_active_run(run_id)
     # V0 has no cancellation hook; placeholder for V2.
     return {"status": "stop_requested", "run_id": run_id}

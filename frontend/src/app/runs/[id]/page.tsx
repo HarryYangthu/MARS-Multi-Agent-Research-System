@@ -3146,9 +3146,7 @@ function AgentWorkbench({
     handoff: "批准后进入下一步",
   };
   const artifactFileName = artifact ? `${artifact.stem}.${artifact.version}.md` : "";
-  const artifactShouldBePrimary = state === "waiting_review" && Boolean(artifactFileName);
   const defaultPath =
-    (artifactShouldBePrimary ? artifactFileName : "") ||
     WORKBENCH_WORKLOG_PATH ||
     artifactFileName ||
     workspaceTree?.entries.find((entry) => entry.kind === "file")?.relative_path ||
@@ -3159,9 +3157,11 @@ function AgentWorkbench({
   const [contextRun, setContextRun] = useState<ContextRunView | null>(null);
   const [selectedManifest, setSelectedManifest] = useState<ContextManifestV2 | null>(null);
   const [workLog, setWorkLog] = useState<WorkLogView | null>(null);
+  const [workLogError, setWorkLogError] = useState("");
+  const [workLogLoading, setWorkLogLoading] = useState(false);
   const [explorerSidebarCollapsed, setExplorerSidebarCollapsed] = useState(false);
   const [processSidebarCollapsed, setProcessSidebarCollapsed] = useState(false);
-  const autoOpenedReviewArtifactRef = useRef("");
+  const previousArtifactFileNameRef = useRef("");
   const spans = trace?.spans.filter((span) => spanBelongsToAgent(span, agent)) ?? [];
   const tools = buildReactToolSteps(toolCalls, agent);
   const agentEvents = events.filter((event) => metaText(asRecord(event.payload), "agent") === agent);
@@ -3189,7 +3189,7 @@ function AgentWorkbench({
   const displayPath = selectedContextFile
     ? selectedContextFile.path
     : isWorkLogPane
-      ? "工作内容"
+      ? "任务处理记录"
     : isResearchSitesPane
       ? "网址源"
       : isCodeRepositoriesPane
@@ -3217,13 +3217,21 @@ function AgentWorkbench({
   }, [defaultPath, selectedPath]);
 
   useEffect(() => {
-    const key = `${agent}:${artifactFileName}:${state}`;
-    if (!artifactShouldBePrimary || !artifactFileName || autoOpenedReviewArtifactRef.current === key) {
+    previousArtifactFileNameRef.current = "";
+    setSelectedPath(WORKBENCH_WORKLOG_PATH);
+  }, [agent]);
+
+  useEffect(() => {
+    if (!artifactFileName) {
+      previousArtifactFileNameRef.current = "";
       return;
     }
-    autoOpenedReviewArtifactRef.current = key;
-    setSelectedPath(artifactFileName);
-  }, [agent, artifactFileName, artifactShouldBePrimary, state]);
+    if (previousArtifactFileNameRef.current === artifactFileName) {
+      return;
+    }
+    previousArtifactFileNameRef.current = artifactFileName;
+    setSelectedPath((current) => (current && current !== WORKBENCH_WORKLOG_PATH ? current : WORKBENCH_WORKLOG_PATH));
+  }, [artifactFileName]);
 
   useEffect(() => {
     let alive = true;
@@ -3302,19 +3310,30 @@ function AgentWorkbench({
 
   useEffect(() => {
     let alive = true;
-    setWorkLog(null);
+    setWorkLogError("");
+    setWorkLogLoading(true);
     if (!run?.run_id) {
+      setWorkLog(null);
+      setWorkLogLoading(false);
       return () => {
         alive = false;
       };
     }
+    setWorkLog((current) =>
+      current?.run_id === run.run_id && current.agent === agent ? current : null,
+    );
     const refresh = (): void => {
       void getRunWorkLog(run.run_id, agent)
         .then((next) => {
-          if (alive) setWorkLog(next);
+          if (!alive) return;
+          setWorkLog(next);
+          setWorkLogError("");
+          setWorkLogLoading(false);
         })
-        .catch(() => {
-          if (alive) setWorkLog(null);
+        .catch((error) => {
+          if (!alive) return;
+          setWorkLogError(error instanceof Error ? error.message : String(error));
+          setWorkLogLoading(false);
         });
     };
     refresh();
@@ -3500,11 +3519,11 @@ function AgentWorkbench({
               </button>
             </div>
           ) : null}
-          {artifact && !isArtifactPane ? (
+          {artifact && !isArtifactPane && !isWorkLogPane ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-fuchsia-500/25 bg-fuchsia-500/10 px-3 py-2 text-xs text-fuchsia-100">
               <span>
                 当前产物是 <span className="font-mono">{artifactFileName}</span>，现在中间区域显示的是
-                {isWorkLogPane ? "工作内容" : "所选文件"}。
+                {isWorkLogPane ? "任务处理记录" : "所选文件"}。
               </span>
               <button
                 type="button"
@@ -3518,10 +3537,13 @@ function AgentWorkbench({
           {isWorkLogPane ? (
             <WorkbenchWorkLogPanel
               workLog={workLog}
+              workLogError={workLogError}
+              workLogLoading={workLogLoading}
               agent={agent}
               state={state}
               artifact={artifact}
               onOpenTimeline={onOpenTimeline}
+              onOpenArtifact={() => setSelectedPath(artifactFileName)}
             />
           ) : isResearchSitesPane ? (
             <WorkbenchResearchSitesPanel
@@ -3741,7 +3763,7 @@ function WorkbenchExplorer({
         <>
           <ExplorerNodeRow
             node={{
-              name: "工作内容",
+              name: "任务处理记录",
               path: WORKBENCH_WORKLOG_PATH,
               kind: "file",
               children: [],
@@ -4227,21 +4249,32 @@ function WorkbenchContextFilePreview({
 
 function WorkbenchWorkLogPanel({
   workLog,
+  workLogError,
+  workLogLoading,
   agent,
   state,
   artifact,
+  onOpenArtifact,
   onOpenTimeline,
 }: {
   workLog: WorkLogView | null;
+  workLogError: string;
+  workLogLoading: boolean;
   agent: string;
   state: string;
   artifact: ArtifactView | null;
+  onOpenArtifact: () => void;
   onOpenTimeline: () => void;
 }): JSX.Element {
   const items = workLog?.items ?? [];
   const latest = items.at(-1);
   const elapsed = workLog?.elapsed_seconds ?? latest?.elapsed_seconds ?? null;
   const nextAction = latest?.next_action || agentNextAction(agent, state, artifact);
+  const contextCount = items.filter((item) => item.kind === "context").length;
+  const toolCount = items.filter((item) => item.kind === "tool").length;
+  const feedbackCount = items.filter((item) => item.kind === "human_feedback" || item.kind === "revision").length;
+  const artifactCount = items.filter((item) => item.kind === "artifact" || item.kind === "hitl" || item.kind === "evaluation").length;
+  const workFinished = ["approved", "done", "failed", "skipped", "waiting_review"].includes(state);
   const copy = AGENT_WORK_COPY[agent] ?? {
     title: "Agent 工作区",
     purpose: "查看当前 Agent 的产物、上下文、评估和运行证据。",
@@ -4262,9 +4295,12 @@ function WorkbenchWorkLogPanel({
                 已处理 {formatWorkLogElapsed(elapsed)}
               </span>
             </div>
-            <h3 className="mt-2 text-base font-semibold text-slate-100">工作内容</h3>
+            <h3 className="mt-2 text-base font-semibold text-slate-100">任务处理记录</h3>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-400">
-              {latest?.detail || `${copy.title}会在这里展示可公开过程摘要、工具动作、人工反馈、证据沉淀和下一步。`}
+              {latest?.detail || `${copy.title}会在这里展示过程摘要、工具动作、人工反馈、证据沉淀和下一步。`}
+            </p>
+            <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-slate-500">
+              这里展示可审计摘要与真实工作轨迹：上下文、工具、返工原因、评价、产物写入和下一步。
             </p>
             <p className="mt-2 text-xs leading-relaxed text-cyan-100">
               下一步：{nextAction}
@@ -4280,39 +4316,74 @@ function WorkbenchWorkLogPanel({
         </div>
       </div>
 
-      <div className="grid min-h-[580px] gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <ol className="max-h-[calc(100vh-260px)] min-h-[580px] overflow-auto p-4">
-          {items.length > 0 ? (
-            items.map((item) => (
-              <WorkLogRow key={item.id} item={item} />
-            ))
-          ) : (
-            <li className="rounded border border-dashed border-mars-border px-3 py-12 text-center text-sm text-slate-500">
-              {state === "pending" ? "等待上游 Agent 交接，启动后这里会出现真实工作过程。" : "正在等待工作事件。"}
-            </li>
-          )}
-        </ol>
-        <aside className="border-t border-mars-border bg-mars-panel/25 p-4 xl:border-l xl:border-t-0">
-          <h4 className="text-xs font-semibold uppercase text-slate-500">本轮状态</h4>
-          <div className="mt-3 space-y-2 text-xs">
-            <WorkLogFact label="Run" value={workLog?.run_id ?? "-"} mono />
-            <WorkLogFact label="Agent" value={agentLabel(agent)} />
-            <WorkLogFact label="状态" value={state} />
-            <WorkLogFact
-              label="产物"
-              value={artifact ? `${artifact.stem}.${artifact.version}.md` : "未生成"}
-              mono
-            />
-            <WorkLogFact
-              label="过程事件"
-              value={`${items.length}`}
-            />
-          </div>
-          <div className="mt-5 rounded border border-cyan-500/25 bg-cyan-500/10 p-3 text-xs leading-relaxed text-cyan-50">
-            这里不是模型私有草稿，而是从真实事件、工具调用、评价、工作区文件和人工反馈中整理出的过程摘要。
-          </div>
-        </aside>
+      {workFinished ? (
+        <WorkLogResultSummary
+          agent={agent}
+          artifact={artifact}
+          elapsed={elapsed}
+          itemCount={items.length}
+          latest={latest}
+          onOpenArtifact={onOpenArtifact}
+          state={state}
+        />
+      ) : null}
+
+      <div className="grid gap-2 border-b border-mars-border bg-mars-panel/15 p-3 sm:grid-cols-2 xl:grid-cols-4">
+        <WorkLogMetric label="上下文装载" value={`${contextCount}`} detail="prompt 输入包、规则和上游交接" />
+        <WorkLogMetric label="工具调用" value={`${toolCount}`} detail="KB、baseline、执行等外部动作" />
+        <WorkLogMetric label="人工反馈" value={`${feedbackCount}`} detail="驳回意见、返工触发和修订原因" />
+        <WorkLogMetric label="产物/审核" value={`${artifactCount}`} detail="产物写入、评价和 HITL 状态" />
       </div>
+
+      <details open={!workFinished} className="group">
+        <summary className="flex cursor-pointer select-none items-center justify-between gap-3 border-b border-mars-border bg-mars-panel/10 px-4 py-2 text-sm text-slate-200 marker:content-none hover:bg-mars-panel/25">
+          <span className="flex items-center gap-2">
+            <span className="font-medium">{workFinished ? "处理过程" : "实时处理过程"}</span>
+            <span className="font-mono text-xs text-slate-500">已处理 {formatWorkLogElapsed(elapsed)}</span>
+          </span>
+          <span className="text-xs text-slate-500 transition group-open:rotate-90">›</span>
+        </summary>
+        <div className="grid min-h-[520px] gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <ol className="max-h-[calc(100vh-300px)] min-h-[520px] overflow-auto p-4">
+            {items.length > 0 ? (
+              items.map((item) => (
+                <WorkLogRow key={item.id} item={item} />
+              ))
+            ) : (
+              <li className="rounded border border-dashed border-mars-border px-3 py-12 text-center text-sm text-slate-500">
+                {workLogLoading
+                  ? "正在加载处理记录。"
+                  : workLogError
+                    ? `处理记录加载失败：${workLogError}`
+                    : state === "pending"
+                      ? "等待上游 Agent 交接，启动后这里会出现真实工作过程。"
+                      : "当前还没有聚合到处理记录，可先查看右侧执行流或原始执行流。"}
+              </li>
+            )}
+          </ol>
+          <aside className="border-t border-mars-border bg-mars-panel/25 p-4 xl:border-l xl:border-t-0">
+            <h4 className="text-xs font-semibold uppercase text-slate-500">本轮状态</h4>
+            <div className="mt-3 space-y-2 text-xs">
+              <WorkLogFact label="Run" value={workLog?.run_id ?? "-"} mono />
+              <WorkLogFact label="Agent" value={agentLabel(agent)} />
+              <WorkLogFact label="状态" value={state} />
+              <WorkLogFact
+                label="产物"
+                value={artifact ? `${artifact.stem}.${artifact.version}.md` : "未生成"}
+                mono
+              />
+              <WorkLogFact
+                label="过程事件"
+                value={`${items.length}`}
+              />
+              <WorkLogFact
+                label="显示范围"
+                value="过程摘要 + 工作轨迹"
+              />
+            </div>
+          </aside>
+        </div>
+      </details>
     </section>
   );
 }
@@ -4368,6 +4439,114 @@ function WorkLogRow({ item }: { item: WorkLogItem }): JSX.Element {
       </article>
     </li>
   );
+}
+
+function WorkLogResultSummary({
+  agent,
+  artifact,
+  elapsed,
+  itemCount,
+  latest,
+  onOpenArtifact,
+  state,
+}: {
+  agent: string;
+  artifact: ArtifactView | null;
+  elapsed: number | null | undefined;
+  itemCount: number;
+  latest: WorkLogItem | undefined;
+  onOpenArtifact: () => void;
+  state: string;
+}): JSX.Element {
+  const artifactName = artifact ? `${artifact.stem}.${artifact.version}.md` : "";
+  const summary = workLogResultText({ agent, artifactName, latest, state });
+  return (
+    <div className="border-b border-mars-border bg-mars-bg/70 p-4">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded border border-mars-border bg-mars-panel/35 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-mars-bg px-2 py-0.5 font-mono text-xs text-slate-300">
+              已处理 {formatWorkLogElapsed(elapsed)}
+            </span>
+            <StateBadge state={state} />
+            <span className="rounded bg-mars-bg px-2 py-0.5 text-xs text-slate-400">
+              {itemCount} 条过程记录
+            </span>
+          </div>
+          <h4 className="mt-3 text-sm font-semibold text-slate-100">结果摘要</h4>
+          <p className="mt-1 text-xs leading-relaxed text-slate-300">{summary}</p>
+          {latest?.next_action ? (
+            <p className="mt-2 text-xs leading-relaxed text-cyan-100">
+              下一步：{latest.next_action}
+            </p>
+          ) : null}
+        </div>
+        <div className="rounded border border-cyan-500/30 bg-cyan-500/10 p-3">
+          <div className="text-[11px] font-semibold uppercase text-cyan-200">产物</div>
+          {artifact ? (
+            <>
+              <div className="mt-2 break-all font-mono text-xs text-cyan-50">{artifactName}</div>
+              <p className="mt-1 line-clamp-2 break-all font-mono text-[10px] text-cyan-200/80">
+                {artifact.path}
+              </p>
+              <button
+                type="button"
+                onClick={onOpenArtifact}
+                className="mt-3 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20"
+              >
+                查看产物正文
+              </button>
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-slate-400">当前还没有生成可查看产物。</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkLogMetric({
+  detail,
+  label,
+  value,
+}: {
+  detail: string;
+  label: string;
+  value: string;
+}): JSX.Element {
+  return (
+    <div className="rounded border border-mars-border bg-mars-bg/45 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-slate-500">{label}</span>
+        <span className="font-mono text-sm font-semibold text-slate-100">{value}</span>
+      </div>
+      <p className="mt-1 truncate text-[10px] text-slate-500">{detail}</p>
+    </div>
+  );
+}
+
+function workLogResultText({
+  agent,
+  artifactName,
+  latest,
+  state,
+}: {
+  agent: string;
+  artifactName: string;
+  latest: WorkLogItem | undefined;
+  state: string;
+}): string {
+  if (state === "failed") {
+    return `${agentLabel(agent)} 执行失败，已保留过程记录、工具证据和最近状态，建议展开处理过程或查看原始执行流定位原因。`;
+  }
+  if (state === "waiting_review") {
+    return `${agentLabel(agent)} 已完成本轮生成，产物${artifactName ? ` ${artifactName}` : ""} 正在等待人工审核。`;
+  }
+  if (artifactName) {
+    return `${agentLabel(agent)} 已完成本轮处理，关键过程已沉淀，产物 ${artifactName} 可作为后续 Agent 的输入。`;
+  }
+  return latest?.detail || `${agentLabel(agent)} 已结束本轮处理，过程记录已沉淀。`;
 }
 
 function WorkLogFact({

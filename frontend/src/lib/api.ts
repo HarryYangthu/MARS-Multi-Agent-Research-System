@@ -38,6 +38,12 @@ export type RunSummary = {
   created_at: string;
 };
 
+export type TrashRunSummary = RunSummary & {
+  deleted_at: string;
+  expires_at: string;
+  days_remaining: number;
+};
+
 export type GraphNode = { key: string; kind: string; state: string; metadata: Record<string, unknown> };
 export type GraphEdge = { src: string; dst: string };
 export type RunDetail = RunSummary & {
@@ -1034,6 +1040,13 @@ export async function listRuns(project?: string): Promise<RunSummary[]> {
   }
   return jsonOrThrow(await fetch(url));
 }
+export async function listTrashedRuns(project?: string): Promise<TrashRunSummary[]> {
+  const url = apiUrl(`${BASE}/api/runs/trash`);
+  if (project) {
+    url.searchParams.set("project", project);
+  }
+  return jsonOrThrow(await fetch(url));
+}
 export async function getRun(runId: string): Promise<RunDetail> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}`));
 }
@@ -1067,6 +1080,28 @@ export async function createRun(body: {
 }
 export async function startRun(runId: string): Promise<{ status: string }> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/start`, { method: "POST" }));
+}
+
+export async function deleteRun(runId: string): Promise<TrashRunSummary> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/runs/${encodeURIComponent(runId)}`, { method: "DELETE" }),
+  );
+}
+
+export async function restoreRun(runId: string): Promise<RunSummary> {
+  return jsonOrThrow(
+    await fetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/restore`, { method: "POST" }),
+  );
+}
+
+export async function permanentlyDeleteRun(runId: string): Promise<void> {
+  const response = await fetch(`${BASE}/api/runs/trash/${encodeURIComponent(runId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(errorDetailText(response.status, text));
+  }
 }
 
 export async function uploadDataSource(params: {
