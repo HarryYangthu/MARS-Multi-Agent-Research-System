@@ -1,16 +1,23 @@
 """REST API for model discovery and run-local Idea Discovery artifacts."""
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.bridge.discovery_service import DiscoveryService, DiscoveryServiceError
+from app.bridge.discovery_service import (
+    DiscoveryService,
+    DiscoveryServiceError,
+    IdeaSelectionRequest,
+)
 from app.bridge.discovery_types import DiscoveryReplayView, DiscoveryRunSpec, DiscoveryRunView
 
 router = APIRouter(prefix="/api", tags=["discovery"])
 _configured_service: DiscoveryService | None = None
+IdeaSelectionHandler = Callable[[IdeaSelectionRequest], Awaitable[str]]
+_configured_idea_selection_handler: IdeaSelectionHandler | None = None
 
 
 class CreateDiscoveryRequest(BaseModel):
@@ -50,6 +57,11 @@ class HypothesisActionRequest(BaseModel):
 def configure_discovery_service(service: DiscoveryService | None) -> None:
     global _configured_service
     _configured_service = service
+
+
+def configure_idea_selection_handler(handler: IdeaSelectionHandler | None) -> None:
+    global _configured_idea_selection_handler
+    _configured_idea_selection_handler = handler
 
 
 def get_discovery_service() -> DiscoveryService:
@@ -141,7 +153,7 @@ def idea_hypotheses(run_id: str, service: Service) -> dict[str, object]:
 
 
 @router.post("/runs/{run_id}/idea-discovery/select")
-def select_idea_hypothesis(
+async def select_idea_hypothesis(
     run_id: str,
     payload: SelectHypothesisRequest,
     service: Service,
@@ -152,13 +164,13 @@ def select_idea_hypothesis(
             hypothesis_id=payload.hypothesis_id,
             idempotency_key=payload.idempotency_key,
         )
-        return selection.model_dump(mode="json")
+        return await _materialize_idea_selection(selection)
     except DiscoveryServiceError as exc:
         _raise_api_error(exc)
 
 
 @router.post("/runs/{run_id}/idea-discovery/hypotheses/{hypothesis_id}/select")
-def select_idea_hypothesis_action(
+async def select_idea_hypothesis_action(
     run_id: str,
     hypothesis_id: str,
     payload: HypothesisActionRequest,
@@ -175,6 +187,22 @@ def select_idea_hypothesis_action(
             actor=payload.actor,
             reason=payload.reason,
         )
-        return selection.model_dump(mode="json")
+        return await _materialize_idea_selection(selection)
     except DiscoveryServiceError as exc:
         _raise_api_error(exc)
+
+
+async def _materialize_idea_selection(
+    selection: IdeaSelectionRequest,
+) -> dict[str, object]:
+    payload = selection.model_dump(mode="json")
+    if _configured_idea_selection_handler is None:
+        return {**payload, "status": "pending"}
+    try:
+        proposal_ref = await _configured_idea_selection_handler(selection)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "idea_selection_failed", "message": str(exc)},
+        ) from exc
+    return {**payload, "status": "completed", "proposal_ref": proposal_ref}

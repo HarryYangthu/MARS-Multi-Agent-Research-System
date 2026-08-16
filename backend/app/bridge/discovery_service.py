@@ -48,6 +48,7 @@ from app.storage.discovery_common import (
     read_json,
     stable_key,
 )
+from app.storage.artifact_store import ArtifactStore
 from app.storage.run_store import RunHandle, RunStore
 
 
@@ -366,9 +367,7 @@ class DiscoveryService:
             or pool.get("selected_hypothesis_id")
             or ""
         )
-        proposal_ref = str(selection.get("proposal_ref") or "")
-        if selection and not proposal_ref:
-            proposal_ref = "idea/discovery/selection.v1.json"
+        proposal_ref = self._proposal_ref(run) if selection else ""
         round_index = max(
             (
                 int(item.get("round_index", 0))
@@ -1140,10 +1139,17 @@ class DiscoveryService:
             payload = read_json(authoritative)
             if isinstance(payload, dict) and payload.get("proposal_ref"):
                 return str(payload["proposal_ref"])
-        candidates = sorted((run.root / "idea").glob("proposal*.md"))
+        candidates = [
+            item
+            for item in ArtifactStore(run).list_versions(
+                agent_dir="idea",
+                stem="idea_proposal",
+            )
+            if item.version != "approved"
+        ]
         if not candidates:
             return ""
-        return candidates[-1].relative_to(run.root).as_posix()
+        return candidates[-1].path.relative_to(run.root).as_posix()
 
     @staticmethod
     def _artifact_mapping(

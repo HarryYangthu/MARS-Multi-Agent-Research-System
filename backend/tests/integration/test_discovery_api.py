@@ -6,8 +6,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.discovery import configure_discovery_service, router
-from app.bridge.discovery_service import DiscoveryService
+from app.api.discovery import (
+    configure_discovery_service,
+    configure_idea_selection_handler,
+    router,
+)
+from app.bridge.discovery_service import DiscoveryService, IdeaSelectionRequest
 from app.harness.runtime.event_bus import InProcessEventBus
 from app.storage.run_store import RunStore
 from tests.unit.bridge.test_discovery_service import (
@@ -18,6 +22,7 @@ from tests.unit.bridge.test_discovery_service import (
 
 
 def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
+    configure_idea_selection_handler(None)
     service = DiscoveryService(
         run_store=RunStore(tmp_path / "runs"),
         event_bus=InProcessEventBus(),
@@ -158,12 +163,19 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
     request_ref = str(selected.json()["selection_request_ref"])
     assert (run.root / request_ref).exists()
 
+    async def materialize_selection(_: IdeaSelectionRequest) -> str:
+        return "idea/idea_proposal.v2.md"
+
+    configure_idea_selection_handler(materialize_selection)
     action_selected = client.post(
         f"/api/runs/{run_id}/idea-discovery/hypotheses/hyp-1/select",
         json={"actor": "researcher", "reason": "best synthetic hypothesis"},
     )
     assert action_selected.status_code == 200
     assert action_selected.json()["actor"] == "researcher"
+    assert action_selected.json()["status"] == "completed"
+    assert action_selected.json()["proposal_ref"] == "idea/idea_proposal.v2.md"
+    configure_idea_selection_handler(None)
 
     (hypothesis_dir / "selection.v1.json").write_text(
         json.dumps(
@@ -197,7 +209,7 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
     assert len(payload["meta_reviews"]) == 1
     assert payload["finalist_ids"] == ["hyp-2", "hyp-1"]
     assert payload["selected_id"] == "hyp-2"
-    assert payload["proposal_ref"] == "idea/discovery/selection.v1.json"
+    assert payload["proposal_ref"] == ""
     assert payload["selection"]["hypothesis_id"] == "hyp-2"
     assert "hypothesis_pool.v1.json" in payload["artifacts"]
 
