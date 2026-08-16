@@ -56,7 +56,9 @@ export function candidateRows(replay: DiscoveryReplayView): CandidateRow[] {
           ? "passed"
           : "blocked"
         : "pending",
-      pareto: paretoIds.has(candidate.candidate_id),
+      pareto:
+        paretoIds.has(candidate.candidate_id) &&
+        !["quarantined", "rejected", "failed"].includes(candidate.status),
     };
   });
 }

@@ -73,6 +73,7 @@ _ALLOWED_TRANSITIONS: dict[CandidateStatus, frozenset[CandidateStatus]] = {
         {
             CandidateStatus.EVALUATED,
             CandidateStatus.ELITE,
+            CandidateStatus.PROMOTED,
             CandidateStatus.QUARANTINED,
             CandidateStatus.REJECTED,
         }

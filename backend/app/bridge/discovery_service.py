@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -86,6 +87,43 @@ class IdeaSelectionRequest(BaseModel):
     reason: str = ""
     selection_request_ref: str = Field(min_length=1)
     proposal_ref: str = ""
+
+
+class CandidateDecisionRecord(BaseModel):
+    """Durable human decision over one evaluated Discovery candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["candidate_decision.v1"] = "candidate_decision.v1"
+    run_id: str = Field(min_length=1)
+    candidate_id: str = Field(min_length=1)
+    action: Literal["approve", "reject", "promote"]
+    actor: str = Field(min_length=1)
+    reason: str = ""
+    idempotency_key: str = Field(min_length=1)
+    status: Literal["applied"] = "applied"
+    audit_ref: str = Field(min_length=1)
+    candidate: CandidateRecord
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+
+
+class HypothesisActionRecord(BaseModel):
+    """Durable scientist-authored mutation of the run-local hypothesis pool."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["idea_hypothesis_action.v1"] = "idea_hypothesis_action.v1"
+    run_id: str = Field(min_length=1)
+    hypothesis_id: str = Field(min_length=1)
+    action: Literal["add", "edit", "reject"]
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    statement: str = ""
+    idempotency_key: str = Field(min_length=1)
+    status: Literal["applied"] = "applied"
+    audit_ref: str = Field(min_length=1)
+    hypothesis: dict[str, Any]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
 
 @dataclass
@@ -347,7 +385,8 @@ class DiscoveryService:
             for path in sorted(idea_dir.rglob("*.json")):
                 artifacts[str(path.relative_to(idea_dir))] = read_json(path)
         service_path = run.root / "discovery" / "service.json"
-        idea_mode = "fast"
+        request_options = self._run_request_extra(run)
+        idea_mode = str(request_options.get("idea_mode") or "fast")
         if service_path.exists():
             idea_mode = _ServiceRecord.model_validate(read_json(service_path)).spec.idea_mode
         pool = self._artifact_mapping(artifacts, "hypothesis_pool.v1.json")
@@ -411,6 +450,242 @@ class DiscoveryService:
         }
         return tuple(found[key] for key in sorted(found))
 
+    def add_idea_hypothesis(
+        self,
+        run_id: str,
+        *,
+        statement: str,
+        actor: str,
+        reason: str,
+    ) -> HypothesisActionRecord:
+        return self._mutate_idea_hypothesis(
+            run_id,
+            hypothesis_id="",
+            action="add",
+            statement=statement,
+            actor=actor,
+            reason=reason,
+        )
+
+    def edit_idea_hypothesis(
+        self,
+        run_id: str,
+        hypothesis_id: str,
+        *,
+        statement: str,
+        actor: str,
+        reason: str,
+    ) -> HypothesisActionRecord:
+        return self._mutate_idea_hypothesis(
+            run_id,
+            hypothesis_id=hypothesis_id,
+            action="edit",
+            statement=statement,
+            actor=actor,
+            reason=reason,
+        )
+
+    def reject_idea_hypothesis(
+        self,
+        run_id: str,
+        hypothesis_id: str,
+        *,
+        actor: str,
+        reason: str,
+    ) -> HypothesisActionRecord:
+        return self._mutate_idea_hypothesis(
+            run_id,
+            hypothesis_id=hypothesis_id,
+            action="reject",
+            statement="",
+            actor=actor,
+            reason=reason,
+        )
+
+    def _mutate_idea_hypothesis(
+        self,
+        run_id: str,
+        *,
+        hypothesis_id: str,
+        action: Literal["add", "edit", "reject"],
+        statement: str,
+        actor: str,
+        reason: str,
+    ) -> HypothesisActionRecord:
+        actor = actor.strip()
+        reason = reason.strip()
+        statement = statement.strip()
+        if not actor or not reason or (action in {"add", "edit"} and not statement):
+            raise DiscoveryServiceError(
+                DiscoveryErrorCode.INVALID_CONTRACT,
+                "actor, reason and a non-empty statement are required",
+                status_code=422,
+            )
+        if action != "add" and not hypothesis_id.strip():
+            raise DiscoveryServiceError(
+                DiscoveryErrorCode.INVALID_CONTRACT,
+                "hypothesis_id is required",
+                status_code=422,
+            )
+        run = self._require_run(run_id)
+        idea_dir = run.root / "idea" / "discovery"
+        pool_path = idea_dir / "hypothesis_pool.v1.json"
+        hypotheses_path = idea_dir / "hypotheses.v1.json"
+        state_path = idea_dir / "state.v1.json"
+        if not pool_path.is_file() or not hypotheses_path.is_file():
+            raise DiscoveryServiceError(
+                DiscoveryErrorCode.INVALID_STATE,
+                "Idea deep discovery artifacts are not available",
+                status_code=404,
+            )
+        idempotency_key = stable_key(
+            "\n".join((run_id, hypothesis_id, action, actor, reason, statement))
+        )
+        relative_record = (
+            Path("idea")
+            / "discovery"
+            / "hitl"
+            / "hypothesis_actions"
+            / f"{idempotency_key}.json"
+        )
+        record_path = run.root / relative_record
+        paths = DiscoveryPaths(run_root=run.root, run_id=run_id)
+        with discovery_lock(paths):
+            if record_path.is_file():
+                return HypothesisActionRecord.model_validate(read_json(record_path))
+            pool = read_json(pool_path)
+            wrapper = read_json(hypotheses_path)
+            items_raw = wrapper.get("items")
+            if not isinstance(items_raw, list):
+                raise self._invalid_state("hypothesis record wrapper is invalid")
+            items = [dict(item) for item in items_raw if isinstance(item, dict)]
+            status = str(pool.get("status") or "")
+            if status != "waiting_selection":
+                raise self._invalid_state(
+                    "hypotheses can only be changed while waiting for selection"
+                )
+
+            found_index = next(
+                (
+                    index
+                    for index, item in enumerate(items)
+                    if str(item.get("hypothesis_id") or "") == hypothesis_id
+                ),
+                None,
+            )
+            top_ids = list(self._string_items(pool.get("top_hypothesis_ids")))
+            audit_ref = relative_record.as_posix()
+            if action == "add":
+                hypothesis_id = f"hypothesis_human_{idempotency_key[:16]}"
+                found_index = next(
+                    (
+                        index
+                        for index, item in enumerate(items)
+                        if str(item.get("hypothesis_id") or "") == hypothesis_id
+                    ),
+                    None,
+                )
+                if found_index is None:
+                    max_round = max(
+                        (
+                            int(item.get("round_index", 0))
+                            for item in items
+                            if isinstance(item.get("round_index", 0), int)
+                        ),
+                        default=0,
+                    )
+                    updated = {
+                        "schema_id": "hypothesis.v1",
+                        "hypothesis_id": hypothesis_id,
+                        "run_id": run_id,
+                        "round_index": max_round + 1,
+                        "parent_ids": [],
+                        "mechanism": "human_proposed",
+                        "statement": statement,
+                        "testable_predictions": [],
+                        "evidence_refs": [audit_ref],
+                        "constraints": [],
+                        "uncertainty": (
+                            "Human-proposed hypothesis has not been independently reranked."
+                        ),
+                        "operator": "human_add",
+                        "cluster_id": "human-review",
+                        "elo": 1000.0,
+                        "blocked": False,
+                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                    }
+                    items.append(updated)
+                else:
+                    updated = items[found_index]
+                config = pool.get("config")
+                top_k = 3
+                if isinstance(config, dict) and isinstance(config.get("top_k"), int):
+                    top_k = max(1, int(config["top_k"]))
+                top_ids = [hypothesis_id, *[item for item in top_ids if item != hypothesis_id]][
+                    :top_k
+                ]
+            else:
+                if found_index is None:
+                    raise DiscoveryServiceError(
+                        DiscoveryErrorCode.INVALID_CONTRACT,
+                        f"unknown hypothesis: {hypothesis_id}",
+                        status_code=404,
+                    )
+                current = items[found_index]
+                if bool(current.get("blocked")):
+                    raise self._invalid_state("blocked hypothesis cannot be changed")
+                updated = dict(current)
+                refs = list(self._string_items(updated.get("evidence_refs")))
+                if audit_ref not in refs:
+                    refs.append(audit_ref)
+                updated["evidence_refs"] = refs
+                if action == "edit":
+                    updated["statement"] = statement
+                    updated["operator"] = "human_edit"
+                    updated["uncertainty"] = (
+                        "Human-edited after ranking; inherited ranking is only an allocation hint."
+                    )
+                else:
+                    updated["blocked"] = True
+                    top_ids = [item for item in top_ids if item != hypothesis_id]
+                items[found_index] = updated
+
+            wrapper["count"] = len(items)
+            wrapper["items"] = items
+            legal_count = sum(not bool(item.get("blocked")) for item in items)
+            pool["hypothesis_count"] = len(items)
+            pool["legal_count"] = legal_count
+            pool["top_hypothesis_ids"] = top_ids
+            warning = f"human_{action}:{hypothesis_id}:{audit_ref}"
+            warnings = list(self._string_items(pool.get("warnings")))
+            if warning not in warnings:
+                warnings.append(warning)
+            pool["warnings"] = warnings
+            atomic_write_json(hypotheses_path, wrapper)
+            atomic_write_json(pool_path, pool)
+            if state_path.is_file():
+                state = read_json(state_path)
+                state["hypotheses"] = items
+                state["top_hypothesis_ids"] = top_ids
+                state_warnings = list(self._string_items(state.get("warnings")))
+                if warning not in state_warnings:
+                    state_warnings.append(warning)
+                state["warnings"] = state_warnings
+                atomic_write_json(state_path, state)
+            record = HypothesisActionRecord(
+                run_id=run_id,
+                hypothesis_id=hypothesis_id,
+                action=action,
+                actor=actor,
+                reason=reason,
+                statement=statement,
+                idempotency_key=idempotency_key,
+                audit_ref=audit_ref,
+                hypothesis=updated,
+            )
+            atomic_write_json(record_path, model_payload(record))
+            return record
+
     def select_idea_hypothesis(
         self,
         run_id: str,
@@ -442,28 +717,180 @@ class DiscoveryService:
             / "selection_requests"
             / f"{stable_key(idempotency_key)}.json"
         )
-        selection = IdeaSelectionRequest(
-            run_id=run_id,
-            hypothesis_id=hypothesis_id,
-            idempotency_key=idempotency_key,
-            actor=actor,
-            reason=reason,
-            selection_request_ref=relative_record.as_posix(),
-            proposal_ref=self._proposal_ref(run),
-        )
         record_path = run.root / relative_record
         paths = DiscoveryPaths(run_root=run.root, run_id=run_id)
         with discovery_lock(paths):
             if record_path.exists():
                 existing = IdeaSelectionRequest.model_validate(read_json(record_path))
-                if existing != selection:
+                if (
+                    existing.run_id != run_id
+                    or existing.hypothesis_id != hypothesis_id
+                    or existing.idempotency_key != idempotency_key
+                    or existing.actor != actor
+                    or existing.reason != reason
+                    or existing.selection_request_ref != relative_record.as_posix()
+                ):
                     raise DiscoveryServiceError(
                         DiscoveryErrorCode.IDEMPOTENCY_CONFLICT,
                         "selection idempotency key is already bound",
                     )
                 return existing
+            selection = IdeaSelectionRequest(
+                run_id=run_id,
+                hypothesis_id=hypothesis_id,
+                idempotency_key=idempotency_key,
+                actor=actor,
+                reason=reason,
+                selection_request_ref=relative_record.as_posix(),
+                proposal_ref=self._proposal_ref(run),
+            )
             atomic_write_json(record_path, model_payload(selection))
         return selection
+
+    async def decide_candidate(
+        self,
+        run_id: str,
+        candidate_id: str,
+        *,
+        action: Literal["approve", "reject", "promote"],
+        actor: str,
+        reason: str,
+        idempotency_key: str,
+    ) -> CandidateDecisionRecord:
+        """Apply one auditable candidate decision while archive HITL is pending."""
+
+        if not candidate_id.strip() or not actor.strip() or not idempotency_key.strip():
+            raise DiscoveryServiceError(
+                DiscoveryErrorCode.INVALID_CONTRACT,
+                "candidate_id, actor and idempotency_key are required",
+                status_code=422,
+            )
+        context = self._context(run_id)
+        control = self._control(run_id)
+        relative_record = (
+            Path("discovery")
+            / "hitl"
+            / "candidate_decisions"
+            / f"{stable_key(idempotency_key)}.json"
+        )
+        record_path = context.run.root / relative_record
+        async with control.lock:
+            if record_path.exists():
+                existing = CandidateDecisionRecord.model_validate(read_json(record_path))
+                if (
+                    existing.run_id != run_id
+                    or existing.candidate_id != candidate_id
+                    or existing.action != action
+                    or existing.actor != actor
+                    or existing.reason != reason
+                    or existing.idempotency_key != idempotency_key
+                ):
+                    raise DiscoveryServiceError(
+                        DiscoveryErrorCode.IDEMPOTENCY_CONFLICT,
+                        "candidate decision idempotency key is already bound",
+                    )
+                return existing
+
+            latest = context.stores.checkpoints.latest()
+            if latest is None:
+                raise self._invalid_state("discovery checkpoint is missing")
+            progress = DiscoveryProgress.model_validate(latest.state)
+            if latest.status != CheckpointStatus.PAUSED or not progress.hitl_pending:
+                raise self._invalid_state(
+                    "candidate decisions require a discovery run waiting for HITL"
+                )
+            candidate = context.stores.candidates.get(candidate_id)
+            if candidate is None:
+                raise DiscoveryServiceError(
+                    DiscoveryErrorCode.INVALID_CONTRACT,
+                    f"unknown candidate: {candidate_id}",
+                    status_code=404,
+                )
+
+            allowed = {
+                "approve": {
+                    CandidateStatus.EVALUATED,
+                    CandidateStatus.DOMINATED,
+                    CandidateStatus.ELITE,
+                    CandidateStatus.PROMOTED,
+                },
+                "promote": {
+                    CandidateStatus.EVALUATED,
+                    CandidateStatus.DOMINATED,
+                    CandidateStatus.ELITE,
+                    CandidateStatus.PROMOTED,
+                },
+                "reject": {
+                    CandidateStatus.DRAFT,
+                    CandidateStatus.VALIDATED,
+                    CandidateStatus.QUEUED,
+                    CandidateStatus.EVALUATED,
+                    CandidateStatus.DOMINATED,
+                    CandidateStatus.ELITE,
+                    CandidateStatus.QUARANTINED,
+                    CandidateStatus.REJECTED,
+                    CandidateStatus.FAILED,
+                },
+            }[action]
+            if candidate.status not in allowed:
+                raise self._invalid_state(
+                    f"cannot {action} candidate in {candidate.status.value} state"
+                )
+
+            if action == "promote":
+                candidate = await self._transition(
+                    context,
+                    candidate_id,
+                    CandidateStatus.PROMOTED,
+                    reason=reason or "human promotion",
+                )
+            elif action == "reject":
+                candidate = await self._transition(
+                    context,
+                    candidate_id,
+                    CandidateStatus.REJECTED,
+                    reason=reason or "human rejection",
+                )
+
+            selected_candidate_id = progress.selected_candidate_id
+            if action in {"approve", "promote"}:
+                selected_candidate_id = candidate_id
+            elif selected_candidate_id == candidate_id:
+                selected_candidate_id = ""
+            progress = progress.model_copy(
+                update={"selected_candidate_id": selected_candidate_id}
+            )
+            context.stores.checkpoints.save(
+                phase="candidate_hitl_decision",
+                iteration=progress.next_iteration,
+                status=CheckpointStatus.PAUSED,
+                state=model_payload(progress),
+                idempotency_key=f"candidate-decision:{stable_key(idempotency_key)}",
+                reason="waiting_hitl",
+            )
+            record = CandidateDecisionRecord(
+                run_id=run_id,
+                candidate_id=candidate_id,
+                action=action,
+                actor=actor,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                audit_ref=relative_record.as_posix(),
+                candidate=candidate,
+            )
+            atomic_write_json(record_path, model_payload(record))
+            await context.events.emit(
+                DiscoveryEventName.HITL_RESOLVED,
+                candidate_id=candidate_id,
+                payload={
+                    "scope": "candidate",
+                    "action": action,
+                    "actor": actor,
+                    "reason": reason,
+                    "audit_ref": relative_record.as_posix(),
+                },
+            )
+            return record
 
     def _launch(self, context: _Context, control: _RunControl) -> asyncio.Task[None]:
         if control.task is None or control.task.done():
@@ -934,7 +1361,29 @@ class DiscoveryService:
             )
 
         archive = context.stores.archive.latest()
-        selected = archive.pareto_candidate_ids[0] if archive and archive.pareto_candidate_ids else ""
+        candidates = {
+            item.candidate_id: item for item in context.stores.candidates.list()
+        }
+        ineligible = {
+            CandidateStatus.QUARANTINED,
+            CandidateStatus.REJECTED,
+            CandidateStatus.FAILED,
+        }
+        selected = progress.selected_candidate_id
+        if selected and (
+            selected not in candidates or candidates[selected].status in ineligible
+        ):
+            selected = ""
+        if not selected and archive is not None:
+            selected = next(
+                (
+                    candidate_id
+                    for candidate_id in archive.pareto_candidate_ids
+                    if candidate_id in candidates
+                    and candidates[candidate_id].status not in ineligible
+                ),
+                "",
+            )
         progress = progress.model_copy(
             update={
                 "lifecycle": DiscoveryLifecycle.COMPLETED,
@@ -1171,6 +1620,24 @@ class DiscoveryService:
         if not candidates:
             return ""
         return candidates[-1].path.relative_to(run.root).as_posix()
+
+    @staticmethod
+    def _run_request_extra(run: RunHandle) -> dict[str, Any]:
+        path = run.subdir("input") / "run_request_options.v1.json"
+        if not path.is_file():
+            return {}
+        try:
+            raw = read_json(path)
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
+            return {}
+        extra = raw.get("extra")
+        return (
+            {str(key): value for key, value in extra.items()}
+            if isinstance(extra, dict)
+            else {}
+        )
 
     @staticmethod
     def _artifact_mapping(

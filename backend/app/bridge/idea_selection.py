@@ -74,10 +74,9 @@ def _agent_request(run: RunHandle, selection: IdeaSelectionRequest) -> Any:
     user_request = (
         request_path.read_text(encoding="utf-8") if request_path.is_file() else ""
     )
-    return AgentRunRequest(
-        project=run.project,
-        user_request=user_request,
-        extra={
+    request_extra = _load_run_request_extra(run)
+    request_extra.update(
+        {
             "run_id": run.run_id,
             "run_root": str(run.root),
             "agent_dir": str(run.subdir("idea")),
@@ -87,8 +86,29 @@ def _agent_request(run: RunHandle, selection: IdeaSelectionRequest) -> Any:
             "idea_selected_hypothesis_id": selection.hypothesis_id,
             "idea_selection_actor": selection.actor,
             "idea_selection_reason": selection.reason,
-        },
+        }
     )
+    return AgentRunRequest(
+        project=run.project,
+        user_request=user_request,
+        extra=request_extra,
+    )
+
+
+def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
+    path = run.subdir("input") / "run_request_options.v1.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise IdeaSelectionError(f"run request options are unreadable: {exc}") from exc
+    if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
+        raise IdeaSelectionError("run request options use an unsupported schema")
+    extra = raw.get("extra")
+    if not isinstance(extra, dict):
+        raise IdeaSelectionError("run request options have no extra mapping")
+    return {str(key): value for key, value in extra.items()}
 
 
 def _materialize_saved_selection(
@@ -128,6 +148,7 @@ def _selected_proposal_ref(run: RunHandle, hypothesis_id: str) -> str:
         if (
             isinstance(summary, dict)
             and summary.get("selected_hypothesis_id") == hypothesis_id
+            and summary.get("selection_source") in {"human", "auto"}
         ):
             return ref.path.relative_to(run.root).as_posix()
     return ""

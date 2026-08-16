@@ -7,13 +7,14 @@ from typing import Any
 
 import pytest
 
-from app.bridge.discovery_service import DiscoveryService
+from app.bridge.discovery_service import DiscoveryService, DiscoveryServiceError
 from app.bridge.discovery_types import CandidateProposalRequest, DiscoveryLifecycle, DiscoveryRunSpec
 from app.execution.adapters.base import AdapterAction, AdapterRequest, AdapterResponse
 from app.harness.discovery.candidate_builder import build_candidate_record
 from app.harness.discovery.models import (
     BudgetLimits,
     CandidateRecord,
+    CandidateStatus,
     ModelGenome,
     ObjectiveDirection,
     ObjectiveSpec,
@@ -266,3 +267,89 @@ def test_old_request_defaults_to_fast_idea_mode(tmp_path: Path) -> None:
     spec = discovery_spec().model_dump(mode="json")
     spec.pop("idea_mode")
     assert DiscoveryRunSpec.model_validate(spec).idea_mode == "fast"
+
+
+@pytest.mark.asyncio
+async def test_candidate_hitl_decisions_are_audited_idempotent_and_selectable(
+    tmp_path: Path,
+) -> None:
+    service = build_service(tmp_path, adapter=FakeAdapter(fail_index=None))
+    manual_spec = discovery_spec(candidates=3).model_copy(update={"auto_approve": False})
+    created = await service.create(manual_spec, idempotency_key="candidate-hitl")
+
+    waiting = await service.start(created.run_id, wait=True)
+
+    assert waiting.lifecycle == DiscoveryLifecycle.WAITING_HITL
+    replay = service.replay(created.run_id)
+    elite = next(item for item in replay.candidates if item.status == CandidateStatus.ELITE)
+    dominated = [
+        item for item in replay.candidates if item.status == CandidateStatus.DOMINATED
+    ]
+    assert len(dominated) == 2
+
+    rejected = await service.decide_candidate(
+        created.run_id,
+        elite.candidate_id,
+        action="reject",
+        actor="researcher",
+        reason="reject archive leader",
+        idempotency_key="decision-reject",
+    )
+    approved = await service.decide_candidate(
+        created.run_id,
+        dominated[0].candidate_id,
+        action="approve",
+        actor="researcher",
+        reason="approve alternative",
+        idempotency_key="decision-approve",
+    )
+    promoted = await service.decide_candidate(
+        created.run_id,
+        dominated[1].candidate_id,
+        action="promote",
+        actor="researcher",
+        reason="promote diverse candidate",
+        idempotency_key="decision-promote",
+    )
+    repeated = await service.decide_candidate(
+        created.run_id,
+        dominated[1].candidate_id,
+        action="promote",
+        actor="researcher",
+        reason="promote diverse candidate",
+        idempotency_key="decision-promote",
+    )
+
+    assert rejected.candidate.status == CandidateStatus.REJECTED
+    assert approved.candidate.status == CandidateStatus.DOMINATED
+    assert promoted.candidate.status == CandidateStatus.PROMOTED
+    assert repeated == promoted
+    run = service.run_store.get(created.run_id)
+    assert run is not None
+    assert (run.root / promoted.audit_ref).exists()
+    with pytest.raises(DiscoveryServiceError, match="idempotency key"):
+        await service.decide_candidate(
+            created.run_id,
+            dominated[1].candidate_id,
+            action="reject",
+            actor="researcher",
+            reason="promote diverse candidate",
+            idempotency_key="decision-promote",
+        )
+
+    completed = await service.resume(created.run_id, wait=True)
+
+    assert completed.lifecycle == DiscoveryLifecycle.COMPLETED
+    assert completed.selected_candidate_id == dominated[1].candidate_id
+    events = service.replay(created.run_id).events
+    decision_events = [
+        item
+        for item in events
+        if item["name"] == DiscoveryEventName.HITL_RESOLVED.value
+        and item["payload"].get("scope") == "candidate"
+    ]
+    assert [item["payload"]["action"] for item in decision_events] == [
+        "reject",
+        "approve",
+        "promote",
+    ]

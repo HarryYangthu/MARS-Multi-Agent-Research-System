@@ -34,6 +34,7 @@ class _FakeIdeaAgent:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.last_extra: dict[str, Any] = {}
 
     async def build_context(self, request: Any) -> object:
         return object()
@@ -41,6 +42,7 @@ class _FakeIdeaAgent:
     async def draft(self, request: Any, context: object) -> _Artifact:
         del context
         self.calls += 1
+        self.last_extra = dict(request.extra)
         hypothesis_id = str(request.extra["idea_selected_hypothesis_id"])
         metadata = _proposal_metadata(request.project, hypothesis_id)
         selection = {
@@ -96,6 +98,19 @@ async def test_selection_materializes_one_idempotent_proposal(tmp_path: Path) ->
     registry = AgentRegistry()
     registry.register("idea", agent)
     coordinator = IdeaSelectionCoordinator(run_store=store, registry=registry)
+    (run.root / "input" / "run_request_options.v1.json").write_text(
+        json.dumps(
+            {
+                "schema_id": "run_request_options.v1",
+                "extra": {
+                    "idea_mode": "auto",
+                    "idea_budget_profile": "fast",
+                    "project_inputs": {"mode": "mock"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     selection = IdeaSelectionRequest(
         run_id=run.run_id,
         hypothesis_id="hypothesis-1",
@@ -104,13 +119,29 @@ async def test_selection_materializes_one_idempotent_proposal(tmp_path: Path) ->
         reason="best falsifiable candidate",
         selection_request_ref="idea/discovery/selection_requests/request.json",
     )
+    ArtifactStore(run).write(
+        text=fm_dumps(
+            {
+                **_proposal_metadata(run.project, selection.hypothesis_id),
+                "discovery_summary": {
+                    "selected_hypothesis_id": selection.hypothesis_id,
+                    "selection_source": "recommended_for_hitl",
+                },
+            },
+            "# Recommended proposal\n",
+        ),
+        expected_schema="proposal.v1",
+    )
 
     first = await coordinator.apply(selection)
     second = await coordinator.apply(selection)
 
     assert first == second
     assert agent.calls == 1
-    assert first == "idea/idea_proposal.v1.md"
+    assert first == "idea/idea_proposal.v2.md"
+    assert agent.last_extra["idea_budget_profile"] == "fast"
+    assert agent.last_extra["project_inputs"] == {"mode": "mock"}
+    assert agent.last_extra["idea_mode"] == "deep"
     assert (run.root / "idea" / "discovery" / "selection.v1.json").is_file()
     assert len(
         [
@@ -120,4 +151,4 @@ async def test_selection_materializes_one_idempotent_proposal(tmp_path: Path) ->
             )
             if item.version != "approved"
         ]
-    ) == 1
+    ) == 2
