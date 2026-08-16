@@ -7,6 +7,7 @@ implementations are looked up via agent_registry (reverse dependency).
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -45,6 +46,7 @@ class RunRequest:
     user_request: str = ""
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
     data_source: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -94,6 +96,7 @@ class Orchestrator:
         )
         session = RunSession(run=run, graph=graph, request=request, bus=self.bus)
         self._sessions[run.run_id] = session
+        self._persist_request_extra(run, request.extra)
         TraceRecorder(run).ensure_manifest()
         if self.langgraph_runtime.enabled():
             self.langgraph_runtime.write_manifest(run=run, graph=graph)
@@ -902,6 +905,11 @@ class Orchestrator:
                 standalone=bool(snapshot.request.get("standalone", False)),
                 user_request=str(snapshot.request.get("user_request", "")),
                 auto_approve=bool(snapshot.request.get("auto_approve", False)),
+                extra=(
+                    dict(snapshot.request.get("extra", {}))
+                    if isinstance(snapshot.request.get("extra"), dict)
+                    else {}
+                ),
             )
         waiting = snapshot is not None and snapshot.status == "waiting_feedback"
         session = RunSession(
@@ -950,9 +958,28 @@ class Orchestrator:
                 "standalone": session.request.standalone,
                 "user_request": session.request.user_request,
                 "auto_approve": session.request.auto_approve,
+                "extra": dict(session.request.extra),
             },
             status=status,
         )
+
+    @staticmethod
+    def _persist_request_extra(run: RunHandle, extra: dict[str, Any]) -> None:
+        """Persist additive V3 request options for bridge runners and recovery."""
+
+        if not extra:
+            return
+        payload = {
+            "schema_id": "run_request_options.v1",
+            "extra": dict(extra),
+        }
+        target = run.subdir("input") / "run_request_options.v1.json"
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(target)
 
     # ----------------------------------------------------- state + emission
 

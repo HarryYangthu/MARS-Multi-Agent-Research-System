@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -32,6 +32,9 @@ class CreateRunPayload(BaseModel):
     # that node — the run goes straight into HITL review.
     seed_artifact: str | None = None
     data_source: "DataSourceSelection | None" = None
+    idea_mode: Literal["auto", "fast", "deep"] | None = None
+    idea_budget_profile: Literal["fast", "balanced", "thorough"] | None = None
+    project_inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class DataSourceSelection(BaseModel):
@@ -88,6 +91,13 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         project=payload.project,
     )
     orch = get_orchestrator()
+    request_extra: dict[str, Any] = {}
+    if payload.idea_mode is not None:
+        request_extra["idea_mode"] = payload.idea_mode
+    if payload.idea_budget_profile is not None:
+        request_extra["idea_budget_profile"] = payload.idea_budget_profile
+    if payload.project_inputs:
+        request_extra["project_inputs"] = dict(payload.project_inputs)
     request = RunRequest(
         task=payload.task,
         project=payload.project,
@@ -96,6 +106,7 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         user_request=payload.user_request,
         auto_approve=payload.auto_approve,
         data_source=data_source,
+        extra=request_extra,
     )
     try:
         session = orch.create_session(request)

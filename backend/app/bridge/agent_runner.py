@@ -143,11 +143,9 @@ async def run_agent_node(
     debate_path = run.subdir(stage) / transcript_name
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
-    request = AgentRunRequest(
-        project=run.project,
-        user_request=user_request,
-        upstream_artifacts=upstream,
-        extra={
+    request_extra = _load_run_request_extra(run)
+    request_extra.update(
+        {
             "debate_progress_path": str(debate_path),
             "attempt": attempt,
             "node_key": node_key,
@@ -155,7 +153,13 @@ async def run_agent_node(
             "run_root": str(run.root),
             "agent_dir": str(run.subdir(stage)),
             "revision_reason": revision_reason,
-        },
+        }
+    )
+    request = AgentRunRequest(
+        project=run.project,
+        user_request=user_request,
+        upstream_artifacts=upstream,
+        extra=request_extra,
     )
     context = await agent.build_context(request)
 
@@ -441,6 +445,22 @@ def _load_selected_data_source(run: RunHandle) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
+    path = run.subdir("input") / "run_request_options.v1.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("run request options are unreadable: {}", path)
+        return {}
+    if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
+        logger.warning("run request options use an unsupported schema: {}", path)
+        return {}
+    extra = raw.get("extra")
+    return {str(key): value for key, value in extra.items()} if isinstance(extra, dict) else {}
 
 
 def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str:

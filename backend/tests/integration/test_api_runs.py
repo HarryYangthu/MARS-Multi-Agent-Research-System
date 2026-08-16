@@ -187,6 +187,35 @@ def test_create_and_list_run(client: TestClient) -> None:
     assert r3.json()["run_id"] == run_id
 
 
+def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> None:
+    response = client.post(
+        "/api/runs",
+        json={
+            "task": "deep-idea-options",
+            "project": "synthetic_regression",
+            "entrypoint": "idea",
+            "idea_mode": "auto",
+            "idea_budget_profile": "balanced",
+            "project_inputs": {"candidate_count": 20, "mode": "mock"},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    from app.api import dependencies as deps
+
+    run_id = response.json()["run_id"]
+    session = deps.get_orchestrator().session(run_id)
+    assert session.request.extra == {
+        "idea_mode": "auto",
+        "idea_budget_profile": "balanced",
+        "project_inputs": {"candidate_count": 20, "mode": "mock"},
+    }
+    options = session.run.subdir("input") / "run_request_options.v1.json"
+    payload = json.loads(options.read_text(encoding="utf-8"))
+    assert payload["schema_id"] == "run_request_options.v1"
+    assert payload["extra"] == session.request.extra
+
+
 def test_evaluation_endpoints_return_artifact_reports_and_scorecard(
     client: TestClient,
 ) -> None:
