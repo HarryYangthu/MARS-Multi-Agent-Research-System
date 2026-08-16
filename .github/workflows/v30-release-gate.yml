@@ -1,0 +1,71 @@
+name: V3.0 public release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      treeish:
+        description: Full commit or immutable tag to audit
+        required: true
+        type: string
+  push:
+    tags: ["v3.0.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install pinned history scanner
+        run: |
+          go install github.com/gitleaks/gitleaks/v8@v8.18.4
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Resolve requested treeish
+        id: target
+        env:
+          REQUESTED: ${{ inputs.treeish }}
+        run: |
+          if [ -n "$REQUESTED" ]; then
+            target="$REQUESTED"
+          else
+            target="$GITHUB_SHA"
+          fi
+          commit=$(git rev-parse --verify "${target}^{commit}")
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Dry-run release audit
+        id: audit
+        continue-on-error: true
+        run: >-
+          python -m scripts.release.export_v30
+          --treeish "${{ steps.target.outputs.commit }}"
+          --report-dir release-evidence
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v30-release-evidence
+          path: release-evidence/
+      - name: Enforce audit decision
+        if: steps.audit.outcome != 'success'
+        run: exit 1
+      - name: Materialize approved source archive
+        run: >-
+          python -m scripts.release.export_v30
+          --treeish "${{ steps.target.outputs.commit }}"
+          --report-dir release-evidence-final
+          --materialize dist/mars-v30-source.tar.gz
+      - name: Upload approved archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: mars-v30-source
+          path: dist/mars-v30-source.tar.gz

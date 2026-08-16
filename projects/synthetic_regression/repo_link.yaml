@@ -1,0 +1,7 @@
+schema_id: packaged_adapter_link.v1
+mode: packaged
+source_access: none
+data_access: packaged_read_only
+candidate_writes: none
+entrypoint: synthetic_regression_adapter
+shell: false

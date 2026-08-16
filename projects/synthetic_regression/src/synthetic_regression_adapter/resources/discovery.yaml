@@ -1,0 +1,12 @@
+{
+  "schema_id": "discovery_config.v1",
+  "family": "polynomial_regressor",
+  "candidate_count": 20,
+  "operator": "grid_config",
+  "mutable_zones": ["hyperparameters.degree", "hyperparameters.regularization"],
+  "search_space": {
+    "degree": [1, 2, 3, 4, 5],
+    "regularization": [0.0, 0.001, 0.01, 0.1]
+  },
+  "objectives": ["validation_mse", "model_terms", "stability_score"]
+}
