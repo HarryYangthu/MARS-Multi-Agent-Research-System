@@ -32,8 +32,10 @@ from app.harness.schema.validator import validate_document
 
 def _context() -> DiscoveryContext:
     request = RunRequest(
-        project="pimc",
-        user_request="如何在不修改 baseline 的前提下降低模型资源并保持 RES 指标?",
+        project="synthetic_regression",
+        user_request=(
+            "如何在不修改 baseline 的前提下降低模型资源并保持 validation score?"
+        ),
         extra={"run_id": "run-deep-001", "node_key": "idea", "idea_mode": "deep"},
     )
     return build_discovery_context(
@@ -42,7 +44,7 @@ def _context() -> DiscoveryContext:
         constraints=(
             "baseline protected",
             "forward interface preserved",
-            "RES mean <= -26 dB",
+            "validation score stays within the frozen tolerance",
         ),
     )
 
@@ -281,20 +283,20 @@ async def test_llm_role_backend_rejects_invented_evidence_refs() -> None:
 
 
 def test_auto_mode_routes_first_run_to_deep_and_revision_to_fast() -> None:
-    legacy = RunRequest(project="pimc", user_request="legacy")
+    legacy = RunRequest(project="synthetic_regression", user_request="legacy")
     first = RunRequest(
-        project="pimc",
+        project="synthetic_regression",
         user_request="first",
         extra={"idea_mode": "auto", "attempt": 1},
     )
     revision = RunRequest(
-        project="pimc",
+        project="synthetic_regression",
         user_request="revision",
         upstream_artifacts={"human_revision_request": "tighten the claim"},
         extra={"idea_mode": "auto", "attempt": 1},
     )
     explicit = RunRequest(
-        project="pimc",
+        project="synthetic_regression",
         user_request="deep",
         extra={"idea_mode": "deep", "attempt": 2},
     )
@@ -316,8 +318,8 @@ async def test_idea_agent_deep_mode_preserves_proposal_contract(
     settings_mod._settings = None
     agent = IdeaAgent()
     request = RunRequest(
-        project="pimc",
-        user_request="用深度假设发现寻找低资源且保持 RES 的 PIMC 模型",
+        project="synthetic_regression",
+        user_request="用深度假设发现寻找低资源且保持 validation score 的候选模型",
         extra={
             "idea_mode": "deep",
             "run_id": "agent-deep-run",
