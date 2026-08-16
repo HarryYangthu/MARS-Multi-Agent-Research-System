@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { DiscoveryApiError, loadDiscoverySnapshot } from "../api";
+import {
+  DiscoveryApiError,
+  isDiscoveryAbortError,
+  loadDiscoverySnapshot,
+} from "../api";
 import { candidateRows, eventsForCandidate, formatMetric, shortRef } from "../selectors";
 import type { CandidateRecord, DiscoverySnapshot } from "../types";
 import { Badge, EmptyState, KeyValue, Panel } from "./Primitives";
@@ -35,22 +39,28 @@ export function CandidateWorkbench({
   useEffect(() => {
     if (!runId) return;
     let active = true;
+    let timer: number | null = null;
+    const controller = new AbortController();
     const refresh = async (): Promise<void> => {
       try {
-        const next = await loadDiscoverySnapshot(runId);
-        if (!active) return;
+        const next = await loadDiscoverySnapshot(runId, controller.signal);
+        if (!active || controller.signal.aborted) return;
         setSnapshot(next);
         setError(null);
       } catch (caught: unknown) {
-        if (!active) return;
+        if (!active || controller.signal.aborted || isDiscoveryAbortError(caught)) return;
         setError(caught instanceof Error ? caught : new Error("Unable to load candidate replay"));
+      } finally {
+        if (active && !controller.signal.aborted) {
+          timer = window.setTimeout(() => void refresh(), 5000);
+        }
       }
     };
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
     return () => {
       active = false;
-      window.clearInterval(interval);
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [runId]);
 

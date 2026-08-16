@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   DiscoveryApiError,
+  isDiscoveryAbortError,
   loadDiscoverySnapshot,
   mutateDiscoveryRun,
 } from "../api";
@@ -51,25 +52,30 @@ export function RunWorkbench({ runId }: { runId: string }): JSX.Element {
 
   useEffect(() => {
     let active = true;
+    let timer: number | null = null;
+    const controller = new AbortController();
     const refresh = async (showLoading: boolean): Promise<void> => {
       if (showLoading) setLoading(true);
       try {
-        const next = await loadDiscoverySnapshot(runId);
-        if (!active) return;
+        const next = await loadDiscoverySnapshot(runId, controller.signal);
+        if (!active || controller.signal.aborted) return;
         setSnapshot(next);
         setError(null);
       } catch (caught: unknown) {
-        if (!active) return;
+        if (!active || controller.signal.aborted || isDiscoveryAbortError(caught)) return;
         setError(caught instanceof Error ? caught : new Error("Unable to load discovery run"));
       } finally {
-        if (active && showLoading) setLoading(false);
+        if (active && !controller.signal.aborted) {
+          if (showLoading) setLoading(false);
+          timer = window.setTimeout(() => void refresh(false), 5000);
+        }
       }
     };
     void refresh(true);
-    const interval = window.setInterval(() => void refresh(false), 5000);
     return () => {
       active = false;
-      window.clearInterval(interval);
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [runId]);
 

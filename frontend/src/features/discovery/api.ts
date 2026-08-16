@@ -51,8 +51,17 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function getDiscoveryRun(runId: string): Promise<DiscoveryRunView> {
-  return requestJson<DiscoveryRunView>(`/api/discovery/runs/${encodeURIComponent(runId)}`);
+export function isDiscoveryAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+export async function getDiscoveryRun(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<DiscoveryRunView> {
+  return requestJson<DiscoveryRunView>(`/api/discovery/runs/${encodeURIComponent(runId)}`, {
+    signal,
+  });
 }
 
 export async function createDiscoveryRun(
@@ -64,22 +73,34 @@ export async function createDiscoveryRun(
   });
 }
 
-export async function getDiscoveryReplay(runId: string): Promise<DiscoveryReplayView> {
+export async function getDiscoveryReplay(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<DiscoveryReplayView> {
   return requestJson<DiscoveryReplayView>(
     `/api/discovery/runs/${encodeURIComponent(runId)}/replay`,
+    { signal },
   );
 }
 
-export async function loadDiscoverySnapshot(runId: string): Promise<DiscoverySnapshot> {
+export async function loadDiscoverySnapshot(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<DiscoverySnapshot> {
+  signal?.throwIfAborted();
   if (runId === "synthetic-preview") {
     const { syntheticDiscoveryReplay } = await import("./fixtures/synthetic-replay");
+    signal?.throwIfAborted();
     return {
       source: "contract_fixture",
       replay: syntheticDiscoveryReplay,
       loaded_at: new Date().toISOString(),
     };
   }
-  const [run, replay] = await Promise.all([getDiscoveryRun(runId), getDiscoveryReplay(runId)]);
+  const [run, replay] = await Promise.all([
+    getDiscoveryRun(runId, signal),
+    getDiscoveryReplay(runId, signal),
+  ]);
   return {
     source: "rest",
     replay: { ...replay, run },
