@@ -349,21 +349,67 @@ class DiscoveryService:
         idea_mode = "fast"
         if service_path.exists():
             idea_mode = _ServiceRecord.model_validate(read_json(service_path)).spec.idea_mode
+        pool = self._artifact_mapping(artifacts, "hypothesis_pool.v1.json")
+        state = self._artifact_mapping(artifacts, "state.v1.json")
+        hypotheses = self._record_items(artifacts, "hypotheses.v1.json")
+        reflections = self._record_items(artifacts, "reflections.v1.json")
+        matches = self._record_items(artifacts, "pairwise_matches.v1.json")
+        proximity_graphs = self._record_items(
+            artifacts,
+            "proximity_graphs.v1.json",
+        )
+        meta_reviews = self._record_items(artifacts, "meta_reviews.v1.json")
+        selection = self._artifact_mapping(artifacts, "selection.v1.json")
+        top_ids = self._string_items(pool.get("top_hypothesis_ids"))
+        selected_id = str(
+            selection.get("hypothesis_id")
+            or pool.get("selected_hypothesis_id")
+            or ""
+        )
+        proposal_ref = str(selection.get("proposal_ref") or "")
+        if selection and not proposal_ref:
+            proposal_ref = "idea/discovery/selection.v1.json"
+        round_index = max(
+            (
+                int(item.get("round_index", 0))
+                for item in hypotheses
+                if isinstance(item.get("round_index", 0), int)
+            ),
+            default=0,
+        )
+        status = str(pool.get("status") or state.get("status") or "unknown")
+        if selection:
+            status = "selected"
         return {
             "run_id": run_id,
             "idea_mode": idea_mode,
+            "project": str(pool.get("project") or run.project),
+            "status": status,
+            "round_index": round_index,
+            "backend_mode": str(state.get("backend_mode") or ""),
+            "config": pool.get("config") if isinstance(pool.get("config"), dict) else {},
+            "hypotheses": hypotheses,
+            "reflections": reflections,
+            "matches": matches,
+            "pairwise_matches": matches,
+            "proximity_graphs": proximity_graphs,
+            "meta_reviews": meta_reviews,
+            "finalist_ids": top_ids,
+            "top_hypothesis_ids": top_ids,
+            "selected_id": selected_id,
+            "selected_hypothesis_id": selected_id,
+            "proposal_ref": proposal_ref,
             "artifacts": artifacts,
-            "selection": artifacts.get("selection.v1.json"),
+            "selection": selection or None,
         }
 
     def idea_hypotheses(self, run_id: str) -> tuple[dict[str, Any], ...]:
         discovery = self.idea_discovery(run_id)
-        found: dict[str, dict[str, Any]] = {}
-        for payload in discovery["artifacts"].values():
-            for item in self._hypothesis_payloads(payload):
-                hypothesis_id = str(item.get("hypothesis_id", ""))
-                if hypothesis_id:
-                    found[hypothesis_id] = item
+        found = {
+            str(item["hypothesis_id"]): item
+            for item in discovery["hypotheses"]
+            if isinstance(item, dict) and item.get("hypothesis_id")
+        }
         return tuple(found[key] for key in sorted(found))
 
     def select_idea_hypothesis(
@@ -1099,19 +1145,31 @@ class DiscoveryService:
             return ""
         return candidates[-1].relative_to(run.root).as_posix()
 
+    @staticmethod
+    def _artifact_mapping(
+        artifacts: dict[str, Any],
+        name: str,
+    ) -> dict[str, Any]:
+        value = artifacts.get(name)
+        return dict(value) if isinstance(value, dict) else {}
+
     @classmethod
-    def _hypothesis_payloads(cls, payload: Any) -> tuple[dict[str, Any], ...]:
-        if isinstance(payload, list):
-            result: list[dict[str, Any]] = []
-            for item in payload:
-                result.extend(cls._hypothesis_payloads(item))
-            return tuple(result)
-        if not isinstance(payload, dict):
+    def _record_items(
+        cls,
+        artifacts: dict[str, Any],
+        name: str,
+    ) -> tuple[dict[str, Any], ...]:
+        wrapper = cls._artifact_mapping(artifacts, name)
+        items = wrapper.get("items")
+        if not isinstance(items, list):
             return ()
-        if payload.get("schema_id") == "hypothesis.v1" and payload.get("hypothesis_id"):
-            return (dict(payload),)
-        nested = payload.get("hypotheses")
-        return cls._hypothesis_payloads(nested) if nested is not None else ()
+        return tuple(dict(item) for item in items if isinstance(item, dict))
+
+    @staticmethod
+    def _string_items(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, list | tuple):
+            return ()
+        return tuple(item for item in value if isinstance(item, str) and item)
 
     def _find_create(self, idempotency_key: str) -> _Context | None:
         for run in self.run_store.list():
