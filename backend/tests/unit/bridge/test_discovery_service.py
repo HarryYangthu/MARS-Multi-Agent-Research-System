@@ -55,7 +55,11 @@ class FakeAdapter:
         self.calls.append(request)
         if request.action == AdapterAction.READINESS:
             return AdapterResponse(request_id=request.request_id, status="ready")
-        index = int(request.config["hyperparameters"]["candidate_index"])
+        genome = request.config["model_genome"]
+        assert isinstance(genome, dict)
+        hyperparameters = genome["hyperparameters"]
+        assert isinstance(hyperparameters, dict)
+        index = int(hyperparameters["candidate_index"])
         if request.action == AdapterAction.EXECUTE and index == self.fail_index:
             return AdapterResponse(
                 request_id=request.request_id,

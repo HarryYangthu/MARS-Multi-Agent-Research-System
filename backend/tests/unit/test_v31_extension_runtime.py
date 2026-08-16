@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -66,6 +67,22 @@ def test_v30_runtime_loads_public_pack_and_process_adapter(tmp_path: Path) -> No
     assert runtime.adapters.names() == ("demo:evaluator",)
     adapter = runtime.adapters.get("demo:evaluator")
     assert getattr(adapter, "argv") == (sys.executable, "-m", "demo_adapter")
+
+
+def test_src_layout_pack_is_available_to_adapter_without_core_install(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "packs"
+    pack = _write_pack(root)
+    (pack / "src" / "demo_adapter").mkdir(parents=True)
+    (pack / "src" / "demo_adapter" / "__init__.py").write_text("", encoding="utf-8")
+
+    runtime = build_extension_runtime(distribution="v30-core", pack_roots=(root,))
+
+    adapter = runtime.adapters.get("demo:evaluator")
+    environment = getattr(adapter, "env")
+    assert environment is not None
+    assert environment["PYTHONPATH"].split(os.pathsep)[0] == str((pack / "src").resolve())
 
 
 def test_private_pack_is_rejected_by_v30_and_accepted_by_v31(tmp_path: Path) -> None:

@@ -501,3 +501,45 @@ tools:
     bridge_only: true
     mutation_level: write
     allowed_agents: [commander]
+
+  discovery.create:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  discovery.start:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  discovery.status:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  discovery.pause:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  discovery.resume:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  discovery.stop:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  discovery.replay:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]

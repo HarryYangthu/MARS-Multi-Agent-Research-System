@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 
 from app.execution.adapters.base import AdapterRequest, AdapterResponse
@@ -13,6 +14,7 @@ class ProcessAdapter:
     name: str
     argv: tuple[str, ...]
     timeout_seconds: float = 900.0
+    env: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not self.argv or not self.argv[0].strip():
@@ -26,6 +28,7 @@ class ProcessAdapter:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **(self.env or {})},
         )
         payload = request.model_dump_json().encode("utf-8")
         try:

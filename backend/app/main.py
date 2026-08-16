@@ -19,6 +19,7 @@ from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
 from app.api import diagnoses as diagnoses_api
+from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
 from app.api import execution as execution_api
@@ -35,8 +36,16 @@ from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
+from app.api.dependencies import get_event_bus, get_run_store
 from app.bridge.agent_registry import get_registry
+from app.bridge.commander_tools import configure_discovery_commander_tools
+from app.bridge.discovery_composition import (
+    ProjectPackCandidateAgent,
+    ProjectPackRoutingAdapter,
+)
+from app.bridge.discovery_service import DiscoveryService
 from app.bridge.extension_runtime import get_extension_runtime
+from app.bridge.idea_selection import IdeaSelectionCoordinator
 from app.settings import get_settings
 
 
@@ -61,6 +70,22 @@ def create_app() -> FastAPI:
         version=extension_runtime.profile.core_version,
     )
     app.state.extension_runtime = extension_runtime
+
+    register_default_agents()
+    discovery_service = DiscoveryService(
+        run_store=get_run_store(),
+        event_bus=get_event_bus(),
+        candidate_agent=ProjectPackCandidateAgent(extension_runtime),
+        adapter=ProjectPackRoutingAdapter(extension_runtime),
+    )
+    discovery_api.configure_discovery_service(discovery_service)
+    selection = IdeaSelectionCoordinator(
+        run_store=get_run_store(),
+        registry=get_registry(),
+    )
+    discovery_api.configure_idea_selection_handler(selection.apply)
+    configure_discovery_commander_tools(discovery_service)
+    app.state.discovery_service = discovery_service
 
     cors_origins = settings.cors_origins
     app.add_middleware(
@@ -88,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(diagnoses_api.router)
+    app.include_router(discovery_api.router)
     app.include_router(agents_api.router)
     app.include_router(artifacts_api.router)
     app.include_router(evaluation_api.router)
@@ -108,8 +134,6 @@ def create_app() -> FastAPI:
     app.include_router(system_api.router)
     app.include_router(chat_api.router)
     app.include_router(ws_api.router)
-
-    register_default_agents()
 
     logger.info(
         "MARS backend ready (distribution={}, core={}, port={})",

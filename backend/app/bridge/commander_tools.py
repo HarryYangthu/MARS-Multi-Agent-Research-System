@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from app.bridge.orchestrator import Orchestrator, RunRequest
+from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
+from app.bridge.discovery_service import DiscoveryService
+from app.bridge.discovery_types import DiscoveryRunSpec
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
 from app.harness.tools.config import tool_config
@@ -57,6 +60,16 @@ class ToolSpec:
 
 _COMMANDER_CONTEXTS: dict[str, ToolContext] = {}
 _REGISTRY_ADAPTERS_INSTALLED = False
+_DISCOVERY_COMMANDER_TOOLS: DiscoveryCommanderTools | None = None
+
+
+def configure_discovery_commander_tools(service: DiscoveryService | None) -> None:
+    """Bind Commander verbs to the active app-local Discovery Service."""
+
+    global _DISCOVERY_COMMANDER_TOOLS
+    _DISCOVERY_COMMANDER_TOOLS = (
+        DiscoveryCommanderTools(service) if service is not None else None
+    )
 
 
 # --------------------------------------------------------------------- tools
@@ -370,6 +383,85 @@ async def _list_runs(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     }
 
 
+async def _discovery_create(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    if tools is None:
+        return {"ok": False, "error": "Discovery Service is not configured"}
+    raw_spec = args.get("spec")
+    if not isinstance(raw_spec, dict):
+        return {"ok": False, "error": "spec object is required"}
+    spec = DiscoveryRunSpec.model_validate(raw_spec)
+    idempotency_key = str(args.get("idempotency_key") or "").strip()
+    if not idempotency_key:
+        return {"ok": False, "error": "idempotency_key is required"}
+    payload = await tools.create(spec, idempotency_key=idempotency_key)
+    ctx.session.linked_run_id = str(payload["run_id"])
+    return {"ok": True, **payload}
+
+
+def _discovery_run_id(args: dict[str, Any], ctx: ToolContext) -> str:
+    return str(args.get("run_id") or ctx.session.linked_run_id or "").strip()
+
+
+async def _discovery_start(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    payload = await tools.start(run_id, wait=bool(args.get("wait", False)))
+    ctx.session.linked_run_id = run_id
+    return {"ok": True, **payload}
+
+
+async def _discovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    return {"ok": True, **tools.status(run_id)}
+
+
+async def _discovery_pause(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    payload = await tools.pause(
+        run_id,
+        reason=str(args.get("reason") or "commander_requested"),
+    )
+    return {"ok": True, **payload}
+
+
+async def _discovery_resume(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    payload = await tools.resume(run_id, wait=bool(args.get("wait", False)))
+    return {"ok": True, **payload}
+
+
+async def _discovery_stop(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    payload = await tools.stop(
+        run_id,
+        reason=str(args.get("reason") or "commander_requested"),
+    )
+    return {"ok": True, **payload}
+
+
+async def _discovery_replay(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    tools = _DISCOVERY_COMMANDER_TOOLS
+    run_id = _discovery_run_id(args, ctx)
+    if tools is None or not run_id:
+        return {"ok": False, "error": "Discovery Service and run_id are required"}
+    return {"ok": True, **tools.replay(run_id)}
+
+
 TOOLS: dict[str, ToolSpec] = {
     "run.create": ToolSpec(
         name="run.create",
@@ -499,6 +591,48 @@ TOOLS: dict[str, ToolSpec] = {
         description="List recent runs (run_id, task, project, entrypoint).",
         parameters={},
         handler=_list_runs,
+    ),
+    "discovery.create": ToolSpec(
+        name="discovery.create",
+        description="Create an auditable model-discovery run from a Project Pack contract.",
+        parameters={"spec": "DiscoveryRunSpec object", "idempotency_key": "required stable key"},
+        handler=_discovery_create,
+    ),
+    "discovery.start": ToolSpec(
+        name="discovery.start",
+        description="Start a model-discovery run after adapter readiness succeeds.",
+        parameters={"run_id": "optional linked run", "wait": "wait for completion"},
+        handler=_discovery_start,
+    ),
+    "discovery.status": ToolSpec(
+        name="discovery.status",
+        description="Read lifecycle, budget, archive, and HITL state for Discovery.",
+        parameters={"run_id": "optional linked run"},
+        handler=_discovery_status,
+    ),
+    "discovery.pause": ToolSpec(
+        name="discovery.pause",
+        description="Pause a running Discovery loop at its durable checkpoint.",
+        parameters={"run_id": "optional linked run", "reason": "audit reason"},
+        handler=_discovery_pause,
+    ),
+    "discovery.resume": ToolSpec(
+        name="discovery.resume",
+        description="Resume Discovery or resolve its archive-level HITL review.",
+        parameters={"run_id": "optional linked run", "wait": "wait for completion"},
+        handler=_discovery_resume,
+    ),
+    "discovery.stop": ToolSpec(
+        name="discovery.stop",
+        description="Stop Discovery and persist its stop reason.",
+        parameters={"run_id": "optional linked run", "reason": "audit reason"},
+        handler=_discovery_stop,
+    ),
+    "discovery.replay": ToolSpec(
+        name="discovery.replay",
+        description="Replay candidates, evaluations, archive, budget, and events.",
+        parameters={"run_id": "optional linked run"},
+        handler=_discovery_replay,
     ),
 }
 

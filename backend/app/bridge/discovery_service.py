@@ -775,7 +775,12 @@ class DiscoveryService:
                 candidate=current,
                 contract=context.contract,
                 response=response,
-                fidelity=FidelityLevel.F0,
+                fidelity=FidelityLevel(
+                    str(
+                        context.record.spec.project_inputs.get("fidelity")
+                        or FidelityLevel.F0.value
+                    )
+                ),
                 seed=seed,
             )
             stored = context.stores.candidates.record_evaluation(evaluation)
@@ -1010,12 +1015,14 @@ class DiscoveryService:
             )
 
     async def _require_adapter_ready(self, context: _Context) -> None:
+        project_inputs = dict(context.record.spec.project_inputs)
         response = await self.adapter.invoke(
             AdapterRequest(
                 action=AdapterAction.READINESS,
                 request_id=f"readiness:{context.run.run_id}",
                 project=context.contract.project,
                 run_id=context.run.run_id,
+                config={**project_inputs, "project_inputs": project_inputs},
             )
         )
         if response.status not in {"ready", "ok"}:
@@ -1035,17 +1042,25 @@ class DiscoveryService:
         iteration: int,
         ordinal: int,
     ) -> AdapterRequest:
+        project_inputs = dict(context.record.spec.project_inputs)
+        fidelity = FidelityLevel(
+            str(project_inputs.get("fidelity") or FidelityLevel.F0.value)
+        )
         return AdapterRequest(
             action=action,
             request_id=f"{action.value}:{iteration}:{ordinal}:{candidate.candidate_id}",
             project=context.contract.project,
             run_id=node.child_run_id,
             candidate_id=candidate.candidate_id,
-            fidelity=FidelityLevel.F0.value,
+            fidelity=fidelity.value,
             seed=context.contract.seed + iteration * 10_000 + ordinal,
             repo_snapshot_ref=context.contract.baseline_ref,
             data_manifest_ref=context.contract.dataset_ref,
-            config=candidate.genome.model_dump(mode="json"),
+            config={
+                **project_inputs,
+                "project_inputs": project_inputs,
+                "model_genome": candidate.genome.model_dump(mode="json"),
+            },
             output_dir=str(context.run.root / "execution" / candidate.candidate_id),
         )
 

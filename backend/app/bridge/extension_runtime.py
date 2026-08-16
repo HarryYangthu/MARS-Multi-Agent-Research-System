@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +64,7 @@ def build_extension_runtime(
                     name=qualified_name,
                     argv=_expand_adapter_argv(declaration.argv),
                     timeout_seconds=declaration.timeout_seconds,
+                    env=_pack_adapter_environment(pack),
                 ),
             )
             bindings[(pack.manifest.project_id, alias)] = qualified_name
@@ -140,3 +142,16 @@ def _expand_adapter_argv(argv: tuple[str, ...]) -> tuple[str, ...]:
             raise ProjectPackError("adapter argv contains an invalid control character")
         expanded.append(token)
     return tuple(expanded)
+
+
+def _pack_adapter_environment(pack: LoadedProjectPack) -> dict[str, str]:
+    """Make a mounted ``src/`` Pack importable without installing it into Core."""
+
+    source_root = pack.root / "src"
+    if not source_root.is_dir():
+        return {}
+    inherited = os.environ.get("PYTHONPATH", "").strip()
+    value = str(source_root.resolve())
+    if inherited:
+        value = os.pathsep.join((value, inherited))
+    return {"PYTHONPATH": value}

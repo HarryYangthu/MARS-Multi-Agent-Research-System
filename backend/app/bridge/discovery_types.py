@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.harness.discovery.models import (
     ArchiveSnapshot,
@@ -50,7 +50,7 @@ class DiscoveryRunSpec(BaseModel):
     baseline_ref: str = ""
     baseline_hash: str = ""
     evaluator_ref: str = ""
-    evaluator_hash: str = Field(min_length=1)
+    evaluator_hash: str = ""
     objectives: tuple[ObjectiveSpec, ...] = Field(min_length=1)
     budget: BudgetLimits = Field(default_factory=BudgetLimits)
     seed: int = 0
@@ -62,6 +62,29 @@ class DiscoveryRunSpec(BaseModel):
     max_iterations: int = Field(default=1, ge=1, le=100)
     auto_approve: bool = False
     idea_mode: Literal["fast", "auto"] = "fast"
+    project_inputs: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_execution_evidence(self) -> DiscoveryRunSpec:
+        mode = str(self.project_inputs.get("mode") or "").strip().lower()
+        if mode == "production":
+            missing = tuple(
+                name
+                for name, value in (
+                    ("dataset_hash", self.dataset_hash),
+                    ("baseline_hash", self.baseline_hash),
+                    ("evaluator_hash", self.evaluator_hash),
+                )
+                if not value.strip()
+            )
+            if missing:
+                raise ValueError(
+                    "production discovery requires frozen " + ", ".join(missing)
+                )
+        fidelity = self.project_inputs.get("fidelity")
+        if fidelity is not None and fidelity not in {"F0", "F1", "F2", "F3", "F4"}:
+            raise ValueError("project_inputs.fidelity must be one of F0..F4")
+        return self
 
     def contract(self, run_id: str) -> ResearchTaskContract:
         return ResearchTaskContract(
