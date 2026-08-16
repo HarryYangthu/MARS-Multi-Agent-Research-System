@@ -24,5 +24,4 @@ pyproject.toml
 scripts/**
 templates/**
 uv.lock
-workspace/README.md
 workspace/repos/README.md
