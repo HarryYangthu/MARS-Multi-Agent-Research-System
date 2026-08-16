@@ -47,6 +47,7 @@ class AdapterResponse(BaseModel):
 
 
 class ProjectAdapter(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
     async def invoke(self, request: AdapterRequest) -> AdapterResponse: ...

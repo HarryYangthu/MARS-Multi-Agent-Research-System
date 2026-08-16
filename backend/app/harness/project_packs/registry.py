@@ -30,14 +30,19 @@ class LoadedProjectPack:
 
 
 class ProjectPackRegistry:
-    def __init__(self, *, core_version: str) -> None:
+    def __init__(self, *, core_version: str, allow_private: bool = False) -> None:
         self.core_version = core_version
+        self.allow_private = allow_private
         self._packs: dict[str, LoadedProjectPack] = {}
 
     def register(self, pack: LoadedProjectPack) -> None:
         project_id = pack.manifest.project_id
         if project_id in self._packs:
             raise ProjectPackError(f"duplicate project pack '{project_id}'")
+        if pack.manifest.distribution == "private" and not self.allow_private:
+            raise ProjectPackError(
+                f"private project pack '{project_id}' is not allowed in this distribution"
+            )
         if not version_satisfies(self.core_version, pack.manifest.requires_core):
             raise ProjectPackError(
                 f"project pack '{project_id}' requires core "

@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     mars_runtime_mode: Literal["development", "staging", "production"] = "development"
     mars_mock_mode: Literal["auto", "always", "never"] = "auto"
     mars_graph_engine: Literal["langgraph", "legacy"] = "langgraph"
+    mars_distribution: Literal["v30-core", "v31-wireless"] = "v30-core"
+    mars_project_pack_paths: str = ""
     mars_execution_backend: Literal[
         "mock",
         "pim_cpu",
@@ -104,6 +106,23 @@ class Settings(BaseSettings):
         if not raw or raw == "*":
             return ["*"]
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    @property
+    def project_pack_roots(self) -> tuple[Path, ...]:
+        """Return deterministic Project Pack roots.
+
+        The repository ``projects`` directory is the public default. Optional
+        overlays are mounted explicitly through ``MARS_PROJECT_PACK_PATHS``
+        using the platform path separator; no package auto-discovery is used.
+        """
+
+        roots = [REPO_ROOT / "projects"]
+        roots.extend(
+            Path(item).expanduser()
+            for item in self.mars_project_pack_paths.split(os.pathsep)
+            if item.strip()
+        )
+        return tuple(roots)
 
 
 _settings: Settings | None = None

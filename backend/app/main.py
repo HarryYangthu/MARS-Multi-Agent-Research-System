@@ -29,12 +29,14 @@ from app.api import reports as reports_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import stats as stats_api
+from app.api import system as system_api
 from app.api import templates as templates_api
 from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
 from app.bridge.agent_registry import get_registry
+from app.bridge.extension_runtime import get_extension_runtime
 from app.settings import get_settings
 
 
@@ -48,15 +50,17 @@ def register_default_agents() -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    extension_runtime = get_extension_runtime()
 
     logger.remove()
     logger.add(sys.stderr, level=settings.mars_log_level)
 
     app = FastAPI(
-        title="MARS V0",
-        description="Multi-Agent Research System — V0 backend",
-        version="0.1.0",
+        title="MARS",
+        description="Multi-Agent Research System",
+        version=extension_runtime.profile.core_version,
     )
+    app.state.extension_runtime = extension_runtime
 
     cors_origins = settings.cors_origins
     app.add_middleware(
@@ -69,7 +73,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "mars-backend", "version": "0.1.0"}
+        return {
+            "status": "ok",
+            "service": "mars-backend",
+            "version": extension_runtime.profile.version,
+            "distribution": extension_runtime.profile.name,
+        }
 
     @app.get("/")
     async def root() -> dict[str, str]:
@@ -96,12 +105,18 @@ def create_app() -> FastAPI:
     app.include_router(reports_api.router)
     app.include_router(events_api.router)
     app.include_router(stats_api.router)
+    app.include_router(system_api.router)
     app.include_router(chat_api.router)
     app.include_router(ws_api.router)
 
     register_default_agents()
 
-    logger.info("MARS V0 backend ready (port={})", settings.backend_port)
+    logger.info(
+        "MARS backend ready (distribution={}, core={}, port={})",
+        extension_runtime.profile.name,
+        extension_runtime.profile.core_version,
+        settings.backend_port,
+    )
     return app
 
 
