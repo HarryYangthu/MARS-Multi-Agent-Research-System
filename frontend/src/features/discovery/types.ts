@@ -57,7 +57,7 @@ export interface DiscoveryRunSpec {
   baseline_ref?: string;
   baseline_hash?: string;
   evaluator_ref?: string;
-  evaluator_hash: string;
+  evaluator_hash?: string;
   objectives: ObjectiveSpec[];
   budget?: Partial<BudgetLimits>;
   seed?: number;

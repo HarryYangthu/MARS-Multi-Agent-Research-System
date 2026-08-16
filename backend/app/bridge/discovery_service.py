@@ -1046,6 +1046,12 @@ class DiscoveryService:
         fidelity = FidelityLevel(
             str(project_inputs.get("fidelity") or FidelityLevel.F0.value)
         )
+        candidate_seed = context.contract.seed + iteration * 10_000 + ordinal
+        candidate_inputs = {
+            **project_inputs,
+            "seed": candidate_seed,
+            "fidelity": fidelity.value,
+        }
         return AdapterRequest(
             action=action,
             request_id=f"{action.value}:{iteration}:{ordinal}:{candidate.candidate_id}",
@@ -1053,12 +1059,12 @@ class DiscoveryService:
             run_id=node.child_run_id,
             candidate_id=candidate.candidate_id,
             fidelity=fidelity.value,
-            seed=context.contract.seed + iteration * 10_000 + ordinal,
+            seed=candidate_seed,
             repo_snapshot_ref=context.contract.baseline_ref,
             data_manifest_ref=context.contract.dataset_ref,
             config={
-                **project_inputs,
-                "project_inputs": project_inputs,
+                **candidate_inputs,
+                "project_inputs": candidate_inputs,
                 "model_genome": candidate.genome.model_dump(mode="json"),
             },
             output_dir=str(context.run.root / "execution" / candidate.candidate_id),
