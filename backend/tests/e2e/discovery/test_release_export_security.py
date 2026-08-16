@@ -13,8 +13,13 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
     tmp_path: Path,
 ) -> None:
     repo = _repository(tmp_path)
+    (repo / "routes").mkdir()
+    (repo / "routes" / "[id].txt").write_text("route\n", encoding="utf-8")
     (repo / "safe.txt").write_text("committed public text\n", encoding="utf-8")
-    (repo / "allowlist.txt").write_text("allowlist.txt\nsafe.txt\n", encoding="utf-8")
+    (repo / "allowlist.txt").write_text(
+        "allowlist.txt\nroutes/**\nsafe.txt\n",
+        encoding="utf-8",
+    )
     commit = _commit(repo, "safe")
     baseline = audit_release(
         repo=repo,
@@ -37,7 +42,11 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
 
     assert baseline.decision == dirty.decision == "pass"
     assert baseline.tree_hash == dirty.tree_hash
-    assert dirty.selected_files == ("allowlist.txt", "safe.txt")
+    assert dirty.selected_files == (
+        "allowlist.txt",
+        "routes/[id].txt",
+        "safe.txt",
+    )
     assert dirty.source_mode == "resolved_git_commit_objects_only"
 
 

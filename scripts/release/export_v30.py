@@ -416,7 +416,14 @@ def _extract_selection(repo: Path, selection: GitSelection, output: Path) -> Non
         for member in archive.getmembers():
             if member.isdir():
                 continue
-            relative = _safe_relative(member.name, label="archive member")
+            # Git tree paths may legitimately contain glob metacharacters (for
+            # example a Next.js ``[id]`` route). The member is still matched
+            # as an exact string against the already-resolved selection.
+            relative = _safe_relative(
+                member.name,
+                label="archive member",
+                allow_glob=True,
+            )
             if relative not in selection.files:
                 raise ReleaseGateError(f"archive contained unselected path: {relative}")
             if not member.isfile() or member.issym() or member.islnk():
