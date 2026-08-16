@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "isolatedModules": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": "/private/tmp/mars-v31-w7-fe-discovery-smoke",
+    "rootDir": "."
+  },
+  "include": ["types.ts", "selectors.ts", "smoke.ts", "fixtures/**/*.ts"],
+  "exclude": []
+}
