@@ -1,4 +1,6 @@
 import type {
+  CandidateDecisionRequest,
+  CandidateDecisionResponse,
   CreateDiscoveryRunRequest,
   DiscoveryReplayView,
   DiscoveryRunView,
@@ -121,5 +123,21 @@ export async function mutateDiscoveryRun(
   return requestJson<DiscoveryRunView>(
     `/api/discovery/runs/${encodeURIComponent(runId)}/${mutation}`,
     { method: "POST", body: JSON.stringify(payload[mutation]) },
+  );
+}
+
+export async function decideDiscoveryCandidate(
+  runId: string,
+  candidateId: string,
+  request: CandidateDecisionRequest,
+  signal?: AbortSignal,
+): Promise<CandidateDecisionResponse> {
+  return requestJson<CandidateDecisionResponse>(
+    `/api/discovery/runs/${encodeURIComponent(runId)}/candidates/${encodeURIComponent(candidateId)}/decision`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+      signal,
+    },
   );
 }

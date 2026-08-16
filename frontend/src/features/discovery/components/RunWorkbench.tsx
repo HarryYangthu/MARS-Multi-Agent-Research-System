@@ -225,7 +225,7 @@ export function RunWorkbench({ runId }: { runId: string }): JSX.Element {
                     <Badge value="waiting_hitl" />
                   </div>
                   <p className="mt-2 text-xs leading-5 text-amber-100/60">
-                    W5 resolves archive-level review through resume. Candidate-specific selection is not exposed by the current REST contract.
+                    Review candidate dossiers and record approve, reject, or promote decisions first. When the archive review is complete, approve and resume this run.
                   </p>
                 </div>
               ) : null}

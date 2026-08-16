@@ -246,3 +246,21 @@ export interface DiscoverySnapshot {
 }
 
 export type RunMutation = "start" | "pause" | "resume" | "stop";
+
+export type CandidateDecisionAction = "approve" | "reject" | "promote";
+
+export interface CandidateDecisionRequest {
+  action: CandidateDecisionAction;
+  actor: "researcher";
+  reason: string;
+  idempotency_key: string;
+}
+
+export interface CandidateDecisionResponse {
+  run_id: string;
+  candidate_id: string;
+  action: CandidateDecisionAction;
+  status: string;
+  audit_ref: string;
+  candidate: CandidateRecord;
+}

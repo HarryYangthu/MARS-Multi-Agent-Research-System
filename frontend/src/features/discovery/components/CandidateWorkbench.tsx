@@ -1,15 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  decideDiscoveryCandidate,
   DiscoveryApiError,
   isDiscoveryAbortError,
   loadDiscoverySnapshot,
 } from "../api";
 import { candidateRows, eventsForCandidate, formatMetric, shortRef } from "../selectors";
-import type { CandidateRecord, DiscoverySnapshot } from "../types";
+import type {
+  CandidateDecisionAction,
+  CandidateDecisionResponse,
+  CandidateRecord,
+  DiscoverySnapshot,
+} from "../types";
 import { Badge, EmptyState, KeyValue, Panel } from "./Primitives";
 
 function json(value: unknown): string {
@@ -26,6 +32,20 @@ function changedEntries(
     .map((key) => ({ key, before: parent[key], after: candidate[key] }));
 }
 
+interface DecisionAttempt {
+  action: CandidateDecisionAction;
+  reason: string;
+  idempotencyKey: string;
+}
+
+function decisionIdempotencyKey(
+  runId: string,
+  candidateId: string,
+  action: CandidateDecisionAction,
+): string {
+  return `candidate-decision:${runId}:${candidateId}:${action}:${crypto.randomUUID()}`;
+}
+
 export function CandidateWorkbench({
   candidateId,
   runId,
@@ -35,6 +55,13 @@ export function CandidateWorkbench({
 }): JSX.Element {
   const [snapshot, setSnapshot] = useState<DiscoverySnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [decisionReason, setDecisionReason] = useState("");
+  const [decisionPending, setDecisionPending] = useState<CandidateDecisionAction | null>(null);
+  const [decisionResult, setDecisionResult] = useState<CandidateDecisionResponse | null>(null);
+  const [decisionError, setDecisionError] = useState<Error | null>(null);
+  const decisionAttemptRef = useRef<DecisionAttempt | null>(null);
+  const decisionControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -62,7 +89,14 @@ export function CandidateWorkbench({
       controller.abort();
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [runId]);
+  }, [refreshVersion, runId]);
+
+  useEffect(
+    () => () => {
+      decisionControllerRef.current?.abort();
+    },
+    [],
+  );
 
   const row = useMemo(
     () =>
@@ -89,6 +123,55 @@ export function CandidateWorkbench({
     candidate.genome.hyperparameters,
   );
   const selected = replay.run.selected_candidate_id === candidateId;
+
+  const submitDecision = async (action: CandidateDecisionAction): Promise<void> => {
+    const reason = decisionReason.trim();
+    if (!reason || source !== "rest" || decisionPending !== null) return;
+
+    const previous = decisionAttemptRef.current;
+    const attempt: DecisionAttempt =
+      previous?.action === action && previous.reason === reason
+        ? previous
+        : {
+            action,
+            reason,
+            idempotencyKey: decisionIdempotencyKey(runId, candidateId, action),
+          };
+    decisionAttemptRef.current = attempt;
+    decisionControllerRef.current?.abort();
+    const controller = new AbortController();
+    decisionControllerRef.current = controller;
+    setDecisionPending(action);
+    setDecisionError(null);
+    setDecisionResult(null);
+    try {
+      const result = await decideDiscoveryCandidate(
+        runId,
+        candidateId,
+        {
+          action,
+          actor: "researcher",
+          reason,
+          idempotency_key: attempt.idempotencyKey,
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setDecisionResult(result);
+      decisionAttemptRef.current = null;
+      setRefreshVersion((version) => version + 1);
+    } catch (caught: unknown) {
+      if (controller.signal.aborted || isDiscoveryAbortError(caught)) return;
+      setDecisionError(
+        caught instanceof Error ? caught : new Error("Candidate decision request failed"),
+      );
+    } finally {
+      if (decisionControllerRef.current === controller) {
+        decisionControllerRef.current = null;
+        if (!controller.signal.aborted) setDecisionPending(null);
+      }
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[#090c12] text-slate-100">
@@ -126,14 +209,10 @@ export function CandidateWorkbench({
                 {candidate.genome.family} · generation {candidate.generation} · iteration {candidate.iteration}
               </p>
             </div>
-            <button
-              className="cursor-not-allowed rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-500"
-              disabled
-              title="Candidate-specific selection is not part of the current W5 REST contract"
-              type="button"
-            >
-              Candidate selection endpoint pending
-            </button>
+            <div className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-right">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">HITL actor</p>
+              <p className="mt-1 font-mono text-xs text-slate-200">researcher</p>
+            </div>
           </div>
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
             <KeyValue label="Preflight" value={<Badge value={row.preflight} />} />
@@ -144,6 +223,84 @@ export function CandidateWorkbench({
             <KeyValue label="Seed" value={evaluation?.seed ?? "—"} />
           </div>
         </header>
+
+        <section className="mb-5 rounded-2xl border border-white/10 bg-[#11151d] p-5">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-300/70">
+                Human decision
+              </p>
+              <h2 className="mt-1 text-sm font-semibold text-slate-100">Candidate HITL</h2>
+              <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500">
+                The service records the decision and audit reference first. Candidate state changes only after the authoritative replay refreshes.
+              </p>
+            </div>
+            {source === "contract_fixture" ? (
+              <Badge value="pending" label="REST required" />
+            ) : (
+              <Badge value={decisionPending ? "running" : "pending"} label={decisionPending ? `${decisionPending} pending` : "ready"} />
+            )}
+          </div>
+          <label className="mt-5 block">
+            <span className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Reason</span>
+            <textarea
+              className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-200 outline-none transition placeholder:text-slate-700 focus:border-cyan-400/40"
+              disabled={decisionPending !== null || source !== "rest"}
+              onChange={(event) => {
+                setDecisionReason(event.target.value);
+                setDecisionError(null);
+              }}
+              placeholder="Record the evidence-based reason for this decision"
+              value={decisionReason}
+            />
+          </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(["approve", "reject", "promote"] as const).map((action) => (
+              <button
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                  action === "reject"
+                    ? "border-rose-400/25 text-rose-200 hover:bg-rose-400/10"
+                    : action === "promote"
+                      ? "border-violet-400/25 text-violet-200 hover:bg-violet-400/10"
+                      : "border-emerald-400/25 text-emerald-200 hover:bg-emerald-400/10"
+                }`}
+                disabled={
+                  source !== "rest" || decisionPending !== null || decisionReason.trim().length === 0
+                }
+                key={action}
+                onClick={() => void submitDecision(action)}
+                type="button"
+              >
+                {decisionPending === action ? `${action}…` : action}
+              </button>
+            ))}
+          </div>
+          <div aria-live="polite" className="mt-4">
+            {decisionPending ? (
+              <p className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-3 py-2.5 text-xs text-cyan-100">
+                Submitting {decisionPending}; waiting for the REST response…
+              </p>
+            ) : null}
+            {decisionResult ? (
+              <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] px-3 py-3 text-xs text-emerald-100">
+                <p>
+                  {decisionResult.action} recorded · status {decisionResult.status}. Refreshing the replay.
+                </p>
+                <p className="mt-2 break-all font-mono text-[11px] text-emerald-200/70">
+                  audit_ref: {decisionResult.audit_ref}
+                </p>
+              </div>
+            ) : null}
+            {decisionError ? (
+              <div className="rounded-xl border border-rose-400/20 bg-rose-400/[0.05] px-3 py-3 text-xs text-rose-100">
+                <p>{decisionError.message}</p>
+                <p className="mt-1 text-rose-200/60">
+                  Retrying the same action and reason reuses its idempotency key.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </section>
 
         {candidate.status === "quarantined" || candidate.status === "failed" ? (
           <div className="mb-5 rounded-2xl border border-rose-400/20 bg-rose-400/[0.05] p-5">
