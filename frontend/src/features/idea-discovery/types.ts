@@ -99,3 +99,9 @@ export interface HypothesisMutationInput {
 export interface HypothesisEditInput extends HypothesisMutationInput {
   statement: string;
 }
+
+export interface HypothesisCreateInput extends HypothesisMutationInput {
+  statement: string;
+}
+
+export type HypothesisCreateAuditRecord = Record<string, unknown>;

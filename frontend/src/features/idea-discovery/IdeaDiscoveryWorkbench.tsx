@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  createHypothesis,
   editHypothesis,
   getDiscoverySystemVersion,
   getIdeaDiscovery,
@@ -12,6 +13,7 @@ import {
   selectHypothesis,
   systemSupportsIdeaDiscovery,
 } from "./api";
+import { AddHypothesisForm } from "./AddHypothesisForm";
 import {
   DISCOVERY_STAGES,
   DiscoveryStagePanel,
@@ -20,6 +22,8 @@ import { HypothesisReviewPanel } from "./HypothesisReviewPanel";
 import type {
   DiscoveryHypothesis,
   DiscoveryStage,
+  HypothesisCreateAuditRecord,
+  HypothesisCreateInput,
   IdeaDiscoverySnapshot,
 } from "./types";
 
@@ -40,13 +44,30 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
   const [busyAction, setBusyAction] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
+  const mountedRef = useRef(false);
+  const refreshSequenceRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      refreshSequenceRef.current += 1;
+    };
+  }, []);
 
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
+    const requestSequence = ++refreshSequenceRef.current;
     const [versionResult, discoveryResult] = await Promise.allSettled([
       getDiscoverySystemVersion(signal),
       getIdeaDiscovery(runId, signal),
     ]);
-    if (signal?.aborted) return;
+    if (
+      !mountedRef.current ||
+      signal?.aborted ||
+      requestSequence !== refreshSequenceRef.current
+    ) {
+      return;
+    }
     if (versionResult.status === "rejected") {
       if (isIdeaDiscoveryUnavailable(versionResult.reason)) {
         setCompatibilityReason("系统没有 capability API；该 run 使用 V3.0 兼容工作台。 ");
@@ -80,25 +101,22 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
 
   useEffect(() => {
     let disposed = false;
-    let inFlight = false;
-    let activeController: AbortController | null = null;
+    let timer: number | null = null;
+    const controller = new AbortController();
     const poll = async (): Promise<void> => {
-      if (disposed || inFlight) return;
-      inFlight = true;
-      activeController = new AbortController();
       try {
-        await refresh(activeController.signal);
+        await refresh(controller.signal);
       } finally {
-        inFlight = false;
-        activeController = null;
+        if (!disposed && !controller.signal.aborted) {
+          timer = window.setTimeout(() => void poll(), 5000);
+        }
       }
     };
     void poll();
-    const interval = window.setInterval(() => void poll(), 5000);
     return () => {
       disposed = true;
-      activeController?.abort();
-      window.clearInterval(interval);
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [refresh]);
 
@@ -162,6 +180,14 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
     }
   }
 
+  async function addHypothesis(
+    input: HypothesisCreateInput,
+  ): Promise<HypothesisCreateAuditRecord> {
+    const audit = await createHypothesis(runId, input);
+    await refresh();
+    return audit;
+  }
+
   if (viewMode === "loading") return <LoadingView runId={runId} />;
   if (viewMode === "compatibility") {
     return <CompatibilityView runId={runId} reason={compatibilityReason} onRetry={() => { setViewMode("loading"); void refresh(); }} />;
@@ -198,7 +224,13 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-5">
-            <HypothesisPool snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} />
+            <HypothesisPool
+              defaultActor={actor}
+              onCreate={addHypothesis}
+              onSelect={setSelectedId}
+              selectedId={selectedId}
+              snapshot={snapshot}
+            />
             <DiscoveryStagePanel stage={activeStage} snapshot={snapshot} />
           </div>
           <HypothesisReviewPanel
@@ -225,10 +257,23 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
   );
 }
 
-function HypothesisPool({ snapshot, selectedId, onSelect }: { snapshot: IdeaDiscoverySnapshot; selectedId: string; onSelect: (id: string) => void }): JSX.Element {
+function HypothesisPool({
+  defaultActor,
+  onCreate,
+  onSelect,
+  selectedId,
+  snapshot,
+}: {
+  defaultActor: string;
+  onCreate: (input: HypothesisCreateInput) => Promise<HypothesisCreateAuditRecord>;
+  onSelect: (id: string) => void;
+  selectedId: string;
+  snapshot: IdeaDiscoverySnapshot;
+}): JSX.Element {
+  const [adding, setAdding] = useState(false);
   const finalistIds = new Set(snapshot.finalist_ids);
   const hypotheses = [...snapshot.hypotheses].sort((left, right) => Number(finalistIds.has(right.hypothesis_id)) - Number(finalistIds.has(left.hypothesis_id)) || right.elo - left.elo);
-  return <section className="rounded-2xl border border-mars-border bg-mars-panel p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-base font-semibold">Hypothesis pool</h2><p className="mt-1 text-xs text-slate-500">Top-K first; blocked candidates remain auditable but cannot be selected.</p></div><span className="font-mono text-xs text-slate-500">{hypotheses.length}</span></div><div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">{hypotheses.map((item) => <HypothesisCard key={item.hypothesis_id} item={item} selected={selectedId === item.hypothesis_id} finalist={finalistIds.has(item.hypothesis_id)} onClick={() => onSelect(item.hypothesis_id)} />)}</div></section>;
+  return <section className="rounded-2xl border border-mars-border bg-mars-panel p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">Hypothesis pool</h2><p className="mt-1 text-xs text-slate-500">Top-K first; blocked candidates remain auditable but cannot be selected.</p></div><div className="flex items-center gap-2"><span className="font-mono text-xs text-slate-500">{hypotheses.length}</span><button type="button" onClick={() => setAdding((value) => !value)} className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs font-medium text-indigo-200 transition hover:bg-indigo-500/20">{adding ? "Close add" : "Add hypothesis"}</button></div></div>{adding ? <AddHypothesisForm defaultActor={defaultActor} onCancel={() => setAdding(false)} onSubmit={onCreate} /> : null}<div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">{hypotheses.map((item) => <HypothesisCard key={item.hypothesis_id} item={item} selected={selectedId === item.hypothesis_id} finalist={finalistIds.has(item.hypothesis_id)} onClick={() => onSelect(item.hypothesis_id)} />)}</div></section>;
 }
 
 function HypothesisCard({ item, selected, finalist, onClick }: { item: DiscoveryHypothesis; selected: boolean; finalist: boolean; onClick: () => void }): JSX.Element {

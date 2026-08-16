@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "jsx": "react-jsx",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": "../../../.tmp/idea-discovery-smoke",
+    "rootDir": "../../.."
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

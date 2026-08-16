@@ -1,5 +1,7 @@
 import { normalizeIdeaDiscoveryPayload } from "./normalize";
 import type {
+  HypothesisCreateAuditRecord,
+  HypothesisCreateInput,
   HypothesisEditInput,
   HypothesisMutationInput,
   IdeaDiscoverySnapshot,
@@ -46,6 +48,22 @@ export async function editHypothesis(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+export async function createHypothesis(
+  runId: string,
+  input: HypothesisCreateInput,
+  signal?: AbortSignal,
+): Promise<HypothesisCreateAuditRecord> {
+  return requestJson<HypothesisCreateAuditRecord>(
+    `/api/runs/${encodeURIComponent(runId)}/idea-discovery/hypotheses`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal,
+    },
+  );
 }
 
 export async function rejectHypothesis(
