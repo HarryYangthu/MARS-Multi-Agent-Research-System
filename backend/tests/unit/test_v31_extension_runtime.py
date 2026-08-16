@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,7 +33,7 @@ def _write_pack(root: Path, *, distribution: str = "public") -> Path:
                 "adapters:",
                 "  evaluator:",
                 "    protocol: adapter.v1",
-                "    argv: [python, -m, demo_adapter]",
+                "    argv: ['{python}', -m, demo_adapter]",
             ]
         ),
         encoding="utf-8",
@@ -63,6 +64,8 @@ def test_v30_runtime_loads_public_pack_and_process_adapter(tmp_path: Path) -> No
     assert runtime.project_packs.get("demo").manifest.pack_version == "1.0.0"
     assert runtime.adapter_name("demo", "evaluator") == "demo:evaluator"
     assert runtime.adapters.names() == ("demo:evaluator",)
+    adapter = runtime.adapters.get("demo:evaluator")
+    assert getattr(adapter, "argv") == (sys.executable, "-m", "demo_adapter")
 
 
 def test_private_pack_is_rejected_by_v30_and_accepted_by_v31(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ def build_extension_runtime(
                 qualified_name,
                 ProcessAdapter(
                     name=qualified_name,
-                    argv=declaration.argv,
+                    argv=_expand_adapter_argv(declaration.argv),
                     timeout_seconds=declaration.timeout_seconds,
                 ),
             )
@@ -123,3 +124,19 @@ def _validate_pack_payload(pack: LoadedProjectPack) -> None:
         raise ProjectPackError(f"invalid UI schema {ui_schema_path}: {exc}") from exc
     if not isinstance(ui_schema, dict):
         raise ProjectPackError(f"UI schema {ui_schema_path} must contain an object")
+
+
+def _expand_adapter_argv(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve the only Core-owned argv placeholder without invoking a shell."""
+
+    expanded: list[str] = []
+    for token in argv:
+        if token == "{python}":
+            expanded.append(sys.executable)
+            continue
+        if "{" in token or "}" in token:
+            raise ProjectPackError(f"unsupported adapter argv placeholder: {token!r}")
+        if any(marker in token for marker in ("\x00", "\n", "\r")):
+            raise ProjectPackError("adapter argv contains an invalid control character")
+        expanded.append(token)
+    return tuple(expanded)
