@@ -6,11 +6,18 @@ export type ProjectPackCapability =
   | string;
 
 export interface ProjectPackSummary {
-  id: string;
+  name: string;
   display_name: string;
-  pack_version?: string;
-  contract_version?: "project_pack.v1" | string;
-  capabilities?: ProjectPackCapability[];
+  description: string;
+  domain: string;
+  tags: string[];
+  repo_path: string;
+  repo_exists: boolean;
+  pack_version: string | null;
+  contract_version: "project_pack.v1" | string | null;
+  capabilities: ProjectPackCapability[];
+  pack_distribution: "public" | "private" | null;
+  compatibility_mode: "v30_legacy" | "v31_pack";
   readiness?: {
     status: "ready" | "blocked" | "unknown";
     missing?: string[];
@@ -18,5 +25,13 @@ export interface ProjectPackSummary {
 }
 
 export function isLegacyProject(project: ProjectPackSummary): boolean {
-  return !project.contract_version || !project.capabilities;
+  return project.compatibility_mode === "v30_legacy" || !project.contract_version;
+}
+
+export interface ProjectPackUiSchema {
+  type: "object";
+  title?: string;
+  description?: string;
+  required?: string[];
+  properties: Record<string, Record<string, unknown>>;
 }

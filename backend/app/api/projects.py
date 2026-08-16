@@ -18,12 +18,14 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 class ProjectSummary(BaseModel):
     name: str
+    display_name: str = ""
     description: str = ""
     domain: str = ""
     tags: list[str] = Field(default_factory=list)
     repo_path: str = ""
     repo_exists: bool = False
     pack_version: str | None = None
+    contract_version: Literal["project_pack.v1"] | None = None
     capabilities: list[str] = Field(default_factory=list)
     pack_distribution: Literal["public", "private"] | None = None
     compatibility_mode: Literal["v30_legacy", "v31_pack"] = "v30_legacy"
@@ -55,6 +57,7 @@ def _summary(project_dir: Path) -> ProjectSummary:
     abs_path = _resolve_repo_path(project_dir, raw_path) if raw_path else Path("")
     return ProjectSummary(
         name=name,
+        display_name=str(pj.get("display_name", name)),
         description=str(pj.get("description", "")),
         domain=str(pj.get("domain", "")),
         tags=list(pj.get("tags", []) or []),
@@ -72,12 +75,14 @@ def _pack_summary(pack: LoadedProjectPack) -> ProjectSummary:
     abs_path = _resolve_repo_path(pack.root, raw_path) if raw_path else Path("")
     return ProjectSummary(
         name=pack.manifest.project_id,
+        display_name=pack.manifest.display_name,
         description=str(project.get("description", "")),
         domain=str(project.get("domain", "")),
         tags=list(project.get("tags", []) or []),
         repo_path=str(abs_path) if raw_path else "",
         repo_exists=bool(raw_path) and abs_path.exists(),
         pack_version=pack.manifest.pack_version,
+        contract_version=pack.manifest.schema_id,
         capabilities=list(pack.manifest.capabilities),
         pack_distribution=pack.manifest.distribution,
         compatibility_mode="v31_pack",
