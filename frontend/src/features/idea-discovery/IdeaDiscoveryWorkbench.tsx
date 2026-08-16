@@ -33,6 +33,8 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
   const [activeStage, setActiveStage] = useState<DiscoveryStage>("generation");
   const [selectedId, setSelectedId] = useState("");
   const [statement, setStatement] = useState("");
+  const [statementHypothesisId, setStatementHypothesisId] = useState("");
+  const [statementDirty, setStatementDirty] = useState(false);
   const [actor, setActor] = useState("ui-researcher");
   const [reason, setReason] = useState("");
   const [busyAction, setBusyAction] = useState("");
@@ -77,11 +79,25 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
   }, [runId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    const interval = window.setInterval(() => void refresh(), 5000);
+    let disposed = false;
+    let inFlight = false;
+    let activeController: AbortController | null = null;
+    const poll = async (): Promise<void> => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      activeController = new AbortController();
+      try {
+        await refresh(activeController.signal);
+      } finally {
+        inFlight = false;
+        activeController = null;
+      }
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 5000);
     return () => {
-      controller.abort();
+      disposed = true;
+      activeController?.abort();
       window.clearInterval(interval);
     };
   }, [refresh]);
@@ -103,10 +119,24 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
     [selectedId, snapshot],
   );
   useEffect(() => {
-    setStatement(selected?.statement ?? "");
-    setReason("");
-    setActionMessage("");
-  }, [selected]);
+    if (!selected) {
+      setStatement("");
+      setStatementHypothesisId("");
+      setStatementDirty(false);
+      return;
+    }
+    if (statementHypothesisId !== selected.hypothesis_id) {
+      setStatement(selected.statement);
+      setStatementHypothesisId(selected.hypothesis_id);
+      setStatementDirty(false);
+      setReason("");
+      setActionMessage("");
+      return;
+    }
+    if (!statementDirty && statement !== selected.statement) {
+      setStatement(selected.statement);
+    }
+  }, [selected, statement, statementDirty, statementHypothesisId]);
 
   async function mutate(
     action: "edit" | "reject" | "select",
@@ -117,6 +147,7 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
     try {
       await operation();
       await refresh();
+      setStatementDirty(false);
       setActionMessage(`${action} 已提交；当前视图已从 REST 恢复。`);
     } catch (nextError) {
       if (isIdeaDiscoveryUnavailable(nextError)) {
@@ -180,7 +211,10 @@ export function IdeaDiscoveryWorkbench({ runId }: { runId: string }): JSX.Elemen
             message={actionMessage}
             onActorChange={setActor}
             onReasonChange={setReason}
-            onStatementChange={setStatement}
+            onStatementChange={(value) => {
+              setStatement(value);
+              setStatementDirty(true);
+            }}
             onEdit={() => selected ? void mutate("edit", () => editHypothesis(runId, selected.hypothesis_id, { actor, reason, statement })) : undefined}
             onReject={() => selected ? void mutate("reject", () => rejectHypothesis(runId, selected.hypothesis_id, { actor, reason })) : undefined}
             onSelect={() => selected ? void mutate("select", () => selectHypothesis(runId, selected.hypothesis_id, { actor, reason })) : undefined}
