@@ -1,0 +1,8 @@
+{
+  "schema_id": "metric_catalog.v1",
+  "metrics": {
+    "validation_mse": {"unit": "squared_unit", "direction": "minimize"},
+    "model_terms": {"unit": "count", "direction": "minimize"},
+    "stability_score": {"unit": "ratio", "direction": "maximize"}
+  }
+}

@@ -1,0 +1,12 @@
+schema_id: discovery_workflow.v1
+workflow_id: synthetic_regression_v1
+stages:
+  - {id: readiness, action: readiness, blocking: true}
+  - {id: preflight, action: preflight, blocking: true}
+  - {id: evaluate, action: evaluate, blocking: true}
+  - {id: archive, action: core_discovery_archive, blocking: true}
+determinism:
+  candidate_count: 20
+  external_services: false
+  gpu_required: false
+  network_required: false
