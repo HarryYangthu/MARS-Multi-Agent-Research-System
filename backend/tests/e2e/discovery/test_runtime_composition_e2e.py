@@ -161,6 +161,21 @@ def test_main_registers_live_discovery_router_and_public_pack(
         )
         assert created.status_code == 200
         assert created.json()["lifecycle"] == "created"
+        run_id = str(created.json()["run_id"])
+
+        legacy_detail = client.get(f"/api/runs/{run_id}")
+        assert legacy_detail.status_code == 200, legacy_detail.text
+        assert legacy_detail.json()["states"] == {"model_discovery": "pending"}
+        assert legacy_detail.json()["graph"]["nodes"][0]["kind"] == "external_service"
+        assert legacy_detail.json()["graph"]["nodes"][0]["metadata"]["read_only"] is True
+
+        legacy_stats = client.get("/api/stats")
+        assert legacy_stats.status_code == 200, legacy_stats.text
+        assert legacy_stats.json()["runs_total"] == 1
+
+        legacy_start = client.post(f"/api/runs/{run_id}/start")
+        assert legacy_start.status_code == 409, legacy_start.text
+        assert "dedicated service API" in str(legacy_start.json()["detail"])
     finally:
         deps.reset_for_tests()
         reset_settings_cache()

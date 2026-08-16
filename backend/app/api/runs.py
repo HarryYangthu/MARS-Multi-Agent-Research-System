@@ -323,6 +323,14 @@ async def start_run(run_id: str) -> dict[str, str]:
         session = orch.session(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+    if session.read_only:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"run entrypoint '{session.run.entrypoint}' is managed by its "
+                "dedicated service API"
+            ),
+        )
     try:
         assert_ready_for_run(project=session.run.project)
     except ProductionReadinessError as exc:

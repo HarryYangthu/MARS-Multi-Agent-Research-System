@@ -11,6 +11,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -20,7 +21,12 @@ from app.bridge.bridge_agent import BridgeAgent, BridgeDecision
 from app.bridge.commander_agent import CommanderAgent, FeedbackDecision
 from app.bridge.langgraph_runtime import LangGraphRuntimeFacade
 from app.bridge.node_key import attempt_key, parse_node_key
-from app.bridge.workflow_service import EntryPoint, build_pipeline, build_standalone
+from app.bridge.workflow_service import (
+    LINEAR_STAGES,
+    EntryPoint,
+    build_pipeline,
+    build_standalone,
+)
 from app.harness.observability.tracing import TraceRecorder
 from app.harness.runtime.event_bus import EventBus, InProcessEventBus
 from app.harness.runtime.readiness import assert_ready_for_run
@@ -35,6 +41,19 @@ from app.storage.run_state_store import RunStateStore
 # just transitions running -> waiting_review -> approved -> done. This keeps
 # the e2e wiring testable in Phase 2 *before* Phase 3 ships real agents.
 NodeRunner = Callable[[RunHandle, str], Awaitable[None]]
+
+_ORCHESTRATED_ENTRYPOINTS = frozenset(("pipeline", *LINEAR_STAGES))
+_EXTERNAL_LIFECYCLE_STATES: dict[str, NodeState] = {
+    "created": NodeState.PENDING,
+    "pending": NodeState.PENDING,
+    "running": NodeState.RUNNING,
+    "paused": NodeState.WAITING_REVIEW,
+    "waiting_hitl": NodeState.WAITING_REVIEW,
+    "completed": NodeState.DONE,
+    "stopped": NodeState.DONE,
+    "failed": NodeState.FAILED,
+    "cancelled": NodeState.FAILED,
+}
 
 
 @dataclass
@@ -57,6 +76,7 @@ class RunSession:
     bus: EventBus
     runners: dict[str, NodeRunner] = field(default_factory=dict)
     waiting_for_feedback: bool = False
+    read_only: bool = False
 
 
 class Orchestrator:
@@ -887,6 +907,7 @@ class Orchestrator:
         run = self.run_store.get(run_id)
         if run is None:
             return None
+        read_only = run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS
         snapshot = RunStateStore(run).load()
         if snapshot is None:
             graph = self._infer_readonly_graph_from_artifacts(run)
@@ -918,6 +939,7 @@ class Orchestrator:
             request=request,
             bus=self.bus,
             waiting_for_feedback=waiting,
+            read_only=read_only,
         )
         self._sessions[run_id] = session
         return session
@@ -925,6 +947,9 @@ class Orchestrator:
     def _infer_readonly_graph_from_artifacts(self, run: RunHandle) -> RunGraph:
         from app.harness.runtime.state_machine import NodeState
         from app.storage.artifact_store import SCHEMA_TO_AGENT
+
+        if run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS:
+            return self._external_run_projection(run)
 
         graph = (
             build_pipeline(run.entrypoint)  # type: ignore[arg-type]
@@ -947,6 +972,74 @@ class Orchestrator:
             else:
                 graph.restore_state(key, NodeState.PENDING)
         return graph
+
+    def _external_run_projection(self, run: RunHandle) -> RunGraph:
+        """Project service-owned runs into the legacy read-only Run API.
+
+        Discovery and future extension services persist runs in the shared
+        ``RunStore`` but own their lifecycle outside the five-Agent graph.
+        Legacy dashboards still enumerate those records, so recovery must be
+        observable without pretending that the Orchestrator can execute them.
+        """
+
+        lifecycle = self._external_run_lifecycle(run)
+        graph = RunGraph()
+        graph.add_node(
+            run.entrypoint,
+            kind="external_service",
+            metadata={
+                "stage": run.entrypoint,
+                "attempt": 1,
+                "read_only": True,
+                "lifecycle": lifecycle,
+            },
+        )
+        graph.set_entrypoint(run.entrypoint)
+        graph.restore_state(
+            run.entrypoint,
+            _EXTERNAL_LIFECYCLE_STATES.get(lifecycle, NodeState.PENDING),
+        )
+        return graph
+
+    def _external_run_lifecycle(self, run: RunHandle) -> str:
+        discovery_root = run.root / "discovery"
+        if run.entrypoint == "model_discovery":
+            checkpoint = self._read_json_object(
+                discovery_root / "checkpoints" / "latest.json"
+            )
+            state = checkpoint.get("state")
+            if isinstance(state, dict) and state.get("lifecycle"):
+                return str(state["lifecycle"])
+            return str(checkpoint.get("status") or "created")
+
+        if run.entrypoint == "discovery_iteration":
+            link = self._read_json_object(discovery_root / "iteration_link.json")
+            parent_run_id = str(link.get("parent_run_id") or "")
+            if parent_run_id:
+                parent = self.run_store.get(parent_run_id)
+                if parent is not None:
+                    checkpoint = self._read_json_object(
+                        parent.root / "discovery" / "checkpoints" / "latest.json"
+                    )
+                    state = checkpoint.get("state")
+                    nodes = state.get("iteration_nodes") if isinstance(state, dict) else None
+                    if isinstance(nodes, list):
+                        for item in nodes:
+                            if not isinstance(item, dict):
+                                continue
+                            if str(item.get("child_run_id") or "") == run.run_id:
+                                return str(item.get("status") or "running")
+            return str(link.get("status") or "created")
+
+        return "created"
+
+    @staticmethod
+    def _read_json_object(path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _persist_state(self, session: RunSession, *, status: str) -> None:
         RunStateStore(session.run).write(
