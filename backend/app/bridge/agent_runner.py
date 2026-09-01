@@ -6,6 +6,8 @@ already inside the registry by the time this runs.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -21,6 +23,7 @@ from app.harness.execution_intent import (
     requested_experiment_count,
     wants_execution_sweep,
 )
+from app.harness.llm.provider_base import LLMCompletionError
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
 from app.storage.data_source_store import selection_summary
@@ -143,11 +146,9 @@ async def run_agent_node(
     debate_path = run.subdir(stage) / transcript_name
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
-    request = AgentRunRequest(
-        project=run.project,
-        user_request=user_request,
-        upstream_artifacts=upstream,
-        extra={
+    request_extra = _load_run_request_extra(run)
+    request_extra.update(
+        {
             "debate_progress_path": str(debate_path),
             "attempt": attempt,
             "node_key": node_key,
@@ -155,15 +156,33 @@ async def run_agent_node(
             "run_root": str(run.root),
             "agent_dir": str(run.subdir(stage)),
             "revision_reason": revision_reason,
-        },
+        }
     )
-    context = await agent.build_context(request)
+    request = AgentRunRequest(
+        project=run.project,
+        user_request=user_request,
+        upstream_artifacts=upstream,
+        extra=request_extra,
+    )
+    failure_phase = "build_context"
+    try:
+        context = await agent.build_context(request)
 
-    run_loop = getattr(agent, "run_loop", None)
-    if callable(run_loop):
-        artifact = await run_loop(request, context)
-    else:
-        artifact = await agent.draft(request, context)
+        failure_phase = "draft"
+        run_loop = getattr(agent, "run_loop", None)
+        if callable(run_loop):
+            artifact = await run_loop(request, context)
+        else:
+            artifact = await agent.draft(request, context)
+    except Exception as exc:
+        _write_agent_failure_diagnostic(
+            run=run,
+            node_key=node_key,
+            agent=stage,
+            phase=failure_phase,
+            exc=exc,
+        )
+        raise
 
     # Validate; ALWAYS persist the artifact under <agent>/<stem>.v1.md, even
     # when schema validation fails — the HITL UI will then show the validation
@@ -360,6 +379,51 @@ async def run_agent_node(
     # in the run directory and review queue until promoted to *.approved.md.
 
 
+def _write_agent_failure_diagnostic(
+    *,
+    run: RunHandle,
+    node_key: str,
+    agent: str,
+    phase: str,
+    exc: Exception,
+) -> None:
+    """Persist a content-free, machine-readable failure before propagation."""
+
+    diagnostic: dict[str, Any] = {
+        "code": "agent_stage_failed",
+        "exception_type": type(exc).__name__,
+    }
+    reason: Mapping[str, object] | None = None
+    raw_reason = getattr(exc, "reason", None)
+    if isinstance(exc, LLMCompletionError):
+        reason = exc.reason
+    elif isinstance(raw_reason, Mapping):
+        reason = raw_reason
+    if reason is not None:
+        allowed_keys = (
+            "code",
+            "role",
+            "provider",
+            "model",
+            "finish_reason",
+            "empty_final",
+        )
+        details = {key: reason[key] for key in allowed_keys if key in reason}
+        diagnostic["code"] = str(details.get("code") or diagnostic["code"])
+        diagnostic["details"] = details
+    run.write_event(
+        "agent_events",
+        {
+            "event": "agent.node_failed",
+            "agent": agent,
+            "node": node_key,
+            "phase": phase,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "diagnostic": diagnostic,
+        },
+    )
+
+
 def _write_patch_diff(*, run: RunHandle, version: str, attempt: int) -> None:
     target = run.subdir("coding") / f"patch.{version}.diff"
     diff = (
@@ -441,6 +505,22 @@ def _load_selected_data_source(run: RunHandle) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
+    path = run.subdir("input") / "run_request_options.v1.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("run request options are unreadable: {}", path)
+        return {}
+    if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
+        logger.warning("run request options use an unsupported schema: {}", path)
+        return {}
+    extra = raw.get("extra")
+    return {str(key): value for key, value in extra.items()} if isinstance(extra, dict) else {}
 
 
 def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str:

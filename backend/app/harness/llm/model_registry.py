@@ -10,13 +10,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from loguru import logger
 
 from app.harness.llm.mock_provider import MockProvider
-from app.harness.llm.provider_base import LLMConfig, LLMProvider
+from app.harness.llm.provider_base import LLMConfig, LLMProvider, ReasoningEffort
 from app.settings import env_or_local, get_settings, repo_root
 
 
@@ -34,9 +34,15 @@ class AgentConfig:
     debate_participants: tuple[Mapping[str, Any], ...]
     tools: tuple[str, ...]
     raw: Mapping[str, Any]
+    top_p: float = 1.0
     api_key_env: str = ""
     base_url: str = ""
     base_url_env: str = ""
+    thinking_enabled: bool = False
+    reasoning_effort: ReasoningEffort | None = None
+    request_timeout_seconds: float = 120.0
+    max_retries: int = 3
+    retry_base_delay_seconds: float = 1.0
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -77,8 +83,25 @@ def _agents_config() -> dict[str, AgentConfig]:
             continue
         model = body.get("model", {}) or {}
         debate = body.get("debate", {}) or {}
+        thinking = model.get("thinking", {}) or {}
+        retry = model.get("retry", {}) or {}
+        if not isinstance(thinking, Mapping):
+            thinking = {}
+        if not isinstance(retry, Mapping):
+            retry = {}
         provider = str(model.get("provider", "mock"))
         provider_defaults = _provider_defaults(provider)
+        reasoning_effort_raw = str(model.get("reasoning_effort") or "").strip()
+        if reasoning_effort_raw and reasoning_effort_raw not in {
+            "low",
+            "medium",
+            "high",
+            "max",
+        }:
+            raise ValueError(
+                f"invalid reasoning_effort for agent '{name}': "
+                f"{reasoning_effort_raw}"
+            )
         out[name] = AgentConfig(
             name=name,
             enabled=bool(body.get("enabled", True)),
@@ -92,6 +115,7 @@ def _agents_config() -> dict[str, AgentConfig]:
             debate_participants=tuple(debate.get("participants", []) or []),
             tools=tuple(body.get("tools", []) or []),
             raw=body,
+            top_p=float(model.get("top_p", 1.0)),
             api_key_env=str(
                 model.get("api_key_env")
                 or provider_defaults.get("api_key_env")
@@ -104,6 +128,19 @@ def _agents_config() -> dict[str, AgentConfig]:
                 model.get("base_url_env")
                 or provider_defaults.get("base_url_env")
                 or ""
+            ),
+            thinking_enabled=bool(thinking.get("enabled", False)),
+            reasoning_effort=(
+                cast(ReasoningEffort, reasoning_effort_raw)
+                if reasoning_effort_raw
+                else None
+            ),
+            request_timeout_seconds=float(
+                model.get("request_timeout_seconds", 120.0)
+            ),
+            max_retries=int(retry.get("max_retries", 3)),
+            retry_base_delay_seconds=float(
+                retry.get("base_delay_seconds", 1.0)
             ),
         )
     return out
@@ -232,6 +269,12 @@ def _build_real_provider(
             return DeepSeekProvider(
                 api_key=credentials["api_key"],
                 base_url=credentials["base_url"] or settings.deepseek_base_url,
+                default_thinking_enabled=(
+                    agent_config.thinking_enabled if agent_config else False
+                ),
+                default_reasoning_effort=(
+                    agent_config.reasoning_effort if agent_config else None
+                ),
             )
     except Exception as exc:
         logger.warning(
@@ -255,7 +298,13 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
         model=agent_config.model_name,
         temperature=agent_config.temperature,
         max_tokens=agent_config.max_tokens,
+        top_p=agent_config.top_p,
         response_schema=agent_config.output_schema,
+        thinking_enabled=agent_config.thinking_enabled,
+        reasoning_effort=agent_config.reasoning_effort,
+        request_timeout_seconds=agent_config.request_timeout_seconds,
+        max_retries=agent_config.max_retries,
+        retry_base_delay_seconds=agent_config.retry_base_delay_seconds,
     )
 
     if settings.mars_mock_mode == "always":

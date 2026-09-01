@@ -132,7 +132,15 @@ def _manifest_paths(run_root: Path) -> list[Path]:
         if path.name != "context_manifest.v2.json"
     ]
     agent_manifests = list(context_dir.glob("agents/*/manifests/context_manifest.v2.*.json"))
-    return sorted(legacy + agent_manifests)
+    # ``write_manifest_v2`` intentionally mirrors every manifest into the
+    # legacy context root.  The workbench is a logical manifest listing, so
+    # returning both physical copies creates duplicate React keys and doubles
+    # all budget/risk summaries.  Keep legacy-only runs readable while
+    # preferring the canonical per-agent copy when both exist.
+    by_manifest_name = {path.name: path for path in sorted(legacy)}
+    for path in sorted(agent_manifests):
+        by_manifest_name[path.name] = path
+    return sorted(by_manifest_name.values(), key=lambda path: path.name)
 
 
 def _manifest_summary(path: Path, *, run_root: Path) -> dict[str, Any]:

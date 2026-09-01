@@ -3,10 +3,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.debate.debate_runner import run_debate
+from app.agents.idea.discovery import (
+    CoScientistWorkflow,
+    DeepDiscoveryConfig,
+    DeterministicRoleBackend,
+    DiscoveryRoleBackend,
+    IdeaMode,
+    LLMRoleBackend,
+    RunLocalDiscoveryStore,
+    build_discovery_context,
+    discovery_root_for_request,
+    resolve_idea_mode,
+)
 from app.agents.idea.research import (
     ResearchPack,
     augment_context_with_research,
@@ -18,6 +30,7 @@ from app.agents.idea.research import (
     prepare_research_pack,
     validate_idea_quality,
 )
+from app.harness.llm.provider_base import Message
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.storage.artifact_store import ArtifactRef
 from app.storage.run_store import RunHandle
@@ -60,6 +73,14 @@ class IdeaAgent(BaseAgent):
         )
         context = augment_context_with_research(context, research_pack)
 
+        idea_mode = resolve_idea_mode(request)
+        if idea_mode is IdeaMode.DEEP:
+            return await self._draft_deep_discovery(
+                request=request,
+                research_pack=research_pack,
+                provider_name=provider.name,
+            )
+
         if self._config.debate_enabled:
             result = await run_debate(
                 agent_name=self.name,
@@ -90,10 +111,81 @@ class IdeaAgent(BaseAgent):
             artifact.metadata["debate_mode"] = result.mode.value
             artifact.metadata["debate_transcript_excerpt"] = result.transcript_md[:1000]
             artifact.metadata["debate_transcript_path"] = "debate_transcript.v1.md"
+            artifact.metadata["idea_mode"] = "fast"
             return self._finalize_artifact(artifact, research_pack)
 
         artifact = await self._draft_via_llm(request, context)
+        artifact.metadata["idea_mode"] = "fast"
         return self._finalize_artifact(artifact, research_pack)
+
+    async def _draft_deep_discovery(
+        self,
+        *,
+        request: RunRequest,
+        research_pack: ResearchPack,
+        provider_name: str,
+    ) -> Artifact:
+        config = DeepDiscoveryConfig.from_request_extra(request.extra)
+        evidence_refs = _research_evidence_refs(research_pack)
+        constraints = _deep_constraints(request)
+        discovery_context = build_discovery_context(
+            request=request,
+            evidence_refs=evidence_refs,
+            constraints=constraints,
+        )
+        backend: DiscoveryRoleBackend
+        if provider_name == "mock":
+            backend = DeterministicRoleBackend()
+        else:
+            backend = LLMRoleBackend(self._complete_discovery_role)
+        workflow = CoScientistWorkflow(
+            backend=backend,
+            config=config,
+            store=RunLocalDiscoveryStore(discovery_root_for_request(request)),
+        )
+        state = await workflow.run(discovery_context)
+        selected_id = str(
+            request.extra.get("idea_selected_hypothesis_id")
+            or request.extra.get("selected_hypothesis_id")
+            or ""
+        ).strip()
+        if selected_id:
+            actor = str(request.extra.get("idea_selection_actor") or "").strip()
+            source: Literal["human", "auto"] = (
+                "auto"
+                if _as_bool(request.extra.get("idea_auto_select"))
+                else "human"
+            )
+            _selected, artifact = workflow.select_hypothesis(
+                state,
+                hypothesis_id=selected_id,
+                research_question=request.user_request,
+                actor=actor,
+                reason=str(request.extra.get("idea_selection_reason") or ""),
+                source=source,
+            )
+        else:
+            artifact = workflow.proposal_for_hitl(
+                state,
+                research_question=request.user_request,
+            )
+        return self._finalize_artifact(artifact, research_pack)
+
+    async def _complete_discovery_role(self, role: str, prompt: str) -> str:
+        completion = await self._call_llm(
+            [
+                Message(
+                    role="system",
+                    content=(
+                        "You are the Idea Agent's internal Co-Scientist role. "
+                        "Return only the requested structured JSON."
+                    ),
+                ),
+                Message(role="user", content=prompt),
+            ],
+            debate_role=f"co_scientist_{role}",
+        )
+        return completion.text
 
     def _finalize_artifact(
         self,
@@ -147,3 +239,35 @@ class IdeaAgent(BaseAgent):
             artifact_ref=artifact_ref,
             node_key=node_key,
         )
+
+
+def _research_evidence_refs(research_pack: ResearchPack) -> tuple[str, ...]:
+    raw_items = research_pack.evidence_index.get("items", [])
+    if not isinstance(raw_items, list):
+        return ("research/evidence_index.v1.json",)
+    refs = tuple(
+        ref
+        for item in raw_items
+        if isinstance(item, Mapping)
+        if (ref := str(item.get("id") or item.get("ref") or "").strip())
+    )
+    return refs[:8] or ("research/evidence_index.v1.json",)
+
+
+def _deep_constraints(request: RunRequest) -> tuple[str, ...]:
+    raw = request.extra.get("idea_constraints")
+    if isinstance(raw, (list, tuple)):
+        values = tuple(value for item in raw if (value := str(item).strip()))
+        if values:
+            return values
+    return (
+        "遵守项目 AGENTS.md、冻结 baseline 与 evaluator",
+        "保持现有公开接口和同预算比较协议",
+        "候选排名不能替代真实实验结论",
+    )
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}

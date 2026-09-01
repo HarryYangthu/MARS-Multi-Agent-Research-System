@@ -55,6 +55,13 @@ export function TopBar(): JSX.Element {
       <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
         <ProjectSwitcher />
         <Link
+          href="/v31/runs/new"
+          className="rounded border border-indigo-400/40 bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-100 hover:bg-indigo-500/25 hover:text-white"
+          title="V3.1 Co-Scientist 与模型发现"
+        >
+          V3.1 发现
+        </Link>
+        <Link
           href="/entries"
           className="rounded border border-mars-border bg-mars-panel2 px-2.5 py-1 text-xs text-slate-200 hover:bg-mars-subtle hover:text-white"
           title={t("topbar.entries")}

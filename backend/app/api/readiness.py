@@ -24,6 +24,8 @@ class ReadinessView(BaseModel):
     runtime_mode: str
     mock_mode: str
     execution_backend: str
+    execution_device: str
+    execution_device_source: str
     project: str
     checks: list[ReadinessCheckView]
 

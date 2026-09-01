@@ -125,6 +125,24 @@ The default path runs without API keys or a GPU. Missing LLM credentials fall
 back to `mock_provider`; missing execution hardware falls back to mock or CPU
 simulation paths.
 
+### Windows one-click (V3.1 CPU)
+
+On Windows 10/11 x64, install Docker Desktop with WSL2/Linux containers, place
+`mars_v2` and the private `mars_v31_wireless` overlay beside each other, then
+double-click `start-mars-windows.cmd`. It builds the CPU image, checks both
+services and run readiness, and opens `http://127.0.0.1:3001/`. The online,
+offline, strict production (including offline), status, and stop paths are documented in
+[`deploy/windows/README.md`](deploy/windows/README.md).
+
+See [the validation record](deploy/windows/VALIDATION.md) for the distinction
+between checked code, Linux-container smoke tests, and pending Windows-host acceptance.
+
+Native Windows Python and Windows containers are intentionally unsupported;
+the one-click package keeps Unix permissions, processes, and research
+workspaces inside Linux containers.
+
+### Local Python
+
 ```bash
 git clone git@github.com:HarryYangthu/MARS-Multi-Agent-Research-System.git mars
 cd mars

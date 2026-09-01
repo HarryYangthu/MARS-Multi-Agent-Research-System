@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.execution.paper_static_adapter import run_paper_static_simulation
+from app.execution.paper_static_adapter import _subprocess_env, run_paper_static_simulation
 from app.execution.simulation_runner import JobSpec
 
 
@@ -92,3 +92,30 @@ print("done ->", run_dir)
     assert result.loss_curve == [pytest.approx(10 ** (-8.74 / 10))]
     assert (run_root / "execution" / "logs" / "static_a_paper_static.log").is_file()
     assert (run_root / "execution" / "paper_static" / "static_a_manifest.json").is_file()
+
+
+def test_paper_static_subprocess_does_not_inherit_control_plane_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-not-reach-research-code")
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-research-code")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/private/tmp/agent.sock")
+    monkeypatch.setenv("PYTHONPATH", "/private/tmp/untrusted-pythonpath")
+    monkeypatch.setenv("MARS_LOG_LEVEL", "INFO")
+    spec = JobSpec(
+        run_id="secret-boundary",
+        experiment_id="static-secret-boundary",
+        project="pimc",
+        config={},
+        run_root=tmp_path,
+    )
+
+    environment = _subprocess_env(run_root=tmp_path, spec=spec)
+
+    assert "DEEPSEEK_API_KEY" not in environment
+    assert "OPENAI_API_KEY" not in environment
+    assert "SSH_AUTH_SOCK" not in environment
+    assert "PYTHONPATH" not in environment
+    assert environment["MARS_LOG_LEVEL"] == "INFO"
+    assert environment["MARS_RUN_ID"] == "secret-boundary"

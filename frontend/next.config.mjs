@@ -5,10 +5,9 @@ const backendUrl =
   "http://127.0.0.1:8000";
 
 const nextConfig = {
+  output: "standalone",
   reactStrictMode: true,
-  experimental: {
-    typedRoutes: false,
-  },
+  typedRoutes: false,
   async rewrites() {
     return [
       {

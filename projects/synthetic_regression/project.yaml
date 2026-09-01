@@ -1,0 +1,13 @@
+schema_id: project.v1
+project_id: synthetic_regression
+display_name: Synthetic Regression Discovery
+distribution: public
+domain: synthetic_regression
+description: Deterministic polynomial configuration search for public CI.
+dataset:
+  kind: packaged_synthetic
+  ref: synthetic_regression_adapter/resources/dataset.json
+  external_dependencies: false
+budget:
+  candidate_count: 20
+  max_parallel: 4

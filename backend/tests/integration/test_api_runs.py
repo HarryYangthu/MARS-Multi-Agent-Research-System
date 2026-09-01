@@ -125,12 +125,38 @@ def test_context_preview_and_run_manifest_endpoints(client: TestClient) -> None:
     listed = client.get(f"/api/context/runs/{run_id}")
     assert listed.status_code == 200, listed.text
     payload = listed.json()
-    assert payload["budget_summary"]["manifest_count"] >= 1
+    assert payload["budget_summary"]["manifest_count"] == 1
+    assert len(payload["manifests"]) == 1
+    assert payload["manifests"][0]["path"].startswith(
+        "context/agents/coding/manifests/"
+    )
     manifest_id = payload["manifests"][0]["manifest_id"]
 
     manifest = client.get(f"/api/context/runs/{run_id}/manifests/{manifest_id}")
     assert manifest.status_code == 200, manifest.text
     assert manifest.json()["schema"] == "context_manifest.v2"
+
+
+def test_worklog_treats_not_yet_created_optional_logs_as_empty(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/runs",
+        json={"task": "empty-worklog", "project": "pimc", "entrypoint": "pipeline"},
+    )
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+
+    worklog = client.get(
+        f"/api/timeline/runs/{run_id}/worklog",
+        params={"agent": "idea"},
+    )
+
+    assert worklog.status_code == 200, worklog.text
+    payload = worklog.json()
+    assert payload["run_id"] == run_id
+    assert payload["agent"] == "idea"
+    assert [item["kind"] for item in payload["items"]] == ["run"]
 
 
 def test_context_workbench_can_be_disabled(
@@ -185,6 +211,35 @@ def test_create_and_list_run(client: TestClient) -> None:
     r3 = client.get(f"/api/runs/{run_id}")
     assert r3.status_code == 200
     assert r3.json()["run_id"] == run_id
+
+
+def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> None:
+    response = client.post(
+        "/api/runs",
+        json={
+            "task": "deep-idea-options",
+            "project": "synthetic_regression",
+            "entrypoint": "idea",
+            "idea_mode": "auto",
+            "idea_budget_profile": "balanced",
+            "project_inputs": {"candidate_count": 20, "mode": "mock"},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    from app.api import dependencies as deps
+
+    run_id = response.json()["run_id"]
+    session = deps.get_orchestrator().session(run_id)
+    assert session.request.extra == {
+        "idea_mode": "auto",
+        "idea_budget_profile": "balanced",
+        "project_inputs": {"candidate_count": 20, "mode": "mock"},
+    }
+    options = session.run.subdir("input") / "run_request_options.v1.json"
+    payload = json.loads(options.read_text(encoding="utf-8"))
+    assert payload["schema_id"] == "run_request_options.v1"
+    assert payload["extra"] == session.request.extra
 
 
 def test_evaluation_endpoints_return_artifact_reports_and_scorecard(

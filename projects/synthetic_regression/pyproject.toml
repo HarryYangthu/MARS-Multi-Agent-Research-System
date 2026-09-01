@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mars-synthetic-regression-adapter"
+version = "1.0.0"
+description = "Standard-library deterministic Project Pack adapter for MARS CI"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mars-synthetic-regression = "synthetic_regression_adapter.adapter:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["synthetic_regression_adapter*"]
+
+[tool.setuptools.package-data]
+synthetic_regression_adapter = ["resources/*.json", "resources/*.yaml"]

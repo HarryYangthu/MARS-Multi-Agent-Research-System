@@ -1,0 +1,27 @@
+services:
+  backend:
+    environment:
+      MARS_RUNTIME_MODE: production
+      MARS_MOCK_MODE: never
+      MARS_EXECUTION_BACKEND: local_command
+      PIMC_REPO_ROOT: /mnt/pimc-repository
+      PIMC_DATA_ROOT: /mnt/pimc-data
+    volumes:
+      - type: bind
+        source: ./repo_link.production.yaml
+        target: /app/projects/pimc/repo_link.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PIMC_REPO_HOST_PATH}
+        target: /mnt/pimc-repository
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PIMC_DATA_HOST_PATH}
+        target: /mnt/pimc-data
+        read_only: true
+        bind:
+          create_host_path: false

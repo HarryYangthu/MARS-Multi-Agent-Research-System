@@ -32,11 +32,14 @@ knowledge/.chromadb/
 knowledge/.chromadb-server/
 knowledge/**/_arxiv_cache/
 knowledge/**/_web_cache/
+/knowledge/_semantic_graph.json
 # Runtime KB indexes are local run state. This also catches Finder-created
 # duplicate files such as "_index 2.json" so V1 memory work does not get noisy.
 knowledge/*/_index*.json
 /runs/
 conversations/
+deploy/windows/images/
+deploy/windows/runtime/
 posttrain/adapters/
 posttrain/checkpoints/
 posttrain/data/

@@ -1,0 +1,529 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1780" viewBox="0 0 2560 1780">
+  <title>MARS V3 无线轻量模型发现与演进架构</title>
+  <desc>最新版 MARS V3 可编辑架构图。包含 Commander 系统级反馈、Idea Agent 内部 Co-Scientist 假设循环、AlphaEvolve 候选循环、Shinka 搜索策略、五个专业 Agent、可信 Harness、PIMC/DPD 项目包、候选谱系和人工审批。</desc>
+  <metadata>
+    Native editable SVG. Every architectural layer and node is grouped with a stable id.
+  </metadata>
+
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e7edf3" stroke-width="1"/>
+    </pattern>
+    <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f2740" flood-opacity="0.10"/>
+    </filter>
+
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#2478bd"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#dc7817"/>
+    </marker>
+    <marker id="arrow-magenta" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#d83383"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#16845d"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#d93d42"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#526274"/>
+    </marker>
+
+    <style>
+      text { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill:#172638; }
+      .title { font-size:40px; font-weight:700; letter-spacing:1px; }
+      .subtitle { font-size:19px; font-weight:500; fill:#526274; }
+      .section-title { font-size:23px; font-weight:700; }
+      .node-title { font-size:20px; font-weight:700; }
+      .body { font-size:17px; font-weight:500; }
+      .small { font-size:15px; font-weight:500; }
+      .micro { font-size:13px; font-weight:500; }
+      .mono { font-family: Menlo, Consolas, monospace; font-size:14px; font-weight:600; }
+      .badge { font-size:13px; font-weight:700; }
+
+      .frame { fill:#ffffff; stroke-width:3; }
+      .blue-frame { stroke:#2478bd; fill:#f8fcff; }
+      .orange-frame { stroke:#dc7817; fill:#fffaf5; }
+      .magenta-frame { stroke:#d83383; fill:#fff8fc; }
+      .purple-frame { stroke:#8055b7; fill:#fbf9ff; }
+      .green-frame { stroke:#16845d; fill:#f7fffb; }
+      .red-frame { stroke:#d93d42; fill:#fffafa; }
+      .gray-frame { stroke:#7c8a99; fill:#ffffff; }
+
+      .node { fill:#ffffff; stroke-width:2.2; }
+      .node-blue { stroke:#2478bd; fill:#ffffff; }
+      .node-orange { stroke:#dc7817; fill:#ffffff; }
+      .node-magenta { stroke:#d83383; fill:#ffffff; }
+      .node-purple { stroke:#8055b7; fill:#ffffff; }
+      .node-green { stroke:#16845d; fill:#ffffff; }
+      .node-red { stroke:#d93d42; fill:#ffffff; }
+      .node-gray { stroke:#8996a3; fill:#ffffff; }
+      .soft-blue { fill:#eaf5ff; stroke:#6aa9dc; stroke-width:1.8; }
+      .soft-orange { fill:#fff1e3; stroke:#e79a51; stroke-width:1.8; }
+      .soft-magenta { fill:#ffeaf5; stroke:#e47aad; stroke-width:1.8; }
+      .soft-purple { fill:#f1ebfb; stroke:#a888cb; stroke-width:1.8; }
+      .soft-green { fill:#e8f8f1; stroke:#63ad91; stroke-width:1.8; }
+      .soft-red { fill:#ffeded; stroke:#e47d80; stroke-width:1.8; }
+
+      .arrow-blue { stroke:#2478bd; stroke-width:3; fill:none; marker-end:url(#arrow-blue); }
+      .arrow-orange { stroke:#dc7817; stroke-width:3; fill:none; marker-end:url(#arrow-orange); }
+      .arrow-magenta { stroke:#d83383; stroke-width:3; fill:none; marker-end:url(#arrow-magenta); }
+      .arrow-green { stroke:#16845d; stroke-width:3; fill:none; marker-end:url(#arrow-green); }
+      .arrow-red { stroke:#d93d42; stroke-width:3; fill:none; marker-end:url(#arrow-red); }
+      .arrow-gray { stroke:#526274; stroke-width:2.7; fill:none; marker-end:url(#arrow-gray); }
+      .dash { stroke-dasharray:10 8; }
+      .dot { stroke-dasharray:4 7; }
+      .bus { stroke:#2478bd; stroke-width:3; fill:none; }
+      .divider { stroke:#d8e0e8; stroke-width:1.5; }
+    </style>
+  </defs>
+
+  <rect width="2560" height="1780" fill="#fbfdff"/>
+  <rect width="2560" height="1780" fill="url(#grid)"/>
+
+  <g id="diagram-title">
+    <text x="1280" y="52" text-anchor="middle" class="title">MARS V3 无线轻量模型发现与演进架构</text>
+    <text x="1280" y="84" text-anchor="middle" class="subtitle">V2 Commander + 5 个专业 Agent + 可信 Harness ｜ V3 Co-Scientist 假设发现 + AlphaEvolve 候选进化 + Shinka 搜索优化</text>
+  </g>
+
+  <!-- Layer 1: user entry -->
+  <g id="layer-entry">
+    <g id="user-researcher" filter="url(#soft-shadow)">
+      <rect x="1030" y="102" width="500" height="56" rx="14" class="node node-gray"/>
+      <circle cx="1103" cy="130" r="13" fill="#1f526f"/>
+      <path d="M1080 150 Q1103 126 1126 150" fill="#1f526f"/>
+      <text x="1280" y="137" text-anchor="middle" class="node-title">用户 / 研究员 / 团队</text>
+    </g>
+
+    <g id="web-workbench">
+      <rect x="360" y="176" width="650" height="58" rx="13" class="node node-blue"/>
+      <text x="685" y="202" text-anchor="middle" class="node-title">Web 工作台</text>
+      <text x="685" y="224" text-anchor="middle" class="small">目标编辑 · 进度/谱系 · Pareto · HITL · 报告</text>
+    </g>
+    <g id="cli-entry">
+      <rect x="1550" y="176" width="650" height="58" rx="13" class="node node-green"/>
+      <text x="1875" y="202" text-anchor="middle" class="node-title">CLI / scripts</text>
+      <text x="1875" y="224" text-anchor="middle" class="small">create · start · pause · resume · stop · inspect</text>
+    </g>
+
+    <path d="M1190 158 V166 H685 V171" class="arrow-blue"/>
+    <path d="M1370 158 V166 H1875 V171" class="arrow-green"/>
+  </g>
+
+  <!-- Layer 2: bridge -->
+  <g id="layer-bridge-orchestrator">
+    <rect x="180" y="254" width="2200" height="166" rx="20" class="frame orange-frame"/>
+    <text x="1280" y="284" text-anchor="middle" class="section-title" fill="#a95008">backend/app/bridge · Orchestrator</text>
+
+    <g id="commander" filter="url(#soft-shadow)">
+      <rect x="270" y="300" width="920" height="92" rx="15" class="node node-orange"/>
+      <rect x="292" y="315" width="93" height="25" rx="12" class="soft-blue"/>
+      <text x="338" y="333" text-anchor="middle" class="badge" fill="#2478bd">V2 保留</text>
+      <text x="730" y="329" text-anchor="middle" class="node-title">Commander · 系统总调度与结果诊断</text>
+      <text x="322" y="360" class="small">• 理解目标 / 选择普通 Pipeline 或 Discovery Run</text>
+      <text x="744" y="360" class="small">• 分配预算 / 调度 Agent / 汇总状态</text>
+      <text x="322" y="382" class="small">• 分析指标、曲线、日志，生成 feedback packet</text>
+      <text x="744" y="382" class="small">• 暂停 / 恢复 / 停止 / HITL 升级</text>
+    </g>
+
+    <g id="discovery-service" filter="url(#soft-shadow)">
+      <rect x="1370" y="300" width="920" height="92" rx="15" class="node node-magenta"/>
+      <rect x="1392" y="315" width="93" height="25" rx="12" class="soft-magenta"/>
+      <text x="1438" y="333" text-anchor="middle" class="badge" fill="#c32672">V3 新增</text>
+      <text x="1830" y="329" text-anchor="middle" class="node-title">Discovery Service · 发现任务控制器</text>
+      <text x="1422" y="360" class="small">• 编译 Hypothesis / Experiment / Search Contract</text>
+      <text x="1870" y="360" class="small">• 控制候选循环、并发、晋级和停止</text>
+      <text x="1422" y="382" class="small">• 读取候选档案与预算，不直接充当专业 Agent</text>
+      <text x="1870" y="382" class="small">• 不是第 6 个 Agent</text>
+    </g>
+
+    <path d="M1195 338 H1365" class="arrow-magenta"/>
+    <path d="M1365 367 H1195" class="arrow-orange dash"/>
+    <text x="1280" y="330" text-anchor="middle" class="micro" fill="#b12b69">启动 / 控制</text>
+    <text x="1280" y="389" text-anchor="middle" class="micro" fill="#b35d10">状态 / 预算 / 风险</text>
+
+    <path d="M685 234 V248 H600 V295" class="arrow-blue"/>
+    <path d="M1875 234 V246 H860 V295" class="arrow-green"/>
+  </g>
+
+  <!-- Layer 3: five professional agents -->
+  <g id="layer-five-agents">
+    <rect x="40" y="450" width="2480" height="340" rx="22" class="frame blue-frame"/>
+    <text x="1280" y="482" text-anchor="middle" class="section-title" fill="#1768a8">5 个专业 Agent（保持五个，不新增固定 Agent）</text>
+
+    <g id="idea-agent-co-scientist" filter="url(#soft-shadow)">
+      <rect x="70" y="500" width="920" height="252" rx="17" class="node node-blue"/>
+      <rect x="92" y="514" width="93" height="25" rx="12" class="soft-magenta"/>
+      <text x="138" y="532" text-anchor="middle" class="badge" fill="#c32672">V3 增强</text>
+      <text x="530" y="531" text-anchor="middle" class="node-title">1 · Idea Agent 内部：Co-Scientist 式假设发现</text>
+
+      <g id="co-scientist-generation">
+        <rect x="95" y="555" width="235" height="54" rx="11" class="soft-blue"/>
+        <text x="212" y="578" text-anchor="middle" class="body">Generation</text>
+        <text x="212" y="599" text-anchor="middle" class="micro">检索 / 讨论 / 初始假设</text>
+      </g>
+      <g id="co-scientist-reflection">
+        <rect x="365" y="555" width="235" height="54" rx="11" class="soft-orange"/>
+        <text x="482" y="578" text-anchor="middle" class="body">Reflection</text>
+        <text x="482" y="599" text-anchor="middle" class="micro">正确性 / 新颖性 / 失败点</text>
+      </g>
+      <g id="co-scientist-ranking">
+        <rect x="635" y="555" width="310" height="54" rx="11" class="soft-magenta"/>
+        <text x="790" y="578" text-anchor="middle" class="body">Debate + Ranking</text>
+        <text x="790" y="599" text-anchor="middle" class="micro">多轮辩论 / Elo 锦标赛</text>
+      </g>
+      <g id="co-scientist-proximity">
+        <rect x="95" y="645" width="235" height="54" rx="11" class="soft-green"/>
+        <text x="212" y="668" text-anchor="middle" class="body">Proximity</text>
+        <text x="212" y="689" text-anchor="middle" class="micro">相似图 / 聚类 / 去重</text>
+      </g>
+      <g id="co-scientist-meta-review">
+        <rect x="365" y="645" width="235" height="54" rx="11" class="soft-purple"/>
+        <text x="482" y="668" text-anchor="middle" class="body">Meta-review</text>
+        <text x="482" y="689" text-anchor="middle" class="micro">错误模式 / 成功模式 / 反馈</text>
+      </g>
+      <g id="co-scientist-evolution">
+        <rect x="635" y="645" width="310" height="54" rx="11" class="soft-magenta"/>
+        <text x="790" y="668" text-anchor="middle" class="body">Evolution</text>
+        <text x="790" y="689" text-anchor="middle" class="micro">补强 / 组合 / 简化 / 发散</text>
+      </g>
+
+      <path d="M330 582 H360" class="arrow-blue"/>
+      <path d="M600 582 H630" class="arrow-orange"/>
+      <path d="M790 609 V640" class="arrow-magenta"/>
+      <path d="M635 672 H605" class="arrow-magenta"/>
+      <path d="M365 672 H335" class="arrow-purple" style="stroke:#8055b7;stroke-width:3;fill:none;marker-end:url(#arrow-gray)"/>
+      <path d="M212 645 V625 H70 V582 H90" class="arrow-green dash"/>
+      <path d="M482 645 V625 H212 V614" class="arrow-purple dash" style="stroke:#8055b7;stroke-width:2.7;fill:none;marker-end:url(#arrow-gray)"/>
+      <path d="M330 672 H620 V615 H785" class="arrow-green dot"/>
+
+      <text x="520" y="731" text-anchor="middle" class="small" fill="#526274">Context Memory · Web Search · 专业数据库 · 领域模型 · 科学家反馈 → 输出 Top-K proposal.v1</text>
+    </g>
+
+    <g id="experiment-agent" filter="url(#soft-shadow)">
+      <rect x="1020" y="500" width="340" height="252" rx="17" class="node node-green"/>
+      <circle cx="1050" cy="530" r="16" fill="#16845d"/>
+      <text x="1050" y="536" text-anchor="middle" class="body" fill="#ffffff">2</text>
+      <text x="1190" y="536" text-anchor="middle" class="node-title">Experiment Agent</text>
+      <line x1="1045" y1="552" x2="1335" y2="552" class="divider"/>
+      <text x="1050" y="588" class="body">• 冻结数据与切分</text>
+      <text x="1050" y="621" class="body">• 冻结 baseline / evaluator</text>
+      <text x="1050" y="654" class="body">• 定义指标与硬约束</text>
+      <text x="1050" y="687" class="body">• 搜索空间 / 演化区域</text>
+      <text x="1050" y="720" class="body">• 多保真预算 F0–F4</text>
+    </g>
+
+    <g id="coding-agent" filter="url(#soft-shadow)">
+      <rect x="1390" y="500" width="340" height="252" rx="17" class="node node-blue"/>
+      <circle cx="1420" cy="530" r="16" fill="#2478bd"/>
+      <text x="1420" y="536" text-anchor="middle" class="body" fill="#ffffff">3</text>
+      <text x="1560" y="536" text-anchor="middle" class="node-title">Coding Agent</text>
+      <line x1="1415" y1="552" x2="1705" y2="552" class="divider"/>
+      <text x="1420" y="588" class="body">• 读取父代与公开反馈</text>
+      <text x="1420" y="621" class="body">• 生成 ModelGenome Δ</text>
+      <text x="1420" y="654" class="body">• config / graph / code diff</text>
+      <text x="1420" y="687" class="body">• mutation / crossover</text>
+      <text x="1420" y="720" class="body">• 仅修改白名单区域</text>
+    </g>
+
+    <g id="execution-agent" filter="url(#soft-shadow)">
+      <rect x="1760" y="500" width="340" height="252" rx="17" class="node node-orange"/>
+      <circle cx="1790" cy="530" r="16" fill="#dc7817"/>
+      <text x="1790" y="536" text-anchor="middle" class="body" fill="#ffffff">4</text>
+      <text x="1930" y="536" text-anchor="middle" class="node-title">Execution Agent</text>
+      <line x1="1785" y1="552" x2="2075" y2="552" class="divider"/>
+      <text x="1790" y="588" class="body">• 隔离训练 / 仿真</text>
+      <text x="1790" y="621" class="body">• 日志 / 曲线 / Checkpoint</text>
+      <text x="1790" y="654" class="body">• Profiling / 设备测量</text>
+      <text x="1790" y="687" class="body">• 外部确定性 Evaluator</text>
+      <text x="1790" y="720" class="body">• 失败证据结构化回传</text>
+    </g>
+
+    <g id="writing-agent" filter="url(#soft-shadow)">
+      <rect x="2130" y="500" width="340" height="252" rx="17" class="node node-magenta"/>
+      <circle cx="2160" cy="530" r="16" fill="#d83383"/>
+      <text x="2160" y="536" text-anchor="middle" class="body" fill="#ffffff">5</text>
+      <text x="2300" y="536" text-anchor="middle" class="node-title">Writing Agent</text>
+      <line x1="2155" y1="552" x2="2445" y2="552" class="divider"/>
+      <text x="2160" y="588" class="body">• 假设与结果对照</text>
+      <text x="2160" y="621" class="body">• Pareto / 谱系分析</text>
+      <text x="2160" y="654" class="body">• 失败与限制说明</text>
+      <text x="2160" y="687" class="body">• 研究报告 / 论文素材</text>
+      <text x="2160" y="720" class="body">• 证据引用与审计索引</text>
+    </g>
+
+    <path d="M990 625 H1015" class="arrow-blue"/>
+    <path d="M1360 625 H1385" class="arrow-blue"/>
+    <path d="M1730 625 H1755" class="arrow-blue"/>
+    <path d="M2100 625 H2125" class="arrow-blue"/>
+
+    <path d="M730 392 V442" class="arrow-orange"/>
+    <text x="746" y="431" class="micro" fill="#a95008">调度五个专业 Agent</text>
+
+    <!-- V2 system-level feedback loop retained -->
+    <path d="M1930 495 V435 H1170 V397" class="arrow-orange dash"/>
+    <text x="1515" y="430" text-anchor="middle" class="small" fill="#a95008">V2 系统级反馈保留：结果不达标 → Commander 诊断 → 回到 Experiment / Coding → 再执行</text>
+  </g>
+
+  <!-- Layer 4: Model discovery core -->
+  <g id="layer-model-discovery-core">
+    <rect x="40" y="830" width="1800" height="370" rx="22" class="frame magenta-frame"/>
+    <text x="940" y="864" text-anchor="middle" class="section-title" fill="#c32672">Model Discovery Core（V3 新增，位于 Harness）</text>
+    <text x="940" y="890" text-anchor="middle" class="small" fill="#7a3a5c">AlphaEvolve 式可执行候选循环；Shinka 不是第三层，而是嵌入循环的搜索策略</text>
+
+    <g id="shinka-search-policy" filter="url(#soft-shadow)">
+      <rect x="70" y="920" width="310" height="225" rx="16" class="node node-green"/>
+      <text x="225" y="950" text-anchor="middle" class="node-title" fill="#116b4d">Shinka 搜索策略</text>
+      <text x="225" y="973" text-anchor="middle" class="micro" fill="#526274">控制“选谁、谁生成、是否重复”</text>
+      <line x1="95" y1="987" x2="355" y2="987" class="divider"/>
+      <text x="100" y="1017" class="small">• Weighted parent sampling</text>
+      <text x="100" y="1045" class="small">• LLM Bandit / UCB</text>
+      <text x="100" y="1073" class="small">• Novelty rejection</text>
+      <text x="100" y="1101" class="small">• Mutation / crossover 选择</text>
+      <text x="100" y="1129" class="small">• Meta-scratchpad</text>
+    </g>
+
+    <g id="alpha-parent-context">
+      <rect x="410" y="930" width="240" height="108" rx="14" class="node node-magenta"/>
+      <text x="530" y="959" text-anchor="middle" class="node-title">① 父代 + Context</text>
+      <text x="530" y="986" text-anchor="middle" class="small">父代 / inspirations</text>
+      <text x="530" y="1011" text-anchor="middle" class="small">Contract / 失败反馈</text>
+    </g>
+    <g id="alpha-candidate-generation">
+      <rect x="680" y="930" width="260" height="108" rx="14" class="node node-blue"/>
+      <text x="810" y="959" text-anchor="middle" class="node-title">② 生成候选</text>
+      <text x="810" y="986" text-anchor="middle" class="small">ModelGenome Δ</text>
+      <text x="810" y="1011" text-anchor="middle" class="small">config / graph / diff</text>
+    </g>
+    <g id="alpha-preflight">
+      <rect x="970" y="930" width="230" height="108" rx="14" class="node node-red"/>
+      <text x="1085" y="959" text-anchor="middle" class="node-title">③ Preflight</text>
+      <text x="1085" y="986" text-anchor="middle" class="small">Schema / AST / 接口</text>
+      <text x="1085" y="1011" text-anchor="middle" class="small">Gate 5 / 去重</text>
+    </g>
+    <g id="alpha-execute-evaluate">
+      <rect x="1230" y="930" width="280" height="108" rx="14" class="node node-orange"/>
+      <text x="1370" y="959" text-anchor="middle" class="node-title">④ 执行 + 评测</text>
+      <text x="1370" y="986" text-anchor="middle" class="small">train / simulate / profile</text>
+      <text x="1370" y="1011" text-anchor="middle" class="small">Deterministic Evaluator</text>
+    </g>
+    <g id="alpha-archive">
+      <rect x="1540" y="930" width="270" height="108" rx="14" class="node node-purple"/>
+      <text x="1675" y="959" text-anchor="middle" class="node-title">⑤ 归档 / 隔离</text>
+      <text x="1675" y="986" text-anchor="middle" class="small">score + lineage</text>
+      <text x="1675" y="1011" text-anchor="middle" class="small">Pareto / MAP-Elites</text>
+    </g>
+
+    <path d="M650 984 H675" class="arrow-magenta"/>
+    <path d="M940 984 H965" class="arrow-blue"/>
+    <path d="M1200 984 H1225" class="arrow-red"/>
+    <path d="M1510 984 H1535" class="arrow-orange"/>
+
+    <path d="M380 980 H405" class="arrow-green dash"/>
+    <path d="M225 920 V905 H810 V925" class="arrow-green dash"/>
+    <path d="M300 1145 V1168 H530 V1043" class="arrow-green dash"/>
+
+    <g id="alpha-feedback">
+      <rect x="410" y="1070" width="510" height="58" rx="12" class="soft-red"/>
+      <text x="665" y="1094" text-anchor="middle" class="body">失败反馈</text>
+      <text x="665" y="1117" text-anchor="middle" class="small">编译错误 / NaN / 指标退化 / 成本超标 / 约束违规</text>
+    </g>
+    <g id="alpha-promotion">
+      <rect x="970" y="1070" width="340" height="58" rx="12" class="soft-purple"/>
+      <text x="1140" y="1094" text-anchor="middle" class="body">多保真晋级 F0 → F4</text>
+      <text x="1140" y="1117" text-anchor="middle" class="small">quick → full → seeds → holdout → device</text>
+    </g>
+    <g id="alpha-quarantine">
+      <rect x="1340" y="1070" width="250" height="58" rx="12" class="soft-red"/>
+      <text x="1465" y="1094" text-anchor="middle" class="body">Quarantine</text>
+      <text x="1465" y="1117" text-anchor="middle" class="small">异常高分 / hack / 缺证据</text>
+    </g>
+    <g id="alpha-elite">
+      <rect x="1620" y="1070" width="190" height="58" rx="12" class="soft-green"/>
+      <text x="1715" y="1094" text-anchor="middle" class="body">Elite</text>
+      <text x="1715" y="1117" text-anchor="middle" class="small">成为下一轮父代</text>
+    </g>
+
+    <path d="M1675 1040 V1065" class="arrow-purple" style="stroke:#8055b7;stroke-width:3;fill:none;marker-end:url(#arrow-gray)"/>
+    <path d="M1620 1099 H1595" class="arrow-red"/>
+    <path d="M1620 1115 V1170 H530 V1043" class="arrow-magenta"/>
+    <text x="1080" y="1190" text-anchor="middle" class="small" fill="#c32672">保留优秀候选 → 再选父代；失败原因 → 下一轮 Prompt / Operator / Parent 选择</text>
+
+    <!-- Agent-to-core mappings -->
+    <path d="M1190 752 V815 H530 V925" class="arrow-green dash"/>
+    <text x="770" y="812" class="micro" fill="#116b4d">Experiment Contract</text>
+    <path d="M1560 752 V815 H810 V925" class="arrow-blue dash"/>
+    <text x="1250" y="812" class="micro" fill="#1768a8">Coding 生成候选</text>
+    <path d="M1930 752 V815 H1370 V925" class="arrow-orange dash"/>
+    <text x="1655" y="812" class="micro" fill="#a95008">Execution 执行评测</text>
+  </g>
+
+  <!-- Project packs and adapters -->
+  <g id="layer-project-packs">
+    <rect x="1870" y="830" width="650" height="370" rx="22" class="frame green-frame"/>
+    <text x="2195" y="864" text-anchor="middle" class="section-title" fill="#116b4d">项目包与执行适配器</text>
+    <text x="2195" y="890" text-anchor="middle" class="small">共用 Discovery Core，只替换 Project Pack 与 Adapter</text>
+
+    <g id="pimc-project-pack">
+      <rect x="1900" y="920" width="280" height="92" rx="14" class="node node-green"/>
+      <text x="2040" y="950" text-anchor="middle" class="node-title">PIMC Project Pack</text>
+      <text x="2040" y="977" text-anchor="middle" class="small">指标 / baseline / 搜索空间</text>
+      <text x="2040" y="999" text-anchor="middle" class="micro">beam · layer · memory · router</text>
+    </g>
+    <g id="dpd-project-pack">
+      <rect x="2210" y="920" width="280" height="92" rx="14" class="node node-green"/>
+      <text x="2350" y="950" text-anchor="middle" class="node-title">DPD Project Pack</text>
+      <text x="2350" y="977" text-anchor="middle" class="small">指标 / baseline / 搜索空间</text>
+      <text x="2350" y="999" text-anchor="middle" class="micro">MP · GMP · LUT · spline · NN</text>
+    </g>
+    <g id="project-contract-adapter">
+      <rect x="1900" y="1040" width="590" height="62" rx="14" class="soft-green"/>
+      <text x="2195" y="1066" text-anchor="middle" class="node-title">统一 Project Contract + Evaluator Adapter</text>
+      <text x="2195" y="1090" text-anchor="middle" class="small">数据清单 · 指标方向 · 预算 · 允许变异区域</text>
+    </g>
+    <g id="execution-adapters">
+      <rect x="1900" y="1125" width="590" height="52" rx="14" class="node node-blue"/>
+      <text x="2195" y="1157" text-anchor="middle" class="body">PIMC / DPD Adapter · Remote GPU · Device · Compiler · HIL</text>
+    </g>
+    <path d="M2040 1012 V1035" class="arrow-green"/>
+    <path d="M2350 1012 V1035" class="arrow-green"/>
+    <path d="M2195 1102 V1120" class="arrow-green"/>
+    <path d="M1840 1015 H1865" class="arrow-green"/>
+  </g>
+
+  <!-- Discovery service control route -->
+  <g id="discovery-service-control-path">
+    <path d="M1830 392 V430 H2498 V805 H940 V825" class="arrow-magenta dash"/>
+    <text x="2260" y="804" text-anchor="middle" class="small" fill="#c32672">Discovery Service 控制候选队列、预算、晋级和停止</text>
+  </g>
+
+  <!-- Architectural boundaries -->
+  <g id="key-boundaries">
+    <rect x="40" y="1218" width="2480" height="68" rx="16" class="frame red-frame"/>
+    <text x="75" y="1247" class="body" fill="#b4262c">关键边界</text>
+    <text x="220" y="1247" class="small">① V3 不是新增第 6 个固定 Agent</text>
+    <text x="620" y="1247" class="small">② Commander 保留 V2 结果诊断与反馈循环</text>
+    <text x="1120" y="1247" class="small">③ Discovery Service ∈ Bridge</text>
+    <text x="1495" y="1247" class="small">④ Discovery Core ∈ Harness</text>
+    <text x="1870" y="1247" class="small">⑤ Evaluator / Baseline / Holdout / Gate 5 不可被候选修改</text>
+    <text x="220" y="1270" class="small" fill="#b4262c">科学边界：Elo 与 LLM 评价只分配资源；最终结论必须来自确定性评测、sealed holdout 和人工审批。</text>
+  </g>
+
+  <!-- Trusted Harness -->
+  <g id="layer-trusted-harness">
+    <rect x="40" y="1305" width="2480" height="220" rx="22" class="frame purple-frame"/>
+    <text x="1280" y="1338" text-anchor="middle" class="section-title" fill="#684096">Agent-agnostic 可信 Harness（V2 复用并扩展）</text>
+
+    <g id="harness-runtime">
+      <rect x="70" y="1360" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="350" y="1384" text-anchor="middle" class="body">Runtime · RunGraph / queue / event bus</text>
+      <text x="350" y="1406" text-anchor="middle" class="micro">运行状态、暂停恢复、并发和重放</text>
+    </g>
+    <g id="harness-schema">
+      <rect x="680" y="1360" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="960" y="1384" text-anchor="middle" class="body">Schema · parser / validator / artifact contract</text>
+      <text x="960" y="1406" text-anchor="middle" class="micro">proposal / plan / code / run / report</text>
+    </g>
+    <g id="harness-tools-gates">
+      <rect x="1290" y="1360" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="1570" y="1384" text-anchor="middle" class="body">Tool Registry · 5 Gates · Gate 5 hook</text>
+      <text x="1570" y="1406" text-anchor="middle" class="micro">权限、审计、baseline compatibility</text>
+    </g>
+    <g id="harness-context">
+      <rect x="1900" y="1360" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="2180" y="1384" text-anchor="middle" class="body">Context Compiler · manifest · compression</text>
+      <text x="2180" y="1406" text-anchor="middle" class="micro">任务 / 项目 / 运行时 / 失败反馈</text>
+    </g>
+
+    <g id="harness-llm">
+      <rect x="70" y="1440" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="350" y="1464" text-anchor="middle" class="body">LLM Provider · ensemble · post-training loader</text>
+      <text x="350" y="1486" text-anchor="middle" class="micro">OpenAI / Anthropic / Qwen / Gemini / local vLLM</text>
+    </g>
+    <g id="harness-eval-trace">
+      <rect x="680" y="1440" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="960" y="1464" text-anchor="middle" class="body">Evaluation · Trace / Replay / Scorecard</text>
+      <text x="960" y="1486" text-anchor="middle" class="micro">确定性指标、轨迹证据、失败归因</text>
+    </g>
+    <g id="harness-memory">
+      <rect x="1290" y="1440" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="1570" y="1464" text-anchor="middle" class="body">Governed Memory · KB · approval lifecycle</text>
+      <text x="1570" y="1486" text-anchor="middle" class="micro">run-local 候选先审后写，失败经验可 stale</text>
+    </g>
+    <g id="harness-sedimentation">
+      <rect x="1900" y="1440" width="560" height="56" rx="12" class="node node-purple"/>
+      <text x="2180" y="1464" text-anchor="middle" class="body">Sedimentation · provenance · evidence refs</text>
+      <text x="2180" y="1486" text-anchor="middle" class="micro">每次 run 完整沉淀、可审计、可回滚</text>
+    </g>
+  </g>
+
+  <!-- Data plane and long-term assets -->
+  <g id="layer-data-and-assets">
+    <rect x="40" y="1545" width="2480" height="150" rx="22" class="frame green-frame"/>
+    <text x="1280" y="1575" text-anchor="middle" class="section-title" fill="#116b4d">输入、运行沉淀与 V3 发现数据面</text>
+
+    <g id="input-knowledge">
+      <rect x="70" y="1592" width="430" height="78" rx="13" class="node node-green"/>
+      <text x="285" y="1620" text-anchor="middle" class="node-title">输入与四区知识库</text>
+      <text x="285" y="1646" text-anchor="middle" class="small">repos / uploads / literature / methodology</text>
+      <text x="285" y="1664" text-anchor="middle" class="micro">code_assets / run_archive</text>
+    </g>
+    <g id="run-sedimentation">
+      <rect x="520" y="1592" width="430" height="78" rx="13" class="node node-orange"/>
+      <text x="735" y="1620" text-anchor="middle" class="node-title">runs/&lt;run_id&gt;/ 完整沉淀</text>
+      <text x="735" y="1646" text-anchor="middle" class="small">context / artifacts / events / logs / HITL</text>
+      <text x="735" y="1664" text-anchor="middle" class="micro">版本化、Trace、Replay</text>
+    </g>
+    <g id="candidate-store-lineage">
+      <rect x="970" y="1592" width="430" height="78" rx="13" class="node node-magenta"/>
+      <text x="1185" y="1620" text-anchor="middle" class="node-title">Candidate Store + Lineage</text>
+      <text x="1185" y="1646" text-anchor="middle" class="small">parent / mutation / evaluator / cost</text>
+      <text x="1185" y="1664" text-anchor="middle" class="micro">Pareto / MAP-Elites / negative archive</text>
+    </g>
+    <g id="registries">
+      <rect x="1420" y="1592" width="500" height="78" rx="13" class="node node-blue"/>
+      <text x="1670" y="1620" text-anchor="middle" class="node-title">Dataset / Model / Hardware Registry</text>
+      <text x="1670" y="1646" text-anchor="middle" class="small">manifest / checkpoint / compiler / device profile</text>
+      <text x="1670" y="1664" text-anchor="middle" class="micro">hash、版本、环境与指标契约</text>
+    </g>
+    <g id="holdout-quarantine-hitl">
+      <rect x="1940" y="1592" width="550" height="78" rx="13" class="node node-red"/>
+      <text x="2215" y="1620" text-anchor="middle" class="node-title">Quarantine → Sealed Holdout → HITL</text>
+      <text x="2215" y="1646" text-anchor="middle" class="small">异常隔离 / multi-seed / paired protocol / 人工批准</text>
+      <text x="2215" y="1664" text-anchor="middle" class="micro">通过后才进入 Model Registry 与最终报告</text>
+    </g>
+
+    <path d="M500 1631 H515" class="arrow-green"/>
+    <path d="M950 1631 H965" class="arrow-orange"/>
+    <path d="M1400 1631 H1415" class="arrow-magenta"/>
+    <path d="M1920 1631 H1935" class="arrow-blue"/>
+  </g>
+
+  <!-- Legend -->
+  <g id="legend">
+    <text x="70" y="1733" class="body">图例</text>
+    <rect x="135" y="1712" width="130" height="31" rx="10" class="soft-blue"/>
+    <text x="200" y="1733" text-anchor="middle" class="badge" fill="#1768a8">V2 复用</text>
+    <rect x="285" y="1712" width="150" height="31" rx="10" class="soft-orange"/>
+    <text x="360" y="1733" text-anchor="middle" class="badge" fill="#a95008">调度 / 反馈</text>
+    <rect x="455" y="1712" width="150" height="31" rx="10" class="soft-magenta"/>
+    <text x="530" y="1733" text-anchor="middle" class="badge" fill="#c32672">V3 新增</text>
+    <rect x="625" y="1712" width="150" height="31" rx="10" class="soft-purple"/>
+    <text x="700" y="1733" text-anchor="middle" class="badge" fill="#684096">可信机制</text>
+    <rect x="795" y="1712" width="150" height="31" rx="10" class="soft-green"/>
+    <text x="870" y="1733" text-anchor="middle" class="badge" fill="#116b4d">数据 / 适配</text>
+    <rect x="965" y="1712" width="150" height="31" rx="10" class="soft-red"/>
+    <text x="1040" y="1733" text-anchor="middle" class="badge" fill="#b4262c">硬约束</text>
+
+    <path d="M1175 1727 H1260" class="arrow-blue"/>
+    <text x="1280" y="1733" class="small">主调用 / 数据流</text>
+    <path d="M1480 1727 H1565" class="arrow-orange dash"/>
+    <text x="1585" y="1733" class="small">反馈 / 控制</text>
+    <path d="M1770 1727 H1855" class="arrow-green dot"/>
+    <text x="1875" y="1733" class="small">策略影响 / 配置注入</text>
+    <text x="2500" y="1733" text-anchor="end" class="small" fill="#526274">全部节点、文本与连线均为原生 SVG，可独立选择和编辑</text>
+  </g>
+</svg>

@@ -7,9 +7,11 @@ implementations are looked up via agent_registry (reverse dependency).
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -19,7 +21,12 @@ from app.bridge.bridge_agent import BridgeAgent, BridgeDecision
 from app.bridge.commander_agent import CommanderAgent, FeedbackDecision
 from app.bridge.langgraph_runtime import LangGraphRuntimeFacade
 from app.bridge.node_key import attempt_key, parse_node_key
-from app.bridge.workflow_service import EntryPoint, build_pipeline, build_standalone
+from app.bridge.workflow_service import (
+    LINEAR_STAGES,
+    EntryPoint,
+    build_pipeline,
+    build_standalone,
+)
 from app.harness.observability.tracing import TraceRecorder
 from app.harness.runtime.event_bus import EventBus, InProcessEventBus
 from app.harness.runtime.readiness import assert_ready_for_run
@@ -35,6 +42,19 @@ from app.storage.run_state_store import RunStateStore
 # the e2e wiring testable in Phase 2 *before* Phase 3 ships real agents.
 NodeRunner = Callable[[RunHandle, str], Awaitable[None]]
 
+_ORCHESTRATED_ENTRYPOINTS = frozenset(("pipeline", *LINEAR_STAGES))
+_EXTERNAL_LIFECYCLE_STATES: dict[str, NodeState] = {
+    "created": NodeState.PENDING,
+    "pending": NodeState.PENDING,
+    "running": NodeState.RUNNING,
+    "paused": NodeState.WAITING_REVIEW,
+    "waiting_hitl": NodeState.WAITING_REVIEW,
+    "completed": NodeState.DONE,
+    "stopped": NodeState.DONE,
+    "failed": NodeState.FAILED,
+    "cancelled": NodeState.FAILED,
+}
+
 
 @dataclass
 class RunRequest:
@@ -45,6 +65,7 @@ class RunRequest:
     user_request: str = ""
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
     data_source: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,6 +76,7 @@ class RunSession:
     bus: EventBus
     runners: dict[str, NodeRunner] = field(default_factory=dict)
     waiting_for_feedback: bool = False
+    read_only: bool = False
 
 
 class Orchestrator:
@@ -94,6 +116,7 @@ class Orchestrator:
         )
         session = RunSession(run=run, graph=graph, request=request, bus=self.bus)
         self._sessions[run.run_id] = session
+        self._persist_request_extra(run, request.extra)
         TraceRecorder(run).ensure_manifest()
         if self.langgraph_runtime.enabled():
             self.langgraph_runtime.write_manifest(run=run, graph=graph)
@@ -156,12 +179,24 @@ class Orchestrator:
                     return
 
         await self._write_evaluation_scorecard(session)
+        states = graph.all_states()
+        failed_nodes = sorted(
+            key for key, state in states.items() if state == NodeState.FAILED
+        )
+        terminal_status = "failed" if failed_nodes else "completed"
+        lifecycle_event = "run.failed" if failed_nodes else "run.completed"
+        self._persist_state(session, status=terminal_status)
         await self._publish_state(session, channel="run.lifecycle", payload={
-            "event": "run.completed",
+            "event": lifecycle_event,
             "run_id": run_id,
-            "states": {k: s.value for k, s in graph.all_states().items()},
+            "states": {key: state.value for key, state in states.items()},
+            "failed_nodes": failed_nodes,
+            "failure_summary": (
+                f"{len(failed_nodes)} run node(s) failed"
+                if failed_nodes
+                else None
+            ),
         })
-        self._persist_state(session, status="completed")
 
     async def _write_evaluation_scorecard(self, session: RunSession) -> None:
         try:
@@ -884,6 +919,7 @@ class Orchestrator:
         run = self.run_store.get(run_id)
         if run is None:
             return None
+        read_only = run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS
         snapshot = RunStateStore(run).load()
         if snapshot is None:
             graph = self._infer_readonly_graph_from_artifacts(run)
@@ -902,6 +938,11 @@ class Orchestrator:
                 standalone=bool(snapshot.request.get("standalone", False)),
                 user_request=str(snapshot.request.get("user_request", "")),
                 auto_approve=bool(snapshot.request.get("auto_approve", False)),
+                extra=(
+                    dict(snapshot.request.get("extra", {}))
+                    if isinstance(snapshot.request.get("extra"), dict)
+                    else {}
+                ),
             )
         waiting = snapshot is not None and snapshot.status == "waiting_feedback"
         session = RunSession(
@@ -910,6 +951,7 @@ class Orchestrator:
             request=request,
             bus=self.bus,
             waiting_for_feedback=waiting,
+            read_only=read_only,
         )
         self._sessions[run_id] = session
         return session
@@ -917,6 +959,9 @@ class Orchestrator:
     def _infer_readonly_graph_from_artifacts(self, run: RunHandle) -> RunGraph:
         from app.harness.runtime.state_machine import NodeState
         from app.storage.artifact_store import SCHEMA_TO_AGENT
+
+        if run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS:
+            return self._external_run_projection(run)
 
         graph = (
             build_pipeline(run.entrypoint)  # type: ignore[arg-type]
@@ -940,6 +985,74 @@ class Orchestrator:
                 graph.restore_state(key, NodeState.PENDING)
         return graph
 
+    def _external_run_projection(self, run: RunHandle) -> RunGraph:
+        """Project service-owned runs into the legacy read-only Run API.
+
+        Discovery and future extension services persist runs in the shared
+        ``RunStore`` but own their lifecycle outside the five-Agent graph.
+        Legacy dashboards still enumerate those records, so recovery must be
+        observable without pretending that the Orchestrator can execute them.
+        """
+
+        lifecycle = self._external_run_lifecycle(run)
+        graph = RunGraph()
+        graph.add_node(
+            run.entrypoint,
+            kind="external_service",
+            metadata={
+                "stage": run.entrypoint,
+                "attempt": 1,
+                "read_only": True,
+                "lifecycle": lifecycle,
+            },
+        )
+        graph.set_entrypoint(run.entrypoint)
+        graph.restore_state(
+            run.entrypoint,
+            _EXTERNAL_LIFECYCLE_STATES.get(lifecycle, NodeState.PENDING),
+        )
+        return graph
+
+    def _external_run_lifecycle(self, run: RunHandle) -> str:
+        discovery_root = run.root / "discovery"
+        if run.entrypoint == "model_discovery":
+            checkpoint = self._read_json_object(
+                discovery_root / "checkpoints" / "latest.json"
+            )
+            state = checkpoint.get("state")
+            if isinstance(state, dict) and state.get("lifecycle"):
+                return str(state["lifecycle"])
+            return str(checkpoint.get("status") or "created")
+
+        if run.entrypoint == "discovery_iteration":
+            link = self._read_json_object(discovery_root / "iteration_link.json")
+            parent_run_id = str(link.get("parent_run_id") or "")
+            if parent_run_id:
+                parent = self.run_store.get(parent_run_id)
+                if parent is not None:
+                    checkpoint = self._read_json_object(
+                        parent.root / "discovery" / "checkpoints" / "latest.json"
+                    )
+                    state = checkpoint.get("state")
+                    nodes = state.get("iteration_nodes") if isinstance(state, dict) else None
+                    if isinstance(nodes, list):
+                        for item in nodes:
+                            if not isinstance(item, dict):
+                                continue
+                            if str(item.get("child_run_id") or "") == run.run_id:
+                                return str(item.get("status") or "running")
+            return str(link.get("status") or "created")
+
+        return "created"
+
+    @staticmethod
+    def _read_json_object(path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _persist_state(self, session: RunSession, *, status: str) -> None:
         RunStateStore(session.run).write(
             graph=session.graph,
@@ -950,9 +1063,28 @@ class Orchestrator:
                 "standalone": session.request.standalone,
                 "user_request": session.request.user_request,
                 "auto_approve": session.request.auto_approve,
+                "extra": dict(session.request.extra),
             },
             status=status,
         )
+
+    @staticmethod
+    def _persist_request_extra(run: RunHandle, extra: dict[str, Any]) -> None:
+        """Persist additive V3 request options for bridge runners and recovery."""
+
+        if not extra:
+            return
+        payload = {
+            "schema_id": "run_request_options.v1",
+            "extra": dict(extra),
+        }
+        target = run.subdir("input") / "run_request_options.v1.json"
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(target)
 
     # ----------------------------------------------------- state + emission
 

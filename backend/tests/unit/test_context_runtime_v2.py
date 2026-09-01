@@ -13,7 +13,12 @@ from app.harness.llm.model_registry import AgentConfig
 from app.harness.llm.provider_base import Completion
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.schema.validator import validate_document
-from app.harness.tools.registry import ToolContext, ToolResult
+from app.harness.tools.registry import (
+    ToolContext,
+    ToolPolicy,
+    ToolResult,
+    ToolSpec,
+)
 
 
 def _agent_config(*, tools: tuple[str, ...] = ()) -> AgentConfig:
@@ -71,12 +76,25 @@ class _RuntimeAgent(BaseAgent):
 
 
 class _FakeToolRegistry:
+    def __init__(self) -> None:
+        self.dispatched: list[str] = []
+
+    def spec(self, tool_name: str) -> ToolSpec | None:
+        mutation_level = "write" if tool_name == "code.write_file" else "read"
+        return ToolSpec(
+            name=tool_name,
+            namespace=tool_name.split(".", 1)[0],
+            description="test tool",
+            policy=ToolPolicy(mutation_level=mutation_level),
+        )
+
     async def dispatch(
         self,
         tool_name: str,
         args: dict[str, Any],
         ctx: ToolContext,
     ) -> ToolResult:
+        self.dispatched.append(tool_name)
         return ToolResult(
             ok=True,
             output={
@@ -204,3 +222,47 @@ async def test_tool_raw_externalize_can_be_disabled(
     assert observations[0]["raw_ref"] is None
     assert not (run_root / "context" / "raw").exists()
     settings_mod._settings = None
+
+
+@pytest.mark.asyncio
+async def test_tool_gather_never_dispatches_model_requested_write_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = RunRequest(
+        project="pimc",
+        user_request="read-only gather",
+        extra={
+            "run_id": "run-read-only",
+            "run_root": str(tmp_path / "run"),
+            "node_key": "coding",
+        },
+    )
+    context = ContextPack(system="system", project="project", task="task")
+    agent = _RuntimeAgent(tools=("search.local_docs", "code.write_file"))
+    agent.max_tool_steps = 1
+    agent.completions.append(
+        '{"tool_calls": [{"tool": "code.write_file", "args": '
+        '{"path": "libs/evil.py", "content": "owned"}}]}'
+    )
+    monkeypatch.setattr(agent, "_tools_enabled", lambda: True)
+    registry = _FakeToolRegistry()
+
+    import app.harness.tools.registry as registry_mod
+
+    monkeypatch.setattr(registry_mod, "get_registry", lambda: registry)
+
+    observations = await agent._gather_with_tools(request, context)
+
+    assert registry.dispatched == []
+    assert observations == [
+        {
+            "tool": "code.write_file",
+            "args": {"path": "libs/evil.py", "content": "owned"},
+            "ok": False,
+            "output": {},
+            "error": "tool is unavailable in the read-only gather phase",
+            "blocked_by_gate": "agent_gather_read_only",
+            "raw_ref": None,
+        }
+    ]

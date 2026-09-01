@@ -1,0 +1,73 @@
+name: Core compatibility CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-deployment-scripts:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate one-click scripts without Docker or credentials
+        shell: ${{ matrix.shell }}
+        run: .\deploy\windows\tests\Test-DeploymentScripts.ps1
+
+  backend-and-synthetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e projects/synthetic_regression
+      - name: Pytest
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: pytest backend/tests projects/synthetic_regression/tests -q
+      - name: Strict mypy
+        env:
+          MYPYPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: mypy --strict backend/ scripts/release projects/synthetic_regression/src
+      - name: Import boundaries
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: lint-imports
+      - name: Twenty-candidate synthetic smoke
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: python -m scripts.release.run_synthetic_smoke
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Production build
+        working-directory: frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build

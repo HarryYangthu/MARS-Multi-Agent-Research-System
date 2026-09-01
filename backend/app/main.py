@@ -19,6 +19,7 @@ from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
 from app.api import diagnoses as diagnoses_api
+from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
 from app.api import execution as execution_api
@@ -29,12 +30,24 @@ from app.api import reports as reports_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import stats as stats_api
+from app.api import system as system_api
 from app.api import templates as templates_api
 from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
+from app.api.dependencies import get_event_bus, get_run_store
 from app.bridge.agent_registry import get_registry
+from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
+from app.bridge.commander_tools import configure_discovery_commander_tools
+from app.bridge.discovery_composition import (
+    ProjectPackCandidateAgent,
+    ProjectPackRoutingAdapter,
+)
+from app.bridge.discovery_service import DiscoveryService
+from app.bridge.extension_runtime import get_extension_runtime
+from app.bridge.idea_selection import IdeaSelectionCoordinator
+from app.harness.tools.registry import get_registry as get_tool_registry
 from app.settings import get_settings
 
 
@@ -48,15 +61,36 @@ def register_default_agents() -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    extension_runtime = get_extension_runtime()
 
     logger.remove()
     logger.add(sys.stderr, level=settings.mars_log_level)
 
     app = FastAPI(
-        title="MARS V0",
-        description="Multi-Agent Research System — V0 backend",
-        version="0.1.0",
+        title="MARS",
+        description="Multi-Agent Research System",
+        version=extension_runtime.profile.core_version,
     )
+    app.state.extension_runtime = extension_runtime
+
+    register_default_agents()
+    discovery_service = DiscoveryService(
+        run_store=get_run_store(),
+        event_bus=get_event_bus(),
+        candidate_agent=ProjectPackCandidateAgent(extension_runtime),
+        adapter=ProjectPackRoutingAdapter(extension_runtime),
+        code_candidate_preparer=SecureCandidateWorkspacePreparer(
+            tool_registry=get_tool_registry(),
+        ),
+    )
+    discovery_api.configure_discovery_service(discovery_service)
+    selection = IdeaSelectionCoordinator(
+        run_store=get_run_store(),
+        registry=get_registry(),
+    )
+    discovery_api.configure_idea_selection_handler(selection.apply)
+    configure_discovery_commander_tools(discovery_service)
+    app.state.discovery_service = discovery_service
 
     cors_origins = settings.cors_origins
     app.add_middleware(
@@ -69,7 +103,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "mars-backend", "version": "0.1.0"}
+        return {
+            "status": "ok",
+            "service": "mars-backend",
+            "version": extension_runtime.profile.version,
+            "distribution": extension_runtime.profile.name,
+        }
 
     @app.get("/")
     async def root() -> dict[str, str]:
@@ -79,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(diagnoses_api.router)
+    app.include_router(discovery_api.router)
     app.include_router(agents_api.router)
     app.include_router(artifacts_api.router)
     app.include_router(evaluation_api.router)
@@ -96,12 +136,16 @@ def create_app() -> FastAPI:
     app.include_router(reports_api.router)
     app.include_router(events_api.router)
     app.include_router(stats_api.router)
+    app.include_router(system_api.router)
     app.include_router(chat_api.router)
     app.include_router(ws_api.router)
 
-    register_default_agents()
-
-    logger.info("MARS V0 backend ready (port={})", settings.backend_port)
+    logger.info(
+        "MARS backend ready (distribution={}, core={}, port={})",
+        extension_runtime.profile.name,
+        extension_runtime.profile.core_version,
+        settings.backend_port,
+    )
     return app
 
 

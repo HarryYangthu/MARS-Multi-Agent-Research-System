@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,12 @@ def test_run_state_written_and_recovered(tmp_path: Path) -> None:
     store = RunStore(tmp_path)
     orch = Orchestrator(run_store=store)
     session = orch.create_session(
-        RunRequest(task="state", project="pimc", auto_approve=True)
+        RunRequest(
+            task="state",
+            project="pimc",
+            auto_approve=True,
+            extra={"idea_mode": "auto", "idea_budget_profile": "balanced"},
+        )
     )
     session.graph.transition("idea", NodeState.RUNNING)
     orch._persist_state(session, status="running")  # noqa: SLF001
@@ -44,6 +50,13 @@ def test_run_state_written_and_recovered(tmp_path: Path) -> None:
     recovered = Orchestrator(run_store=store).session(session.run.run_id)
     assert recovered.graph.state("idea") == NodeState.RUNNING
     assert recovered.request.project == "pimc"
+    assert recovered.request.extra == {
+        "idea_mode": "auto",
+        "idea_budget_profile": "balanced",
+    }
+    options = session.run.subdir("input") / "run_request_options.v1.json"
+    assert options.is_file()
+    assert json.loads(options.read_text(encoding="utf-8"))["extra"]["idea_mode"] == "auto"
 
 
 @pytest.mark.asyncio

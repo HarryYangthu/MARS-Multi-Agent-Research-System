@@ -1,0 +1,115 @@
+ARG MARS_PYTHON_IMAGE=python:3.11-slim-bookworm
+
+FROM ${MARS_PYTHON_IMAGE} AS builder
+
+ARG MARS_UV_VERSION=0.11.1
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /src
+
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install \
+      "uv==${MARS_UV_VERSION}" \
+      "wheel==0.48.0"
+
+COPY pyproject.toml uv.lock ./
+
+RUN /opt/venv/bin/uv export \
+      --frozen \
+      --no-dev \
+      --no-emit-project \
+      --format requirements-txt \
+      --output-file /tmp/mars-requirements.txt \
+    && /opt/venv/bin/pip install --requirement /tmp/mars-requirements.txt \
+    && /opt/venv/bin/pip check
+
+ARG MARS_INSTALL_STATIC_ALPHA=1
+ARG MARS_TORCH_VERSION=2.12.1
+ARG MARS_TORCH_WHEEL_BASE_URL=https://download.pytorch.org/whl/cpu
+ARG MARS_TORCH_AMD64_SHA256=04cd8b002c03dd6a246fbb4ae5abf1edd42adf0a9929ad82162c973e5737b5ac
+ARG MARS_TORCH_ARM64_SHA256=6d1b61e53a2c000e1e5cc49fc88aebc665bdf02c63910c243116d395d7cbc164
+
+RUN if [ "$MARS_INSTALL_STATIC_ALPHA" = "1" ]; then \
+      /opt/venv/bin/pip install \
+        "Jinja2==3.1.6" \
+        "MarkupSafe==3.0.3" \
+        "networkx==3.6.1" \
+        "sympy==1.14.0" \
+      && case "$(uname -m)" in \
+        x86_64) torch_arch="x86_64"; torch_sha256="$MARS_TORCH_AMD64_SHA256" ;; \
+        aarch64|arm64) torch_arch="aarch64"; torch_sha256="$MARS_TORCH_ARM64_SHA256" ;; \
+        *) echo "unsupported torch build architecture: $(uname -m)" >&2; exit 1 ;; \
+      esac \
+      && torch_url="${MARS_TORCH_WHEEL_BASE_URL%/}/torch-${MARS_TORCH_VERSION}%2Bcpu-cp311-cp311-manylinux_2_28_${torch_arch}.whl" \
+      && mkdir -p /tmp/mars-torch \
+      && /opt/venv/bin/pip download \
+        --dest /tmp/mars-torch \
+        --no-deps \
+        --only-binary=:all: \
+        "$torch_url" \
+      && set -- /tmp/mars-torch/torch-*.whl \
+      && [ "$#" -eq 1 ] \
+      && echo "$torch_sha256  $1" | sha256sum --check --strict \
+      && /opt/venv/bin/pip install --no-deps "$1" \
+      && rm -rf /tmp/mars-torch; \
+    fi \
+    && /opt/venv/bin/pip check
+
+COPY backend ./backend
+
+RUN /opt/venv/bin/pip install --no-build-isolation --no-deps . \
+    && /opt/venv/bin/pip check
+
+
+FROM ${MARS_PYTHON_IMAGE} AS runtime
+
+ARG MARS_INSTALL_SYSTEM_TOOLS=1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HOME=/tmp/mars-home \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONPATH=/app/backend:/app/posttrain/src:/opt/mars-v31-wireless/src \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MPLCONFIGDIR=/tmp/matplotlib
+
+RUN if [ "$MARS_INSTALL_SYSTEM_TOOLS" = "1" ]; then \
+      apt-get update \
+      && apt-get install --yes --no-install-recommends git openssh-client \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && groupadd --gid 10001 mars \
+    && useradd --uid 10001 --gid mars --create-home --home-dir /home/mars mars
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=mars:mars backend ./backend
+COPY --chown=mars:mars configs ./configs
+COPY --chown=mars:mars projects ./projects
+COPY --chown=mars:mars templates ./templates
+COPY --chown=mars:mars posttrain/src ./posttrain/src
+COPY --chown=mars:mars workspace/repos/pimc-stub ./workspace/repos/pimc-stub
+
+RUN mkdir -p \
+      /app/knowledge \
+      /app/runs \
+      /app/runtime \
+      /app/workspace \
+      /tmp/mars-home \
+      /tmp/matplotlib \
+    && touch /app/runtime/.env.local \
+    && ln -s runtime/.env.local /app/.env.local \
+    && chown -R mars:mars /app /tmp/mars-home /tmp/matplotlib
+
+USER mars
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

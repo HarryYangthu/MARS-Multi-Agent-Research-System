@@ -338,6 +338,43 @@ export type ContextRunView = {
   risk_summary: Record<string, number>;
 };
 
+export function normalizeContextRunView(view: ContextRunView): ContextRunView {
+  const manifests = [...new Map(
+    view.manifests.map((manifest) => [manifest.manifest_id, manifest] as const),
+  ).values()];
+  if (manifests.length === view.manifests.length) {
+    return view;
+  }
+
+  const riskSummary: Record<string, number> = {};
+  let usedTokens = 0;
+  let overBudgetCount = 0;
+  for (const manifest of manifests) {
+    const used = manifest.budget.used;
+    if (typeof used === "number" && Number.isFinite(used)) {
+      usedTokens += used;
+    }
+    if (manifest.budget.over_budget === true) {
+      overBudgetCount += 1;
+    }
+    for (const [risk, count] of Object.entries(manifest.risk_counts)) {
+      if (Number.isFinite(count)) {
+        riskSummary[risk] = (riskSummary[risk] ?? 0) + count;
+      }
+    }
+  }
+  return {
+    ...view,
+    manifests,
+    budget_summary: {
+      manifest_count: manifests.length,
+      used_tokens: usedTokens,
+      over_budget_count: overBudgetCount,
+    },
+    risk_summary: riskSummary,
+  };
+}
+
 export type ContextRawView = {
   raw_ref: string;
   path: string;
@@ -1598,7 +1635,10 @@ export async function getTrace(runId: string): Promise<TraceManifest> {
 }
 
 export async function getContextRun(runId: string): Promise<ContextRunView> {
-  return jsonOrThrow(await fetch(`${BASE}/api/context/runs/${runId}`));
+  const view = await jsonOrThrow<ContextRunView>(
+    await fetch(`${BASE}/api/context/runs/${runId}`),
+  );
+  return normalizeContextRunView(view);
 }
 
 export async function getContextManifest(

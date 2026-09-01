@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     mars_runtime_mode: Literal["development", "staging", "production"] = "development"
     mars_mock_mode: Literal["auto", "always", "never"] = "auto"
     mars_graph_engine: Literal["langgraph", "legacy"] = "langgraph"
+    mars_distribution: Literal["v30-core", "v31-wireless"] = "v30-core"
+    mars_project_pack_paths: str = ""
     mars_execution_backend: Literal[
         "mock",
         "pim_cpu",
@@ -60,6 +62,7 @@ class Settings(BaseSettings):
         "docker_command",
         "remote_gpu",
     ] = "mock"
+    mars_execution_device: Literal["cpu", "gpu"] = "cpu"
     mars_coding_backend: Literal[
         "mock",
         "native_llm",
@@ -99,11 +102,46 @@ class Settings(BaseSettings):
         return not self.is_production and self.mars_mock_mode != "never"
 
     @property
+    def effective_execution_device(self) -> Literal["cpu", "gpu"]:
+        """Resolve the new device switch while preserving the legacy GPU alias."""
+
+        if "mars_execution_device" in self.model_fields_set:
+            return self.mars_execution_device
+        if self.mars_execution_backend == "remote_gpu":
+            return "gpu"
+        return self.mars_execution_device
+
+    @property
+    def execution_device_source(self) -> Literal["explicit", "legacy_backend", "default"]:
+        if "mars_execution_device" in self.model_fields_set:
+            return "explicit"
+        if self.mars_execution_backend == "remote_gpu":
+            return "legacy_backend"
+        return "default"
+
+    @property
     def cors_origins(self) -> list[str]:
         raw = self.mars_cors_origins.strip()
         if not raw or raw == "*":
             return ["*"]
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    @property
+    def project_pack_roots(self) -> tuple[Path, ...]:
+        """Return deterministic Project Pack roots.
+
+        The repository ``projects`` directory is the public default. Optional
+        overlays are mounted explicitly through ``MARS_PROJECT_PACK_PATHS``
+        using the platform path separator; no package auto-discovery is used.
+        """
+
+        roots = [REPO_ROOT / "projects"]
+        roots.extend(
+            Path(item).expanduser()
+            for item in self.mars_project_pack_paths.split(os.pathsep)
+            if item.strip()
+        )
+        return tuple(roots)
 
 
 _settings: Settings | None = None
@@ -128,7 +166,7 @@ def local_env_files() -> tuple[Path, ...]:
 def read_local_env_vars() -> dict[str, str]:
     values: dict[str, str] = {}
     for path in LOCAL_ENV_FILES:
-        if not path.exists():
+        if not path.is_file():
             continue
         for raw_line in path.read_text(encoding="utf-8").splitlines():
             parsed = _parse_env_line(raw_line)
