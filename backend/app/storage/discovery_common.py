@@ -8,8 +8,8 @@ threads and worker processes on the supported POSIX deployment targets.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
+import importlib
 import json
 import os
 import tempfile
@@ -19,6 +19,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_WINDOWS_LOCKING: Any | None = None
+if os.name == "nt":  # pragma: no cover - exercised by Windows CI
+    _WINDOWS_LOCKING = importlib.import_module("msvcrt")
+else:  # pragma: no cover - imported on POSIX CI
+    import fcntl
 
 
 class DiscoveryStoreError(RuntimeError):
@@ -124,11 +130,11 @@ def discovery_lock(paths: DiscoveryPaths) -> Iterator[None]:
         thread_lock = _THREAD_LOCKS.setdefault(lock_key, threading.RLock())
     with thread_lock:
         with paths.lock_path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            _lock_file(handle)
             try:
                 yield
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                _unlock_file(handle)
 
 
 def model_payload(model: Any) -> dict[str, Any]:
@@ -171,3 +177,29 @@ def _fsync_directory(directory: Path) -> None:
         pass
     finally:
         os.close(descriptor)
+
+
+def _lock_file(handle: Any) -> None:
+    """Acquire one cross-process byte-range lock on POSIX or Windows."""
+
+    if os.name != "nt":
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+    handle.seek(0)
+    if _WINDOWS_LOCKING is None:  # pragma: no cover - defensive platform guard
+        raise RuntimeError("Windows file locking module is unavailable")
+    _WINDOWS_LOCKING.locking(handle.fileno(), _WINDOWS_LOCKING.LK_LOCK, 1)
+
+
+def _unlock_file(handle: Any) -> None:
+    if os.name != "nt":
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return
+    handle.seek(0)
+    if _WINDOWS_LOCKING is None:  # pragma: no cover - defensive platform guard
+        raise RuntimeError("Windows file locking module is unavailable")
+    _WINDOWS_LOCKING.locking(handle.fileno(), _WINDOWS_LOCKING.LK_UNLCK, 1)

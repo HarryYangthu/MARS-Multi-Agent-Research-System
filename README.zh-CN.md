@@ -118,6 +118,20 @@ python scripts/run_demo.py --port 8000 --mock-mode
 bash scripts/acceptance.sh
 ```
 
+### Windows 原生一键启动（无 Docker）
+
+Windows 10/11 x64 先通过公司软件中心安装 Python 3.11 和 Node.js 20，将
+`mars_v2` 与 `mars_v31_wireless` 放在同一父目录，然后双击：
+
+```text
+start-mars-windows.cmd
+```
+
+首次运行会自动创建虚拟环境、安装依赖、构建前端并打开
+`http://127.0.0.1:3001/`。内网包源和完全离线方式见
+[`deploy/windows-native/README.md`](deploy/windows-native/README.md)。此入口使用
+单机进程内事件总线，不要求 Docker 或 Redis；Linux 隔离生产模式不在原生入口开放。
+
 ## 上线部署
 
 生产环境建议采用混合部署:Next.js 前端上 Vercel,FastAPI 后端、Redis、

@@ -17,7 +17,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from pydantic import BaseModel
 
@@ -160,7 +160,7 @@ def cancel_job(
     root: Path,
     job_id: str,
     *,
-    kill_process_group: Callable[[int, int], None] = os.killpg,
+    kill_process_group: Callable[[int, int], None] | None = None,
 ) -> RemoteJobRecord:
     record_path = _job_dir(root, job_id) / _RECORD_FILE
     record = _read_record(record_path)
@@ -176,11 +176,12 @@ def cancel_job(
         }
     )
     _write_record(record_path, cancelled)
+    killer = kill_process_group or _kill_process_group
     for pid in (record.workload_pid, record.worker_pid):
         if pid is None:
             continue
         try:
-            kill_process_group(pid, signal.SIGTERM)
+            killer(pid, signal.SIGTERM)
         except ProcessLookupError:
             continue
         except PermissionError as exc:
@@ -224,15 +225,12 @@ def work_job(root: Path, job_id: str, *, wait_for_start: bool = True) -> RemoteJ
     monotonic_started = time.monotonic()
     try:
         with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
-            process = subprocess.Popen(
-                list(request.workload_argv),
+            process = _spawn_workload_process(
+                argv=list(request.workload_argv),
                 cwd=job_dir,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                start_new_session=True,
-                close_fds=True,
+                environment=environment,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
             )
             record = record.model_copy(update={"workload_pid": process.pid})
             _write_record(record_path, record)
@@ -339,8 +337,8 @@ def _launch_worker(root: Path, job_id: str) -> int:
     runner_stdout = (job_dir / "runner.log").open("ab")
     runner_stderr = (job_dir / "runner.err.log").open("ab")
     try:
-        process = subprocess.Popen(
-            [
+        process = _spawn_worker_process(
+            argv=[
                 sys.executable,
                 "-m",
                 "app.execution.remote.runner",
@@ -351,16 +349,13 @@ def _launch_worker(root: Path, job_id: str) -> int:
                 job_id,
             ],
             cwd=job_dir,
-            stdin=subprocess.DEVNULL,
-            stdout=runner_stdout,
-            stderr=runner_stderr,
-            start_new_session=True,
-            close_fds=True,
+            stdout_handle=runner_stdout,
+            stderr_handle=runner_stderr,
         )
     finally:
         runner_stdout.close()
         runner_stderr.close()
-    return process.pid
+    return int(process.pid)
 
 
 def _finish_failed(
@@ -539,14 +534,80 @@ def _verify_input_artifacts(job_dir: Path, request: RemoteJobRequest) -> None:
 
 def _terminate_process_group(pid: int) -> None:
     try:
-        os.killpg(pid, signal.SIGTERM)
+        _kill_process_group(pid, signal.SIGTERM)
     except ProcessLookupError:
         return
     time.sleep(0.2)
     try:
-        os.killpg(pid, signal.SIGKILL)
+        _kill_process_group(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except ProcessLookupError:
         return
+
+
+def _kill_process_group(pid: int, signal_number: int) -> None:
+    if hasattr(os, "killpg"):
+        os.killpg(pid, signal_number)
+        return
+    os.kill(pid, signal_number)
+
+
+def _spawn_workload_process(
+    *,
+    argv: list[str],
+    cwd: Path,
+    environment: dict[str, str],
+    stdout_handle: Any,
+    stderr_handle: Any,
+) -> subprocess.Popen[bytes]:
+    if os.name == "nt":
+        return subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            close_fds=True,
+            creationflags=int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)),
+        )
+    return subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout_handle,
+        stderr=stderr_handle,
+        close_fds=True,
+        start_new_session=True,
+    )
+
+
+def _spawn_worker_process(
+    *,
+    argv: list[str],
+    cwd: Path,
+    stdout_handle: Any,
+    stderr_handle: Any,
+) -> subprocess.Popen[bytes]:
+    if os.name == "nt":
+        return subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            close_fds=True,
+            creationflags=int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)),
+        )
+    return subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout_handle,
+        stderr=stderr_handle,
+        close_fds=True,
+        start_new_session=True,
+    )
 
 
 def _wait_for_start(path: Path) -> None:

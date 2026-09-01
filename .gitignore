@@ -40,6 +40,10 @@ knowledge/*/_index*.json
 conversations/
 deploy/windows/images/
 deploy/windows/runtime/
+deploy/windows-native/.env
+deploy/windows-native/runtime/
+deploy/windows-native/offline/
+.venv-windows/
 posttrain/adapters/
 posttrain/checkpoints/
 posttrain/data/

@@ -256,7 +256,10 @@ def _copy_bound_regular_file(
         if actual_sha256 != expected_sha256:
             raise CodeWorkspaceTransferError(f"{label} hash mismatch")
         os.fsync(destination_descriptor)
-        os.fchmod(destination_descriptor, 0o644)
+        if hasattr(os, "fchmod"):
+            os.fchmod(destination_descriptor, 0o644)
+        else:  # Windows exposes chmod by path rather than file descriptor.
+            destination.chmod(0o644)
         published = True
     finally:
         os.close(source_descriptor)

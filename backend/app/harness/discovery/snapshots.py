@@ -206,7 +206,7 @@ def verify_snapshot(root: Path) -> SnapshotHandle:
         if stat.S_ISDIR(mode):
             if _hard_forbidden(rel):
                 raise SnapshotError(f"snapshot contains a forbidden directory: {rel}")
-            if stat.S_IMODE(mode) != 0o555:
+            if os.name != "nt" and stat.S_IMODE(mode) != 0o555:
                 raise SnapshotError(f"snapshot directory mode mismatch: {rel}")
             actual_directories.add(rel)
             continue
@@ -227,11 +227,15 @@ def verify_snapshot(root: Path) -> SnapshotHandle:
         if path.stat().st_size != item.size_bytes or _sha256_file(path) != item.sha256:
             raise SnapshotError(f"snapshot file hash mismatch: {item.path}")
         expected_mode = 0o555 if item.executable else 0o444
-        if stat.S_IMODE(path.stat(follow_symlinks=False).st_mode) != expected_mode:
+        if os.name != "nt" and stat.S_IMODE(
+            path.stat(follow_symlinks=False).st_mode
+        ) != expected_mode:
             raise SnapshotError(f"snapshot file mode mismatch: {item.path}")
-    if stat.S_IMODE(manifest_mode) != 0o444:
+    if os.name != "nt" and stat.S_IMODE(manifest_mode) != 0o444:
         raise SnapshotError("snapshot manifest mode mismatch")
-    if stat.S_IMODE(resolved.stat(follow_symlinks=False).st_mode) != 0o555:
+    if os.name != "nt" and stat.S_IMODE(
+        resolved.stat(follow_symlinks=False).st_mode
+    ) != 0o555:
         raise SnapshotError("snapshot root mode mismatch")
     return SnapshotHandle(root=resolved, manifest=manifest)
 

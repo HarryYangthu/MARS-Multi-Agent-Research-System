@@ -127,19 +127,18 @@ simulation paths.
 
 ### Windows one-click (V3.1 CPU)
 
-On Windows 10/11 x64, install Docker Desktop with WSL2/Linux containers, place
-`mars_v2` and the private `mars_v31_wireless` overlay beside each other, then
-double-click `start-mars-windows.cmd`. It builds the CPU image, checks both
-services and run readiness, and opens `http://127.0.0.1:3001/`. The online,
-offline, strict production (including offline), status, and stop paths are documented in
-[`deploy/windows/README.md`](deploy/windows/README.md).
+On Windows 10/11 x64, install company-approved Python 3.11 and Node.js 20,
+place `mars_v2` and the private `mars_v31_wireless` overlay beside each other,
+then double-click `start-mars-windows.cmd`. It starts the backend and standalone
+frontend directly, uses the single-process event bus, and opens
+`http://127.0.0.1:3001/`; Docker and Redis are not required. Internal registry
+and fully offline instructions are in
+[`deploy/windows-native/README.md`](deploy/windows-native/README.md).
 
-See [the validation record](deploy/windows/VALIDATION.md) for the distinction
-between checked code, Linux-container smoke tests, and pending Windows-host acceptance.
-
-Native Windows Python and Windows containers are intentionally unsupported;
-the one-click package keeps Unix permissions, processes, and research
-workspaces inside Linux containers.
+Native Windows is a local CPU/development or staging target. Strict production
+is fail-closed because it cannot reproduce the Linux read-only mount boundary;
+the retained container deployment is documented separately under
+[`deploy/windows/`](deploy/windows/README.md).
 
 ### Local Python
 

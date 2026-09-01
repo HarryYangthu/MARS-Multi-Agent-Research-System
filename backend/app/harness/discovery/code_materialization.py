@@ -464,7 +464,7 @@ def verify_code_workspace(
     _assert_no_symlink_components(manifest_path, label="workspace manifest")
     try:
         manifest_mode = stat.S_IMODE(manifest_path.stat(follow_symlinks=False).st_mode)
-        if manifest_mode != 0o644:
+        if os.name != "nt" and manifest_mode != 0o644:
             raise MaterializationError("workspace manifest mode must be 0644")
         manifest_bytes = _read_regular_file(manifest_path, label="workspace manifest")
         manifest_text = manifest_bytes.decode("utf-8", errors="strict")
@@ -950,7 +950,9 @@ def _build_manifest(
 
 
 def _inventory_workspace(root: Path) -> _WorkspaceInventory:
-    if stat.S_IMODE(root.stat(follow_symlinks=False).st_mode) != 0o755:
+    if os.name != "nt" and stat.S_IMODE(
+        root.stat(follow_symlinks=False).st_mode
+    ) != 0o755:
         raise MaterializationError("workspace root mode must be 0755")
     directories: list[CodeWorkspaceDirectory] = []
     files: list[CodeWorkspaceFile] = []
@@ -964,7 +966,7 @@ def _inventory_workspace(root: Path) -> _WorkspaceInventory:
                 raise MaterializationError(
                     f"workspace contains a hard-forbidden directory: {relative}"
                 )
-            if stat.S_IMODE(mode) != 0o755:
+            if os.name != "nt" and stat.S_IMODE(mode) != 0o755:
                 raise MaterializationError(
                     f"workspace directory mode must be 0755: {relative}"
                 )
@@ -978,7 +980,7 @@ def _inventory_workspace(root: Path) -> _WorkspaceInventory:
             raise MaterializationError(
                 f"workspace contains a hard-forbidden file: {relative}"
             )
-        if stat.S_IMODE(mode) != 0o644:
+        if os.name != "nt" and stat.S_IMODE(mode) != 0o644:
             raise MaterializationError(f"workspace file mode must be 0644: {relative}")
         files.append(
             CodeWorkspaceFile(
