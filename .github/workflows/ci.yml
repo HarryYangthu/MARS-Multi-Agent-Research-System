@@ -3,7 +3,7 @@ name: Core compatibility CI
 on:
   pull_request:
   push:
-    branches: [main, codex/windows-native]
+    branches: [main, "codex/windows-native"]
 
 permissions:
   contents: read
@@ -11,14 +11,15 @@ permissions:
 jobs:
   windows-deployment-scripts:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
-      - name: Validate one-click scripts without Docker or credentials
-        shell: ${{ matrix.shell }}
+      - name: Validate one-click scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\deploy\windows\tests\Test-DeploymentScripts.ps1
+          .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
+      - name: Validate one-click scripts with PowerShell 7
+        shell: pwsh
         run: |
           .\deploy\windows\tests\Test-DeploymentScripts.ps1
           .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
