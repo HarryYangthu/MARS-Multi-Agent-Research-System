@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
@@ -13,11 +14,13 @@ from app.harness.discovery.models import (
     CandidateEvaluation,
     CandidateRecord,
     FidelityLevel,
+    MetricValue,
     ModelGenome,
     ObjectiveDirection,
     ObjectiveSpec,
     ResearchTaskContract,
 )
+from app.storage.discovery_budget_ledger import BudgetLedger
 
 
 def _contract() -> ResearchTaskContract:
@@ -192,3 +195,51 @@ def test_legacy_flat_metrics_remain_supported() -> None:
     assert evaluation.hard_constraints_passed is True
     assert evaluation.canonical_metrics["score"].value == pytest.approx(0.5)
     assert evaluation.raw_metrics == {"score": 0.5}
+
+
+def test_archive_uses_highest_fidelity_shared_seed_cohort_not_last_seed(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+
+    def evaluation(candidate_id: str, seed: int, value: float) -> CandidateEvaluation:
+        return CandidateEvaluation(
+            evaluation_id=f"{candidate_id}-{seed}",
+            candidate_id=candidate_id,
+            run_id=contract.run_id,
+            fidelity=FidelityLevel.F0,
+            seed=seed,
+            evaluator_hash=contract.evaluator_hash,
+            dataset_hash=contract.dataset_hash,
+            canonical_metrics={
+                "score": MetricValue(
+                    value=value,
+                    unit="normalized",
+                    direction=ObjectiveDirection.MINIMIZE,
+                )
+            },
+            hard_constraints_passed=True,
+        )
+
+    candidate_a = tuple(
+        evaluation("candidate-a", seed, 30.0 if seed < 30 else 40.01)
+        for seed in range(31)
+    )
+    candidate_b = tuple(
+        evaluation("candidate-b", seed, 40.0) for seed in range(31)
+    )
+    budget = BudgetLedger(
+        tmp_path,
+        run_id=contract.run_id,
+        limits=contract.budget,
+    ).snapshot()
+
+    snapshot = DefaultDiscoveryCore().archive(
+        contract=contract,
+        evaluations=(*candidate_a, *candidate_b),
+        iteration=0,
+        budget=budget,
+        quarantined_candidate_ids=(),
+    )
+
+    assert snapshot.pareto_candidate_ids == ("candidate-a",)

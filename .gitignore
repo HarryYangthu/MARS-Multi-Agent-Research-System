@@ -38,6 +38,8 @@ knowledge/**/_web_cache/
 knowledge/*/_index*.json
 /runs/
 conversations/
+deploy/windows/images/
+deploy/windows/runtime/
 posttrain/adapters/
 posttrain/checkpoints/
 posttrain/data/

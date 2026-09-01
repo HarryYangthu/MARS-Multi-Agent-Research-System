@@ -12,7 +12,9 @@ from app.bridge.extension_runtime import (
     build_extension_runtime,
     reset_extension_runtime,
 )
+from app.execution.adapters.process import ProcessAdapter
 from app.harness.project_packs.registry import ProjectPackError
+from app.execution.remote import RemoteExecutorConfig, RemoteProjectAdapter
 from app.main import create_app
 from app.settings import reset_settings_cache
 
@@ -56,17 +58,23 @@ def _write_pack(root: Path, *, distribution: str = "public") -> Path:
 def test_v30_runtime_loads_public_pack_and_process_adapter(tmp_path: Path) -> None:
     root = tmp_path / "packs"
     _write_pack(root)
+    workspace_runs_root = tmp_path / "runs"
+    workspace_runs_root.mkdir()
 
     runtime = build_extension_runtime(
         distribution="v30-core",
         pack_roots=(root,),
+        workspace_runs_root=workspace_runs_root,
     )
 
     assert runtime.project_packs.get("demo").manifest.pack_version == "1.0.0"
     assert runtime.adapter_name("demo", "evaluator") == "demo:evaluator"
     assert runtime.adapters.names() == ("demo:evaluator",)
     adapter = runtime.adapters.get("demo:evaluator")
-    assert getattr(adapter, "argv") == (sys.executable, "-m", "demo_adapter")
+    assert isinstance(adapter, ProcessAdapter)
+    assert adapter.argv == (sys.executable, "-m", "demo_adapter")
+    assert adapter.workspace_resolver is not None
+    assert getattr(adapter.workspace_resolver, "runs_root") == workspace_runs_root
 
 
 def test_src_layout_pack_is_available_to_adapter_without_core_install(
@@ -83,6 +91,123 @@ def test_src_layout_pack_is_available_to_adapter_without_core_install(
     environment = getattr(adapter, "env")
     assert environment is not None
     assert environment["PYTHONPATH"].split(os.pathsep)[0] == str((pack / "src").resolve())
+
+
+def test_private_overlay_src_is_explicit_and_ambient_pythonpath_is_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlay = tmp_path / "overlay"
+    pack = _write_pack(overlay / "project_packs")
+    (overlay / "src" / "demo_adapter").mkdir(parents=True)
+    (overlay / "src" / "demo_adapter" / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", "/ambient/untrusted")
+
+    runtime = build_extension_runtime(
+        distribution="v30-core",
+        pack_roots=(pack,),
+    )
+
+    adapter = runtime.adapters.get("demo:evaluator")
+    environment = getattr(adapter, "env")
+    assert environment is not None
+    paths = environment["PYTHONPATH"].split(os.pathsep)
+    assert paths[0] == str((overlay / "src").resolve())
+    assert "/ambient/untrusted" not in paths
+
+
+def test_remote_gpu_backend_registers_remote_project_adapter(tmp_path: Path) -> None:
+    root = tmp_path / "packs"
+    _write_pack(root)
+    remote_python = "/opt/mars/bin/python"
+    config = RemoteExecutorConfig(
+        enabled=True,
+        host="gpu.example.test",
+        user="mars",
+        key_path=tmp_path / "id_ed25519",
+        known_hosts_path=tmp_path / "known_hosts",
+        remote_root="/srv/mars",
+        python=remote_python,
+    )
+    artifact_root = tmp_path / "artifacts"
+    workspace_runs_root = tmp_path / "runs"
+    workspace_runs_root.mkdir()
+
+    runtime = build_extension_runtime(
+        distribution="v30-core",
+        pack_roots=(root,),
+        execution_backend="remote_gpu",
+        remote_config=config,
+        remote_artifact_root=artifact_root,
+        workspace_runs_root=workspace_runs_root,
+    )
+
+    adapter = runtime.adapters.get("demo:evaluator")
+    assert isinstance(adapter, RemoteProjectAdapter)
+    assert adapter.trusted_adapter_argv == (
+        remote_python,
+        "-m",
+        "demo_adapter",
+    )
+    assert adapter.remote_worker_python == remote_python
+    assert adapter.artifact_root == artifact_root
+    assert adapter.workspace_resolver is not None
+    assert getattr(adapter.workspace_resolver, "runs_root") == workspace_runs_root
+
+
+def test_explicit_cpu_device_overrides_legacy_remote_backend(tmp_path: Path) -> None:
+    root = tmp_path / "packs"
+    _write_pack(root)
+    remote_config = RemoteExecutorConfig(
+        enabled=False,
+        host="",
+        user="",
+        key_path=None,
+        known_hosts_path=None,
+        remote_root="",
+    )
+
+    runtime = build_extension_runtime(
+        distribution="v30-core",
+        pack_roots=(root,),
+        execution_backend="remote_gpu",
+        execution_device="cpu",
+        remote_config=remote_config,
+    )
+
+    adapter = runtime.adapters.get("demo:evaluator")
+    assert isinstance(adapter, ProcessAdapter)
+    assert adapter.argv == (sys.executable, "-m", "demo_adapter")
+
+
+def test_gpu_device_maps_non_remote_backend_to_remote_adapter(tmp_path: Path) -> None:
+    root = tmp_path / "packs"
+    _write_pack(root)
+    remote_python = "/opt/mars/bin/python"
+    remote_config = RemoteExecutorConfig(
+        enabled=True,
+        host="gpu.example.test",
+        user="mars",
+        key_path=tmp_path / "id_ed25519",
+        known_hosts_path=tmp_path / "known_hosts",
+        remote_root="/srv/mars",
+        python=remote_python,
+    )
+
+    runtime = build_extension_runtime(
+        distribution="v30-core",
+        pack_roots=(root,),
+        execution_backend="mock",
+        execution_device="gpu",
+        remote_config=remote_config,
+    )
+
+    adapter = runtime.adapters.get("demo:evaluator")
+    assert isinstance(adapter, RemoteProjectAdapter)
+    assert adapter.remote_worker_python == remote_python
 
 
 def test_private_pack_is_rejected_by_v30_and_accepted_by_v31(tmp_path: Path) -> None:

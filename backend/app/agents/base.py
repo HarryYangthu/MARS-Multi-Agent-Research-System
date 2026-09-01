@@ -20,7 +20,13 @@ from typing import Any
 from loguru import logger
 
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
-from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message
+from app.harness.llm.provider_base import (
+    Completion,
+    LLMConfig,
+    LLMProvider,
+    Message,
+    llm_call_deadline_seconds,
+)
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
 from app.harness.schema.validator import (
@@ -351,7 +357,10 @@ class BaseAgent(ABC):
         try:
             completion = await asyncio.wait_for(
                 provider.complete(list(messages), cfg),
-                timeout=get_settings().mars_llm_timeout_seconds,
+                timeout=llm_call_deadline_seconds(
+                    cfg,
+                    minimum_seconds=get_settings().mars_llm_timeout_seconds,
+                ),
             )
             return completion
         except Exception as exc:
@@ -464,13 +473,27 @@ class BaseAgent(ABC):
         from app.harness.tools.registry import ToolContext, get_registry
 
         registry = get_registry()
+        read_only_tools = tuple(
+            tool_name
+            for tool_name in self._config.tools
+            if (
+                (spec := registry.spec(tool_name)) is not None
+                and spec.policy.mutation_level == "read"
+            )
+        )
+        if not read_only_tools:
+            return []
+        allowed_tools = frozenset(read_only_tools)
         tool_ctx = ToolContext(
             run_id=str(request.extra.get("run_id", "")),
             project=request.project,
             agent=self.name,
             extra={"run_root": str(request.extra.get("run_root", ""))},
         )
-        convo: list[Message] = self._tool_gather_messages(context)
+        convo: list[Message] = self._tool_gather_messages(
+            context,
+            tool_names=read_only_tools,
+        )
         observations: list[dict[str, Any]] = []
         for _step in range(self.max_tool_steps):
             self._write_messages_manifest(
@@ -485,6 +508,28 @@ class BaseAgent(ABC):
             for call in calls:
                 tool_name = call["tool"]
                 args = call.get("args", {})
+                if tool_name not in allowed_tools:
+                    observations.append(
+                        {
+                            "tool": tool_name,
+                            "args": args,
+                            "ok": False,
+                            "output": {},
+                            "error": "tool is unavailable in the read-only gather phase",
+                            "blocked_by_gate": "agent_gather_read_only",
+                            "raw_ref": None,
+                        }
+                    )
+                    convo.append(
+                        Message(
+                            role="user",
+                            content=(
+                                "[observation] requested tool is unavailable in the "
+                                "read-only gather phase"
+                            ),
+                        )
+                    )
+                    continue
                 result = await registry.dispatch(tool_name, args, tool_ctx)
                 raw_ref = _write_tool_raw_result(
                     request=request,
@@ -519,12 +564,18 @@ class BaseAgent(ABC):
             )
         return observations
 
-    def _tool_gather_messages(self, context: ContextPack) -> list[Message]:
-        tool_lines = "\n".join(f"- {t}" for t in self._config.tools)
+    def _tool_gather_messages(
+        self,
+        context: ContextPack,
+        *,
+        tool_names: Sequence[str] | None = None,
+    ) -> list[Message]:
+        visible_tools = tuple(tool_names or self._config.tools)
+        tool_lines = "\n".join(f"- {tool_name}" for tool_name in visible_tools)
         sys = (
             f"你是 MARS 的 **{self.name}** Agent，正在为最终产物收集信息。\n"
             "你可以先调用工具检索资料，再撰写产物。本阶段**只决定是否调用工具**，"
-            "不要写最终产物。\n\n"
+            "不要写最终产物。此阶段只允许只读工具，任何写入、补丁、删除或执行工具都不可用。\n\n"
             f"可用工具:\n{tool_lines}\n\n"
             "输出协议(严格):只输出一个 JSON 对象，不要任何额外文字或代码围栏。\n"
             '需要调用工具时:{"tool_calls": [{"tool": "工具名", "args": {...}}]}\n'

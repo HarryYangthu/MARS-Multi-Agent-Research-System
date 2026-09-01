@@ -17,18 +17,23 @@ def client() -> TestClient:
     return TestClient(create_app())
 
 
-def test_get_coding_post_training_status(client: TestClient) -> None:
+def test_get_coding_post_training_status_uses_configured_deepseek_model(
+    client: TestClient,
+) -> None:
     response = client.get("/api/agents/coding/post-training")
 
     assert response.status_code == 200
     body = response.json()
     assert body["agent"] == "coding"
-    assert body["enabled"] is True
-    assert body["mode"] == "endpoint"
-    assert body["provider"] == "local_vllm"
-    assert body["model"] == "mars-coding-posttrain"
-    assert body["endpoint"] == "http://127.0.0.1:8001/v1"
+    assert body["enabled"] is False
+    assert body["mode"] == "load_only"
+    assert body["provider"] is None
+    assert body["model"] is None
+    assert body["endpoint"] is None
     assert body["source"] == "config"
+    assert body["warnings"] == [
+        "post_training disabled; Coding Agent uses configured model"
+    ]
 
 
 def test_load_coding_post_training_runtime_endpoint(

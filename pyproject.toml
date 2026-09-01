@@ -56,7 +56,7 @@ filterwarnings = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
-mypy_path = "backend"
+mypy_path = "backend:projects/synthetic_regression/src"
 namespace_packages = true
 explicit_package_bases = true
 exclude = [

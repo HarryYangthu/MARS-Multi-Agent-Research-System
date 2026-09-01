@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
 import pytest
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.harness.llm.model_registry import AgentConfig
 from app.harness.llm.mock_provider import build_fake_metadata
+from app.harness.llm.provider_base import LLMCompletionError
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.schema.validator import ValidationResult, validate_document
 from app.storage.run_store import RunStore
@@ -91,6 +94,17 @@ class _RunnerAgent(_RepairingAgent):
         return _valid_proposal(seed="runner")
 
 
+class _FailingRunnerAgent(_RepairingAgent):
+    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
+        raise LLMCompletionError(
+            code="empty_final_content",
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            finish_reason="stop",
+            empty_final=True,
+        )
+
+
 @pytest.mark.asyncio
 async def test_agent_loop_repairs_schema_invalid_draft() -> None:
     agent = _RepairingAgent(loop={"max_validation_repairs": 1, "max_tool_steps": 5})
@@ -152,3 +166,50 @@ async def test_agent_runner_uses_agent_loop(tmp_path: Path) -> None:
     assert result.valid, result.errors
     assert agent.draft_calls == 0
     assert agent.repair_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_persists_structured_content_free_failure(
+    tmp_path: Path,
+) -> None:
+    from app.bridge.agent_registry import get_registry, reset_registry_for_tests
+    from app.bridge.agent_runner import run_agent_node
+    from app.harness.kb.stores import reset_for_tests as reset_kb_stores
+
+    reset_registry_for_tests()
+    reset_kb_stores(tmp_path / "knowledge")
+    get_registry().register("idea", _FailingRunnerAgent())
+    run = RunStore(tmp_path / "runs").create(
+        task="agent-failure-diagnostic",
+        project="pimc",
+        entrypoint="idea",
+        user_request="runner should persist structured failure",
+    )
+
+    try:
+        with pytest.raises(LLMCompletionError):
+            await run_agent_node(run, "idea")
+    finally:
+        reset_registry_for_tests()
+        reset_kb_stores()
+
+    events = [
+        json.loads(line)
+        for line in (run.subdir("events") / "agent_events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    failure = events[-1]
+    assert failure["event"] == "agent.node_failed"
+    assert failure["phase"] == "draft"
+    assert failure["diagnostic"] == {
+        "code": "empty_final_content",
+        "exception_type": "LLMCompletionError",
+        "details": {
+            "code": "empty_final_content",
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "finish_reason": "stop",
+            "empty_final": True,
+        },
+    }

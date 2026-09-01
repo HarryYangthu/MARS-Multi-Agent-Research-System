@@ -62,6 +62,7 @@ class Settings(BaseSettings):
         "docker_command",
         "remote_gpu",
     ] = "mock"
+    mars_execution_device: Literal["cpu", "gpu"] = "cpu"
     mars_coding_backend: Literal[
         "mock",
         "native_llm",
@@ -99,6 +100,24 @@ class Settings(BaseSettings):
     @property
     def mock_allowed(self) -> bool:
         return not self.is_production and self.mars_mock_mode != "never"
+
+    @property
+    def effective_execution_device(self) -> Literal["cpu", "gpu"]:
+        """Resolve the new device switch while preserving the legacy GPU alias."""
+
+        if "mars_execution_device" in self.model_fields_set:
+            return self.mars_execution_device
+        if self.mars_execution_backend == "remote_gpu":
+            return "gpu"
+        return self.mars_execution_device
+
+    @property
+    def execution_device_source(self) -> Literal["explicit", "legacy_backend", "default"]:
+        if "mars_execution_device" in self.model_fields_set:
+            return "explicit"
+        if self.mars_execution_backend == "remote_gpu":
+            return "legacy_backend"
+        return "default"
 
     @property
     def cors_origins(self) -> list[str]:
@@ -147,7 +166,7 @@ def local_env_files() -> tuple[Path, ...]:
 def read_local_env_vars() -> dict[str, str]:
     values: dict[str, str] = {}
     for path in LOCAL_ENV_FILES:
-        if not path.exists():
+        if not path.is_file():
             continue
         for raw_line in path.read_text(encoding="utf-8").splitlines():
             parsed = _parse_env_line(raw_line)

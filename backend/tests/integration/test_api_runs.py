@@ -125,12 +125,38 @@ def test_context_preview_and_run_manifest_endpoints(client: TestClient) -> None:
     listed = client.get(f"/api/context/runs/{run_id}")
     assert listed.status_code == 200, listed.text
     payload = listed.json()
-    assert payload["budget_summary"]["manifest_count"] >= 1
+    assert payload["budget_summary"]["manifest_count"] == 1
+    assert len(payload["manifests"]) == 1
+    assert payload["manifests"][0]["path"].startswith(
+        "context/agents/coding/manifests/"
+    )
     manifest_id = payload["manifests"][0]["manifest_id"]
 
     manifest = client.get(f"/api/context/runs/{run_id}/manifests/{manifest_id}")
     assert manifest.status_code == 200, manifest.text
     assert manifest.json()["schema"] == "context_manifest.v2"
+
+
+def test_worklog_treats_not_yet_created_optional_logs_as_empty(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/api/runs",
+        json={"task": "empty-worklog", "project": "pimc", "entrypoint": "pipeline"},
+    )
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+
+    worklog = client.get(
+        f"/api/timeline/runs/{run_id}/worklog",
+        params={"agent": "idea"},
+    )
+
+    assert worklog.status_code == 200, worklog.text
+    payload = worklog.json()
+    assert payload["run_id"] == run_id
+    assert payload["agent"] == "idea"
+    assert [item["kind"] for item in payload["items"]] == ["run"]
 
 
 def test_context_workbench_can_be_disabled(

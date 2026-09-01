@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import cast
 
@@ -28,10 +27,15 @@ PACK_ROOT = Path(__file__).resolve().parents[4] / "projects" / "synthetic_regres
 
 
 @pytest.mark.asyncio
-async def test_public_pack_runs_twenty_candidates_through_core_adapter() -> None:
+async def test_public_pack_runs_twenty_candidates_through_core_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     runtime = build_extension_runtime(
         distribution="v30-core",
         pack_roots=(PACK_ROOT,),
+        execution_device="cpu",
+        workspace_runs_root=tmp_path,
     )
     adapter = _manifest_adapter(runtime)
     objectives = (
@@ -83,9 +87,17 @@ async def test_public_pack_runs_twenty_candidates_through_core_adapter() -> None
 
 
 @pytest.mark.asyncio
-async def test_public_pack_is_identical_under_v30_and_v31_profiles() -> None:
+async def test_public_pack_is_identical_under_v30_and_v31_profiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     runtimes = [
-        build_extension_runtime(distribution=name, pack_roots=(PACK_ROOT,))
+        build_extension_runtime(
+            distribution=name,
+            pack_roots=(PACK_ROOT,),
+            execution_device="cpu",
+            workspace_runs_root=tmp_path,
+        )
         for name in ("v30-core", "v31-wireless")
     ]
     candidate = candidate_configs()[3]
@@ -183,14 +195,13 @@ def _metric_number(value: object) -> float:
 
 
 def _manifest_adapter(runtime: ExtensionRuntime) -> ProcessAdapter:
-    # This branch predates Core's {python} renderer; keep the Pack contract
-    # frozen while exercising the same argv substitution in its isolated test.
-    declaration = runtime.project_packs.get(
-        "synthetic_regression"
-    ).manifest.adapters["evaluator"]
-    argv = tuple(sys.executable if token == "{python}" else token for token in declaration.argv)
-    return ProcessAdapter(
-        name="synthetic_regression:evaluator",
-        argv=argv,
-        timeout_seconds=declaration.timeout_seconds,
+    # Exercise the product composition, including its explicitly trusted
+    # module path and workspace resolver. Rebuilding the adapter here bypassed
+    # that environment and accidentally relied on ambient editable installs.
+    adapter = runtime.adapters.get(
+        runtime.adapter_name("synthetic_regression", "evaluator")
     )
+    assert isinstance(adapter, ProcessAdapter)
+    assert adapter.env is not None
+    assert str((PACK_ROOT / "src").resolve()) in adapter.env["PYTHONPATH"]
+    return adapter

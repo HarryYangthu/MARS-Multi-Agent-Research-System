@@ -22,6 +22,26 @@ def test_idea_config_has_debate_participants() -> None:
     assert cfg.debate_enabled is True
     assert len(cfg.debate_participants) >= 2
     assert cfg.output_schema == "proposal.v1"
+    assert cfg.model_name == "deepseek-v4-pro"
+    assert cfg.thinking_enabled is True
+    assert cfg.reasoning_effort == "high"
+    assert cfg.max_tokens == 16_384
+    assert cfg.top_p == 1.0
+    assert cfg.request_timeout_seconds == 120.0
+    assert cfg.max_retries == 3
+
+
+def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
+    for cfg in list_agent_configs():
+        if not cfg.enabled:
+            continue
+        assert cfg.model_provider == "deepseek"
+        assert cfg.model_name == "deepseek-v4-pro"
+        assert cfg.thinking_enabled is True
+        assert cfg.reasoning_effort == "high"
+        assert cfg.max_tokens >= 16_384
+        if cfg.name in {"coding", "writing"}:
+            assert cfg.max_tokens >= 32_768
 
 
 def test_select_provider_falls_back_to_mock_without_keys(
@@ -46,6 +66,12 @@ def test_select_provider_falls_back_to_mock_without_keys(
     provider, llm_cfg = select_provider(cfg)
     assert isinstance(provider, MockProvider)
     assert llm_cfg.response_schema == "proposal.v1"
+    assert llm_cfg.thinking_enabled is True
+    assert llm_cfg.reasoning_effort == "high"
+    assert llm_cfg.max_tokens == 16_384
+    assert llm_cfg.top_p == 1.0
+    assert llm_cfg.request_timeout_seconds == 120.0
+    assert llm_cfg.max_retries == 3
 
 
 def test_available_providers_always_includes_mock() -> None:

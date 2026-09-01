@@ -1,6 +1,7 @@
 """Pure ModelGenome mutation and deterministic Candidate construction."""
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -14,6 +15,7 @@ from app.harness.discovery.models import CandidateRecord, ModelGenome
 DeltaKind = Literal["set", "remove", "merge"]
 _MUTABLE_ROOTS = frozenset({"structure", "hyperparameters", "recipe"})
 _FORBIDDEN_SEGMENTS = frozenset({"", ".", "..", "__class__", "__dict__", "__globals__"})
+_SHA256_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -113,20 +115,28 @@ def derive_candidate_id(
     iteration: int,
     creator: str,
     operator: str,
+    implementation_fingerprint: str | None = None,
 ) -> str:
-    """Derive a stable identifier independent of mapping and parent ordering."""
-    digest = stable_hash(
-        {
-            "run_id": run_id,
-            "genome": genome.model_dump(mode="json"),
-            "parent_ids": sorted(set(parent_ids)),
-            "generation": generation,
-            "iteration": iteration,
-            "creator": creator,
-            "operator": operator,
-        },
-        prefix="",
-    )
+    """Derive a stable identifier independent of mapping and parent ordering.
+
+    Omitting ``implementation_fingerprint`` deliberately preserves the legacy
+    config-only identity payload. Code-backed candidates may bind the same
+    genome and lineage to a distinct, content-addressed implementation.
+    """
+    identity_payload: dict[str, Any] = {
+        "run_id": run_id,
+        "genome": genome.model_dump(mode="json"),
+        "parent_ids": sorted(set(parent_ids)),
+        "generation": generation,
+        "iteration": iteration,
+        "creator": creator,
+        "operator": operator,
+    }
+    if implementation_fingerprint is not None:
+        identity_payload["implementation_fingerprint"] = (
+            _validate_implementation_fingerprint(implementation_fingerprint)
+        )
+    digest = stable_hash(identity_payload, prefix="")
     return f"cand_{digest[:24]}"
 
 
@@ -143,6 +153,7 @@ def build_candidate_record(
     model_name: str = "",
     prompt_hash: str = "",
     context_manifest_ref: str = "",
+    implementation_fingerprint: str | None = None,
     artifact_refs: dict[str, str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> CandidateRecord:
@@ -156,7 +167,13 @@ def build_candidate_record(
         iteration=iteration,
         creator=creator,
         operator=operator,
+        implementation_fingerprint=implementation_fingerprint,
     )
+    fingerprints = {"exact": genome_fingerprint(genome)}
+    if implementation_fingerprint is not None:
+        fingerprints["implementation"] = _validate_implementation_fingerprint(
+            implementation_fingerprint
+        )
     return CandidateRecord(
         candidate_id=candidate_id,
         run_id=run_id,
@@ -171,10 +188,18 @@ def build_candidate_record(
         operator=operator,
         genome=genome,
         artifact_refs=dict(artifact_refs or {}),
-        fingerprints={"exact": genome_fingerprint(genome)},
+        fingerprints=fingerprints,
         idempotency_key=f"candidate:{candidate_id}",
         metadata=dict(metadata or {}),
     )
+
+
+def _validate_implementation_fingerprint(fingerprint: str) -> str:
+    if _SHA256_FINGERPRINT.fullmatch(fingerprint) is None:
+        raise ValueError(
+            "implementation_fingerprint must be a lowercase sha256 address"
+        )
+    return fingerprint
 
 
 def _matches_any_zone(path: str, zones: tuple[str, ...]) -> bool:

@@ -11,7 +11,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.bridge.discovery_types import CandidateProposalRequest
+from app.bridge.discovery_types import BanditArmSignal, CandidateProposalRequest
 from app.bridge.extension_runtime import ExtensionRuntime
 from app.execution.adapters.base import AdapterRequest, AdapterResponse, ProjectAdapter
 from app.harness.discovery.candidate_builder import build_candidate_record
@@ -23,7 +23,6 @@ from app.harness.discovery.sampling import (
     UCBSelectionAudit,
     sample_parent,
     select_ucb,
-    update_arm,
 )
 from app.harness.project_packs.registry import LoadedProjectPack, ProjectPackError
 
@@ -106,16 +105,33 @@ class ProjectPackCandidateAgent:
         audit_seed = request.contract.seed + audit_index * 10
         model_audit = _bandit_audit(
             config.models or ("project_pack",),
-            index=audit_index,
-            seed=request.contract.seed + 1,
+            persisted=request.model_arms,
+            seed=request.contract.seed + audit_index * 10 + 1,
         )
         operator_audit = _bandit_audit(
             config.operators or (config.operator,),
-            index=audit_index,
-            seed=request.contract.seed + 2,
+            persisted=request.operator_arms,
+            seed=request.contract.seed + audit_index * 10 + 2,
         )
         parent_ids: tuple[str, ...] = ()
-        if request.parent_candidate_ids:
+        if request.parent_candidates:
+            parent_audit = sample_parent(
+                tuple(
+                    ParentCandidate(
+                        candidate_id=item.candidate_id,
+                        quality=item.quality,
+                        scarcity=item.scarcity,
+                        uncertainty=item.uncertainty,
+                        recency=item.recency,
+                        offspring_count=item.offspring_count,
+                    )
+                    for item in request.parent_candidates
+                ),
+                seed=audit_seed,
+            )
+            parent_ids = (parent_audit.selected_id,)
+            parent_payload: dict[str, Any] = asdict(parent_audit)
+        elif request.parent_candidate_ids:
             parent_audit = sample_parent(
                 tuple(
                     ParentCandidate(candidate_id=candidate_id)
@@ -124,7 +140,7 @@ class ProjectPackCandidateAgent:
                 seed=audit_seed,
             )
             parent_ids = (parent_audit.selected_id,)
-            parent_payload: dict[str, Any] = asdict(parent_audit)
+            parent_payload = asdict(parent_audit)
         else:
             parent_payload = {
                 "seed": audit_seed,
@@ -254,21 +270,21 @@ def _candidate_combinations(
 def _bandit_audit(
     arm_ids: tuple[str, ...],
     *,
-    index: int,
+    persisted: tuple[BanditArmSignal, ...],
     seed: int,
 ) -> UCBSelectionAudit:
     normalized = tuple(sorted(set(item.strip() for item in arm_ids if item.strip())))
     if not normalized:
         raise DiscoveryCompositionError("bandit arm list must not be empty")
-    arms = tuple(BanditArm(arm_id=item) for item in normalized)
-    selected: UCBSelectionAudit | None = None
-    for step in range(index + 1):
-        selected = select_ucb(arms, seed=seed + step)
-        arms = tuple(
-            update_arm(arm, reward=0.0)
-            if arm.arm_id == selected.selected_id
-            else arm
-            for arm in arms
+    observed = {item.arm_id: item for item in persisted}
+    arms = tuple(
+        BanditArm(
+            arm_id=arm_id,
+            pulls=observed[arm_id].pulls,
+            total_reward=observed[arm_id].total_reward,
         )
-    assert selected is not None
-    return selected
+        if arm_id in observed
+        else BanditArm(arm_id=arm_id)
+        for arm_id in normalized
+    )
+    return select_ucb(arms, seed=seed)

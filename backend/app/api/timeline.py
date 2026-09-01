@@ -664,6 +664,11 @@ def _event_summary(event: str, payload: dict[str, Any]) -> str:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    # Append-only audit logs are created lazily.  A run can legitimately reach
+    # the workbench before its first evaluation, review, or tool event, so an
+    # absent optional log represents an empty stream rather than an API error.
+    if not path.exists():
+        return []
     rows: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():

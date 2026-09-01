@@ -54,5 +54,25 @@ KNOWN_ROLES: dict[str, DebateRole] = {
 }
 
 
-def role_prompt(role: str) -> str:
-    return KNOWN_ROLES.get(role, DebateRole(role, "")).system_prompt
+_NO_TOOL_PROTOCOL = (
+    "辩论发言阶段不允许调用任何工具；所需检索和代码观察已经在上游完成。"
+    "只返回当前角色的可见文本，不得输出 <tool_calls>、函数调用、工具参数或等待工具结果。"
+)
+
+
+def role_prompt(role: str, *, output_schema: str = "") -> str:
+    base = KNOWN_ROLES.get(role, DebateRole(role, "")).system_prompt
+    if role != "judge":
+        return base + _NO_TOOL_PROTOCOL
+    schema_instruction = (
+        f"最终回答必须且只能是一个完整的 {output_schema} 文档，"
+        if output_schema
+        else "最终回答必须且只能是一个完整的 schema 文档，"
+    )
+    return (
+        base
+        + _NO_TOOL_PROTOCOL
+        + schema_instruction
+        + "从 YAML frontmatter 的 --- 开始，随后给出正文；"
+        "不得附加前言、解释、Markdown 代码围栏、第二份草稿或工具调用。"
+    )

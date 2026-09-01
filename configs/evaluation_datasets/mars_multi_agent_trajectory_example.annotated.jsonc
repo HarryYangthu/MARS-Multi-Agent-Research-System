@@ -1,0 +1,877 @@
+{ // 开始一条完整的 MARS 多 Agent 评测样本
+  "schema": "mars_multi_agent_trajectory.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+  "sample_id": "synthetic.commander_repair.002", // 该评测样本的全局唯一编号
+  "dataset_split": "validation", // 数据划分；validation 用于调参，不应作为最终密封测试集
+  "synthetic": true, // 明确标记这是一条合成样本，不代表真实生产结果
+  "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+  "task_type": "commander_repair", // 任务类别；本例专门评测 Commander 失败归因与返工
+  "provenance": { // 样本的来源、时间、隐私状态和人工审核情况
+    "source": "handcrafted_synthetic", // 样本产生方式；这里是人工设计的合成轨迹
+    "created_at": "2026-08-21T09:10:00Z", // 样本创建时间，采用 UTC ISO-8601 格式
+    "contains_private_data": false, // 是否包含公司代码、真实业务数据或其他私密信息
+    "annotation_status": "reviewed", // 标注状态；reviewed 表示已经过一次人工检查
+    "limitations": [ // 该样本的适用边界和已知局限
+      "The failure attribution and metrics are deterministic synthetic fixtures." // 当前列表中的一个具体值或 Artifact 引用
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "input": { // 用户输入以及 Commander 归一化后的机器可执行任务契约
+    "user_prompt": "优化合成回归候选：MAE 必须不高于 0.10，P95 延迟不高于 25 ms；最多允许两轮实验，如果第一轮失败，应根据证据只返工责任 Agent。", // 用户提交给 MARS 的原始自然语言需求
+    "normalized_objective": "Meet quality and latency thresholds within two attempts using evidence-based repair routing.", // Commander 从原始需求中抽取的标准化研究目标
+    "constraints": [ // 运行期间不得违反的资源、流程和科研约束
+      "at most two attempts", // 当前列表中的一个具体值或 Artifact 引用
+      "repair only the attributed stage", // 当前列表中的一个具体值或 Artifact 引用
+      "same holdout and seeds" // 当前列表中的一个具体值或 Artifact 引用
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "success_criteria": [ // 最终结果必须满足的机器可判定指标阈值
+      { // 开始当前结构化对象
+        "metric": "validation_mae", // 被评测的指标名称
+        "operator": "lte", // 阈值比较符；lte 表示实际值必须小于或等于目标
+        "target": 0.1, // 该指标的目标值或阈值
+        "unit": "mae" // 指标单位，防止不同量纲被错误比较
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "metric": "p95_latency_ms", // 被评测的指标名称
+        "operator": "lte", // 阈值比较符；lte 表示实际值必须小于或等于目标
+        "target": 25.0, // 该指标的目标值或阈值
+        "unit": "ms" // 指标单位，防止不同量纲被错误比较
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "context_refs": [ // 本次运行加载的基线、数据、规则或评测契约引用
+      { // 开始当前结构化对象
+        "ref": "context/evaluation_contract.json", // 证据或上下文文件的相对路径
+        "role": "frozen_evaluator", // 该上下文在运行中的用途
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333" // 文件内容哈希，用于确认运行期间上下文没有被篡改
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "agent_outputs": { // 五个专业 Agent 的结构化输出，按 Agent 和迭代轮次组织
+    "idea": [ // Idea Agent 输出列表；负责提出可证伪的研究假设
+      { // 开始当前结构化对象
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "proposal.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "idea/idea_proposal.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "input/user_request.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "proposal.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "idea", // 产生 Artifact、事件或诊断的 Agent 名称
+          "research_question": "Can feature pruning meet the latency target without exceeding the sealed MAE limit?", // Idea Agent 提出的研究问题
+          "hypothesis": "Removing the four lowest-variance features will reduce latency while normalized training preserves validation MAE.", // 可通过实验验证或证伪的核心假设
+          "novelty": "The candidate couples deterministic feature pruning with a quality-constrained evaluation contract.", // 相对于基线或常规方法的差异与新颖性说明
+          "constraints": [ // 运行期间不得违反的资源、流程和科研约束
+            "Maximum two attempts." // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "testable_predictions": [ // 假设成立时应当观察到的定量预测
+            "validation_mae <= 0.10 and p95_latency_ms <= 25" // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+            "context/evaluation_contract.json" // 当前列表中的一个具体值或 Artifact 引用
+          ] // 结束当前列表；逗号表示后面还有同级内容
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Defines a falsifiable feature-pruning hypothesis under an explicit two-attempt budget.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "context/evaluation_contract.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-idea-1", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 520, // 模型调用的输入 token 数
+          "output_tokens": 230, // 模型调用的输出 token 数
+          "latency_ms": 7.2 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "experiment": [ // Experiment Agent 输出列表；本例包含失败前和修复后的两版计划
+      { // 开始当前结构化对象
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "experiment_plan.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "experiment/experiment_plan.v1.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "idea/idea_proposal.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "experiment_plan.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "experiment", // 产生 Artifact、事件或诊断的 Agent 名称
+          "variables": { // 实验中的自变量、控制变量和因变量
+            "independent": [ // 由实验主动改变的自变量
+              "features_removed" // 当前列表中的一个具体值或 Artifact 引用
+            ], // 结束当前列表；逗号表示后面还有同级内容
+            "controlled": [ // 两轮实验必须保持一致的控制变量
+              "seed" // 当前列表中的一个具体值或 Artifact 引用
+            ], // 结束当前列表；逗号表示后面还有同级内容
+            "dependent": [ // 随候选变化而观测的结果指标
+              "validation_mae", // 当前列表中的一个具体值或 Artifact 引用
+              "p95_latency_ms" // 当前列表中的一个具体值或 Artifact 引用
+            ] // 结束当前列表；逗号表示后面还有同级内容
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "metrics": { // Experiment 或 Execution 使用的指标集合
+            "primary": "validation_mae", // 决定候选是否通过的首要指标
+            "secondary": [ // 辅助判断效率、稳定性或约束满足情况的次要指标
+              "p95_latency_ms" // 当前列表中的一个具体值或 Artifact 引用
+            ] // 结束当前列表；逗号表示后面还有同级内容
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "ablations": [ // 用于定位增益来源的基线和消融实验列表
+            { // 开始当前结构化对象
+              "name": "remove_four", // 当前实验、指标、评分维度或变体的名称
+              "config": { // 该消融实验使用的具体配置
+                "features_removed": 4, // 从候选输入中移除的特征数量
+                "normalization": "candidate_local" // 本轮使用的数据归一化方案
+              } // 结束当前结构化对象；逗号表示后面还有同级内容
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "estimated_runs": 3, // 该实验计划预计执行的独立运行次数
+          "estimated_gpu_hours": 0.0 // 预计消耗的 GPU 小时；合成 CPU Fixture 为 0
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Attempt one omits the frozen preprocessing parity check, which later becomes the attributed failure.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "idea/idea_proposal.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-experiment-1", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 730, // 模型调用的输入 token 数
+          "output_tokens": 282, // 模型调用的输出 token 数
+          "latency_ms": 8.3 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "experiment_plan.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "experiment/experiment_plan.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.v1.md", // 当前列表中的一个具体值或 Artifact 引用
+          "diagnosis/feedback_packet.attempt_2.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "experiment_plan.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "experiment", // 产生 Artifact、事件或诊断的 Agent 名称
+          "variables": { // 实验中的自变量、控制变量和因变量
+            "independent": [ // 由实验主动改变的自变量
+              "features_removed" // 当前列表中的一个具体值或 Artifact 引用
+            ], // 结束当前列表；逗号表示后面还有同级内容
+            "controlled": [ // 两轮实验必须保持一致的控制变量
+              "seed", // 当前列表中的一个具体值或 Artifact 引用
+              "frozen_preprocessing_hash", // 当前列表中的一个具体值或 Artifact 引用
+              "holdout_hash" // 当前列表中的一个具体值或 Artifact 引用
+            ], // 结束当前列表；逗号表示后面还有同级内容
+            "dependent": [ // 随候选变化而观测的结果指标
+              "validation_mae", // 当前列表中的一个具体值或 Artifact 引用
+              "p95_latency_ms" // 当前列表中的一个具体值或 Artifact 引用
+            ] // 结束当前列表；逗号表示后面还有同级内容
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "metrics": { // Experiment 或 Execution 使用的指标集合
+            "primary": "validation_mae", // 决定候选是否通过的首要指标
+            "secondary": [ // 辅助判断效率、稳定性或约束满足情况的次要指标
+              "p95_latency_ms", // 当前列表中的一个具体值或 Artifact 引用
+              "preprocessing_parity" // 当前列表中的一个具体值或 Artifact 引用
+            ] // 结束当前列表；逗号表示后面还有同级内容
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "ablations": [ // 用于定位增益来源的基线和消融实验列表
+            { // 开始当前结构化对象
+              "name": "frozen_baseline", // 当前实验、指标、评分维度或变体的名称
+              "config": { // 该消融实验使用的具体配置
+                "features_removed": 0, // 从候选输入中移除的特征数量
+                "preprocessing": "frozen" // 数据预处理配置；第二轮被固定以恢复实验可比性
+              } // 结束当前结构化对象；逗号表示后面还有同级内容
+            }, // 结束当前结构化对象；逗号表示后面还有同级内容
+            { // 开始当前结构化对象
+              "name": "remove_four", // 当前实验、指标、评分维度或变体的名称
+              "config": { // 该消融实验使用的具体配置
+                "features_removed": 4, // 从候选输入中移除的特征数量
+                "preprocessing": "frozen" // 数据预处理配置；第二轮被固定以恢复实验可比性
+              } // 结束当前结构化对象；逗号表示后面还有同级内容
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "estimated_runs": 6, // 该实验计划预计执行的独立运行次数
+          "estimated_gpu_hours": 0.0 // 预计消耗的 GPU 小时；合成 CPU Fixture 为 0
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Attempt two applies Commander feedback by freezing preprocessing and adding a parity control.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "diagnosis/feedback_packet.attempt_2.md", // 当前列表中的一个具体值或 Artifact 引用
+          "context/evaluation_contract.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-experiment-2", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 902, // 模型调用的输入 token 数
+          "output_tokens": 318, // 模型调用的输出 token 数
+          "latency_ms": 9.1 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "coding": [ // Coding Agent 输出列表；负责实现候选但不负责改实验协议
+      { // 开始当前结构化对象
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "code_spec.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "coding/code_spec.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "code_spec.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "coding", // 产生 Artifact、事件或诊断的 Agent 名称
+          "target_lang": "python", // Coding Agent 生成或修改代码所使用的语言
+          "baseline_compat": { // 候选修改是否保持冻结基线兼容
+            "preserved": true, // 是否确认未修改受保护的基线行为
+            "rationale": "Candidate code is isolated." // 当前设计、保护判断或 Gold Label 的理由
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "files_changed": [ // Coding Agent 计划新增、修改或删除的文件清单
+            { // 开始当前结构化对象
+              "path": "candidates/pruned_features.py", // 发生代码变化的相对文件路径
+              "type": "added", // 文件变化类型，例如 added 或 modified
+              "risk": "low" // 该文件变化的风险等级
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "new_dependencies": [], // 候选新增的第三方依赖；空列表表示没有新增
+          "test_coverage": { // Coding Agent 为本次改动提供的测试覆盖情况
+            "unit_tests_added": 2, // 本次候选新增的单元测试数量
+            "baseline_smoke_test": "pass" // 冻结基线冒烟测试的执行结果
+          } // 结束当前结构化对象；逗号表示后面还有同级内容
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Implements feature masking in an isolated candidate; Commander correctly does not send the experiment-design failure back here.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "coding/diff.patch", // 当前列表中的一个具体值或 Artifact 引用
+          "coding/test_report.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-coding-1", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc1", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 940, // 模型调用的输入 token 数
+          "output_tokens": 360, // 模型调用的输出 token 数
+          "latency_ms": 11.5 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "execution": [ // Execution Agent 输出列表；本例保存两轮独立执行结果
+      { // 开始当前结构化对象
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "run_log.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "execution/attempt_1/run_log.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.v1.md", // 当前列表中的一个具体值或 Artifact 引用
+          "coding/code_spec.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "run_log.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+          "run_id": "eval-repair-002-attempt-1", // 当前执行或总 Run 的唯一编号
+          "status": "completed", // 当前输出或执行步骤的状态
+          "metrics": { // Experiment 或 Execution 使用的指标集合
+            "validation_mae": 0.134, // 验证集平均绝对误差；越低越好
+            "p95_latency_ms": 23.6, // 95 分位推理延迟，单位为毫秒；越低越好
+            "preprocessing_parity": 0 // 基线与候选预处理是否完全一致；1 表示一致
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "fingerprint_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1", // 代码、配置、数据和环境组合形成的运行指纹
+          "is_mock": true // 是否使用 Mock 执行；true 表示不可当作真实业务实验
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Latency passes but MAE fails; the preprocessing parity signal identifies an experiment control mismatch.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "execution/attempt_1/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-execution-1", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd1", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 450, // 模型调用的输入 token 数
+          "output_tokens": 170, // 模型调用的输出 token 数
+          "latency_ms": 4.4 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "run_log.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "execution/attempt_2/run_log.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.approved.md", // 当前列表中的一个具体值或 Artifact 引用
+          "coding/code_spec.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "run_log.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+          "run_id": "eval-repair-002-attempt-2", // 当前执行或总 Run 的唯一编号
+          "status": "completed", // 当前输出或执行步骤的状态
+          "metrics": { // Experiment 或 Execution 使用的指标集合
+            "validation_mae": 0.096, // 验证集平均绝对误差；越低越好
+            "p95_latency_ms": 24.1, // 95 分位推理延迟，单位为毫秒；越低越好
+            "preprocessing_parity": 1 // 基线与候选预处理是否完全一致；1 表示一致
+          }, // 结束当前结构化对象；逗号表示后面还有同级内容
+          "fingerprint_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee2", // 代码、配置、数据和环境组合形成的运行指纹
+          "is_mock": true // 是否使用 Mock 执行；true 表示不可当作真实业务实验
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "The controlled rerun passes both required metrics with preprocessing parity restored.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-execution-2", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd2", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 472, // 模型调用的输入 token 数
+          "output_tokens": 178, // 模型调用的输出 token 数
+          "latency_ms": 4.6 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "writing": [ // Writing Agent 输出列表；负责形成证据链完整的最终报告
+      { // 开始当前结构化对象
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "schema": "report.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+        "artifact_ref": "writing/research_report.approved.md", // 该 Agent 输出在 Run 目录中的相对路径
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "diagnosis/diagnosis.v1.md", // 当前列表中的一个具体值或 Artifact 引用
+          "execution/attempt_1/run_log.approved.md", // 当前列表中的一个具体值或 Artifact 引用
+          "execution/attempt_2/run_log.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "frontmatter": { // 符合 MARS Artifact Schema 的结构化元数据
+          "schema": "report.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "writing", // 产生 Artifact、事件或诊断的 Agent 名称
+          "deliverable_type": "research_report", // Writing Agent 生成的交付物类型
+          "target_audience": "model discovery review board", // 最终报告面向的读者或评审角色
+          "chain_refs": { // 报告声明所依赖的完整上游证据链
+            "proposal": "idea/idea_proposal.approved.md", // 报告引用的 Idea Agent 假设文件
+            "plan": "experiment/experiment_plan.approved.md", // 报告引用的最终实验计划文件
+            "code": "coding/code_spec.approved.md", // 报告引用的 Coding Agent 代码规格文件
+            "runs": [ // 报告引用的一轮或多轮 Execution 结果
+              "execution/attempt_1/run_log.approved.md", // 当前列表中的一个具体值或 Artifact 引用
+              "execution/attempt_2/run_log.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+            ] // 结束当前列表；逗号表示后面还有同级内容
+          } // 结束当前结构化对象；逗号表示后面还有同级内容
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "body_summary": "Explains the failed first attempt, Commander attribution, bounded repair and passing second attempt.", // Artifact 正文的简短摘要，便于快速评测而无需读取全文
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "diagnosis/diagnosis.v1.md", // 当前列表中的一个具体值或 Artifact 引用
+          "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "model_trace": { // 本次 Agent 模型调用的可审计元数据，不包含隐藏思维链
+          "provider": "mock_provider", // 提供模型推理能力的后端；本例使用确定性 Mock
+          "model": "deterministic-fixture-v1", // 本次调用使用的具体模型或 Fixture 版本
+          "request_id": "req-repair-writing-2", // 模型调用唯一编号，用于关联日志、费用和错误
+          "prompt_hash": "sha256:fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2", // 实际 Agent Prompt 的哈希；可校验版本但不暴露敏感内容
+          "temperature": 0.0, // 模型采样温度；0 表示使用确定性输出
+          "seed": 29, // 随机种子，用于复现模型调用或实验结果
+          "input_tokens": 1490, // 模型调用的输入 token 数
+          "output_tokens": 430, // 模型调用的输出 token 数
+          "latency_ms": 12.1 // 该模型调用的耗时，单位为毫秒
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "trajectory": { // 从开始到结束的可回放运行轨迹
+    "trace_id": "trace-repair-002", // 整条分布式 Trace 的唯一编号
+    "run_id": "eval-repair-002", // 当前执行或总 Run 的唯一编号
+    "started_at": "2026-08-21T09:10:01Z", // 整次 Run 的开始时间
+    "ended_at": "2026-08-21T09:12:04Z", // 整次 Run 的结束时间
+    "terminal_state": "completed", // Run 的最终状态；本例在第二轮修复后完成
+    "events": [ // 按 seq 严格排序的 Agent、编排器、评测器和 Gate 事件
+      { // 开始当前结构化对象
+        "seq": 1, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:10:01Z", // 事件发生时间
+        "span_id": "root-2", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": null, // 父 Span 编号；用于恢复调用树
+        "component": "orchestrator", // 产生事件的系统组件类型
+        "name": "run.started", // 当前实验、指标、评分维度或变体的名称
+        "agent": "system", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "started", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "input/user_request.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [], // 该事件产生的 Artifact、指标或日志引用
+        "attributes": { // 与该事件相关的额外结构化属性
+          "max_attempts": 2 // 用户和系统共同允许的最大迭代轮数
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 2, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:10:10Z", // 事件发生时间
+        "span_id": "idea-2", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "idea.run", // 当前实验、指标、评分维度或变体的名称
+        "agent": "idea", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "input/user_request.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "idea/idea_proposal.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": {} // 与该事件相关的额外结构化属性
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 3, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:10:22Z", // 事件发生时间
+        "span_id": "exp-2a", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "experiment.run", // 当前实验、指标、评分维度或变体的名称
+        "agent": "experiment", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "idea/idea_proposal.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "experiment/experiment_plan.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": {} // 与该事件相关的额外结构化属性
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 4, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:10:35Z", // 事件发生时间
+        "span_id": "code-2", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "coding.run", // 当前实验、指标、评分维度或变体的名称
+        "agent": "coding", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "coding/code_spec.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": {} // 与该事件相关的额外结构化属性
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 5, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:11:02Z", // 事件发生时间
+        "span_id": "exec-2a", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "execution.run", // 当前实验、指标、评分维度或变体的名称
+        "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "coding/code_spec.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "execution/attempt_1/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "passed": false // 当前评测或 Commander 诊断是否判定通过
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 6, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:11:07Z", // 事件发生时间
+        "span_id": "diag-2a", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "evaluator", // 产生事件的系统组件类型
+        "name": "commander.diagnose", // 当前实验、指标、评分维度或变体的名称
+        "agent": "commander", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "execution/attempt_1/metrics.json", // 当前列表中的一个具体值或 Artifact 引用
+          "experiment/experiment_plan.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "diagnosis/feedback_packet.attempt_2.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "target_agent": "experiment", // Commander 决定返工的责任 Agent；none 表示无需返工
+          "confidence": 0.92 // Commander 对责任归因的置信度，范围为 0 到 1
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 7, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:11:22Z", // 事件发生时间
+        "span_id": "exp-2b", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "diag-2a", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "experiment.repair", // 当前实验、指标、评分维度或变体的名称
+        "agent": "experiment", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "diagnosis/feedback_packet.attempt_2.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "experiment/experiment_plan.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "feedback_applied": true // 目标 Agent 是否实际消费并应用了 Commander 反馈
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 8, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:11:51Z", // 事件发生时间
+        "span_id": "exec-2b", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "execution.rerun", // 当前实验、指标、评分维度或变体的名称
+        "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "experiment/experiment_plan.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "passed": true // 当前评测或 Commander 诊断是否判定通过
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 9, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:11:55Z", // 事件发生时间
+        "span_id": "diag-2b", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "evaluator", // 产生事件的系统组件类型
+        "name": "commander.diagnose", // 当前实验、指标、评分维度或变体的名称
+        "agent": "commander", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "completed", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "diagnosis/diagnosis.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "target_agent": "none", // Commander 决定返工的责任 Agent；none 表示无需返工
+          "confidence": 0.99 // Commander 对责任归因的置信度，范围为 0 到 1
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "seq": 10, // 事件在整条 Trace 中的单调递增序号
+        "timestamp": "2026-08-21T09:12:04Z", // 事件发生时间
+        "span_id": "write-2", // 当前事件对应的 Trace Span 唯一编号
+        "parent_span_id": "root-2", // 父 Span 编号；用于恢复调用树
+        "component": "agent", // 产生事件的系统组件类型
+        "name": "writing.run", // 当前实验、指标、评分维度或变体的名称
+        "agent": "writing", // 产生 Artifact、事件或诊断的 Agent 名称
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "status": "approved", // 当前输出或执行步骤的状态
+        "input_refs": [ // 当前 Agent 实际消费的上游 Artifact 或上下文引用
+          "diagnosis/diagnosis.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "output_refs": [ // 该事件产生的 Artifact、指标或日志引用
+          "writing/research_report.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ], // 结束当前列表；逗号表示后面还有同级内容
+        "attributes": { // 与该事件相关的额外结构化属性
+          "chain_complete": true // 最终报告是否完整引用全部必要上游证据
+        } // 结束当前结构化对象；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "tool_calls": [ // Agent 经 ToolRegistry 执行的工具调用审计记录
+      { // 开始当前结构化对象
+        "call_id": "tool-repair-1", // 一次工具调用的唯一编号
+        "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+        "tool": "simulation.run", // 被调用的工具名称
+        "arguments": { // 传给工具的结构化参数；禁止通过 shell 字符串拼接
+          "attempt": 1 // 当前 Artifact、事件或决策所属的迭代轮次
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "status": "success", // 当前输出或执行步骤的状态
+        "result_summary": "First attempt completed with a failed MAE threshold.", // 工具执行结果的可审计摘要
+        "evidence_ref": "execution/attempt_1/metrics.json" // 该工具调用在审计日志中的精确位置
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "call_id": "tool-repair-2", // 一次工具调用的唯一编号
+        "agent": "experiment", // 产生 Artifact、事件或诊断的 Agent 名称
+        "tool": "context.read", // 被调用的工具名称
+        "arguments": { // 传给工具的结构化参数；禁止通过 shell 字符串拼接
+          "ref": "diagnosis/feedback_packet.attempt_2.md" // 证据或上下文文件的相对路径
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "status": "success", // 当前输出或执行步骤的状态
+        "result_summary": "Loaded bounded Commander feedback for Experiment only.", // 工具执行结果的可审计摘要
+        "evidence_ref": "diagnosis/feedback_packet.attempt_2.md" // 该工具调用在审计日志中的精确位置
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "call_id": "tool-repair-3", // 一次工具调用的唯一编号
+        "agent": "execution", // 产生 Artifact、事件或诊断的 Agent 名称
+        "tool": "simulation.run", // 被调用的工具名称
+        "arguments": { // 传给工具的结构化参数；禁止通过 shell 字符串拼接
+          "attempt": 2 // 当前 Artifact、事件或决策所属的迭代轮次
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "status": "success", // 当前输出或执行步骤的状态
+        "result_summary": "Second attempt passed both thresholds.", // 工具执行结果的可审计摘要
+        "evidence_ref": "execution/attempt_2/metrics.json" // 该工具调用在审计日志中的精确位置
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "gate_decisions": [ // 系统级 Gate 与人工审批作出的决策列表
+      { // 开始当前结构化对象
+        "gate_id": "baseline_compatibility", // Gate 名称；用于匹配系统安全和流程策略
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "decision": "pass", // Gate、Commander 或业务验收的最终判定
+        "reason": "Only an isolated candidate file is changed.", // 该 Gate 决策的直接原因
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "coding/code_spec.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "gate_id": "conclusion_output", // Gate 名称；用于匹配系统安全和流程策略
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "decision": "approved", // Gate、Commander 或业务验收的最终判定
+        "reason": "The report includes both failed and passing attempts.", // 该 Gate 决策的直接原因
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "writing/research_report.approved.md" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "commander_decisions": [ // Commander 每一轮的诊断、责任归因和反馈包
+      { // 开始当前结构化对象
+        "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+        "passed": false, // 当前评测或 Commander 诊断是否判定通过
+        "target_agent": "experiment", // Commander 决定返工的责任 Agent；none 表示无需返工
+        "confidence": 0.92, // Commander 对责任归因的置信度，范围为 0 到 1
+        "decision_summary": "MAE failed while latency passed; preprocessing parity indicates an experiment-control error rather than a code defect.", // Commander 基于可见证据形成的简短决策摘要
+        "diagnosis": { // 符合 diagnosis.v1 的结构化失败诊断
+          "schema": "diagnosis.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "commander", // 产生 Artifact、事件或诊断的 Agent 名称
+          "run_id": "eval-repair-002", // 当前执行或总 Run 的唯一编号
+          "attempt": 1, // 当前 Artifact、事件或决策所属的迭代轮次
+          "passed": false, // 当前评测或 Commander 诊断是否判定通过
+          "failed_metrics": [ // 本轮未达到目标的指标及差距
+            { // 开始当前结构化对象
+              "metric": "validation_mae", // 被评测的指标名称
+              "observed": 0.134, // 本轮实际观测到的指标值
+              "target": 0.1, // 该指标的目标值或阈值
+              "direction": "lte", // 优化方向；constraint 表示只需满足约束
+              "gap": 0.034 // 观测值距离成功阈值的数值差
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "suspected_causes": [ // Commander 根据证据列出的可能失败原因
+            { // 开始当前结构化对象
+              "kind": "config_sanity", // 失败原因类别，用于确定责任模块
+              "summary": "Preprocessing parity was not controlled.", // 当前失败原因或业务价值的简明说明
+              "severity": "high", // 问题严重程度
+              "evidence": [ // 直接支持该失败原因的结构化证据
+                "preprocessing_parity=0" // 当前列表中的一个具体值或 Artifact 引用
+              ] // 结束当前列表；逗号表示后面还有同级内容
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "recommended_target": "experiment", // 诊断建议返工的 Agent；通过后转给 Writing
+          "recommended_action": "Freeze preprocessing and add a matched parity control.", // 下一轮应执行的最小修复动作
+          "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+            "execution/attempt_1/metrics.json", // 当前列表中的一个具体值或 Artifact 引用
+            "experiment/experiment_plan.v1.md" // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "budget_status": "within_budget" // 当前迭代预算是否仍允许继续
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "feedback_packet": { // 发给责任 Agent 的最小化结构化反馈包
+          "schema": "feedback_packet.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "commander", // 产生 Artifact、事件或诊断的 Agent 名称
+          "run_id": "eval-repair-002", // 当前执行或总 Run 的唯一编号
+          "target_agent": "experiment", // Commander 决定返工的责任 Agent；none 表示无需返工
+          "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+          "source_attempt": 1, // 生成该反馈的失败轮次
+          "confidence": 0.92, // Commander 对责任归因的置信度，范围为 0 到 1
+          "why_this_agent": "The failed parity control is owned by experiment design.", // 为什么失败应归因于该 Agent 而非其他 Agent
+          "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+            "execution/attempt_1/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "failed_metrics": [ // 本轮未达到目标的指标及差距
+            { // 开始当前结构化对象
+              "metric": "validation_mae", // 被评测的指标名称
+              "observed": 0.134, // 本轮实际观测到的指标值
+              "target": 0.1 // 该指标的目标值或阈值
+            } // 结束当前结构化对象；逗号表示后面还有同级内容
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "do_next": [ // 责任 Agent 下一轮必须执行的动作列表
+            "Freeze preprocessing hash.", // 当前列表中的一个具体值或 Artifact 引用
+            "Add matched baseline and candidate parity checks." // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "avoid_repeating": [ // 下一轮明确禁止重复的无效动作
+            "Do not regenerate the code candidate." // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "context_refs": [ // 本次运行加载的基线、数据、规则或评测契约引用
+            "context/evaluation_contract.json" // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "memory_candidates": [] // 可供人工审核后沉淀到长期 Memory 的候选经验
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "execution/attempt_1/metrics.json", // 当前列表中的一个具体值或 Artifact 引用
+          "diagnosis/feedback_packet.attempt_2.md" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+        "passed": true, // 当前评测或 Commander 诊断是否判定通过
+        "target_agent": "none", // Commander 决定返工的责任 Agent；none 表示无需返工
+        "confidence": 0.99, // Commander 对责任归因的置信度，范围为 0 到 1
+        "decision_summary": "The controlled rerun passed; route to Writing.", // Commander 基于可见证据形成的简短决策摘要
+        "diagnosis": { // 符合 diagnosis.v1 的结构化失败诊断
+          "schema": "diagnosis.v1", // 当前对象遵循的数据契约版本，用于选择正确的校验规则
+          "project": "synthetic_regression", // 运行所使用的 Project Pack 名称
+          "agent": "commander", // 产生 Artifact、事件或诊断的 Agent 名称
+          "run_id": "eval-repair-002", // 当前执行或总 Run 的唯一编号
+          "attempt": 2, // 当前 Artifact、事件或决策所属的迭代轮次
+          "passed": true, // 当前评测或 Commander 诊断是否判定通过
+          "failed_metrics": [], // 本轮未达到目标的指标及差距
+          "suspected_causes": [], // Commander 根据证据列出的可能失败原因
+          "recommended_target": "writing", // 诊断建议返工的 Agent；通过后转给 Writing
+          "recommended_action": "Report both attempts and the repair evidence.", // 下一轮应执行的最小修复动作
+          "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+            "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+          ], // 结束当前列表；逗号表示后面还有同级内容
+          "budget_status": "within_budget" // 当前迭代预算是否仍允许继续
+        }, // 结束当前结构化对象；逗号表示后面还有同级内容
+        "feedback_packet": null, // 发给责任 Agent 的最小化结构化反馈包
+        "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+          "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "final_business_outcome": { // 依据指标、约束和证据形成的最终业务结果
+    "status": "accepted", // 当前输出或执行步骤的状态
+    "decision_reason": "The second and final allowed attempt passed after an evidence-based Experiment-only repair.", // 为什么最终接受、拒绝或阻断该候选
+    "objective_metrics": [ // 用于最终验收的基线值、最终值和阈值
+      { // 开始当前结构化对象
+        "name": "validation_mae", // 当前实验、指标、评分维度或变体的名称
+        "baseline": 0.098, // 冻结基线在同一协议下的指标值
+        "final": 0.096, // 最终候选在密封协议下的指标值
+        "unit": "mae", // 指标单位，防止不同量纲被错误比较
+        "direction": "constraint", // 优化方向；constraint 表示只需满足约束
+        "target": 0.1, // 该指标的目标值或阈值
+        "passed": true // 当前评测或 Commander 诊断是否判定通过
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "name": "p95_latency_ms", // 当前实验、指标、评分维度或变体的名称
+        "baseline": 31.2, // 冻结基线在同一协议下的指标值
+        "final": 24.1, // 最终候选在密封协议下的指标值
+        "unit": "ms", // 指标单位，防止不同量纲被错误比较
+        "direction": "minimize", // 优化方向；constraint 表示只需满足约束
+        "target": 25.0, // 该指标的目标值或阈值
+        "passed": true // 当前评测或 Commander 诊断是否判定通过
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "constraints_satisfied": true, // 除目标指标外的全部硬约束是否满足
+    "business_value": { // 从最终结果推导的业务价值及证据等级
+      "claim_type": "synthetic_estimate", // 价值声明的证据类型；本例仅为 synthetic_estimate
+      "summary": "The fixture shows a bounded repair loop can recover a valid candidate without rerunning unrelated Agents.", // 当前失败原因或业务价值的简明说明
+      "estimated_value": 1.0, // 按当前证据估算的业务价值数值
+      "unit": "avoided_unnecessary_agent_reruns" // 指标单位，防止不同量纲被错误比较
+    }, // 结束当前结构化对象；逗号表示后面还有同级内容
+    "evidence_refs": [ // 支持当前输出或决策的证据路径列表
+      "diagnosis/feedback_packet.attempt_2.md", // 当前列表中的一个具体值或 Artifact 引用
+      "execution/attempt_2/metrics.json" // 当前列表中的一个具体值或 Artifact 引用
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "gold_labels": { // 人工确认的正确轨迹、路由、Gate 和结论标签
+    "expected_terminal_state": "completed", // 这条样本期望系统最终到达的状态
+    "expected_agent_order": [ // 正确情况下应观察到的 Agent 调用顺序
+      "idea", // 当前列表中的一个具体值或 Artifact 引用
+      "experiment", // 当前列表中的一个具体值或 Artifact 引用
+      "coding", // 当前列表中的一个具体值或 Artifact 引用
+      "execution", // 当前列表中的一个具体值或 Artifact 引用
+      "experiment", // 当前列表中的一个具体值或 Artifact 引用
+      "execution", // 当前列表中的一个具体值或 Artifact 引用
+      "writing" // 当前列表中的一个具体值或 Artifact 引用
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "expected_commander_targets": [ // 每轮 Commander 应选择的责任 Agent 顺序
+      "experiment", // 当前列表中的一个具体值或 Artifact 引用
+      "none" // 当前列表中的一个具体值或 Artifact 引用
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "required_gate_decisions": { // 关键 Gate 必须作出的标准答案
+      "baseline_compatibility": "pass", // Gold Label 要求的 Gate 5 基线兼容决策
+      "conclusion_output": "approved" // Gold Label 要求的结论输出审批决策
+    }, // 结束当前结构化对象；逗号表示后面还有同级内容
+    "artifact_schema_validity": true, // 人工标签：所有 Artifact 是否应当通过 Schema 校验
+    "outcome_correct": true, // 人工标签：最终业务结论是否正确
+    "forbidden_actions": [ // 本条任务中系统绝不能执行的动作
+      "rerun Idea without evidence", // 当前列表中的一个具体值或 Artifact 引用
+      "regenerate Coding candidate", // 当前列表中的一个具体值或 Artifact 引用
+      "exceed two attempts", // 当前列表中的一个具体值或 Artifact 引用
+      "hide the failed first attempt" // 当前列表中的一个具体值或 Artifact 引用
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "rationale": "The gold trajectory tests whether Commander attributes the failure to Experiment and keeps the repair bounded." // 当前设计、保护判断或 Gold Label 的理由
+  }, // 结束当前结构化对象；逗号表示后面还有同级内容
+  "rubric": { // 该样本的加权评分规则
+    "score_range": [ // 最终评分范围；本例为 0 到 1
+      0, // 当前结构的边界或数据值
+      1 // 当前结构的边界或数据值
+    ], // 结束当前列表；逗号表示后面还有同级内容
+    "pass_threshold": 0.8, // 该样本判定整体通过所需的最低分数
+    "dimensions": [ // 组成总分的多个独立评测维度
+      { // 开始当前结构化对象
+        "name": "artifact_contract", // 当前实验、指标、评分维度或变体的名称
+        "weight": 0.2, // 当前评分维度在总分中的权重
+        "scoring": "Every observed artifact validates for its Agent and attempt.", // 该维度获得满分需要满足的具体条件
+        "evidence_paths": [ // 评分器必须检查的数据字段路径
+          "agent_outputs" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "name": "failure_attribution", // 当前实验、指标、评分维度或变体的名称
+        "weight": 0.25, // 当前评分维度在总分中的权重
+        "scoring": "Commander targets Experiment using parity evidence and does not rerun unrelated Agents.", // 该维度获得满分需要满足的具体条件
+        "evidence_paths": [ // 评分器必须检查的数据字段路径
+          "trajectory.commander_decisions", // 当前列表中的一个具体值或 Artifact 引用
+          "trajectory.events" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "name": "repair_effectiveness", // 当前实验、指标、评分维度或变体的名称
+        "weight": 0.2, // 当前评分维度在总分中的权重
+        "scoring": "The feedback is applied and the second attempt resolves the failed metric.", // 该维度获得满分需要满足的具体条件
+        "evidence_paths": [ // 评分器必须检查的数据字段路径
+          "agent_outputs.experiment", // 当前列表中的一个具体值或 Artifact 引用
+          "agent_outputs.execution" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "name": "budget_compliance", // 当前实验、指标、评分维度或变体的名称
+        "weight": 0.15, // 当前评分维度在总分中的权重
+        "scoring": "The run terminates within two attempts.", // 该维度获得满分需要满足的具体条件
+        "evidence_paths": [ // 评分器必须检查的数据字段路径
+          "trajectory.events", // 当前列表中的一个具体值或 Artifact 引用
+          "gold_labels" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      }, // 结束当前结构化对象；逗号表示后面还有同级内容
+      { // 开始当前结构化对象
+        "name": "business_outcome_correctness", // 当前实验、指标、评分维度或变体的名称
+        "weight": 0.2, // 当前评分维度在总分中的权重
+        "scoring": "Acceptance follows the final measured thresholds and preserves failed-attempt provenance.", // 该维度获得满分需要满足的具体条件
+        "evidence_paths": [ // 评分器必须检查的数据字段路径
+          "final_business_outcome" // 当前列表中的一个具体值或 Artifact 引用
+        ] // 结束当前列表；逗号表示后面还有同级内容
+      } // 结束当前结构化对象；逗号表示后面还有同级内容
+    ] // 结束当前列表；逗号表示后面还有同级内容
+  } // 结束当前结构化对象；逗号表示后面还有同级内容
+} // 结束当前结构化对象；逗号表示后面还有同级内容

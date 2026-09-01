@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,7 +26,11 @@ from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prom
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import get_agent_config, select_provider
-from app.harness.llm.provider_base import LLMProvider, Message
+from app.harness.llm.provider_base import (
+    LLMProvider,
+    Message,
+    llm_call_deadline_seconds,
+)
 from app.harness.runtime.conversation_state import (
     ConversationState,
     can_transition,
@@ -33,7 +38,9 @@ from app.harness.runtime.conversation_state import (
 from app.settings import get_settings
 from app.storage.run_store import RunStore
 
-MAX_STEPS = 4  # max ReAct iterations per user turn
+DEFAULT_MAX_REACT_STEPS = 4
+MIN_MAX_REACT_STEPS = 1
+MAX_MAX_REACT_STEPS = 32
 
 
 @dataclass
@@ -56,6 +63,7 @@ class Commander:
         self.run_store = run_store or orchestrator.run_store
         self._provider, self._llm_config = self._resolve_provider()
         self._is_mock = isinstance(self._provider, MockProvider)
+        self.max_react_steps = self._resolve_max_react_steps()
 
     def _resolve_provider(self) -> tuple[LLMProvider, Any]:
         try:
@@ -65,6 +73,15 @@ class Commander:
             # explicit commander block exists in agents.yaml.
             cfg = get_agent_config("idea")
         return select_provider(cfg)
+
+    def _resolve_max_react_steps(self) -> int:
+        try:
+            cfg = get_agent_config("commander")
+        except KeyError:
+            # The idea config is only a model fallback. Its loop policy must
+            # not silently become the Commander's policy.
+            return DEFAULT_MAX_REACT_STEPS
+        return _react_step_limit(cfg.raw)
 
     # ----------------------------------------------------------- public API
 
@@ -80,7 +97,7 @@ class Commander:
         )
         emitted: list[ChatMessage] = []
 
-        for _step in range(MAX_STEPS):
+        for _step in range(self.max_react_steps):
             decision = await self._decide(session)
 
             if decision.next_state:
@@ -124,7 +141,10 @@ class Commander:
         try:
             completion = await asyncio.wait_for(
                 self._provider.complete(messages, self._llm_config),
-                timeout=get_settings().mars_llm_timeout_seconds,
+                timeout=llm_call_deadline_seconds(
+                    self._llm_config,
+                    minimum_seconds=get_settings().mars_llm_timeout_seconds,
+                ),
             )
             return _parse_decision(completion.text)
         except Exception as exc:
@@ -223,6 +243,25 @@ class Commander:
             return
         if can_transition(session.state, dst):
             session.state = dst
+
+
+def _react_step_limit(raw_config: Mapping[str, Any]) -> int:
+    loop = raw_config.get("loop", {})
+    if not isinstance(loop, Mapping):
+        return DEFAULT_MAX_REACT_STEPS
+    configured = loop.get("max_tool_steps", DEFAULT_MAX_REACT_STEPS)
+    if isinstance(configured, bool):
+        return DEFAULT_MAX_REACT_STEPS
+    if isinstance(configured, int):
+        value = configured
+    elif isinstance(configured, str):
+        try:
+            value = int(configured)
+        except ValueError:
+            return DEFAULT_MAX_REACT_STEPS
+    else:
+        return DEFAULT_MAX_REACT_STEPS
+    return min(max(value, MIN_MAX_REACT_STEPS), MAX_MAX_REACT_STEPS)
 
 
 def _summarize_result(tool: str, result: dict[str, Any]) -> str:

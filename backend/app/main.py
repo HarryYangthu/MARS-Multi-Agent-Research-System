@@ -38,6 +38,7 @@ from app.api import traces as traces_api
 from app.api import websocket as ws_api
 from app.api.dependencies import get_event_bus, get_run_store
 from app.bridge.agent_registry import get_registry
+from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
 from app.bridge.discovery_composition import (
     ProjectPackCandidateAgent,
@@ -46,6 +47,7 @@ from app.bridge.discovery_composition import (
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.extension_runtime import get_extension_runtime
 from app.bridge.idea_selection import IdeaSelectionCoordinator
+from app.harness.tools.registry import get_registry as get_tool_registry
 from app.settings import get_settings
 
 
@@ -77,6 +79,9 @@ def create_app() -> FastAPI:
         event_bus=get_event_bus(),
         candidate_agent=ProjectPackCandidateAgent(extension_runtime),
         adapter=ProjectPackRoutingAdapter(extension_runtime),
+        code_candidate_preparer=SecureCandidateWorkspacePreparer(
+            tool_registry=get_tool_registry(),
+        ),
     )
     discovery_api.configure_discovery_service(discovery_service)
     selection = IdeaSelectionCoordinator(

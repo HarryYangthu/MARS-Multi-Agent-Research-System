@@ -9,7 +9,12 @@ from app.bridge.discovery_composition import (
     ProjectPackCandidateAgent,
     ProjectPackRoutingAdapter,
 )
-from app.bridge.discovery_types import CandidateProposalRequest, DiscoveryRunSpec
+from app.bridge.discovery_types import (
+    BanditArmSignal,
+    CandidateProposalRequest,
+    DiscoveryRunSpec,
+    ParentCandidateSignal,
+)
 from app.bridge.extension_runtime import ExtensionRuntime, build_extension_runtime
 from app.execution.adapters.base import AdapterAction, AdapterRequest, AdapterResponse
 from app.execution.adapters.registry import AdapterRegistry
@@ -123,6 +128,56 @@ async def test_pack_candidate_generation_is_seeded_and_audited(tmp_path: Path) -
     assert len(child.parent_ids) == 1
     assert child.parent_ids[0] in {first.candidate_id, second.candidate_id}
 
+    adaptive = await agent.propose(
+        request.model_copy(
+            update={
+                "iteration": 1,
+                "parent_candidates": (
+                    ParentCandidateSignal(
+                        candidate_id=first.candidate_id,
+                        quality=1.0,
+                        offspring_count=5,
+                    ),
+                    ParentCandidateSignal(
+                        candidate_id=second.candidate_id,
+                        quality=5.0,
+                        scarcity=1.0,
+                        recency=1.0,
+                    ),
+                ),
+                "model_arms": (
+                    BanditArmSignal(
+                        arm_id="model_a",
+                        pulls=10,
+                        total_reward=-10.0,
+                    ),
+                    BanditArmSignal(
+                        arm_id="model_b",
+                        pulls=10,
+                        total_reward=10.0,
+                    ),
+                ),
+                "operator_arms": (
+                    BanditArmSignal(
+                        arm_id="mutate",
+                        pulls=10,
+                        total_reward=-10.0,
+                    ),
+                    BanditArmSignal(
+                        arm_id="crossover",
+                        pulls=10,
+                        total_reward=10.0,
+                    ),
+                ),
+            }
+        )
+    )
+    adaptive_audit = adaptive.metadata["selection_audit"]
+    assert adaptive_audit["model"]["selected_id"] == "model_b"
+    assert adaptive_audit["operator"]["selected_id"] == "crossover"
+    parent_choices = adaptive_audit["parent"]["choices"]
+    assert parent_choices[0]["score"] != parent_choices[1]["score"]
+
 
 @pytest.mark.asyncio
 async def test_router_resolves_one_trusted_adapter_and_fails_closed(tmp_path: Path) -> None:
@@ -174,12 +229,68 @@ def test_production_spec_requires_frozen_evidence_hashes() -> None:
     with pytest.raises(ValueError, match="production discovery requires frozen"):
         DiscoveryRunSpec.model_validate(base)
 
+    frozen = {
+        **base,
+        "dataset_hash": "sha256:dataset",
+        "baseline_hash": "sha256:baseline",
+        "evaluator_hash": "sha256:evaluator",
+    }
+    with pytest.raises(ValueError, match="three shared evaluation_seeds"):
+        DiscoveryRunSpec.model_validate(frozen)
+
     valid = DiscoveryRunSpec.model_validate(
         {
-            **base,
-            "dataset_hash": "sha256:dataset",
-            "baseline_hash": "sha256:baseline",
-            "evaluator_hash": "sha256:evaluator",
+            **frozen,
+            "evaluation_seeds": (101, 102, 103),
         }
     )
     assert valid.project_inputs["mode"] == "production"
+    assert valid.evaluation_seeds == (101, 102, 103)
+
+
+def test_statistical_gate_requires_a_satisfiable_shared_seed_cohort() -> None:
+    base = {
+        "task": "paired-discovery",
+        "project": "demo",
+        "objective": "minimize validation loss",
+        "objectives": (
+            ObjectiveSpec(
+                name="validation_loss",
+                direction=ObjectiveDirection.MINIMIZE,
+            ),
+        ),
+        "promotion_policy": {
+            "enabled": True,
+            "statistical_gate": {
+                "enabled": True,
+                "minimum_pairs": 3,
+                "baseline_candidate_ordinal": 0,
+                "objective_name": "validation_loss",
+                "dataset_role": "validation",
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="minimum_pairs shared evaluation_seeds"):
+        DiscoveryRunSpec.model_validate(base)
+    with pytest.raises(ValueError, match="minimum_pairs shared evaluation_seeds"):
+        DiscoveryRunSpec.model_validate(
+            {
+                **base,
+                "evaluation_seeds": tuple(range(32)),
+                "promotion_policy": {
+                    "enabled": True,
+                    "statistical_gate": {
+                        "enabled": True,
+                        "minimum_pairs": 33,
+                        "baseline_candidate_ordinal": 0,
+                        "objective_name": "validation_loss",
+                        "dataset_role": "validation",
+                    },
+                }
+            }
+        )
+
+    valid = DiscoveryRunSpec.model_validate(
+        {**base, "evaluation_seeds": (11, 22, 33)}
+    )
+    assert valid.evaluation_seeds == (11, 22, 33)

@@ -1,0 +1,32 @@
+# Container paths only. Keep the protection rules aligned with
+# projects/pimc/repo_link.yaml; this is a public demo stub, not real PIMC code.
+project: pimc
+repo_mode: local_path
+repo_path: /app/workspace/repos/pimc-stub
+read_only: true
+sync_strategy: snapshot
+allowed_paths:
+  - libs/
+  - configs/
+  - train_static.py
+  - train_dynamic.py
+  - Launch.sh
+  - README.md
+  - tests/
+protected_paths:
+  - baseline/
+  - production_interface/
+  - libs/model.py:Paper_Total_0327
+baseline_rules_file: ./AGENTS.md
+ignore_patterns:
+  - "data/"
+  - "*.npy"
+  - "*.npz"
+  - "*.pt"
+  - "*.pth"
+  - "*.ckpt"
+  - "*.pkl"
+  - "__pycache__/"
+  - "runs/"
+  - ".git/"
+  - "logs/"

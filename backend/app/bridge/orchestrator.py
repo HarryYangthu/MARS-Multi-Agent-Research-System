@@ -179,12 +179,24 @@ class Orchestrator:
                     return
 
         await self._write_evaluation_scorecard(session)
+        states = graph.all_states()
+        failed_nodes = sorted(
+            key for key, state in states.items() if state == NodeState.FAILED
+        )
+        terminal_status = "failed" if failed_nodes else "completed"
+        lifecycle_event = "run.failed" if failed_nodes else "run.completed"
+        self._persist_state(session, status=terminal_status)
         await self._publish_state(session, channel="run.lifecycle", payload={
-            "event": "run.completed",
+            "event": lifecycle_event,
             "run_id": run_id,
-            "states": {k: s.value for k, s in graph.all_states().items()},
+            "states": {key: state.value for key, state in states.items()},
+            "failed_nodes": failed_nodes,
+            "failure_summary": (
+                f"{len(failed_nodes)} run node(s) failed"
+                if failed_nodes
+                else None
+            ),
         })
-        self._persist_state(session, status="completed")
 
     async def _write_evaluation_scorecard(self, session: RunSession) -> None:
         try:

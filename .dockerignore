@@ -1,7 +1,13 @@
 .git
+.claude
+.codex
+.agents
 .venv
 venv
+**/.venv
+**/venv
 __pycache__
+**/__pycache__
 *.py[cod]
 *.log
 .mypy_cache
@@ -10,11 +16,20 @@ __pycache__
 .ruff_cache
 .coverage
 htmlcov
+.tmp
+outputs
+test_reports
+deploy/windows/images
+deploy/windows/runtime
 
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
 !.env.production.example
+!**/.env.example
+!**/.env.production.example
 
 frontend/node_modules
 frontend/.next
@@ -23,6 +38,7 @@ frontend/*.tsbuildinfo
 
 runs
 conversations
+knowledge
 knowledge/.chromadb
 knowledge/.chromadb-server
 knowledge/*/_index*.json

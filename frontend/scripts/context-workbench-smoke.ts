@@ -3,8 +3,10 @@ import { strict as assert } from "node:assert";
 import type {
   ContextManifestSummary,
   ContextManifestV2,
+  ContextRunView,
   ContextSegment,
 } from "../src/lib/api";
+import { normalizeContextRunView } from "../src/lib/api";
 import {
   buildManifestDiff,
   filterAndSortSegments,
@@ -147,6 +149,26 @@ assert.deepEqual(
 assert.equal(riskTotal(summaries[0].risk_counts), 1);
 assert.equal(summaryBudgetUsed(summaries[1]), 118);
 assert.equal(summaryOverBudget(summaries[1]), true);
+
+const normalizedRun = normalizeContextRunView({
+  run_id: "run-1",
+  project: "pimc",
+  agents: ["idea", "coding"],
+  manifests: [summaries[0], summaries[0], summaries[1]],
+  budget_summary: {
+    manifest_count: 3,
+    used_tokens: 234,
+    over_budget_count: 1,
+  },
+  risk_summary: { confusion: 2 },
+} satisfies ContextRunView);
+assert.deepEqual(normalizedRun.manifests.map((item) => item.manifest_id), ["m1", "m2"]);
+assert.deepEqual(normalizedRun.budget_summary, {
+  manifest_count: 2,
+  used_tokens: 176,
+  over_budget_count: 1,
+});
+assert.deepEqual(normalizedRun.risk_summary, { confusion: 1 });
 
 assert.deepEqual(segmentKindOptions(currentManifest.segments), ["all", "kb", "system"]);
 assert.deepEqual(segmentRiskOptions(currentManifest.segments), ["all", "confusion", "lost_in_middle"]);

@@ -86,6 +86,50 @@ def test_preflight_blocks_unauthorized_delta_paths_and_duplicates() -> None:
     assert "novelty" in blocker_ids
 
 
+def test_preflight_rejects_tampered_implementation_fingerprint() -> None:
+    contract, base_candidate = _candidate()
+    implementation = "sha256:" + "1" * 64
+    candidate = build_candidate_record(
+        run_id=base_candidate.run_id,
+        creator=base_candidate.creator,
+        operator=base_candidate.operator,
+        genome=base_candidate.genome,
+        implementation_fingerprint=implementation,
+    )
+    tampered = candidate.model_copy(
+        update={
+            "fingerprints": {
+                **candidate.fingerprints,
+                "implementation": "sha256:" + "2" * 64,
+            }
+        }
+    )
+
+    report = run_preflight(candidate=tampered, contract=contract)
+
+    assert not report.passed
+    assert {check.check_id for check in report.blockers} == {"stable_identity"}
+
+
+def test_preflight_rejects_malformed_implementation_fingerprint() -> None:
+    contract, candidate = _candidate()
+    malformed = candidate.model_copy(
+        update={
+            "fingerprints": {
+                **candidate.fingerprints,
+                "implementation": "sha256:not-a-digest",
+            }
+        }
+    )
+
+    report = run_preflight(candidate=malformed, contract=contract)
+
+    assert not report.passed
+    blocker = report.blockers[0]
+    assert blocker.check_id == "stable_identity"
+    assert "lowercase sha256" in blocker.reason
+
+
 def test_promotion_is_direction_aware_and_stops_at_highest_fidelity() -> None:
     objectives = (
         ObjectiveSpec(

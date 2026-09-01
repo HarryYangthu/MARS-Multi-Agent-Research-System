@@ -1,0 +1,877 @@
+{
+  "schema": "mars_multi_agent_trajectory.v1",
+  "sample_id": "synthetic.commander_repair.002",
+  "dataset_split": "validation",
+  "synthetic": true,
+  "project": "synthetic_regression",
+  "task_type": "commander_repair",
+  "provenance": {
+    "source": "handcrafted_synthetic",
+    "created_at": "2026-08-21T09:10:00Z",
+    "contains_private_data": false,
+    "annotation_status": "reviewed",
+    "limitations": [
+      "The failure attribution and metrics are deterministic synthetic fixtures."
+    ]
+  },
+  "input": {
+    "user_prompt": "优化合成回归候选：MAE 必须不高于 0.10，P95 延迟不高于 25 ms；最多允许两轮实验，如果第一轮失败，应根据证据只返工责任 Agent。",
+    "normalized_objective": "Meet quality and latency thresholds within two attempts using evidence-based repair routing.",
+    "constraints": [
+      "at most two attempts",
+      "repair only the attributed stage",
+      "same holdout and seeds"
+    ],
+    "success_criteria": [
+      {
+        "metric": "validation_mae",
+        "operator": "lte",
+        "target": 0.1,
+        "unit": "mae"
+      },
+      {
+        "metric": "p95_latency_ms",
+        "operator": "lte",
+        "target": 25.0,
+        "unit": "ms"
+      }
+    ],
+    "context_refs": [
+      {
+        "ref": "context/evaluation_contract.json",
+        "role": "frozen_evaluator",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ]
+  },
+  "agent_outputs": {
+    "idea": [
+      {
+        "attempt": 1,
+        "schema": "proposal.v1",
+        "artifact_ref": "idea/idea_proposal.approved.md",
+        "status": "approved",
+        "input_refs": [
+          "input/user_request.md"
+        ],
+        "frontmatter": {
+          "schema": "proposal.v1",
+          "project": "synthetic_regression",
+          "agent": "idea",
+          "research_question": "Can feature pruning meet the latency target without exceeding the sealed MAE limit?",
+          "hypothesis": "Removing the four lowest-variance features will reduce latency while normalized training preserves validation MAE.",
+          "novelty": "The candidate couples deterministic feature pruning with a quality-constrained evaluation contract.",
+          "constraints": [
+            "Maximum two attempts."
+          ],
+          "testable_predictions": [
+            "validation_mae <= 0.10 and p95_latency_ms <= 25"
+          ],
+          "evidence_refs": [
+            "context/evaluation_contract.json"
+          ]
+        },
+        "body_summary": "Defines a falsifiable feature-pruning hypothesis under an explicit two-attempt budget.",
+        "evidence_refs": [
+          "context/evaluation_contract.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-idea-1",
+          "prompt_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 520,
+          "output_tokens": 230,
+          "latency_ms": 7.2
+        }
+      }
+    ],
+    "experiment": [
+      {
+        "attempt": 1,
+        "schema": "experiment_plan.v1",
+        "artifact_ref": "experiment/experiment_plan.v1.md",
+        "status": "approved",
+        "input_refs": [
+          "idea/idea_proposal.approved.md"
+        ],
+        "frontmatter": {
+          "schema": "experiment_plan.v1",
+          "project": "synthetic_regression",
+          "agent": "experiment",
+          "variables": {
+            "independent": [
+              "features_removed"
+            ],
+            "controlled": [
+              "seed"
+            ],
+            "dependent": [
+              "validation_mae",
+              "p95_latency_ms"
+            ]
+          },
+          "metrics": {
+            "primary": "validation_mae",
+            "secondary": [
+              "p95_latency_ms"
+            ]
+          },
+          "ablations": [
+            {
+              "name": "remove_four",
+              "config": {
+                "features_removed": 4,
+                "normalization": "candidate_local"
+              }
+            }
+          ],
+          "estimated_runs": 3,
+          "estimated_gpu_hours": 0.0
+        },
+        "body_summary": "Attempt one omits the frozen preprocessing parity check, which later becomes the attributed failure.",
+        "evidence_refs": [
+          "idea/idea_proposal.approved.md"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-experiment-1",
+          "prompt_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 730,
+          "output_tokens": 282,
+          "latency_ms": 8.3
+        }
+      },
+      {
+        "attempt": 2,
+        "schema": "experiment_plan.v1",
+        "artifact_ref": "experiment/experiment_plan.approved.md",
+        "status": "approved",
+        "input_refs": [
+          "experiment/experiment_plan.v1.md",
+          "diagnosis/feedback_packet.attempt_2.md"
+        ],
+        "frontmatter": {
+          "schema": "experiment_plan.v1",
+          "project": "synthetic_regression",
+          "agent": "experiment",
+          "variables": {
+            "independent": [
+              "features_removed"
+            ],
+            "controlled": [
+              "seed",
+              "frozen_preprocessing_hash",
+              "holdout_hash"
+            ],
+            "dependent": [
+              "validation_mae",
+              "p95_latency_ms"
+            ]
+          },
+          "metrics": {
+            "primary": "validation_mae",
+            "secondary": [
+              "p95_latency_ms",
+              "preprocessing_parity"
+            ]
+          },
+          "ablations": [
+            {
+              "name": "frozen_baseline",
+              "config": {
+                "features_removed": 0,
+                "preprocessing": "frozen"
+              }
+            },
+            {
+              "name": "remove_four",
+              "config": {
+                "features_removed": 4,
+                "preprocessing": "frozen"
+              }
+            }
+          ],
+          "estimated_runs": 6,
+          "estimated_gpu_hours": 0.0
+        },
+        "body_summary": "Attempt two applies Commander feedback by freezing preprocessing and adding a parity control.",
+        "evidence_refs": [
+          "diagnosis/feedback_packet.attempt_2.md",
+          "context/evaluation_contract.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-experiment-2",
+          "prompt_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 902,
+          "output_tokens": 318,
+          "latency_ms": 9.1
+        }
+      }
+    ],
+    "coding": [
+      {
+        "attempt": 1,
+        "schema": "code_spec.v1",
+        "artifact_ref": "coding/code_spec.approved.md",
+        "status": "approved",
+        "input_refs": [
+          "experiment/experiment_plan.v1.md"
+        ],
+        "frontmatter": {
+          "schema": "code_spec.v1",
+          "project": "synthetic_regression",
+          "agent": "coding",
+          "target_lang": "python",
+          "baseline_compat": {
+            "preserved": true,
+            "rationale": "Candidate code is isolated."
+          },
+          "files_changed": [
+            {
+              "path": "candidates/pruned_features.py",
+              "type": "added",
+              "risk": "low"
+            }
+          ],
+          "new_dependencies": [],
+          "test_coverage": {
+            "unit_tests_added": 2,
+            "baseline_smoke_test": "pass"
+          }
+        },
+        "body_summary": "Implements feature masking in an isolated candidate; Commander correctly does not send the experiment-design failure back here.",
+        "evidence_refs": [
+          "coding/diff.patch",
+          "coding/test_report.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-coding-1",
+          "prompt_hash": "sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc1",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 940,
+          "output_tokens": 360,
+          "latency_ms": 11.5
+        }
+      }
+    ],
+    "execution": [
+      {
+        "attempt": 1,
+        "schema": "run_log.v1",
+        "artifact_ref": "execution/attempt_1/run_log.approved.md",
+        "status": "completed",
+        "input_refs": [
+          "experiment/experiment_plan.v1.md",
+          "coding/code_spec.approved.md"
+        ],
+        "frontmatter": {
+          "schema": "run_log.v1",
+          "project": "synthetic_regression",
+          "agent": "execution",
+          "run_id": "eval-repair-002-attempt-1",
+          "status": "completed",
+          "metrics": {
+            "validation_mae": 0.134,
+            "p95_latency_ms": 23.6,
+            "preprocessing_parity": 0
+          },
+          "fingerprint_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1",
+          "is_mock": true
+        },
+        "body_summary": "Latency passes but MAE fails; the preprocessing parity signal identifies an experiment control mismatch.",
+        "evidence_refs": [
+          "execution/attempt_1/metrics.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-execution-1",
+          "prompt_hash": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd1",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 450,
+          "output_tokens": 170,
+          "latency_ms": 4.4
+        }
+      },
+      {
+        "attempt": 2,
+        "schema": "run_log.v1",
+        "artifact_ref": "execution/attempt_2/run_log.approved.md",
+        "status": "completed",
+        "input_refs": [
+          "experiment/experiment_plan.approved.md",
+          "coding/code_spec.approved.md"
+        ],
+        "frontmatter": {
+          "schema": "run_log.v1",
+          "project": "synthetic_regression",
+          "agent": "execution",
+          "run_id": "eval-repair-002-attempt-2",
+          "status": "completed",
+          "metrics": {
+            "validation_mae": 0.096,
+            "p95_latency_ms": 24.1,
+            "preprocessing_parity": 1
+          },
+          "fingerprint_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee2",
+          "is_mock": true
+        },
+        "body_summary": "The controlled rerun passes both required metrics with preprocessing parity restored.",
+        "evidence_refs": [
+          "execution/attempt_2/metrics.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-execution-2",
+          "prompt_hash": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd2",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 472,
+          "output_tokens": 178,
+          "latency_ms": 4.6
+        }
+      }
+    ],
+    "writing": [
+      {
+        "attempt": 2,
+        "schema": "report.v1",
+        "artifact_ref": "writing/research_report.approved.md",
+        "status": "approved",
+        "input_refs": [
+          "diagnosis/diagnosis.v1.md",
+          "execution/attempt_1/run_log.approved.md",
+          "execution/attempt_2/run_log.approved.md"
+        ],
+        "frontmatter": {
+          "schema": "report.v1",
+          "project": "synthetic_regression",
+          "agent": "writing",
+          "deliverable_type": "research_report",
+          "target_audience": "model discovery review board",
+          "chain_refs": {
+            "proposal": "idea/idea_proposal.approved.md",
+            "plan": "experiment/experiment_plan.approved.md",
+            "code": "coding/code_spec.approved.md",
+            "runs": [
+              "execution/attempt_1/run_log.approved.md",
+              "execution/attempt_2/run_log.approved.md"
+            ]
+          }
+        },
+        "body_summary": "Explains the failed first attempt, Commander attribution, bounded repair and passing second attempt.",
+        "evidence_refs": [
+          "diagnosis/diagnosis.v1.md",
+          "execution/attempt_2/metrics.json"
+        ],
+        "model_trace": {
+          "provider": "mock_provider",
+          "model": "deterministic-fixture-v1",
+          "request_id": "req-repair-writing-2",
+          "prompt_hash": "sha256:fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2",
+          "temperature": 0.0,
+          "seed": 29,
+          "input_tokens": 1490,
+          "output_tokens": 430,
+          "latency_ms": 12.1
+        }
+      }
+    ]
+  },
+  "trajectory": {
+    "trace_id": "trace-repair-002",
+    "run_id": "eval-repair-002",
+    "started_at": "2026-08-21T09:10:01Z",
+    "ended_at": "2026-08-21T09:12:04Z",
+    "terminal_state": "completed",
+    "events": [
+      {
+        "seq": 1,
+        "timestamp": "2026-08-21T09:10:01Z",
+        "span_id": "root-2",
+        "parent_span_id": null,
+        "component": "orchestrator",
+        "name": "run.started",
+        "agent": "system",
+        "attempt": 1,
+        "status": "started",
+        "input_refs": [
+          "input/user_request.md"
+        ],
+        "output_refs": [],
+        "attributes": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "seq": 2,
+        "timestamp": "2026-08-21T09:10:10Z",
+        "span_id": "idea-2",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "idea.run",
+        "agent": "idea",
+        "attempt": 1,
+        "status": "approved",
+        "input_refs": [
+          "input/user_request.md"
+        ],
+        "output_refs": [
+          "idea/idea_proposal.approved.md"
+        ],
+        "attributes": {}
+      },
+      {
+        "seq": 3,
+        "timestamp": "2026-08-21T09:10:22Z",
+        "span_id": "exp-2a",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "experiment.run",
+        "agent": "experiment",
+        "attempt": 1,
+        "status": "approved",
+        "input_refs": [
+          "idea/idea_proposal.approved.md"
+        ],
+        "output_refs": [
+          "experiment/experiment_plan.v1.md"
+        ],
+        "attributes": {}
+      },
+      {
+        "seq": 4,
+        "timestamp": "2026-08-21T09:10:35Z",
+        "span_id": "code-2",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "coding.run",
+        "agent": "coding",
+        "attempt": 1,
+        "status": "approved",
+        "input_refs": [
+          "experiment/experiment_plan.v1.md"
+        ],
+        "output_refs": [
+          "coding/code_spec.approved.md"
+        ],
+        "attributes": {}
+      },
+      {
+        "seq": 5,
+        "timestamp": "2026-08-21T09:11:02Z",
+        "span_id": "exec-2a",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "execution.run",
+        "agent": "execution",
+        "attempt": 1,
+        "status": "completed",
+        "input_refs": [
+          "coding/code_spec.approved.md"
+        ],
+        "output_refs": [
+          "execution/attempt_1/metrics.json"
+        ],
+        "attributes": {
+          "passed": false
+        }
+      },
+      {
+        "seq": 6,
+        "timestamp": "2026-08-21T09:11:07Z",
+        "span_id": "diag-2a",
+        "parent_span_id": "root-2",
+        "component": "evaluator",
+        "name": "commander.diagnose",
+        "agent": "commander",
+        "attempt": 1,
+        "status": "completed",
+        "input_refs": [
+          "execution/attempt_1/metrics.json",
+          "experiment/experiment_plan.v1.md"
+        ],
+        "output_refs": [
+          "diagnosis/feedback_packet.attempt_2.md"
+        ],
+        "attributes": {
+          "target_agent": "experiment",
+          "confidence": 0.92
+        }
+      },
+      {
+        "seq": 7,
+        "timestamp": "2026-08-21T09:11:22Z",
+        "span_id": "exp-2b",
+        "parent_span_id": "diag-2a",
+        "component": "agent",
+        "name": "experiment.repair",
+        "agent": "experiment",
+        "attempt": 2,
+        "status": "approved",
+        "input_refs": [
+          "diagnosis/feedback_packet.attempt_2.md"
+        ],
+        "output_refs": [
+          "experiment/experiment_plan.approved.md"
+        ],
+        "attributes": {
+          "feedback_applied": true
+        }
+      },
+      {
+        "seq": 8,
+        "timestamp": "2026-08-21T09:11:51Z",
+        "span_id": "exec-2b",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "execution.rerun",
+        "agent": "execution",
+        "attempt": 2,
+        "status": "completed",
+        "input_refs": [
+          "experiment/experiment_plan.approved.md"
+        ],
+        "output_refs": [
+          "execution/attempt_2/metrics.json"
+        ],
+        "attributes": {
+          "passed": true
+        }
+      },
+      {
+        "seq": 9,
+        "timestamp": "2026-08-21T09:11:55Z",
+        "span_id": "diag-2b",
+        "parent_span_id": "root-2",
+        "component": "evaluator",
+        "name": "commander.diagnose",
+        "agent": "commander",
+        "attempt": 2,
+        "status": "completed",
+        "input_refs": [
+          "execution/attempt_2/metrics.json"
+        ],
+        "output_refs": [
+          "diagnosis/diagnosis.v1.md"
+        ],
+        "attributes": {
+          "target_agent": "none",
+          "confidence": 0.99
+        }
+      },
+      {
+        "seq": 10,
+        "timestamp": "2026-08-21T09:12:04Z",
+        "span_id": "write-2",
+        "parent_span_id": "root-2",
+        "component": "agent",
+        "name": "writing.run",
+        "agent": "writing",
+        "attempt": 2,
+        "status": "approved",
+        "input_refs": [
+          "diagnosis/diagnosis.v1.md"
+        ],
+        "output_refs": [
+          "writing/research_report.approved.md"
+        ],
+        "attributes": {
+          "chain_complete": true
+        }
+      }
+    ],
+    "tool_calls": [
+      {
+        "call_id": "tool-repair-1",
+        "agent": "execution",
+        "tool": "simulation.run",
+        "arguments": {
+          "attempt": 1
+        },
+        "status": "success",
+        "result_summary": "First attempt completed with a failed MAE threshold.",
+        "evidence_ref": "execution/attempt_1/metrics.json"
+      },
+      {
+        "call_id": "tool-repair-2",
+        "agent": "experiment",
+        "tool": "context.read",
+        "arguments": {
+          "ref": "diagnosis/feedback_packet.attempt_2.md"
+        },
+        "status": "success",
+        "result_summary": "Loaded bounded Commander feedback for Experiment only.",
+        "evidence_ref": "diagnosis/feedback_packet.attempt_2.md"
+      },
+      {
+        "call_id": "tool-repair-3",
+        "agent": "execution",
+        "tool": "simulation.run",
+        "arguments": {
+          "attempt": 2
+        },
+        "status": "success",
+        "result_summary": "Second attempt passed both thresholds.",
+        "evidence_ref": "execution/attempt_2/metrics.json"
+      }
+    ],
+    "gate_decisions": [
+      {
+        "gate_id": "baseline_compatibility",
+        "attempt": 1,
+        "decision": "pass",
+        "reason": "Only an isolated candidate file is changed.",
+        "evidence_refs": [
+          "coding/code_spec.approved.md"
+        ]
+      },
+      {
+        "gate_id": "conclusion_output",
+        "attempt": 2,
+        "decision": "approved",
+        "reason": "The report includes both failed and passing attempts.",
+        "evidence_refs": [
+          "writing/research_report.approved.md"
+        ]
+      }
+    ],
+    "commander_decisions": [
+      {
+        "attempt": 1,
+        "passed": false,
+        "target_agent": "experiment",
+        "confidence": 0.92,
+        "decision_summary": "MAE failed while latency passed; preprocessing parity indicates an experiment-control error rather than a code defect.",
+        "diagnosis": {
+          "schema": "diagnosis.v1",
+          "project": "synthetic_regression",
+          "agent": "commander",
+          "run_id": "eval-repair-002",
+          "attempt": 1,
+          "passed": false,
+          "failed_metrics": [
+            {
+              "metric": "validation_mae",
+              "observed": 0.134,
+              "target": 0.1,
+              "direction": "lte",
+              "gap": 0.034
+            }
+          ],
+          "suspected_causes": [
+            {
+              "kind": "config_sanity",
+              "summary": "Preprocessing parity was not controlled.",
+              "severity": "high",
+              "evidence": [
+                "preprocessing_parity=0"
+              ]
+            }
+          ],
+          "recommended_target": "experiment",
+          "recommended_action": "Freeze preprocessing and add a matched parity control.",
+          "evidence_refs": [
+            "execution/attempt_1/metrics.json",
+            "experiment/experiment_plan.v1.md"
+          ],
+          "budget_status": "within_budget"
+        },
+        "feedback_packet": {
+          "schema": "feedback_packet.v1",
+          "project": "synthetic_regression",
+          "agent": "commander",
+          "run_id": "eval-repair-002",
+          "target_agent": "experiment",
+          "attempt": 2,
+          "source_attempt": 1,
+          "confidence": 0.92,
+          "why_this_agent": "The failed parity control is owned by experiment design.",
+          "evidence_refs": [
+            "execution/attempt_1/metrics.json"
+          ],
+          "failed_metrics": [
+            {
+              "metric": "validation_mae",
+              "observed": 0.134,
+              "target": 0.1
+            }
+          ],
+          "do_next": [
+            "Freeze preprocessing hash.",
+            "Add matched baseline and candidate parity checks."
+          ],
+          "avoid_repeating": [
+            "Do not regenerate the code candidate."
+          ],
+          "context_refs": [
+            "context/evaluation_contract.json"
+          ],
+          "memory_candidates": []
+        },
+        "evidence_refs": [
+          "execution/attempt_1/metrics.json",
+          "diagnosis/feedback_packet.attempt_2.md"
+        ]
+      },
+      {
+        "attempt": 2,
+        "passed": true,
+        "target_agent": "none",
+        "confidence": 0.99,
+        "decision_summary": "The controlled rerun passed; route to Writing.",
+        "diagnosis": {
+          "schema": "diagnosis.v1",
+          "project": "synthetic_regression",
+          "agent": "commander",
+          "run_id": "eval-repair-002",
+          "attempt": 2,
+          "passed": true,
+          "failed_metrics": [],
+          "suspected_causes": [],
+          "recommended_target": "writing",
+          "recommended_action": "Report both attempts and the repair evidence.",
+          "evidence_refs": [
+            "execution/attempt_2/metrics.json"
+          ],
+          "budget_status": "within_budget"
+        },
+        "feedback_packet": null,
+        "evidence_refs": [
+          "execution/attempt_2/metrics.json"
+        ]
+      }
+    ]
+  },
+  "final_business_outcome": {
+    "status": "accepted",
+    "decision_reason": "The second and final allowed attempt passed after an evidence-based Experiment-only repair.",
+    "objective_metrics": [
+      {
+        "name": "validation_mae",
+        "baseline": 0.098,
+        "final": 0.096,
+        "unit": "mae",
+        "direction": "constraint",
+        "target": 0.1,
+        "passed": true
+      },
+      {
+        "name": "p95_latency_ms",
+        "baseline": 31.2,
+        "final": 24.1,
+        "unit": "ms",
+        "direction": "minimize",
+        "target": 25.0,
+        "passed": true
+      }
+    ],
+    "constraints_satisfied": true,
+    "business_value": {
+      "claim_type": "synthetic_estimate",
+      "summary": "The fixture shows a bounded repair loop can recover a valid candidate without rerunning unrelated Agents.",
+      "estimated_value": 1.0,
+      "unit": "avoided_unnecessary_agent_reruns"
+    },
+    "evidence_refs": [
+      "diagnosis/feedback_packet.attempt_2.md",
+      "execution/attempt_2/metrics.json"
+    ]
+  },
+  "gold_labels": {
+    "expected_terminal_state": "completed",
+    "expected_agent_order": [
+      "idea",
+      "experiment",
+      "coding",
+      "execution",
+      "experiment",
+      "execution",
+      "writing"
+    ],
+    "expected_commander_targets": [
+      "experiment",
+      "none"
+    ],
+    "required_gate_decisions": {
+      "baseline_compatibility": "pass",
+      "conclusion_output": "approved"
+    },
+    "artifact_schema_validity": true,
+    "outcome_correct": true,
+    "forbidden_actions": [
+      "rerun Idea without evidence",
+      "regenerate Coding candidate",
+      "exceed two attempts",
+      "hide the failed first attempt"
+    ],
+    "rationale": "The gold trajectory tests whether Commander attributes the failure to Experiment and keeps the repair bounded."
+  },
+  "rubric": {
+    "score_range": [
+      0,
+      1
+    ],
+    "pass_threshold": 0.8,
+    "dimensions": [
+      {
+        "name": "artifact_contract",
+        "weight": 0.2,
+        "scoring": "Every observed artifact validates for its Agent and attempt.",
+        "evidence_paths": [
+          "agent_outputs"
+        ]
+      },
+      {
+        "name": "failure_attribution",
+        "weight": 0.25,
+        "scoring": "Commander targets Experiment using parity evidence and does not rerun unrelated Agents.",
+        "evidence_paths": [
+          "trajectory.commander_decisions",
+          "trajectory.events"
+        ]
+      },
+      {
+        "name": "repair_effectiveness",
+        "weight": 0.2,
+        "scoring": "The feedback is applied and the second attempt resolves the failed metric.",
+        "evidence_paths": [
+          "agent_outputs.experiment",
+          "agent_outputs.execution"
+        ]
+      },
+      {
+        "name": "budget_compliance",
+        "weight": 0.15,
+        "scoring": "The run terminates within two attempts.",
+        "evidence_paths": [
+          "trajectory.events",
+          "gold_labels"
+        ]
+      },
+      {
+        "name": "business_outcome_correctness",
+        "weight": 0.2,
+        "scoring": "Acceptance follows the final measured thresholds and preserves failed-attempt provenance.",
+        "evidence_paths": [
+          "final_business_outcome"
+        ]
+      }
+    ]
+  }
+}

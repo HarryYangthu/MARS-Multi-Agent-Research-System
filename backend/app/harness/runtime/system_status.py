@@ -18,7 +18,10 @@ from typing import Any
 import yaml
 
 from app.harness.llm.model_registry import available_providers, list_agent_configs
-from app.harness.runtime.readiness import check_readiness
+from app.harness.runtime.readiness import (
+    check_readiness,
+    remote_gpu_configuration_status,
+)
 from app.settings import get_settings, repo_root
 
 
@@ -130,11 +133,18 @@ def _execution_summary() -> dict[str, Any]:
     raw = _read_yaml(repo_root() / "configs" / "execution.yaml")
     execution = _as_dict(raw.get("execution"))
     code_checks = _as_dict(raw.get("code_checks"))
-    remote_gpu = _as_dict(execution.get("remote_gpu"))
     paper_static = _paper_static_summary(_as_dict(execution.get("paper_static")))
     local_commands = execution.get("local_commands")
     return {
         "backend": settings.mars_execution_backend,
+        "device": settings.effective_execution_device,
+        "device_source": settings.execution_device_source,
+        "effective_adapter_backend": (
+            "remote_gpu"
+            if settings.effective_execution_device == "gpu"
+            else "local_process"
+        ),
+        "configured_default_device": str(execution.get("device", "cpu")),
         "mock_mode": settings.mars_mock_mode,
         "max_concurrency": _to_int(execution.get("max_concurrency"), default=0),
         "batch_steps": _to_int(execution.get("batch_steps"), default=0),
@@ -144,10 +154,7 @@ def _execution_summary() -> dict[str, Any]:
         ),
         "allow_real_patch_apply": bool(execution.get("allow_real_patch_apply", False)),
         "local_command_count": len(local_commands) if isinstance(local_commands, list) else 0,
-        "remote_gpu": {
-            "enabled": bool(remote_gpu.get("enabled", False)),
-            "configured": bool(remote_gpu.get("endpoint")),
-        },
+        "remote_gpu": remote_gpu_configuration_status(),
         "paper_static": paper_static,
         "code_checks": {
             "lint_enabled": bool(_as_dict(code_checks.get("lint")).get("enabled", False)),

@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  windows-deployment-scripts:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate one-click scripts without Docker or credentials
+        shell: ${{ matrix.shell }}
+        run: .\deploy\windows\tests\Test-DeploymentScripts.ps1
+
   backend-and-synthetic:
     runs-on: ubuntu-latest
     steps:

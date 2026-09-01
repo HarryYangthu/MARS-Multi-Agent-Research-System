@@ -4,12 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import statistics
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.execution.adapters.base import AdapterResponse
 from app.harness.discovery.archive import ParetoArchive, evaluation_errors
 from app.harness.discovery.canonical import stable_hash
+from app.harness.discovery.evaluation_aggregate import t_critical_95
 from app.harness.discovery.models import (
     ArchiveSnapshot,
     CandidateEvaluation,
@@ -147,11 +149,19 @@ class DefaultDiscoveryCore:
     ) -> ArchiveSnapshot:
         archive = ParetoArchive(contract.objectives)
         negative: list[str] = []
-        for evaluation in sorted(evaluations, key=lambda item: item.candidate_id):
-            if evaluation_errors(evaluation, contract.objectives):
-                negative.append(evaluation.candidate_id)
+        grouped: dict[str, list[CandidateEvaluation]] = {}
+        for evaluation in evaluations:
+            grouped.setdefault(evaluation.candidate_id, []).append(evaluation)
+        for candidate_id, candidate_evaluations in sorted(grouped.items()):
+            try:
+                aggregate = _conservative_candidate_cohort(
+                    tuple(candidate_evaluations),
+                    contract=contract,
+                )
+            except ValueError:
+                negative.append(candidate_id)
                 continue
-            archive.add(evaluation)
+            archive.add(aggregate)
         usage = budget.used
         budget_payload = {
             "proposals": float(usage.proposals),
@@ -168,6 +178,94 @@ class DefaultDiscoveryCore:
             budget_snapshot=budget_payload,
             stop_reason=stop_reason,
         )
+
+
+def _conservative_candidate_cohort(
+    evaluations: tuple[CandidateEvaluation, ...],
+    *,
+    contract: ResearchTaskContract,
+) -> CandidateEvaluation:
+    """Collapse the highest-fidelity shared-seed cohort before Pareto ranking."""
+
+    if not evaluations:
+        raise ValueError("candidate evaluations are required")
+    candidate_ids = {item.candidate_id for item in evaluations}
+    run_ids = {item.run_id for item in evaluations}
+    if len(candidate_ids) != 1 or run_ids != {contract.run_id}:
+        raise ValueError("candidate cohort identity mismatch")
+    fidelity = max((item.fidelity for item in evaluations), key=_fidelity_rank)
+    cohort = tuple(item for item in evaluations if item.fidelity == fidelity)
+    if any(evaluation_errors(item, contract.objectives) for item in cohort):
+        raise ValueError("candidate cohort contains invalid evidence")
+    evaluator_hashes = {item.evaluator_hash for item in cohort}
+    dataset_hashes = {item.dataset_hash for item in cohort}
+    if len(evaluator_hashes) != 1 or len(dataset_hashes) != 1:
+        raise ValueError("candidate cohort mixes evaluator or dataset identities")
+
+    metrics: dict[str, MetricValue] = {}
+    means: dict[str, float] = {}
+    standard_errors: dict[str, float] = {}
+    critical = t_critical_95(len(cohort)) if len(cohort) > 1 else 0.0
+    for objective in contract.objectives:
+        values = [item.canonical_metrics[objective.name].value for item in cohort]
+        mean = statistics.fmean(values)
+        standard_error = (
+            statistics.stdev(values) / math.sqrt(len(values))
+            if len(values) > 1
+            else 0.0
+        )
+        margin = critical * standard_error
+        conservative_value = (
+            mean + margin
+            if objective.direction.value == "minimize"
+            else mean - margin
+        )
+        metrics[objective.name] = MetricValue(
+            value=conservative_value,
+            unit=objective.unit,
+            direction=objective.direction,
+        )
+        means[objective.name] = mean
+        standard_errors[objective.name] = standard_error
+
+    source_ids = tuple(sorted(item.evaluation_id for item in cohort))
+    identity = {
+        "candidate_id": next(iter(candidate_ids)),
+        "fidelity": fidelity.value,
+        "evaluator_hash": next(iter(evaluator_hashes)),
+        "dataset_hash": next(iter(dataset_hashes)),
+        "source_evaluation_ids": source_ids,
+        "aggregation": "student_t_conservative_95",
+    }
+    return CandidateEvaluation(
+        evaluation_id=f"cohort_{stable_hash(identity, prefix='')[:24]}",
+        candidate_id=next(iter(candidate_ids)),
+        run_id=contract.run_id,
+        fidelity=fidelity,
+        seed=min(item.seed for item in cohort),
+        evaluator_hash=next(iter(evaluator_hashes)),
+        dataset_hash=next(iter(dataset_hashes)),
+        raw_metrics={
+            "schema_id": "candidate_cohort_aggregate.v1",
+            "aggregation": "student_t_conservative_95",
+            "source_evaluation_ids": source_ids,
+            "seeds": tuple(sorted(item.seed for item in cohort)),
+            "means": means,
+            "standard_errors": standard_errors,
+            "critical_value": critical,
+        },
+        canonical_metrics=metrics,
+        hard_constraints_passed=True,
+        evidence_refs=tuple(
+            sorted({ref for item in cohort for ref in item.evidence_refs})
+        ),
+        findings=("highest_fidelity_shared_seed_cohort",),
+        created_at=max(item.created_at for item in cohort),
+    )
+
+
+def _fidelity_rank(value: FidelityLevel) -> int:
+    return int(value.value[1:])
 
 
 def _parse_flat_metrics(

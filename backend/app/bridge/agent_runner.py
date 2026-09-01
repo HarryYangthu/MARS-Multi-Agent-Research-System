@@ -6,6 +6,8 @@ already inside the registry by the time this runs.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -21,6 +23,7 @@ from app.harness.execution_intent import (
     requested_experiment_count,
     wants_execution_sweep,
 )
+from app.harness.llm.provider_base import LLMCompletionError
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
 from app.storage.data_source_store import selection_summary
@@ -161,13 +164,25 @@ async def run_agent_node(
         upstream_artifacts=upstream,
         extra=request_extra,
     )
-    context = await agent.build_context(request)
+    failure_phase = "build_context"
+    try:
+        context = await agent.build_context(request)
 
-    run_loop = getattr(agent, "run_loop", None)
-    if callable(run_loop):
-        artifact = await run_loop(request, context)
-    else:
-        artifact = await agent.draft(request, context)
+        failure_phase = "draft"
+        run_loop = getattr(agent, "run_loop", None)
+        if callable(run_loop):
+            artifact = await run_loop(request, context)
+        else:
+            artifact = await agent.draft(request, context)
+    except Exception as exc:
+        _write_agent_failure_diagnostic(
+            run=run,
+            node_key=node_key,
+            agent=stage,
+            phase=failure_phase,
+            exc=exc,
+        )
+        raise
 
     # Validate; ALWAYS persist the artifact under <agent>/<stem>.v1.md, even
     # when schema validation fails — the HITL UI will then show the validation
@@ -362,6 +377,51 @@ async def run_agent_node(
 
     # Long-term Memory writes happen only after HITL/auto approval. Drafts stay
     # in the run directory and review queue until promoted to *.approved.md.
+
+
+def _write_agent_failure_diagnostic(
+    *,
+    run: RunHandle,
+    node_key: str,
+    agent: str,
+    phase: str,
+    exc: Exception,
+) -> None:
+    """Persist a content-free, machine-readable failure before propagation."""
+
+    diagnostic: dict[str, Any] = {
+        "code": "agent_stage_failed",
+        "exception_type": type(exc).__name__,
+    }
+    reason: Mapping[str, object] | None = None
+    raw_reason = getattr(exc, "reason", None)
+    if isinstance(exc, LLMCompletionError):
+        reason = exc.reason
+    elif isinstance(raw_reason, Mapping):
+        reason = raw_reason
+    if reason is not None:
+        allowed_keys = (
+            "code",
+            "role",
+            "provider",
+            "model",
+            "finish_reason",
+            "empty_final",
+        )
+        details = {key: reason[key] for key in allowed_keys if key in reason}
+        diagnostic["code"] = str(details.get("code") or diagnostic["code"])
+        diagnostic["details"] = details
+    run.write_event(
+        "agent_events",
+        {
+            "event": "agent.node_failed",
+            "agent": agent,
+            "node": node_key,
+            "phase": phase,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "diagnostic": diagnostic,
+        },
+    )
 
 
 def _write_patch_diff(*, run: RunHandle, version: str, attempt: int) -> None:

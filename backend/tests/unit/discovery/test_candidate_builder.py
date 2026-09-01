@@ -127,6 +127,7 @@ def test_candidate_identity_and_fingerprint_are_stable() -> None:
     assert first.fingerprints == second.fingerprints
     assert first.fingerprints["exact"] == genome_fingerprint(first.genome)
     assert first.idempotency_key == f"candidate:{first.candidate_id}"
+    assert first.candidate_id == "cand_c4d20af1d23e1469d925ddbb"
     assert first.candidate_id == derive_candidate_id(
         run_id="run-1",
         genome=first.genome,
@@ -136,3 +137,49 @@ def test_candidate_identity_and_fingerprint_are_stable() -> None:
         creator="generator",
         operator="mutate",
     )
+
+
+def test_implementation_fingerprint_distinguishes_identical_genomes() -> None:
+    first_implementation = "sha256:" + "1" * 64
+    second_implementation = "sha256:" + "2" * 64
+
+    first = build_candidate_record(
+        run_id="run-implementation",
+        genome=_genome(),
+        creator="generator",
+        operator="materialize",
+        parent_ids=("parent-a",),
+        implementation_fingerprint=first_implementation,
+    )
+    second = build_candidate_record(
+        run_id="run-implementation",
+        genome=_genome(),
+        creator="generator",
+        operator="materialize",
+        parent_ids=("parent-a",),
+        implementation_fingerprint=second_implementation,
+    )
+
+    assert first.candidate_id != second.candidate_id
+    assert first.fingerprints == {
+        "exact": genome_fingerprint(first.genome),
+        "implementation": first_implementation,
+    }
+    assert second.fingerprints["implementation"] == second_implementation
+
+
+@pytest.mark.parametrize(
+    "implementation_fingerprint",
+    ("", "sha256:abc", "sha256:" + "A" * 64, "md5:" + "1" * 64),
+)
+def test_invalid_implementation_fingerprint_is_rejected(
+    implementation_fingerprint: str,
+) -> None:
+    with pytest.raises(ValueError, match="lowercase sha256"):
+        build_candidate_record(
+            run_id="run-implementation",
+            genome=_genome(),
+            creator="generator",
+            operator="materialize",
+            implementation_fingerprint=implementation_fingerprint,
+        )

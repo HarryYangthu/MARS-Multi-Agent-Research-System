@@ -80,6 +80,7 @@ def test_runtime_status_api_is_sanitized(
     monkeypatch.setenv("OPENAI_API_KEY", "secret-value")
     monkeypatch.setenv("LANGSMITH_API_KEY", "secret-value")
     monkeypatch.setenv("MARS_LANGSMITH_ENABLED", "true")
+    monkeypatch.setenv("MARS_EXECUTION_DEVICE", "cpu")
     monkeypatch.setattr("app.harness.runtime.system_status.shutil.which", lambda _name: None)
     import app.settings as settings_mod
 
@@ -92,5 +93,60 @@ def test_runtime_status_api_is_sanitized(
     payload: dict[str, Any] = response.json()
     assert payload["schema"] == "runtime_status.v1"
     assert payload["resources"]["gpu"]["available"] is False
+    execution = payload["resources"]["execution"]
+    assert execution["device"] == "cpu"
+    assert execution["device_source"] == "explicit"
+    assert execution["effective_adapter_backend"] == "local_process"
+    assert execution["configured_default_device"] == "cpu"
+    assert payload["readiness"]["execution_device"] == "cpu"
     assert payload["config"]["llm"]["secrets_configured"]["openai"] is True
     assert "secret-value" not in response.text
+
+
+def test_remote_gpu_status_exposes_state_without_connection_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_path = tmp_path / "private-key-secret-marker"
+    known_hosts_path = tmp_path / "known-hosts-secret-marker"
+    key_path.write_text("test-only", encoding="utf-8")
+    known_hosts_path.write_text("test-only", encoding="utf-8")
+    connection_values = {
+        "MARS_EXECUTION_DEVICE": "gpu",
+        "MARS_EXECUTION_BACKEND": "remote_gpu",
+        "MARS_REMOTE_ENABLED": "true",
+        "MARS_REMOTE_SSH_HOST": "secret-host.example.test",
+        "MARS_REMOTE_SSH_USER": "secret-user",
+        "MARS_REMOTE_SSH_KEY_PATH": str(key_path),
+        "MARS_REMOTE_SSH_KNOWN_HOSTS": str(known_hosts_path),
+        "MARS_REMOTE_ROOT": "/secret/remote/root",
+        "MARS_REMOTE_PYTHON": "/secret/remote/python",
+        "MARS_REMOTE_GPU_IDS": "0,1",
+    }
+    for name, value in connection_values.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(
+        "app.harness.runtime.readiness.shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "app.harness.runtime.system_status.probe_gpu_resources",
+        lambda: {"available": False, "devices": [], "summary": {"count": 0}},
+    )
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+
+    status = system_status.build_runtime_status(project="pimc")
+    remote = status["resources"]["execution"]["remote_gpu"]
+    execution = status["resources"]["execution"]
+    serialized = repr(status)
+
+    assert execution["device"] == "gpu"
+    assert execution["device_source"] == "explicit"
+    assert execution["effective_adapter_backend"] == "remote_gpu"
+    assert remote["configured"] is True
+    assert remote["gpu_count"] == 2
+    for value in connection_values.values():
+        if value not in {"true", "gpu", "remote_gpu", "0,1"}:
+            assert value not in serialized

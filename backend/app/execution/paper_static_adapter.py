@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 
 from app.execution.mock_simulation import MockResult
+from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.settings import repo_root
 
 _EPOCH_RE = re.compile(
@@ -356,14 +357,15 @@ def _python_exists(python: str) -> bool:
 
 
 def _subprocess_env(*, run_root: Path, spec: Any) -> dict[str, str]:
-    return {
-        **os.environ,
-        "MARS_RUN_ROOT": str(run_root),
-        "MARS_RUN_ID": str(spec.run_id),
-        "MARS_EXPERIMENT_ID": str(spec.experiment_id),
-        "MARS_PROJECT": str(spec.project),
-        "PYTHONUNBUFFERED": "1",
-    }
+    return sanitized_subprocess_environment(
+        overrides={
+            "MARS_RUN_ROOT": str(run_root),
+            "MARS_RUN_ID": str(spec.run_id),
+            "MARS_EXPERIMENT_ID": str(spec.experiment_id),
+            "MARS_PROJECT": str(spec.project),
+            "PYTHONUNBUFFERED": "1",
+        }
+    )
 
 
 def _override_args(config: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
