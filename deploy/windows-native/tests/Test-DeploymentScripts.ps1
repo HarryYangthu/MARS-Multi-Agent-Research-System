@@ -4,6 +4,11 @@ param()
 # Dependency-free control-flow and syntax tests for Windows PowerShell 5.1 and
 # PowerShell 7. They do not install packages or start MARS processes.
 $ErrorActionPreference = "Stop"
+trap {
+    $message = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+    Write-Host "::error title=Native Windows script validation::$message"
+    exit 1
+}
 $sourceDeployRoot = Split-Path -Parent $PSScriptRoot
 $sourceRepoRoot = [IO.Path]::GetFullPath((Join-Path $sourceDeployRoot "..\.."))
 . (Join-Path $sourceDeployRoot "Common.ps1")
