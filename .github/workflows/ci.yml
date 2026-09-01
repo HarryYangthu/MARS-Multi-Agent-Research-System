@@ -13,16 +13,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate one-click scripts with Windows PowerShell 5.1
+      - name: Validate Docker scripts with Windows PowerShell 5.1
         shell: powershell
-        run: |
-          .\deploy\windows\tests\Test-DeploymentScripts.ps1
-          .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
-      - name: Validate one-click scripts with PowerShell 7
+        run: .\deploy\windows\tests\Test-DeploymentScripts.ps1
+      - name: Validate native scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
+      - name: Validate Docker scripts with PowerShell 7
         shell: pwsh
-        run: |
-          .\deploy\windows\tests\Test-DeploymentScripts.ps1
-          .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
+        run: .\deploy\windows\tests\Test-DeploymentScripts.ps1
+      - name: Validate native scripts with PowerShell 7
+        shell: pwsh
+        run: .\deploy\windows-native\tests\Test-DeploymentScripts.ps1
 
   backend-and-synthetic:
     runs-on: ubuntu-latest
@@ -65,7 +67,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
