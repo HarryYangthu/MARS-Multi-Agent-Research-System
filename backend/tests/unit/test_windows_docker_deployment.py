@@ -317,7 +317,13 @@ def test_windows_ci_exercises_both_powershell_runtimes() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
     job = workflow["jobs"]["windows-deployment-scripts"]
     assert job["runs-on"] == "windows-latest"
-    assert set(job["strategy"]["matrix"]["shell"]) == {"powershell", "pwsh"}
+    validation_steps = [
+        step for step in job["steps"] if "Validate" in str(step.get("name", ""))
+    ]
+    assert {step["shell"] for step in validation_steps} == {"powershell", "pwsh"}
+    commands = "\n".join(str(step.get("run", "")) for step in validation_steps)
+    assert "deploy\\windows\\tests\\Test-DeploymentScripts.ps1" in commands
+    assert "deploy\\windows-native\\tests\\Test-DeploymentScripts.ps1" in commands
     script = WINDOWS_DEPLOY / "tests" / "Test-DeploymentScripts.ps1"
     assert script.read_bytes().startswith(b"\xef\xbb\xbf")
     source = script.read_text(encoding="utf-8")
