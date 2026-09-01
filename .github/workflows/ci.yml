@@ -41,7 +41,15 @@ jobs:
       - name: Pytest
         env:
           PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
-        run: pytest backend/tests projects/synthetic_regression/tests -q
+        run: |
+          set +e
+          pytest backend/tests projects/synthetic_regression/tests --tb=short -q 2>&1 | tee pytest.log
+          test_exit=${PIPESTATUS[0]}
+          if [ "$test_exit" -ne 0 ]; then
+            failure=$(tail -80 pytest.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=Backend pytest::$failure"
+          fi
+          exit "$test_exit"
       - name: Strict mypy
         env:
           MYPYPATH: .:backend:posttrain/src:projects/synthetic_regression/src
