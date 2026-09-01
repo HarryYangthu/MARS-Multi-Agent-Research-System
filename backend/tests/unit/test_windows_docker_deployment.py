@@ -274,7 +274,9 @@ def test_compose_resolves_container_paths_without_a_docker_daemon(
     expected_name = "repo_link.production.yaml" if production else "repo_link.demo.yaml"
     assert repo_links[0]["source"] == str(deployment / expected_name)
     assert repo_links[0]["read_only"] is True
-    assert repo_links[0]["bind"]["create_host_path"] is False
+    # Compose versions may either retain the explicit false value or omit
+    # it from normalized JSON because false is the schema default.
+    assert repo_links[0]["bind"].get("create_host_path", False) is False
     for service in document["services"].values():
         assert service["platform"] == "linux/amd64"
     if production:
