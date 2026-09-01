@@ -1,4 +1,4 @@
-Set-StrictMode -Version 3.0
+﻿Set-StrictMode -Version 3.0
 
 $script:MarsNativeRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:MarsRepoRoot = [IO.Path]::GetFullPath((Join-Path $script:MarsNativeRoot "..\.."))

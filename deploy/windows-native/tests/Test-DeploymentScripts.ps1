@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 # Dependency-free control-flow and syntax tests for Windows PowerShell 5.1 and
