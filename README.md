@@ -1,6 +1,6 @@
 # MARS - Multi-Agent Research System
 
-![version](https://img.shields.io/badge/release-Mars_V2.0-coral)
+![version](https://img.shields.io/badge/release-V3.1_Native_Dev-coral)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![next](https://img.shields.io/badge/next.js-15-black)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -57,11 +57,13 @@ feed self-evolution records back into the knowledge system.
   <img src="docs/mars_memory_development_roadmap.svg" alt="MARS memory roadmap" width="48%" />
 </p>
 
-## What Is In Mars_V2.0
+## What Is In V3.1 Native Dev
 
-Mars_V2.0 is the current development line. It includes the original mock-first
-multi-agent pipeline plus the newer V2 workbench, evaluation, memory, and data
-preparation surfaces.
+V3.1 Native Dev is the current functional development line. It includes the
+mock-first multi-agent pipeline, V2 workbench/evaluation/memory capabilities,
+and the V3.1 Discovery plus Wireless Overlay integration. The default developer
+path runs as local Python and Node.js processes; Docker and Redis are not
+required.
 
 | Area | What it does |
 |---|---|
@@ -125,6 +127,25 @@ The default path runs without API keys or a GPU. Missing LLM credentials fall
 back to `mock_provider`; missing execution hardware falls back to mock or CPU
 simulation paths.
 
+### macOS/Linux one-command development
+
+Install Python 3.11 and Node.js 20+, place `mars_v31_wireless` beside this
+repository, then run:
+
+```bash
+./start-mars.sh
+```
+
+The launcher creates `.venv`, installs Core, Overlay, and synthetic adapter
+dependencies on first run, starts the
+V3.1 backend on `127.0.0.1:8000` and the frontend on `127.0.0.1:3001`, and uses
+the in-process event bus. Press `Ctrl+C` to stop both services. Copy
+`.env.example` to `.env` only when you need real providers or custom settings;
+mock/CPU development does not require an env file.
+
+The lightweight default supports mock/config Discovery. To add the PyTorch
+alpha-static CPU evaluator, run `MARS_INSTALL_STATIC_CPU=1 ./start-mars.sh`.
+
 ### Windows one-click (V3.1 CPU)
 
 On Windows 10/11 x64, install company-approved Python 3.11 and Node.js 20,
@@ -136,9 +157,8 @@ and fully offline instructions are in
 [`deploy/windows-native/README.md`](deploy/windows-native/README.md).
 
 Native Windows is a local CPU/development or staging target. Strict production
-is fail-closed because it cannot reproduce the Linux read-only mount boundary;
-the retained container deployment is documented separately under
-[`deploy/windows/`](deploy/windows/README.md).
+is fail-closed because native Windows cannot reproduce the required Linux
+read-only mount boundary.
 
 ### Local Python
 

@@ -6,6 +6,7 @@ const backendUrl =
 
 const nextConfig = {
   output: "standalone",
+  outputFileTracingRoot: process.cwd(),
   reactStrictMode: true,
   typedRoutes: false,
   async rewrites() {

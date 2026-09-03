@@ -51,6 +51,13 @@ function Get-MarsNativeSetting {
     return $Default
 }
 
+function Test-MarsNativeEnabled {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
+}
+
 function ConvertTo-MarsNativePort {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -195,7 +202,12 @@ function Install-MarsNativeDependencies {
         ) -Description "创建 Python 虚拟环境"
     }
 
-    & $python -c "import fastapi, uvicorn, socketio, pydantic, chromadb" 2>$null
+    $staticCpu = Test-MarsNativeEnabled (
+        Get-MarsNativeSetting -Name "MARS_INSTALL_STATIC_CPU" -Values $Context.Settings -Default "false"
+    )
+    $requiredImports = "import fastapi, uvicorn, socketio, pydantic, chromadb, mars_v31_wireless, synthetic_regression_adapter"
+    if ($staticCpu) { $requiredImports += ", torch" }
+    & $python -c $requiredImports 2>$null
     $backendReady = $LASTEXITCODE -eq 0
     if (-not $backendReady -or $ForceRebuild) {
         $pipArguments = @("-m", "pip", "install", "--disable-pip-version-check")
@@ -213,10 +225,15 @@ function Install-MarsNativeDependencies {
             }
         }
         if ($Offline) {
-            $pipArguments += @("mars==0.1.0")
+            $overlayPackage = "mars-v31-wireless==3.1.0"
+            if ($staticCpu) { $overlayPackage = "mars-v31-wireless[static]==3.1.0" }
+            $pipArguments += @("mars==0.1.0", $overlayPackage, "mars-synthetic-regression-adapter==1.0.0")
         }
         else {
-            $pipArguments += @("-e", $Context.RepoRoot)
+            $overlayPackage = $Context.OverlayPath
+            if ($staticCpu) { $overlayPackage = "$($Context.OverlayPath)[static]" }
+            $syntheticRoot = Join-Path $Context.RepoRoot "projects\synthetic_regression"
+            $pipArguments += @($Context.RepoRoot, $overlayPackage, $syntheticRoot)
         }
         Invoke-MarsNativeChecked -FilePath $python -Arguments $pipArguments -Description "安装后端依赖"
     }

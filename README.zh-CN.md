@@ -5,7 +5,7 @@
 
 [English](README.md) · 简体中文
 
-![status](https://img.shields.io/badge/V0-验收通过-brightgreen) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![next](https://img.shields.io/badge/next.js-15-black) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
+![status](https://img.shields.io/badge/V3.1-原生开发版-brightgreen) ![python](https://img.shields.io/badge/python-3.11-blue) ![next](https://img.shields.io/badge/next.js-15-black) ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ---
 
@@ -87,24 +87,23 @@ api  →  bridge  →  hitl  →  (agents | execution | workers)  →  storage  
 
 详细架构图见 [`docs/architecture.md`](docs/architecture.md)。
 
-## 快速开始(零依赖)
+## 快速开始（原生开发）
 
-不用 GPU、不用 LLM key、不用 Docker:
+无需 GPU、LLM Key、Docker 或 Redis。先安装 Python 3.11 和 Node.js 20+，
+并把 `mars_v31_wireless` 放在本仓库同级目录，然后执行：
 
 ```bash
-git clone git@github.com:HarryYangthu/MARS-Multi-Agent-Research-System.git mars
-cd mars
-cp .env.example .env                 # 所有 key 留空也行 — 自动用 mock
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-
-# === 后端 ===
-PYTHONPATH=backend uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-
-# === 前端 ===
-cd frontend && npm install --legacy-peer-deps && npm run dev
-# 浏览器打开 http://localhost:3000
+./start-mars.sh
 ```
+
+脚本首次运行会创建 `.venv`，安装 Core、Overlay、Synthetic Adapter 及前端依赖，
+按 V3.1 Wireless 模式启动后端
+`http://127.0.0.1:8000` 和前端 `http://127.0.0.1:3001`。按 `Ctrl+C`
+同时停止两个服务。不创建 `.env` 也会使用安全的 mock/CPU 默认值；需要真实模型或
+自定义配置时，再把 `.env.example` 复制为 `.env`，适合直接开始 V3 开发。
+
+轻量默认模式支持 mock/config Discovery。如需 PyTorch `alpha-static` CPU 评估器，
+使用 `MARS_INSTALL_STATIC_CPU=1 ./start-mars.sh` 启动并安装可选依赖。
 
 跑标准 11 步 e2e demo(mock 模式):
 
@@ -121,7 +120,7 @@ bash scripts/acceptance.sh
 ### Windows 原生一键启动（无 Docker）
 
 Windows 10/11 x64 先通过公司软件中心安装 Python 3.11 和 Node.js 20，将
-`mars_v2` 与 `mars_v31_wireless` 放在同一父目录，然后双击：
+本仓库与 `mars_v31_wireless` 放在同一父目录，然后双击：
 
 ```text
 start-mars-windows.cmd
@@ -197,8 +196,11 @@ mars/
 
 ## 项目状态
 
-**V0 验收已通过**(Dev E2E 通道)。完整审计见
-[`docs/implementation_report.md`](docs/implementation_report.md)。要点:
+当前开发基线为 **V3.1 Native Dev**：在 V2 Agent/Harness、评测和记忆系统上，
+集成 Discovery Core、Co-Scientist、候选存储与恢复、PIMC Project Pack/Adapter
+以及对应前端工作台。默认原生启动，不依赖 Docker、Redis、GPU 或真实 LLM Key。
+历史 V0 实现审计见 [`docs/implementation_report.md`](docs/implementation_report.md)。
+当前基线的静态与自动化检查包括：
 
 | | |
 |---|---|
@@ -209,13 +211,13 @@ mars/
 | `import-linter` 4 条契约 | 全部 KEPT |
 | Schema 合规率 | ≥ 95% |
 | Baseline matcher 召回/精度 | 合成集 100% / 100% |
-| 11 步 e2e demo | 零外部依赖通过 |
+| V3.1 synthetic smoke | 20 个候选链路 |
 | `runs/<id>/` 完整性 | 9/9 子目录有内容 |
 
-## 路线图(V2 主题)
+## 后续开发方向
 
-V0 仍是当前稳定发布线(`v0.1.0`)。在 [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md)
-通过之前,V2 都按开发态处理,不要提前把 UI/API 版本标成稳定 V2。
+此分支是 V3.1 开发基线，不等同于真实 PIMC 科学结果或生产放行。新增功能仍应
+遵循 [`ACCEPTANCE.md`](ACCEPTANCE.md) 和项目 Gate：
 
 - **后训练流水线** — GRPO 训练器、从 `runs/<id>/hitl/*` 构造 preference
   pair、复合 reward(schema 合规 × baseline 保护 × 下游指标)。

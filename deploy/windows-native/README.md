@@ -8,17 +8,23 @@
 - Windows 10/11 x64；
 - 公司批准安装的 Python 3.11 x64；
 - 公司批准安装的 Node.js 20 x64；
-- `mars_v2` 与 `mars_v31_wireless` 位于同一父目录。
+- 本仓库与 `mars_v31_wireless` 位于同一父目录。
 
 先在 PowerShell 执行：
 
 ```powershell
-cd D:\MARS\mars_v2
+cd D:\MARS\mars_v3_native_dev
 .\deploy\windows-native\Test-Mars.ps1
 ```
 
-检查通过后，双击仓库根目录的 `start-mars-windows-native.cmd`。首次启动会创建
-`.venv-windows`、安装依赖、构建前端，然后打开 `http://127.0.0.1:3001/`。
+检查通过后，双击仓库根目录的 `start-mars-windows.cmd`。首次启动会创建
+`.venv-windows`、安装 Core、Overlay 和 Synthetic Adapter 依赖、构建前端，
+然后打开 `http://127.0.0.1:3001/`。轻量默认模式无需 PyTorch；需要
+`alpha-static` CPU 评估器时，先在 `deploy/windows-native/.env` 设置：
+
+```dotenv
+MARS_INSTALL_STATIC_CPU=true
+```
 
 如果内网不能访问公网包源，在 `deploy/windows-native/.env` 中设置公司镜像：
 
@@ -31,7 +37,7 @@ MARS_NPM_REGISTRY=https://你的内网-npm-镜像
 Python/Node 版本的 Windows x64 构建机执行：
 
 ```powershell
-cd D:\MARS\mars_v2\deploy\windows-native
+cd D:\MARS\mars_v3_native_dev\deploy\windows-native
 .\Export-MarsNativeDependencies.ps1
 ```
 
@@ -42,8 +48,8 @@ cd D:\MARS\mars_v2\deploy\windows-native
 停止和状态入口：
 
 ```text
-stop-mars-windows-native.cmd
-status-mars-windows-native.cmd
+stop-mars-windows.cmd
+status-mars-windows.cmd
 ```
 
 运行日志位于 `deploy/windows-native/runtime/`。普通停止不会删除 `runs/`、

@@ -18,8 +18,15 @@ try {
 
     $wheelRoot = Join-Path $offlineRoot "wheels"
     New-Item -ItemType Directory -Path $wheelRoot | Out-Null
+    $staticCpu = Test-MarsNativeEnabled (
+        Get-MarsNativeSetting -Name "MARS_INSTALL_STATIC_CPU" -Values $context.Settings -Default "false"
+    )
+    $overlayPackage = $context.OverlayPath
+    if ($staticCpu) { $overlayPackage = "$($context.OverlayPath)[static]" }
+    $syntheticRoot = Join-Path $context.RepoRoot "projects\synthetic_regression"
     Invoke-MarsNativeChecked -FilePath $runtime.Python -Arguments @(
-        "-m", "pip", "wheel", "--wheel-dir", $wheelRoot, $context.RepoRoot
+        "-m", "pip", "wheel", "--wheel-dir", $wheelRoot,
+        $context.RepoRoot, $overlayPackage, $syntheticRoot
     ) -Description "导出 Windows Python wheels"
     Invoke-MarsNativeChecked -FilePath $runtime.Python -Arguments @(
         "-m", "pip", "download", "--dest", $wheelRoot, "setuptools", "wheel"
@@ -38,6 +45,7 @@ try {
     }
     [IO.File]::WriteAllLines($manifestPath, $lines, (New-Object Text.UTF8Encoding($false)))
     Write-Host "原生 Windows 离线依赖已导出：$offlineRoot" -ForegroundColor Green
+    Write-Host "静态 CPU 依赖：$staticCpu"
     Write-Host "请连同 mars_v2 和 mars_v31_wireless 一起按公司流程带入内网。"
 }
 catch {

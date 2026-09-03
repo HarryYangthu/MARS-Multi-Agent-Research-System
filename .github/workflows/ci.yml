@@ -3,7 +3,7 @@ name: Core compatibility CI
 on:
   pull_request:
   push:
-    branches: [main, "codex/windows-native"]
+    branches: [main, "codex/windows-native", "codex/v3-native-dev"]
 
 permissions:
   contents: read
