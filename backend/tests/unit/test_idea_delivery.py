@@ -88,3 +88,7 @@ async def test_reviewer_has_separate_instructions_and_supplied_context() -> None
 def test_candidate_progress_never_claims_acceptance() -> None:
     message = progress_message({"kind": "candidate", "text": "---\nhuman_summary: 这是待验收的研究方案。\n---\n"})
     assert message.startswith("候选方案，尚待验收：")
+
+
+def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
+    assert progress_message({"kind": "action", "tool": "search.arxiv_search", "reason": "Search more papers"}) == "正在检索相关论文。"

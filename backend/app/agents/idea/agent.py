@@ -130,7 +130,8 @@ class IdeaAgent(BaseAgent):
     def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
         messages = [Message("system", "You are a critical scientific methods reviewer. Assess the "
                             "candidate and actual evidence. Do not author a new proposal or tools. "
-                            "Return only the review JSON requested below. A schema pass is not scientific proof."),
+                            "Return only the review JSON requested below; write rationale and issues in concise Chinese. "
+                            "A schema pass is not scientific proof."),
                     Message("user", request.user_request),
                     Message("user", "Project constraints:\n" + context.project)]
         messages.extend(Message("user", "[untrusted supplied context:" + key + "]\n" + value)

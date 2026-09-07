@@ -76,7 +76,7 @@ def progress_message(event: dict[str, Any]) -> str:
         return "我会先核对研究目标和已有材料，再比较可行方向，形成一份可交给实验环节的方案。"
     if kind == "action":
         reason = str(event.get("reason") or "").strip()
-        if reason and len(reason) <= 240 and "\n" not in reason:
+        if reason and len(reason) <= 240 and "\n" not in reason and re.search(r"[\u4e00-\u9fff]", reason):
             return reason
         tool = str(event.get("tool", ""))
         descriptions = {"knowledge.kb_query": "查询相关历史记录", "knowledge.baseline_match": "查找可复用的基线记录",
@@ -97,7 +97,11 @@ def progress_message(event: dict[str, Any]) -> str:
     if kind == "validation":
         return "结构与材料检查通过，继续完成本次验收。" if event.get("valid") else f"结构或材料检查发现 {len(event.get('issues', []))} 项问题，候选方案尚未通过。"
     if kind == "review":
-        return "本轮模型审查未发现阻断问题；研究效果仍需实验验证。" if event.get("accepted") else f"审查发现 {len(event.get('issues', []))} 项待解决问题，需要修订方案。"
+        if event.get("accepted"):
+            return "本轮模型审查未发现阻断问题；研究效果仍需实验验证。"
+        issues = event.get("issues", [])
+        detail = str(issues[0]) if issues and re.search(r"[\u4e00-\u9fff]", str(issues[0])) else "需要修订方案。"
+        return f"审查发现 {len(issues)} 项待解决问题：" + detail[:220]
     return "本次方案生成已完成，正在整理交付材料。" if event.get("status") == "passed" else "本次运行已停止，未完成验收；进展和问题已保留。"
 
 
