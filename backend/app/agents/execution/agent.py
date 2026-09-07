@@ -51,7 +51,7 @@ class ExecutionAgent(BaseAgent):
     output_schema = "run_log.v1"
     agent_brief = (
         "你负责把代码规格转化为可执行的仿真批次并汇总 run_log。实际仿真由 Execution "
-        "流水线驱动(无 GPU 时走 mock_simulation);可用 execution.metrics_collector / "
+        "流水线驱动(缺少真实执行依赖时明确失败);可用 execution.metrics_collector / "
         "execution.log_streamer 读取已完成 run 的指标与日志来汇总结果。"
     )
 

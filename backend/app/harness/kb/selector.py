@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
-from app.harness.kb.config import current_profile, selector_config
+from app.harness.kb.config import selector_config
 from app.harness.kb.embedder import cosine, embed, tokenize
 from app.harness.kb.models import MemoryRecord, memory_from_kb_record
 from app.harness.kb.stores import KBRecord, KBStores, MAIN_ZONES, get_stores
@@ -34,6 +34,8 @@ def select_memory(
     update_access: bool = True,
     stores: KBStores | None = None,
 ) -> list[MemoryHit]:
+    if include_mock:
+        raise ValueError("mock Memory cannot be injected into agent context")
     selected_zones = list(zones or MAIN_ZONES)
     s = stores or get_stores()
     cfg = selector_config()
@@ -48,9 +50,10 @@ def select_memory(
         filters["memory_type"] = memory_type
     if project:
         filters["project"] = project
-    if approved_only:
-        filters["approved"] = True
     for zone in selected_zones:
+        filters.pop("approved", None)
+        if approved_only and zone != "literature":
+            filters["approved"] = True
         for record in s.zone(zone).all(
             filters=filters,
             exclude_superseded=not include_superseded,
@@ -92,7 +95,7 @@ def select_memory(
 
 
 def default_include_mock() -> bool:
-    return current_profile() == "dev_e2e"
+    return False
 
 
 def _weight(raw: dict[Any, Any], key: str, default: float) -> float:

@@ -1,9 +1,4 @@
-"""Centralized settings loaded from environment.
-
-Development keeps the V0 mock-first defaults. Production mode is fail-closed:
-missing LLM or execution configuration must stop a run instead of silently
-falling back to demo behavior.
-"""
+"""Centralized real-only settings; missing services never produce sample results."""
 from __future__ import annotations
 
 import os
@@ -29,6 +24,7 @@ class Settings(BaseSettings):
     qwen_api_key: str = ""
     gemini_api_key: str = ""
     deepseek_api_key: str = ""
+    zhipu_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
 
     # Default empty — local_vllm is "available" only when explicitly configured.
@@ -50,21 +46,19 @@ class Settings(BaseSettings):
 
     # === Mode flags ===
     mars_runtime_mode: Literal["development", "staging", "production"] = "development"
-    mars_mock_mode: Literal["auto", "always", "never"] = "auto"
+    mars_mock_mode: Literal["never"] = "never"
     mars_graph_engine: Literal["langgraph", "legacy"] = "langgraph"
     mars_distribution: Literal["v30-core", "v31-wireless"] = "v30-core"
     mars_project_pack_paths: str = ""
     mars_execution_backend: Literal[
-        "mock",
         "pim_cpu",
         "paper_static",
         "local_command",
         "docker_command",
         "remote_gpu",
-    ] = "mock"
+    ] = "local_command"
     mars_execution_device: Literal["cpu", "gpu"] = "cpu"
     mars_coding_backend: Literal[
-        "mock",
         "native_llm",
         "opencode",
         "codex",
@@ -75,7 +69,7 @@ class Settings(BaseSettings):
     mars_llm_timeout_seconds: float = 90.0
     mars_enable_network_tools: bool = False
     mars_web_search_allowlist: str = ""
-    mars_web_search_provider: Literal["", "brave", "tavily", "serper"] = ""
+    mars_web_search_provider: Literal["", "brave", "tavily", "serper", "zhipu"] = ""
     brave_search_api_key: str = ""
     tavily_api_key: str = ""
     serper_api_key: str = ""
@@ -99,7 +93,7 @@ class Settings(BaseSettings):
 
     @property
     def mock_allowed(self) -> bool:
-        return not self.is_production and self.mars_mock_mode != "never"
+        return False
 
     @property
     def effective_execution_device(self) -> Literal["cpu", "gpu"]:

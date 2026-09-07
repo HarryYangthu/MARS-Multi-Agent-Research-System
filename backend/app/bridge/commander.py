@@ -5,8 +5,7 @@ ReAct loop: the LLM emits a strict-JSON decision {reply, next_state, actions},
 the Commander executes any tool actions against the EXISTING engine, feeds the
 results back, and lets the LLM react — until it has nothing left to do.
 
-When no real LLM provider is configured it falls back to a deterministic
-mock decision path so the zero-dependency demo still works.
+Missing providers fail closed; all decisions require an actual model response.
 
 Layer: bridge/ (product orchestration). It drives the conversation FSM
 (harness/runtime/conversation_state) and the existing Orchestrator.
@@ -24,7 +23,6 @@ from loguru import logger
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
-from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import (
     LLMProvider,
@@ -62,7 +60,6 @@ class Commander:
         self.orchestrator = orchestrator
         self.run_store = run_store or orchestrator.run_store
         self._provider, self._llm_config = self._resolve_provider()
-        self._is_mock = isinstance(self._provider, MockProvider)
         self.max_react_steps = self._resolve_max_react_steps()
 
     def _resolve_provider(self) -> tuple[LLMProvider, Any]:
@@ -132,8 +129,6 @@ class Commander:
     # ----------------------------------------------------------- decision
 
     async def _decide(self, session: CommanderSession) -> Decision:
-        if self._is_mock:
-            return self._decide_mock(session)
         return await self._decide_llm(session)
 
     async def _decide_llm(self, session: CommanderSession) -> Decision:
@@ -147,12 +142,8 @@ class Commander:
                 ),
             )
             return _parse_decision(completion.text)
-        except Exception as exc:
-            settings = get_settings()
-            if settings.is_production or settings.mars_mock_mode == "never":
-                raise
-            logger.warning("commander LLM decide failed ({}); using mock", exc)
-            return self._decide_mock(session)
+        finally:
+            await self._provider.close()
 
     def _build_messages(self, session: CommanderSession) -> list[Message]:
         sys = _system_prompt(session)
@@ -185,54 +176,6 @@ class Commander:
             )
         )
         return msgs
-
-    # ----------------------------------------------------------- mock path
-
-    def _decide_mock(self, session: CommanderSession) -> Decision:
-        """Deterministic fallback when no LLM is available."""
-        last_user = next(
-            (m.content for m in reversed(session.messages) if m.role == "user"), ""
-        )
-        text = last_user.lower()
-
-        # Already saw a tool observation this turn? Then summarize and stop.
-        if session.messages and session.messages[-1].role == "tool":
-            res = session.messages[-1].tool_result or {}
-            if res.get("ok") and res.get("run_id"):
-                return Decision(
-                    reply=(
-                        f"已启动 run `{res['run_id']}`(入口:{res.get('entrypoint')})。"
-                        "我会监控执行,有节点需要审核时提醒你。"
-                    ),
-                    next_state="executing",
-                )
-            return Decision(reply=f"工具结果:{json.dumps(res, ensure_ascii=False)[:300]}")
-
-        # Intent routing heuristics (mock):
-        has_idea = any(k in text for k in ["已有", "已经有", "有了想法", "有 idea", "有idea", "假设", "验证"])
-        wants_code = any(k in text for k in ["代码", "实现", "coding", "patch"])
-        if not last_user:
-            return Decision(
-                reply="你好,我是 MARS 主控 Agent。告诉我你的研究目标,我来规划并调度 5 个 Agent。",
-                next_state="idle",
-            )
-        if has_idea:
-            entry = "experiment"
-            note = "检测到你已有想法/假设,跳过 Idea Agent,直接从实验设计进入。"
-        elif wants_code:
-            entry = "coding"
-            note = "检测到你要写代码,从 Coding Agent 进入。"
-        else:
-            entry = "pipeline"
-            note = "走完整 Idea→Experiment→Coding→Execution→Writing 链路。"
-        return Decision(
-            reply=f"明白。{note}正在启动…",
-            next_state="planning",
-            actions=[{
-                "tool": "create_and_start_run",
-                "args": {"entrypoint": entry, "user_request": last_user},
-            }],
-        )
 
     # ----------------------------------------------------------- helpers
 

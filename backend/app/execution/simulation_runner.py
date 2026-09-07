@@ -1,13 +1,4 @@
-"""Single-experiment runner.
-
-For the pimc project this runs a REAL (lightweight) dual-carrier PIM
-cancellation simulation on CPU (see ``pim_cancellation.py``) — generating a
-real ~30k-point complex dual-carrier signal, fitting a memory-polynomial
-canceller, and emitting a real loss curve + RES/PIM/APE metrics.
-
-Falls back to the synthetic mock simulation when ``MARS_MOCK_MODE=always`` or
-for non-PIM projects. GPU training of the full 7-layer model is V2.
-"""
+"""Explicit real PIM CPU or external paper-static execution; no fake fallback."""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.execution.mock_simulation import MockJob, MockResult, run_mock_simulation
+from app.execution.results import SimulationResult
 from app.settings import get_settings
 
 
@@ -55,7 +46,7 @@ async def run_real_pim_simulation(
     bus_publish: Any | None = None,
     sleep_per_tick: float = 0.05,
     steps: int = 60,
-) -> MockResult:
+) -> SimulationResult:
     """Run the real dual-carrier PIM cancellation for one ablation."""
     from app.execution.pim_cancellation import (
         DEFAULT_N_POINTS,
@@ -176,7 +167,7 @@ async def run_real_pim_simulation(
                 channel,
                 {"event": "execution.failed", "experiment_id": spec.experiment_id, "error": str(exc)},
             )
-        return MockResult(
+        return SimulationResult(
             run_id=spec.run_id,
             experiment_id=spec.experiment_id,
             duration_seconds=time.monotonic() - started,
@@ -210,7 +201,7 @@ async def run_real_pim_simulation(
                 "metrics": metrics,
             },
         )
-    return MockResult(
+    return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=elapsed,
@@ -222,16 +213,10 @@ async def run_real_pim_simulation(
     )
 
 
-async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int = 30) -> MockResult:
+async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int = 30) -> SimulationResult:
     settings = get_settings()
-    if settings.is_production and settings.mars_execution_backend == "mock":
-        raise RuntimeError("production mode cannot use mock execution backend")
     backend = settings.mars_execution_backend
-    use_real = (
-        settings.mars_mock_mode != "always"
-        and spec.project == "pimc"
-        and spec.run_root is not None
-    )
+    use_real = spec.project == "pimc" and spec.run_root is not None
     if use_real and backend == "paper_static":
         from app.execution.paper_static_adapter import run_paper_static_simulation
 
@@ -239,16 +224,7 @@ async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int =
     if use_real and backend == "pim_cpu":
         return await run_real_pim_simulation(spec, bus_publish=bus_publish, steps=steps)
 
-    job = MockJob(
-        run_id=spec.run_id,
-        experiment_id=spec.experiment_id,
-        project=spec.project,
-        config=spec.config,
-        duration_seconds=spec.duration_seconds,
-        template=spec.template,
-        seed=spec.seed,
-    )
-    return await run_mock_simulation(job, bus_publish=bus_publish, steps=steps)
+    raise RuntimeError(f"no configured execution adapter for backend {backend!r} and project {spec.project!r}")
 
 
 def _safe_name(value: str) -> str:

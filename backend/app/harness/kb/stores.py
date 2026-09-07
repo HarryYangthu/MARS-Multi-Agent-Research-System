@@ -9,6 +9,7 @@ V2 work.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from importlib import import_module
 from pathlib import Path
@@ -183,7 +184,7 @@ class FileMemoryBackend:
     name = "file"
 
     def __init__(self, base: Path | None = None) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self._zones: dict[str, FileZoneBackend] = {
             zone: FileZoneBackend(zone, self.base / zone / "_index.json")
             for zone in ZONES
@@ -351,7 +352,7 @@ class ChromaMemoryBackend:
     name = "chroma"
 
     def __init__(self, base: Path | None = None) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self.path = self.base / ".chromadb"
         self.path.mkdir(parents=True, exist_ok=True)
         chromadb = _load_chromadb()
@@ -423,7 +424,7 @@ class KBStores:
         store: str = "file",
         backend: MemoryBackend | None = None,
     ) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self._backend = backend or _build_backend(store=store, base=self.base)
 
     @property
@@ -595,7 +596,8 @@ def _record_matches(
     )
     if exclude_superseded and memory.superseded_by:
         return False
-    if exclude_mock and memory.is_mock:
+    from app.harness.kb.provenance import verified_memory
+    if exclude_mock and (memory.is_mock or not verified_memory(record.text, record.metadata)):
         return False
     if not filters:
         return True

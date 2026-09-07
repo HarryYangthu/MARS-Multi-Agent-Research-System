@@ -50,7 +50,6 @@ posttrain/tensorboard/
 posttrain/wandb/
 workspace/uploads/
 workspace/repos/*
-!workspace/repos/pimc-stub/
 !workspace/repos/README.md
 
 # Large or local-only research artifacts. Keep real data in external project
@@ -75,3 +74,6 @@ docs/*.xlsx
 htmlcov/
 
 .DS_Store
+
+/knowledge/_retrieval_receipts/
+/release-evidence*/

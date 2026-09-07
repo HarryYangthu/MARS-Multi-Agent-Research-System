@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.execution.mock_simulation import MockResult
+from app.execution.results import SimulationResult
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 
 
-def write_run_log(*, run_root: Path, result: MockResult, project: str) -> Path:
-    """Write a `run_log.v1` artifact derived from MockResult."""
+def write_run_log(*, run_root: Path, result: SimulationResult, project: str) -> Path:
+    """Write a `run_log.v1` artifact derived from SimulationResult."""
     metadata: dict[str, Any] = {
         "schema": "run_log.v1",
         "project": project,
@@ -40,7 +40,7 @@ def write_run_log(*, run_root: Path, result: MockResult, project: str) -> Path:
     return target
 
 
-def write_metrics_json(*, run_root: Path, results: list[MockResult]) -> Path:
+def write_metrics_json(*, run_root: Path, results: list[SimulationResult]) -> Path:
     target = run_root / "execution" / "metrics.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = [

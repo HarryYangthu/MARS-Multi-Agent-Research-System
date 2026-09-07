@@ -17,6 +17,8 @@ from typing import Any
 import httpx as httpx
 
 from app.harness.kb.memory_writer import write_to_zone
+from app.harness.kb.provenance import record_retrieval
+from app.harness.tools.search.source_fetch import fetch_sources_tool as fetch_sources_tool
 from app.harness.tools.registry import ToolContext, ToolResult
 from app.settings import get_settings, repo_root
 
@@ -80,13 +82,14 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     if isinstance(categories, list) and categories:
         category_query = " AND (" + " OR ".join(f"cat:{c}" for c in categories) + ")"
     date_from = str(args.get("date_from", "") or "")
-    sort_by_raw = str(args.get("sort_by") or "submittedDate")
+    sort_by_raw = str(args.get("sort_by") or "relevance")
     sort_by = (
         sort_by_raw
         if sort_by_raw in {"relevance", "lastUpdatedDate", "submittedDate"}
         else "submittedDate"
     )
-    search_query = query + category_query
+    terms = query if re.search(r"\b(AND|OR|ANDNOT)\b|:", query) else " AND ".join(query.split())
+    search_query = terms + category_query
     cache_key = _cache_key(
         {
             "q": search_query,
@@ -109,17 +112,19 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
     try:
         await _respect_arxiv_rate_limit()
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.get(url)
             response.raise_for_status()
     except httpx.HTTPError as exc:
-        return ToolResult(ok=False, error=f"arXiv request failed: {exc}")
+        return ToolResult(ok=False, error=f"arXiv request failed: {type(exc).__name__}: {exc}")
     hits = _parse_arxiv(response.text, date_from=date_from)
     for hit in hits:
+        receipt = record_retrieval(text=f"{hit['title']}\n\n{hit['summary']}", url=hit["url"], title=hit["title"], run_id=ctx.run_id)
         write_to_zone(
             zone="literature",
             text=f"{hit['title']}\n\n{hit['summary']}",
             metadata={
+                **receipt,
                 "source": "arxiv",
                 "arxiv_id": hit["id"],
                 "title": hit["title"],
@@ -140,140 +145,6 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return ToolResult(ok=True, output=payload, evidence_refs=[str(cache_path)])
-
-
-async def fetch_sources_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-    """Download selected paper/blog sources and persist deterministic summaries."""
-    settings = get_settings()
-    if not settings.mars_enable_network_tools:
-        return ToolResult(
-            ok=False,
-            error="network tools are disabled; set MARS_ENABLE_NETWORK_TOOLS=true",
-        )
-    sources_raw = args.get("sources", [])
-    if not isinstance(sources_raw, list) or not sources_raw:
-        return ToolResult(ok=False, error="sources must be a non-empty list")
-    max_sources = max(1, min(int(args.get("max_sources", 3) or 3), 5))
-    out_dir = _source_download_dir(ctx)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    fetched: list[dict[str, Any]] = []
-    evidence_refs: list[str] = []
-    started = time.monotonic()
-    async with httpx.AsyncClient(
-        timeout=_SOURCE_FETCH_TIMEOUT_SECONDS,
-        follow_redirects=True,
-    ) as client:
-        for index, raw in enumerate(sources_raw[:max_sources], 1):
-            if not isinstance(raw, dict):
-                continue
-            title = str(raw.get("title") or raw.get("id") or f"source_{index}").strip()
-            source_url = str(raw.get("url") or raw.get("evidence_ref") or "").strip()
-            pdf_url = str(raw.get("pdf_url") or _pdf_url_for_source(source_url)).strip()
-            download_url = pdf_url or source_url
-            if not download_url:
-                fetched.append(
-                    {
-                        "title": title,
-                        "ok": False,
-                        "error": "missing source url",
-                    }
-                )
-                continue
-            source_type = "pdf" if _looks_like_pdf(download_url) else "html"
-            basename = _safe_source_basename(title or download_url, index=index)
-            extension = ".pdf" if source_type == "pdf" else ".html"
-            target = out_dir / f"{basename}{extension}"
-            summary_path = out_dir / f"{basename}.summary.md"
-            if time.monotonic() - started >= _SOURCE_FETCH_BUDGET_SECONDS:
-                fetched.append(
-                    {
-                        "title": title,
-                        "ok": False,
-                        "source_type": source_type,
-                        "url": source_url or download_url,
-                        "download_url": download_url,
-                        "error": "source fetch budget exhausted; kept earlier successful downloads",
-                    }
-                )
-                continue
-            try:
-                response = await client.get(download_url)
-                response.raise_for_status()
-                data = response.content[:_MAX_SOURCE_DOWNLOAD_BYTES]
-                target.write_bytes(data)
-                extracted = (
-                    _extract_pdf_text(data)
-                    if source_type == "pdf"
-                    else _extract_html_text(data, response.encoding)
-                )
-                abstract = str(raw.get("summary") or raw.get("snippet") or raw.get("excerpt") or "")
-                summary = _render_source_summary(
-                    title=title,
-                    source_url=source_url or download_url,
-                    download_url=download_url,
-                    source_type=source_type,
-                    abstract=abstract,
-                    extracted=extracted,
-                )
-                summary_path.write_text(summary, encoding="utf-8")
-                row = {
-                    "title": title,
-                    "ok": True,
-                    "source_type": source_type,
-                    "url": source_url or download_url,
-                    "download_url": download_url,
-                    "download_path": target.relative_to(repo_root()).as_posix()
-                    if _is_relative_to(target, repo_root())
-                    else str(target),
-                    "summary_path": summary_path.relative_to(repo_root()).as_posix()
-                    if _is_relative_to(summary_path, repo_root())
-                    else str(summary_path),
-                    "summary": summary[:3000],
-                    "excerpt": extracted[:1600],
-                    "bytes": len(data),
-                }
-                fetched.append(row)
-                evidence_refs.extend(
-                    [
-                        str(row["url"]),
-                        str(row["download_path"]),
-                        str(row["summary_path"]),
-                    ]
-                )
-            except (httpx.HTTPError, OSError) as exc:
-                fetched.append(
-                    {
-                        "title": title,
-                        "ok": False,
-                        "source_type": source_type,
-                        "url": source_url or download_url,
-                        "download_url": download_url,
-                        "error": f"source download failed: {exc}",
-                    }
-                )
-    index_path = out_dir / "source_fetch_index.v1.json"
-    index_path.write_text(json.dumps(fetched, ensure_ascii=False, indent=2), encoding="utf-8")
-    evidence_refs.append(
-        index_path.relative_to(repo_root()).as_posix()
-        if _is_relative_to(index_path, repo_root())
-        else str(index_path)
-    )
-    return ToolResult(
-        ok=any(bool(item.get("ok")) for item in fetched),
-        output={
-            "download_dir": str(out_dir),
-            "index_path": evidence_refs[-1],
-            "sources": fetched,
-        },
-        evidence_refs=evidence_refs,
-        artifacts=[
-            {
-                "kind": "source_fetch_index",
-                "path": evidence_refs[-1],
-            }
-        ],
-    )
 
 
 async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -309,7 +180,7 @@ async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             ok=False,
             error=(
                 "web_search provider is not configured; set "
-                "MARS_WEB_SEARCH_PROVIDER=brave|tavily|serper"
+                "MARS_WEB_SEARCH_PROVIDER=zhipu|brave|tavily|serper"
             ),
         )
     try:
@@ -322,7 +193,7 @@ async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     except ValueError as exc:
         return ToolResult(ok=False, error=str(exc))
     except httpx.HTTPError as exc:
-        return ToolResult(ok=False, error=f"web_search request failed: {exc}")
+        return ToolResult(ok=False, error=f"web_search request failed: {type(exc).__name__}: {exc}")
     filtered = _filter_hits_by_domain(hits, tuple(domains))
     return ToolResult(
         ok=True,
@@ -331,6 +202,9 @@ async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             "query": query,
             "domains": domains,
             "hits": filtered[:top_k],
+            "raw_hit_count": len(hits),
+            "filtered_hit_count": len(filtered),
+            "empty_reason": "no provider hits" if not hits else ("all hits outside requested domains" if not filtered else ""),
         },
         evidence_refs=[hit["url"] for hit in filtered[:top_k] if hit.get("url")],
     )
@@ -369,7 +243,8 @@ def _entry_text(node: ET.Element, name: str, ns: dict[str, str]) -> str:
 
 
 def _cache_dir() -> Path:
-    return repo_root() / "knowledge" / "literature" / "_arxiv_cache"
+    from app.harness.kb.stores import get_stores
+    return get_stores().base / "literature" / "_arxiv_cache"
 
 
 def _cache_key(payload: dict[str, Any]) -> str:
@@ -387,7 +262,7 @@ def _source_download_dir(ctx: ToolContext) -> Path:
 
 def _pdf_url_for_source(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
-    if "arxiv.org" not in parsed.netloc:
+    if parsed.hostname not in {"arxiv.org", "export.arxiv.org"}:
         return ""
     if "/pdf/" in parsed.path:
         return url
@@ -492,6 +367,26 @@ async def _call_web_search_provider(
     top_k: int,
 ) -> list[dict[str, str]]:
     settings = get_settings()
+    if provider == "zhipu":
+        if not settings.zhipu_api_key:
+            raise ValueError("ZHIPU_API_KEY is required for zhipu web_search")
+        if len(query) > 70:
+            raise ValueError("Zhipu search query must be <=70 characters; use concise terms")
+        payload: dict[str, Any] = {"search_query": query, "search_engine": "search_std",
+                                   "search_intent": False, "count": top_k, "content_size": "high"}
+        if len(domains) == 1:
+            payload["search_domain_filter"] = domains[0]
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post("https://open.bigmodel.cn/api/paas/v4/web_search",
+                                         headers={"Authorization": "Bearer " + settings.zhipu_api_key},
+                                         json=payload)
+            response.raise_for_status()
+        raw = response.json()
+        if not isinstance(raw, dict) or not isinstance(raw.get("search_result"), list):
+            raise ValueError("invalid Zhipu search response: search_result array missing")
+        return [{"title": str(x.get("title", "")), "url": str(x.get("link", "")),
+                 "snippet": str(x.get("content", "")), "source": "zhipu"}
+                for x in raw["search_result"] if isinstance(x, dict)]
     if provider == "tavily":
         if not settings.tavily_api_key:
             raise ValueError("TAVILY_API_KEY is required for tavily web_search")
@@ -502,7 +397,7 @@ async def _call_web_search_provider(
             "include_domains": list(domains),
             "search_depth": "basic",
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post("https://api.tavily.com/search", json=payload)
             response.raise_for_status()
         raw = response.json()
@@ -522,7 +417,7 @@ async def _call_web_search_provider(
             raise ValueError("BRAVE_SEARCH_API_KEY is required for brave web_search")
         headers = {"X-Subscription-Token": settings.brave_search_api_key}
         params = {"q": _domain_query(query, domains), "count": str(top_k)}
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.get(
                 "https://api.search.brave.com/res/v1/web/search",
                 params=params,
@@ -547,7 +442,7 @@ async def _call_web_search_provider(
             raise ValueError("SERPER_API_KEY is required for serper web_search")
         headers = {"X-API-KEY": settings.serper_api_key, "Content-Type": "application/json"}
         payload = {"q": _domain_query(query, domains), "num": top_k}
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(
                 "https://google.serper.dev/search",
                 json=payload,

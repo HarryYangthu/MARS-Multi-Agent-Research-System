@@ -51,7 +51,7 @@ def _steps_from_args(args: dict[str, Any]) -> int:
 
 def _backend_from_args(args: dict[str, Any]) -> str:
     cfg = load_execution_config()["execution"]
-    return str(args.get("backend") or cfg.get("backend") or "mock")
+    return str(args.get("backend") or cfg.get("backend") or "local_command")
 
 
 def _float_arg(args: dict[str, Any], key: str, default: float) -> float:
@@ -164,44 +164,6 @@ def _seed_for(spec: _ExecutionSpec) -> int:
     return int(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8], 16)
 
 
-def _run_mock_spec(spec: _ExecutionSpec, *, steps: int) -> _ExecutionResult:
-    started = time.monotonic()
-    seed = _seed_for(spec)
-    n_steps = max(1, steps)
-    expert_count = _config_float(spec.config, "expert_count", 8.0)
-    learning_rate = _config_float(spec.config, "learning_rate", 0.06)
-    floor = max(0.008, 0.022 - min(expert_count, 16.0) * 0.0005)
-    decay = max(0.020, min(0.090, learning_rate))
-    phase = (seed % 17) / 17.0
-    loss_curve = [
-        float(floor + 0.34 * math.exp(-decay * step) + 0.002 * math.sin(step * 0.7 + phase))
-        for step in range(n_steps)
-    ]
-    final_loss = max(0.001, loss_curve[-1])
-    res = -20.0 - min(expert_count, 16.0) * 1.5
-    metrics = {
-        "loss": round(final_loss, 6),
-        "RES": round(res, 3),
-        "PIM": round(-res, 3),
-        "APE": round(max(0.4, 5.0 / max(1.0, expert_count)), 3),
-    }
-    fingerprint_hash = "sha256:" + hashlib.sha256(
-        f"{spec.project}:{spec.run_id}:{spec.experiment_id}:{spec.config}:harness-mock".encode(
-            "utf-8"
-        )
-    ).hexdigest()[:24]
-    return _ExecutionResult(
-        run_id=spec.run_id,
-        experiment_id=spec.experiment_id,
-        duration_seconds=time.monotonic() - started,
-        status="completed",
-        metrics=metrics,
-        fingerprint_hash=fingerprint_hash,
-        is_mock=True,
-        loss_curve=loss_curve,
-    )
-
-
 def _config_float(config: dict[str, Any], key: str, default: float) -> float:
     try:
         return float(config.get(key, default))
@@ -231,7 +193,7 @@ def _write_run_log(
     }
     body = (
         f"# Run log - {result.experiment_id}\n\n"
-        f"Harness mock simulation completed at {datetime.now(tz=timezone.utc).isoformat()}.\n"
+        f"Execution status {result.status} recorded at {datetime.now(tz=timezone.utc).isoformat()}.\n"
     )
     target_dir = run_root / "execution"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -506,9 +468,7 @@ async def simulation_runner_tool(args: dict[str, Any], ctx: ToolContext) -> Tool
         return ToolResult(ok=False, error="run_id is required")
     backend = _backend_from_args(args)
     command_artifacts: list[dict[str, Any]] = []
-    if backend == "mock":
-        result = _run_mock_spec(spec, steps=_steps_from_args(args))
-    elif backend == "local_command":
+    if backend == "local_command":
         try:
             result, command_artifacts = await _run_local_command(
                 args=args,
@@ -567,7 +527,7 @@ async def batch_runner_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
             )
     cfg = load_execution_config()["execution"]
     backend = _backend_from_args(args)
-    if backend not in {"mock", "local_command"}:
+    if backend != "local_command":
         return _backend_unavailable_result(backend=backend, run_id=run_id)
     configured_limit = int(cfg.get("max_concurrency", 6) or 6)
     requested_limit = int(args.get("max_concurrency", configured_limit) or configured_limit)
@@ -592,9 +552,6 @@ async def batch_runner_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
             command_artifacts.extend(local_artifacts)
             if result.status != "completed":
                 failures.append((spec.experiment_id, "local_command failed"))
-    else:
-        results = [_run_mock_spec(spec, steps=steps) for spec in specs]
-        failures = []
     artifacts = _persist_results(
         run_root=_run_root(ctx, run_id),
         project=ctx.project,

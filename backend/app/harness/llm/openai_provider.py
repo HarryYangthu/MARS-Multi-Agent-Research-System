@@ -44,6 +44,11 @@ class _OpenAICompatProvider(LLMProvider):
         self._default_reasoning_effort = default_reasoning_effort
         self._client: Any = None
 
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
+
     def _get_client(self) -> Any:
         if self._client is None:
             from openai import AsyncOpenAI
@@ -81,6 +86,8 @@ class _OpenAICompatProvider(LLMProvider):
         if not (self.name == "deepseek" and thinking_enabled):
             kwargs["temperature"] = config.temperature
             kwargs["top_p"] = config.top_p
+        if config.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
         if stream:
             kwargs["stream"] = True
 
@@ -104,12 +111,21 @@ class _OpenAICompatProvider(LLMProvider):
         max_retries = min(max(config.max_retries, 0), MAX_LLM_RETRIES)
         base_delay = max(config.retry_base_delay_seconds, 0.0)
         for attempt in range(max_retries + 1):
+            if config.attempt_observer:
+                config.attempt_observer("sdk_attempt_started", {"attempt": attempt + 1})
             try:
-                return await operation()
+                result = await operation()
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_succeeded", {"attempt": attempt + 1})
+                return result
             except Exception as exc:
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1, "error": _safe_error_label(exc)})
                 if attempt >= max_retries or not _is_retryable_error(exc):
                     raise
                 delay = base_delay * (2**attempt)
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_retry_scheduled", {"next_attempt": attempt + 2, "delay": delay})
                 logger.warning(
                     "LLM request retry {}/{} provider={} model={} reason={} "
                     "delay_seconds={}",
@@ -150,6 +166,7 @@ class _OpenAICompatProvider(LLMProvider):
                 model=config.model,
                 finish_reason=finish_reason,
                 empty_final=not bool(text.strip()),
+                usage=_usage_payload(getattr(resp, "usage", None)),
             )
         if not text.strip():
             raise LLMCompletionError(
@@ -158,6 +175,7 @@ class _OpenAICompatProvider(LLMProvider):
                 model=config.model,
                 finish_reason=finish_reason,
                 empty_final=True,
+                usage=_usage_payload(getattr(resp, "usage", None)),
             )
         return Completion(
             text=text,
@@ -215,6 +233,11 @@ class _OpenAICompatProvider(LLMProvider):
                 empty_final=True,
             )
         yield Delta(text="", finish_reason=finish_reason or "stop")
+
+
+class ZhipuProvider(_OpenAICompatProvider):
+    def __init__(self, *, api_key: str, base_url: str = "https://open.bigmodel.cn/api/paas/v4") -> None:
+        super().__init__(api_key=api_key, base_url=base_url, provider_name="zhipu")
 
 
 class OpenAIProvider(_OpenAICompatProvider):

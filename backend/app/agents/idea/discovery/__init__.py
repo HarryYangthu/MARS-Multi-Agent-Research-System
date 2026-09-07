@@ -1,7 +1,6 @@
 """Co-Scientist deep hypothesis discovery inside the Idea Agent."""
 
 from app.agents.idea.discovery.backend import (
-    DeterministicRoleBackend,
     DiscoveryProtocolError,
     DiscoveryRoleBackend,
     LLMRoleBackend,
@@ -26,7 +25,6 @@ __all__ = [
     "DeepDiscoveryConfig",
     "DeepDiscoveryInsufficientPool",
     "DeepDiscoveryState",
-    "DeterministicRoleBackend",
     "DiscoveryProtocolError",
     "DiscoveryRoleBackend",
     "IdeaBudgetProfile",

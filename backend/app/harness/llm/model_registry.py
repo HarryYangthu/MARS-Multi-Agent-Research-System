@@ -1,9 +1,4 @@
-"""Routes (provider, model) pairs to concrete LLMProvider instances.
-
-★ Critical fallback rule (DESIGN §16.1): if the requested provider has no
-API key (or its endpoint is unreachable), the registry returns a
-``MockProvider`` — and logs a clear warning so the run still completes.
-"""
+"""Route configured real providers; missing credentials fail closed."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -13,9 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
-from loguru import logger
 
-from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, ReasoningEffort
 from app.settings import env_or_local, get_settings, repo_root
 
@@ -89,7 +82,7 @@ def _agents_config() -> dict[str, AgentConfig]:
             thinking = {}
         if not isinstance(retry, Mapping):
             retry = {}
-        provider = str(model.get("provider", "mock"))
+        provider = str(model.get("provider", ""))
         provider_defaults = _provider_defaults(provider)
         reasoning_effort_raw = str(model.get("reasoning_effort") or "").strip()
         if reasoning_effort_raw and reasoning_effort_raw not in {
@@ -107,7 +100,7 @@ def _agents_config() -> dict[str, AgentConfig]:
             enabled=bool(body.get("enabled", True)),
             output_schema=str(body.get("output_schema", "")),
             model_provider=provider,
-            model_name=str(model.get("model", "mock-1")),
+            model_name=str(model.get("model", "")),
             temperature=float(model.get("temperature", 0.7)),
             max_tokens=int(model.get("max_tokens", 4096)),
             debate_enabled=bool(debate.get("enabled", False)),
@@ -165,6 +158,7 @@ _KEY_ATTRS: Mapping[str, str] = {
     "qwen": "qwen_api_key",
     "gemini": "gemini_api_key",
     "deepseek": "deepseek_api_key",
+    "zhipu": "zhipu_api_key",
     "local_vllm": "local_vllm_api_key",
     "custom": "custom_endpoint_api_key",
 }
@@ -181,7 +175,7 @@ def _settings_value(settings: Any, attr: str) -> str:
     return str(val or "")
 
 
-def available_providers(*, include_mock: bool = True) -> set[str]:
+def available_providers(*, include_mock: bool = False) -> set[str]:
     """Set of providers whose API key (or endpoint) is configured."""
     out: set[str] = set()
     if _secret_value("ANTHROPIC_API_KEY", "anthropic_api_key"):
@@ -200,8 +194,8 @@ def available_providers(*, include_mock: bool = True) -> set[str]:
         out.add("custom")
     if _secret_value("DEEPSEEK_API_KEY", "deepseek_api_key"):
         out.add("deepseek")
-    if include_mock:
-        out.add("mock")  # always available outside production admission checks
+    if _secret_value("ZHIPU_API_KEY", "zhipu_api_key"):
+        out.add("zhipu")
     return out
 
 
@@ -256,6 +250,10 @@ def _build_real_provider(
                 base_url=credentials["base_url"],
                 api_key=credentials["api_key"] or "EMPTY",
             )
+        if provider == "zhipu":
+            from app.harness.llm.openai_provider import ZhipuProvider
+
+            return ZhipuProvider(api_key=credentials["api_key"], base_url=credentials["base_url"] or "https://open.bigmodel.cn/api/paas/v4")
         if provider == "custom":
             from app.harness.llm.openai_provider import CustomEndpointProvider
 
@@ -277,22 +275,12 @@ def _build_real_provider(
                 ),
             )
     except Exception as exc:
-        logger.warning(
-            "failed to build provider '{}': {}; falling back to mock",
-            provider,
-            exc,
-        )
-        return None
+        raise RuntimeError(f"provider {provider!r} failed to initialize") from exc
     return None
 
 
 def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
-    """Pick a provider for an agent, with mock fallback.
-
-    Returns (provider, llm_config). The llm_config carries the agent's
-    output_schema so MockProvider can produce the right fake.
-    """
-    settings = get_settings()
+    """Select an explicitly configured real model; never substitute output."""
     cfg = LLMConfig(
         provider=agent_config.model_provider,
         model=agent_config.model_name,
@@ -307,33 +295,11 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
         retry_base_delay_seconds=agent_config.retry_base_delay_seconds,
     )
 
-    if settings.mars_mock_mode == "always":
-        if settings.is_production:
-            raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
-        logger.info("MARS_MOCK_MODE=always — agent {} uses mock", agent_config.name)
-        return MockProvider(default_schema=agent_config.output_schema), cfg
-
     if not provider_configured_for_agent(agent_config):
-        if settings.is_production or settings.mars_mock_mode == "never":
-            raise RuntimeError(
-                f"provider '{agent_config.model_provider}' is not configured "
-                f"for agent '{agent_config.name}'"
-            )
-        logger.warning(
-            "provider '{}' not configured (agent={}) — falling back to mock_provider",
-            agent_config.model_provider,
-            agent_config.name,
-        )
-        return MockProvider(default_schema=agent_config.output_schema), cfg
-
+        raise RuntimeError(f"provider {agent_config.model_provider!r} is not configured for {agent_config.name}")
     real = _build_real_provider(agent_config.model_provider, agent_config=agent_config)
     if real is None:
-        if settings.is_production or settings.mars_mock_mode == "never":
-            raise RuntimeError(
-                f"provider '{agent_config.model_provider}' failed to initialize "
-                f"for agent '{agent_config.name}'"
-            )
-        return MockProvider(default_schema=agent_config.output_schema), cfg
+        raise RuntimeError(f"unsupported provider: {agent_config.model_provider}")
     return real, cfg
 
 
@@ -400,12 +366,10 @@ def _provider_credentials(
 
 
 def _provider_is_ready(provider: str, credentials: Mapping[str, str]) -> bool:
-    if provider == "mock":
-        return True
     if provider == "local_vllm":
         return bool(credentials.get("base_url"))
     if provider == "custom":
         return bool(credentials.get("api_key") and credentials.get("base_url"))
-    if provider in {"anthropic", "openai", "qwen", "gemini", "deepseek"}:
+    if provider in {"anthropic", "openai", "qwen", "gemini", "deepseek", "zhipu"}:
         return bool(credentials.get("api_key"))
     return False

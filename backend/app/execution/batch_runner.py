@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.execution.mock_simulation import MockResult
+from app.execution.results import SimulationResult
 from app.execution.simulation_runner import JobSpec, run_one
 
 
@@ -19,7 +19,7 @@ class BatchConfig:
 
 @dataclass
 class BatchOutcome:
-    results: list[MockResult] = field(default_factory=list)
+    results: list[SimulationResult] = field(default_factory=list)
     failures: list[tuple[str, str]] = field(default_factory=list)
 
 

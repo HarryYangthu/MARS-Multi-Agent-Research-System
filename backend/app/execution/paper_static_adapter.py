@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-from app.execution.mock_simulation import MockResult
+from app.execution.results import SimulationResult
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.settings import repo_root
 
@@ -36,7 +36,7 @@ async def run_paper_static_simulation(
     *,
     bus_publish: Any | None = None,
     steps: int = 1,
-) -> MockResult:
+) -> SimulationResult:
     """Run the external static PIMC script for one MARS experiment."""
     started = time.monotonic()
     cfg = _paper_static_config()
@@ -276,7 +276,7 @@ async def run_paper_static_simulation(
             },
         )
 
-    return MockResult(
+    return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=time.monotonic() - started,
@@ -501,8 +501,8 @@ def _write_manifest(*, run_root: Path, experiment_id: str, payload: dict[str, An
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _failed_result(spec: Any, started: float, message: str) -> MockResult:
-    return MockResult(
+def _failed_result(spec: Any, started: float, message: str) -> SimulationResult:
+    return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=time.monotonic() - started,

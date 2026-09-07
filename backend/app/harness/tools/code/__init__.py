@@ -295,7 +295,7 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
     if requested:
         commands = tuple(cmd for cmd in commands if cmd.id == requested)
     if not commands:
-        return ToolResult(ok=True, output={"commands": [], "note": f"no {kind} commands configured"})
+        return ToolResult(ok=False, error=f"no {kind} commands configured; not executed", output={"commands": []})
     allowlist = tool_config(tool_name).command_allowlist
     timeout = command_timeout_seconds()
     results: list[dict[str, Any]] = []
