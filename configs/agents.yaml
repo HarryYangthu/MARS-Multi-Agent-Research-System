@@ -37,7 +37,7 @@ idea:
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek-v4-flash
     temperature: 0.7
     # DeepSeek thinking shares this bound between reasoning and visible output.
     # 16K leaves room for high-effort reasoning plus one complete proposal.v1
@@ -60,13 +60,13 @@ idea:
     participants:
     - role: proposer
       provider: deepseek
-      model: deepseek-v4-pro
+      model: deepseek-v4-flash
     - role: critic
       provider: deepseek
-      model: deepseek-v4-pro
+      model: deepseek-v4-flash
     - role: judge
       provider: deepseek
-      model: deepseek-v4-pro
+      model: deepseek-v4-flash
   research:
     required_tools: true
     enable_network: true
