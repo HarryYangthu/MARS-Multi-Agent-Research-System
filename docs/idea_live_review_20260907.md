@@ -229,3 +229,9 @@ Discovery 测试不再返回按候选索引预设的 loss/GPU 消耗或伪造安
 GitHub PR #5 的首个 CI 在创建任何 job 之前失败。GitHub 原始 annotation 为 `(Line: 21, Col: 16): Unrecognized named-value: matrix`；已将动态 shell matrix 拆成两个固定 shell 的 Windows job，不删除任一 shell 验证。
 
 收尾发现配置 API 仍枚举/接受 Mock provider、Coding workspace 可回退到 stub、旧 backtracking demo 强制开启 Mock；均移除。结果落盘不再伪填 batch_size/GPU/上游引用，旧模拟结果禁止发布。命令/论文适配器缺实测指标时不能仅凭 exit 0 标为科研执行完成；失败 SimulationResult 进入 batch failures，非法零并发立即拒绝。针对性真实回归 14+8 项通过；strict mypy 403 文件通过。
+
+### Python 3.11 / 实际 Chroma 与 Windows 回归
+
+实际安装依赖的 Python 3.11 strict mypy 检查 403 文件通过。完整测试启用了真实 Chroma 后发现旧正向样例缺来源回执；已改用真实本地文件回执，并修复多 KB 实例错误依赖全局 KB 路径的问题。每个 File/Chroma backend 现在只信任本实例根目录下的回执，测试明确拒绝跨库复制的回执；22 个相关检查通过。
+
+Windows 原测试覆盖了伪 Docker 返回，已移除替身。保留实际临时文件、配置/端口/路径/校验和与纯 readiness DTO 校验（这些不冒充容器或 API 执行）。实际 CI 进一步发现 Windows compose/env 仍默认 auto/mock、Dockerfile 引用已不存在的 stub；已改为 never/local_command，未接入研究仓库时使用缺失的明确路径并阻塞执行，删除 stub COPY。Compose config 新版本省略 false 字段，测试同时保留源 YAML 约束并按 false 缺省读取输出，未放宽挂载保护。

@@ -91,12 +91,13 @@ def test_file_backend_adapter_keeps_legacy_store_surface(tmp_path: Path) -> None
 
 def test_chroma_backend_adapter_round_trip(tmp_path: Path) -> None:
     pytest.importorskip("chromadb")
-    stores = KBStores(base=tmp_path / "knowledge", store="chroma")
+    stores = reset_for_tests(base=tmp_path / "knowledge", store="chroma")
 
     written = ingest_memory(
         zone="methodology",
         text="chroma adapter stores governed procedural memory",
-        metadata={"project": "pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology",
+                  **authored_note(tmp_path, "chroma adapter stores governed procedural memory")},
         source_path="tests/chroma.md",
         memory_type="procedural",
         approved=True,

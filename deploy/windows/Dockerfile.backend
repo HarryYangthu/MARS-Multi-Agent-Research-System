@@ -92,7 +92,6 @@ COPY --chown=mars:mars configs ./configs
 COPY --chown=mars:mars projects ./projects
 COPY --chown=mars:mars templates ./templates
 COPY --chown=mars:mars posttrain/src ./posttrain/src
-COPY --chown=mars:mars workspace/repos/pimc-stub ./workspace/repos/pimc-stub
 
 RUN mkdir -p \
       /app/knowledge \

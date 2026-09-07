@@ -10,9 +10,9 @@ from typing import Any
 from app.harness.agent_loop.trace import atomic_json
 
 
-def record_retrieval(*, text: str, url: str, run_id: str, title: str) -> dict[str, Any]:
+def record_retrieval(*, text: str, url: str, run_id: str, title: str, base: Path | None = None) -> dict[str, Any]:
     from app.harness.kb.stores import get_stores
-    base = get_stores().base.resolve()
+    base = (base if base is not None else get_stores().base).resolve()
     target = base / "_retrieval_receipts" / (uuid.uuid4().hex + ".json")
     receipt = {"kind": "real_retrieval", "url": url, "run_id": run_id, "title": title,
                "text": text, "text_sha256": hashlib.sha256(text.encode()).hexdigest()}
@@ -23,7 +23,7 @@ def record_retrieval(*, text: str, url: str, run_id: str, title: str) -> dict[st
 
 
 def record_artifact(*, path: Path, run_id: str, project: str,
-                    extracted_text: str | None = None) -> dict[str, Any]:
+                    extracted_text: str | None = None, base: Path | None = None) -> dict[str, Any]:
     """Bind a host extraction to actual local bytes, without asserting scientific truth.
 
     Approval remains a separate write/selection gate. This function is not a tool
@@ -36,7 +36,8 @@ def record_artifact(*, path: Path, run_id: str, project: str,
     text = source_text if extracted_text is None else extracted_text
     if not text.strip():
         raise ValueError("empty artifact extraction")
-    target = get_stores().base.resolve() / "_artifact_receipts" / (uuid.uuid4().hex + ".json")
+    root = (base if base is not None else get_stores().base).resolve()
+    target = root / "_artifact_receipts" / (uuid.uuid4().hex + ".json")
     receipt = {"kind": "local_artifact", "source_path": str(source),
                "source_text": source_text,
                "source_sha256": hashlib.sha256(source_text.encode()).hexdigest(),
@@ -48,14 +49,14 @@ def record_artifact(*, path: Path, run_id: str, project: str,
             "source_sha256": receipt["source_sha256"], "run_id": run_id, "project": project}
 
 
-def verified_memory(text: str, metadata: dict[str, Any]) -> bool:
+def verified_memory(text: str, metadata: dict[str, Any], *, base: Path | None = None) -> bool:
     origin = metadata.get("origin")
     if metadata.get("is_mock") or origin not in {"real_retrieval", "local_artifact"}:
         return False
     try:
         from app.harness.kb.stores import get_stores
         prefix = "retrieval" if origin == "real_retrieval" else "artifact"
-        root = (get_stores().base / f"_{prefix}_receipts").resolve()
+        root = ((base if base is not None else get_stores().base) / f"_{prefix}_receipts").resolve()
         path = Path(str(metadata[f"{prefix}_receipt"])).resolve()
         if not path.is_relative_to(root) or not path.is_file():
             return False

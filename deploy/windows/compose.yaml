@@ -52,9 +52,9 @@ services:
       MARS_DISTRIBUTION: v31-wireless
       MARS_PROJECT_PACK_PATHS: /opt/mars-v31-wireless/project_packs
       MARS_EXECUTION_DEVICE: ${MARS_EXECUTION_DEVICE:-cpu}
-      MARS_EXECUTION_BACKEND: ${MARS_EXECUTION_BACKEND:-mock}
+      MARS_EXECUTION_BACKEND: ${MARS_EXECUTION_BACKEND:-local_command}
       MARS_RUNTIME_MODE: ${MARS_RUNTIME_MODE:-development}
-      MARS_MOCK_MODE: ${MARS_MOCK_MODE:-auto}
+      MARS_MOCK_MODE: ${MARS_MOCK_MODE:-never}
       MARS_DEFAULT_PROJECT: pimc
       MARS_PAPER_STATIC_PYTHON: /opt/venv/bin/python
       MARS_ENABLE_NETWORK_TOOLS: "false"
