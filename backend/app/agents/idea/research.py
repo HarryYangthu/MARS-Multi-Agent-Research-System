@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.harness.agent_loop.trace import atomic_json
+from app.agents.idea.protocol import protocol_errors
 
 
 def canonical_source(url: str) -> str:
@@ -223,7 +224,7 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
                     min_sources: int, min_pdfs: int, require_budget: bool, max_ratio: float) -> list[str]:
     inventory = evidence_inventory(observations)
     papers = {p["identity"]: p for p in inventory["papers"]}
-    errors: list[str] = []
+    errors: list[str] = protocol_errors(metadata)
     debate = metadata.get("debate_summary")
     if isinstance(debate, dict) and debate.get("rounds", 0) != 0:
         errors.append("/debate_summary/rounds: this research loop has no debate tool receipts; comparisons are not executed debate rounds")

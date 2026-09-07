@@ -10,6 +10,7 @@ from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
 from app.agents.idea.delivery import delivery_errors, progress_sink, write_delivery
 from app.agents.idea.acceptance import archive_baseline_input
+from app.agents.idea.protocol import protocol_schema
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.provider_base import Message
 from app.harness.agent_loop.trace import atomic_json, digest
@@ -46,6 +47,10 @@ class IdeaAgent(BaseAgent):
         for field in ("method_spec", "decision_rule"):
             schema["properties"][field] = {"type": "object", "minProperties": 1,
                 "description": "Canonical complete structured definition; never put this only in body."}
+        requirements = request.extra.get("idea_requirements", {})
+        if requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol"):
+            schema["required"].append("evaluation_protocol")
+            schema["properties"]["evaluation_protocol"] = protocol_schema()
         if request.extra.get("idea_requirements", {}).get("require_parameter_budget"):
             schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
             component = {"type": "object", "required": ["name", "formula", "dtype", "shape"],
@@ -124,6 +129,21 @@ class IdeaAgent(BaseAgent):
             "and evidence; otherwise withdraw the guarantee. A numerical example is not a universal proof. "
             "Report only actual memory, tools, PDF page excerpts and review/debate activity."
         )
+        if requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol"):
+            context.task += (
+                "\nUse evaluation_protocol (idea.evaluation.v1) as the canonical controlled-comparison "
+                "contract. Declare datasets with IDs, train/validation/test roles and method_spec refs; "
+                "define objectives once with train-only data_refs and method_spec refs. Both arms reference "
+                "their training and held-out assessment IDs, objective, optimizer and initialization. "
+                "For an architecture-isolating comparison share the training data and objective; any intentional "
+                "non-architecture differences require a justification. Declare actual seeds and the random "
+                "source(s) that change across seeds, with executable definitions under method_spec. "
+                "A seed label does not make deterministic repetitions independent. Put split construction, "
+                "training objective, optimizer, initialization and randomness definitions at distinct method_spec "
+                "references; other prose must refer to this protocol instead of redefining it. "
+                "The Experiment handoff and decision_rule must use this same protocol. These declarations "
+                "are not evidence of physically disjoint data, an implemented random source or scientific validity."
+            )
         scope = request.extra.get("scope", "method_proposal")
         if scope not in {"method_proposal", "project_proposal"}:
             raise ValueError("Idea scope must be method_proposal or project_proposal")
@@ -187,6 +207,8 @@ class IdeaAgent(BaseAgent):
             "candidate_sha256": candidate_sha, "requirements": requirements,
             "delivery_contract_version": "idea.handoff.v1",
             "body_policy": "summary_only",
+            "evaluation_protocol_required": bool(requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol")),
+            "parameter_cases_required": bool(requirements.get("require_parameter_budget")),
             "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,

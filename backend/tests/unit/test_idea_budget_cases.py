@@ -89,3 +89,16 @@ def test_historical_ledger_remains_readable() -> None:
 @pytest.mark.parametrize("limit", [float("nan"), float("inf"), 0, -1])
 def test_invalid_host_limit_cannot_disable_budget_check(limit: float) -> None:
     assert parameter_errors(ledger(), max_ratio=limit)
+
+
+def test_recorded_requirements_cannot_disappear_during_audit() -> None:
+    from app.agents.idea.acceptance import validation_record_delivery_errors
+    metadata: dict[str, Any] = {"parameter_budget": ledger()}
+    del metadata["parameter_budget"]["evaluation_cases"]
+    record = {"delivery_contract_version": "idea.handoff.v1", "evaluation_protocol_required": True,
+              "parameter_cases_required": True}
+    errors = validation_record_delivery_errors(metadata, record)
+    assert any("/evaluation_protocol: required" in error for error in errors)
+    assert any("/parameter_budget/evaluation_cases: required" in error for error in errors)
+    legacy_errors = validation_record_delivery_errors(metadata, {"delivery_contract_version": "idea.handoff.v1"})
+    assert not any("/evaluation_protocol" in error or "/evaluation_cases" in error for error in legacy_errors)
