@@ -1,0 +1,34 @@
+{
+  "config": {
+    "budget_profile": "balanced",
+    "children_per_round": 1,
+    "elo_k": 32.0,
+    "evolution_rounds": 1,
+    "initial_hypotheses": 3,
+    "max_pairwise_matches": 4,
+    "proximity_threshold": 0.72,
+    "schema_id": "idea_deep_discovery_config.v1",
+    "seed": 0,
+    "top_k": 1
+  },
+  "hypothesis_count": 3,
+  "legal_count": 0,
+  "match_count": 0,
+  "project": "synthetic_regression",
+  "record_refs": {
+    "checkpoint": "idea/discovery/checkpoint.v1.json",
+    "hypotheses": "idea/discovery/hypotheses.v1.json",
+    "matches": "idea/discovery/pairwise_matches.v1.json",
+    "meta_reviews": "idea/discovery/meta_reviews.v1.json",
+    "proximity": "idea/discovery/proximity_graphs.v1.json",
+    "reflections": "idea/discovery/reflections.v1.json"
+  },
+  "run_id": "idea_roles_20260907T193336_9081e4",
+  "schema_id": "hypothesis_pool.v1",
+  "selected_hypothesis_id": "",
+  "status": "failed",
+  "top_hypothesis_ids": [],
+  "warnings": [
+    "insufficient_legal_hypotheses"
+  ]
+}

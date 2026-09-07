@@ -83,3 +83,19 @@
 完整候选：[hypotheses.v1.json](roles_attempt_02/idea/discovery/hypotheses.v1.json)。角色审查：[reflections.v1.json](roles_attempt_02/idea/discovery/reflections.v1.json)。实际结果：[summary.json](roles_attempt_02/summary.json)。逐次原始输入输出：[full_trace.zip](roles_attempt_02/full_trace.zip)，每个文件的散列见 [trace_manifest.json](roles_attempt_02/trace_manifest.json)。
 
 旧记录的 `created_at` 来自稳定值函数，并非真实调用时间；实际时间以 `role_calls/*/record.json` 和 summary 为准。角色互相隔离上下文，但仍是单次模型调用，没有各自的工具循环，工作流也仍为固定串行。下一次只补反馈传递后运行同一场景，验证意见实际进入演化输入，不将多次运行当作公平性能对照。
+
+### 第三次：反馈补丁后的新任务运行
+
+源提交 `792256b`（GitHub 同树提交 `022e6b53e59ba48d198bcd00d83fbcc8bff385fa`），运行 `idea_roles_20260907T193336_9081e4`。4 次真实请求/响应，110.52 秒，14,695 tokens。三个新候选全部被审查阻断，最终 `DeepDiscoveryInsufficientPool`。没有执行演化或成对比较，因此不能用这次结果声称新反馈已被模型实际消费。
+
+| 原始方向 | 声明参数 | 本轮阻断原因 |
+|---|---:|---|
+| 15×16 LUT + 单轴可学习网格 | 240 + 16 = 256 | 未给出坐标排序／有序性约束的具体实现 |
+| 15×16 LUT + 逐维坐标变换 | 240 + 16 = 256 | 未定义变换节点位置和可训练量，无法确定账本和实现 |
+| 15×16 LUT + 固定中心高斯残差 | 240 + 16 = 256 | 高斯中心、带宽策略及其训练状态没有说明 |
+
+同类单调性缺口在第二次 H1 与第三次 H1 的处理不同，说明审查判据仍需校准。两次候选并不完全相同，这不是同文档的严格重复审查实验。
+
+完整候选：[hypotheses.v1.json](roles_attempt_03/idea/discovery/hypotheses.v1.json)。完整审查：[reflections.v1.json](roles_attempt_03/idea/discovery/reflections.v1.json)。失败与消耗：[summary.json](roles_attempt_03/summary.json)。原始调用保存在 `roles_attempt_03/role_calls/`。
+
+本轮未改变旧的候选选择策略：所有候选被阻断时没有修复父候选可选；只有一个子候选时固定使用 `strengthen`。这两点仍限制自主闭环。为了仅验证本次反馈修复，将单独回放第二次真实候选的原有演化步骤，使用该次模型自己的审查和复盘；该回放会明确标记为定向回归，不算新的自主研究成功。
