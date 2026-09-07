@@ -1,13 +1,7 @@
-"""Context compression strategies (V0 = manifest + manual triggers only).
+"""Deterministic excerpt, reference and lexical selection utilities.
 
-Three policies (DESIGN §7.4):
-
-* ``hier_summary`` — replace older dialog with abstract → key decisions.
-* ``reference``   — push large artifacts into KB and keep a pointer.
-* ``relevance_prune`` — drop low-scoring chunks against the current task.
-
-V0 implements simple stand-ins so the API is stable; Phase 6/7 don't rely
-on real compression because we keep token budgets small in mock mode.
+These functions do not perform model summarization. The native loop keeps
+pinned inputs and full on-disk observations alongside bounded excerpts.
 """
 from __future__ import annotations
 
@@ -28,7 +22,7 @@ class CompressedSegment:
 def hier_summary(text: str, *, keep_chars: int = 1500) -> CompressedSegment:
     head = text[: keep_chars // 2]
     tail = text[-keep_chars // 2 :]
-    body = head + "\n[... HIER_SUMMARY: omitted middle ...]\n" + tail
+    body = head + "\n[... EXCERPT: omitted middle ...]\n" + tail
     return CompressedSegment(
         original_chars=len(text),
         compressed_chars=len(body),

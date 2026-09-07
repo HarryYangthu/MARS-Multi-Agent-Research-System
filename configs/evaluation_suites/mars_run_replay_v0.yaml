@@ -5,7 +5,7 @@ description: >
   directory as the source of truth.
 
 tasks:
-  - id: pimc_mock_full_pipeline
+  - id: pimc_existing_run
     task: pimc_demo
     project: pimc
     entrypoint: pipeline

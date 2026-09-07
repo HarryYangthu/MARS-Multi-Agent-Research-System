@@ -350,12 +350,13 @@ async def _run_local_command(
         encoding="utf-8",
     )
     metrics = _metrics_from_command_output(stdout_text)
+    has_measurements = bool(metrics)
     metrics.setdefault("returncode", float(returncode))
     result = _ExecutionResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=duration,
-        status="completed" if returncode == 0 else "failed",
+        status="completed" if returncode == 0 and has_measurements else "failed",
         metrics=metrics,
         fingerprint_hash="sha256:" + hashlib.sha256(
             f"{spec.project}:{spec.run_id}:{spec.experiment_id}:{selected.argv}:{returncode}".encode(
@@ -383,7 +384,9 @@ def _metrics_from_command_output(stdout_text: str) -> dict[str, float]:
         metrics: dict[str, float] = {}
         for key, value in raw_metrics.items():
             try:
-                metrics[str(key)] = float(value)
+                number = float(value)
+                if not isinstance(value, bool) and math.isfinite(number) and key not in {"returncode", "dry_run", "max_iters"}:
+                    metrics[str(key)] = number
             except (TypeError, ValueError):
                 continue
         if metrics:

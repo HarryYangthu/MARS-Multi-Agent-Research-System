@@ -1,4 +1,4 @@
-"""Parse a mock simulation's curve into a JSON file under runs/<id>/execution/curves/."""
+"""Persist a supplied measured curve into a JSON file under runs/<id>/execution/curves/."""
 from __future__ import annotations
 
 import json

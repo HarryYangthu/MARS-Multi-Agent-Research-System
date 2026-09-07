@@ -225,7 +225,6 @@ def _project_config(project: str) -> dict[str, Any]:
 def _code_sources(*, project: str, project_cfg: Mapping[str, Any]) -> tuple[CodeSource, ...]:
     raw_path = str(project_cfg.get("repo_path", "")).strip()
     project_path = _resolve_repo_path(project, raw_path) if raw_path else None
-    stub_path = repo_root() / "workspace" / "repos" / "pimc-stub"
     return (
         CodeSource(
             id="empty",
@@ -242,14 +241,6 @@ def _code_sources(*, project: str, project_cfg: Mapping[str, Any]) -> tuple[Code
             exists=project_path is not None and project_path.exists(),
             read_only=bool(project_cfg.get("read_only", False)),
             kind="project_repo",
-        ),
-        CodeSource(
-            id="pimc_stub",
-            label="PIMC stub 仿真代码",
-            path=str(stub_path),
-            exists=stub_path.exists(),
-            read_only=False,
-            kind="stub",
         ),
     )
 
@@ -270,7 +261,7 @@ def _select_source(requested: str, sources: Sequence[CodeSource]) -> str:
         if not source.exists:
             raise ValueError(f"code source '{requested}' is not available")
         return requested
-    for candidate in ("project_repo", "pimc_stub", "empty"):
+    for candidate in ("project_repo", "empty"):
         source = by_id[candidate]
         if source.exists:
             return source.id

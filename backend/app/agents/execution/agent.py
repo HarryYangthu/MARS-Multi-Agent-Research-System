@@ -1,9 +1,4 @@
-"""Execution Agent — code_spec → run_log.
-
-In Phase 3 this agent only validates / serializes the run_log shape via the
-LLM (or mock). Phase 6 wires in the real ``execution/simulation_runner.py``
-and the multi-experiment WS plumbing.
-"""
+"""Execution Agent — request an execution plan; the bridge owns actual simulation."""
 from __future__ import annotations
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest

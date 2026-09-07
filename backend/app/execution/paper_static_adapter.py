@@ -184,13 +184,16 @@ async def run_paper_static_simulation(
     metrics = _metrics_from_summary(summary)
     if not metrics and loss_curve:
         metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
+    has_measurements = bool(metrics) and all(math.isfinite(value) for value in metrics.values())
     metrics.setdefault("returncode", float(returncode))
     metrics.setdefault("dry_run", 1.0 if dry_run else 0.0)
     metrics.setdefault("max_iters", float(max_iters))
     if summary_path is not None:
         metrics.setdefault("summary_written", 1.0)
 
-    status = "completed" if returncode == 0 else "failed"
+    status = "completed" if returncode == 0 and has_measurements and not dry_run else "failed"
+    if not has_measurements:
+        stderr_lines.append("execution produced no finite research measurements")
     if timed_out:
         status = "failed"
     if loss_curve == [] and "loss" in metrics:

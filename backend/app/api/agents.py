@@ -687,7 +687,7 @@ def _warnings(handle: PostTrainingHandle) -> list[str]:
         and not env_or_local(handle.api_key_env or "")
     ):
         warnings.append(
-            f"api_key_env={handle.api_key_env} is not set; provider will fall back to mock"
+            f"api_key_env={handle.api_key_env} is not set; provider is unavailable until the key is configured"
         )
     return warnings
 

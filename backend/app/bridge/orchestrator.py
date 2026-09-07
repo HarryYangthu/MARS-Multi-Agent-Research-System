@@ -37,9 +37,7 @@ from app.storage.run_store import RunHandle, RunStore
 from app.storage.run_state_store import RunStateStore
 
 
-# When no real agent is registered for a node we fall back to a stub that
-# just transitions running -> waiting_review -> approved -> done. This keeps
-# the e2e wiring testable in Phase 2 *before* Phase 3 ships real agents.
+# Node runners execute registered agents; missing registration fails explicitly.
 NodeRunner = Callable[[RunHandle, str], Awaitable[None]]
 
 _ORCHESTRATED_ENTRYPOINTS = frozenset(("pipeline", *LINEAR_STAGES))
@@ -158,7 +156,7 @@ class Orchestrator:
                 await asyncio.sleep(0)
                 # If no node is ready and we're not complete, that means
                 # there's a node stuck in WAITING_REVIEW or RUNNING. For V0
-                # the dummy/test driver advances those externally.
+                # the external workflow driver advances those states.
                 non_terminal = [
                     k for k, s in graph.all_states().items()
                     if s in (NodeState.RUNNING, NodeState.WAITING_REVIEW)

@@ -41,3 +41,23 @@ async def test_real_cpu_jobs_obey_cap_and_isolate_events(tmp_path: Path, monkeyp
         assert all(row["experiment_id"] == result.experiment_id for row in events[channel])
         assert sum(row["event"] == "execution.started" for row in events[channel]) == 1
         assert sum(row["event"] == "execution.completed" for row in events[channel]) == 1
+
+
+@pytest.mark.asyncio
+async def test_actual_missing_capture_is_a_batch_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "paper_static")
+    reset_settings_cache()
+    spec = JobSpec(run_id="missing-capture", experiment_id="missing", project="pimc",
+                   run_root=tmp_path, config={"data_path": str(tmp_path / "absent-capture")})
+    try:
+        outcome = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    finally:
+        reset_settings_cache()
+    assert len(outcome.results) == 1 and outcome.results[0].status == "failed"
+    assert outcome.failures == [("missing", "execution status: failed")]
+
+
+@pytest.mark.asyncio
+async def test_zero_concurrency_rejected_without_hanging() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        await run_batch([], config=BatchConfig(max_concurrency=0))

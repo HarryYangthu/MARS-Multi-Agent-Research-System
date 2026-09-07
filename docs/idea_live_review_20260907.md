@@ -221,3 +221,11 @@ Discovery 测试不再返回按候选索引预设的 loss/GPU 消耗或伪造安
 完整后端回归首次出现 12 项失败。修复中发现真实问题：已批准本地产物没有来源回执而被 Memory 过滤；BaseAgent 丢失共享仓库上下文；数值计划 embedding 相同会误匹配不同配置。现为本地产物和宿主提取保存不可变文件快照与哈希（只证明来源，不证明科学结论），恢复所有子 Agent 的仓库配置上下文，baseline 匹配优先精确签名并过滤项目。未验证 metadata 仍不得作为真实实验记录。
 
 旧 MCP/patch tool/adapter 固定成功替身已逐个换成实际文件操作、真实子进程失败与缺失依赖断言；CPU loss 不再要求人为波动；旧 Mock 模式必须配置失败。新增文件来源防篡改测试。本环境 strict mypy Python 3.12 检查 403 个源文件通过，import 边界通过。完整 pytest 与下一轮真实模型评测尚在进行。SDK 流关闭的异步生成器警告仍可复现，不影响已写入结果，但不能称已修复。
+
+### 完整测试与 CI 启动缺陷
+
+`full_real_suite_v2.xml`：905 项用例，896 通过、9 跳过、0 失败/错误（70.868 秒）。跳过为真实 gitleaks、外部 scipy Python、Chroma、显式 opt-in 网络测试、Docker Compose 缺失；这不是替身通过。4 个 import 边界全部通过。
+
+GitHub PR #5 的首个 CI 在创建任何 job 之前失败。GitHub 原始 annotation 为 `(Line: 21, Col: 16): Unrecognized named-value: matrix`；已将动态 shell matrix 拆成两个固定 shell 的 Windows job，不删除任一 shell 验证。
+
+收尾发现配置 API 仍枚举/接受 Mock provider、Coding workspace 可回退到 stub、旧 backtracking demo 强制开启 Mock；均移除。结果落盘不再伪填 batch_size/GPU/上游引用，旧模拟结果禁止发布。命令/论文适配器缺实测指标时不能仅凭 exit 0 标为科研执行完成；失败 SimulationResult 进入 batch failures，非法零并发立即拒绝。针对性真实回归 14+8 项通过；strict mypy 403 文件通过。

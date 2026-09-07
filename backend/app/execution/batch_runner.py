@@ -30,6 +30,8 @@ async def run_batch(
     bus_publish: Any | None = None,
 ) -> BatchOutcome:
     cfg = config or BatchConfig()
+    if cfg.max_concurrency < 1 or cfg.steps < 1:
+        raise ValueError("batch concurrency and steps must be positive")
     sem = asyncio.Semaphore(cfg.max_concurrency)
     outcome = BatchOutcome()
 
@@ -38,6 +40,8 @@ async def run_batch(
             try:
                 res = await run_one(s, bus_publish=bus_publish, steps=cfg.steps)
                 outcome.results.append(res)
+                if res.status != "completed":
+                    outcome.failures.append((s.experiment_id, f"execution status: {res.status}"))
             except Exception as exc:
                 logger.exception("batch job {} failed", s.experiment_id)
                 outcome.failures.append((s.experiment_id, str(exc)))
