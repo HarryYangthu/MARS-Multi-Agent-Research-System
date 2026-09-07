@@ -16,7 +16,7 @@ New parameter-budget tasks require both fields. Other comparison tasks can reque
 
 ## Engineering validation
 
-118 focused tests passed, including 22 parameter/audit regressions and 35 protocol tests, using arithmetic, schemas and real files. Strict mypy passed for 19 Idea/test source files. A pre-existing local mypy cache triggered an internal tool error on the first invocation; a separate cache completed normally. No provider/tool substitutes or mocked successful Agent execution were used.
+152 focused tests passed, including 22 parameter/audit regressions, 35 protocol tests and 34 API/Bridge input tests, using arithmetic, schemas and real files. Strict mypy passed for 19 Idea/test source files. A pre-existing local mypy cache triggered an internal tool error on the first invocation; a separate cache completed normally. No provider/tool substitutes or mocked successful Agent execution were used.
 
 ## Fresh real evaluation
 
@@ -24,4 +24,10 @@ The fresh run is `idea_lut_20260907T183449_cfa94f` (UTC start date differs from 
 
 It uses the same public-source task and two paper URL hints as the preceding evaluation, a fresh isolated memory, DeepSeek V4 Flash, native ReAct tool actions and optional Reflection enabled for this test. No prior candidate or externally selected correction is supplied. Real baseline/data and GPU execution are outside this method-proposal test.
 
-Execution is in progress. Final counts, artifacts, failure analysis and acceptance will be appended from the persisted trace; no success is asserted here.
+The run failed with `protocol_exhausted`: 13 real model calls, 10 tool calls, 2 submitted candidates, 2 validation failures and 5 syntax failures; 492.96 seconds, 324,137 reported tokens. It downloaded two papers. The first submission had four host errors, including a shared train/held-out specification and incorrect alternative parameter counts. The second still had two errors. Subsequent native arguments repeatedly appended another `body` outside the closed root object. No candidate passed, no Reflection acceptance occurred, and no experiment ran.
+
+The failure exposed a generic executor defect: a protocol error or successful tool observation overwrote pending candidate validation feedback. Validation issues now persist separately, are bound to the current candidate digest in packed context, and are replaced only on a newly validated candidate. They are excluded from fresh reviewer context. Native syntax repair now explicitly describes the metadata/body root boundaries; no invalid model output is automatically repaired or accepted. 62 loop/protocol tests passed (including five new pure context regressions), and strict mypy passed for the three changed loop/test files.
+
+The production API also now accepts labeled Idea context and typed requirements. The actual persisted run options are consumed by the Idea-stage Bridge loader; exact caller text is retained. This path is verified with real temporary archives and payload validation, not a live HTTP-to-model integration test.
+
+A fresh evaluation on the repaired executor follows; its result will be recorded separately rather than overwriting this failed trace.
