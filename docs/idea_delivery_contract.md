@@ -46,6 +46,8 @@ The generic ReAct action loop is retained. Optional Reflection uses separate rev
 
 Successful runs write `proposal.md`, `proposal.json`, `summary.txt`, and `acceptance.json` in a fresh `idea/deliveries/<invocation>/<export-id>/` directory. Resuming an invocation preserves earlier exports. The JSON metadata and Markdown represent the same model-written proposal. The original trace and candidate digest remain authoritative. `scientific_validated` and `simulation_executed` stay false until a real downstream process supplies the corresponding evidence. Method-only proposals explicitly require real baseline and data before project execution.
 
+`loop.reflection_thinking_enabled` independently configures the tool-free review call. Native action calls still use non-thinking mode until provider continuation support is implemented. Setting only `reasoning_effort` does not enable a provider's thinking mode. Each model-request trace records both settings. The configured Idea reviewer enables thinking; this remains model review, not experimental proof.
+
 Run the public research evaluation with:
 
 ```bash

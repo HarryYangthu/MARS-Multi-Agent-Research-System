@@ -175,3 +175,26 @@ def test_prior_critique_reaches_author_but_not_independent_reviewer() -> None:
     assert any(candidate in message.content for message in reviewer)
     assert author_manifest["prior_review_issues_visible"] is True
     assert review_manifest["prior_review_issues_visible"] is False
+
+
+def test_tool_free_review_can_enable_thinking_without_changing_native_actions() -> None:
+    from app.harness.agent_loop.executor import phase_llm_config
+    from app.harness.agent_loop.policy import AgentLoopPolicy
+    provider = DeepSeekProvider(api_key="parser-input-not-a-key")
+    config = LLMConfig(provider="deepseek", model="parser-contract", thinking_enabled=False)
+    policy = AgentLoopPolicy(protocol="native_tools", reflection_thinking_enabled=True,
+                             reflection_reasoning_effort="high")
+    tools = ({"type": "function", "function": {"name": "read"}},)
+    author = phase_llm_config(config, policy, phase="act", native=True, wire_tools=tools, effort_overrides={})
+    reviewer = phase_llm_config(config, policy, phase="reflect", native=True, wire_tools=tools, effort_overrides={})
+    author_wire = provider._request_kwargs([Message("user", "Author input")], author)
+    reviewer_wire = provider._request_kwargs([Message("user", "Review input")], reviewer)
+    assert author_wire["extra_body"]["thinking"]["type"] == "disabled"
+    assert author_wire["tools"] == list(tools)
+    assert reviewer_wire["extra_body"]["thinking"]["type"] == "enabled"
+    assert reviewer_wire["reasoning_effort"] == "high"
+    assert reviewer_wire["response_format"] == {"type": "json_object"}
+    assert "tools" not in reviewer_wire
+    assert config.thinking_enabled is False and provider._client is None
+    with pytest.raises(ValueError, match="boolean"):
+        AgentLoopPolicy.from_mapping({"reflection_thinking_enabled": "true"})

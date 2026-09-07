@@ -37,6 +37,7 @@ model:
 loop:
   mode: reflection
   reflection_reasoning_effort: high
+  reflection_thinking_enabled: true
   trace: full
   max_model_calls: 30
   max_tool_steps: 12

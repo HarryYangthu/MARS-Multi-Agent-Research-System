@@ -66,6 +66,17 @@ class AgentLoopExecutor(Protocol):
     async def run(self, request: LoopInput) -> LoopResult: ...
 
 
+def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
+                     native: bool, wire_tools: tuple[dict[str, Any], ...],
+                     effort_overrides: dict[str, Any]) -> LLMConfig:
+    reviewing = phase == "reflect"
+    effort = policy.reflection_reasoning_effort if reviewing and policy.reflection_reasoning_effort else config.reasoning_effort
+    thinking = (policy.reflection_thinking_enabled
+                if reviewing and policy.reflection_thinking_enabled is not None else config.thinking_enabled)
+    return replace(config, reasoning_effort=effort_overrides.get(phase, effort), thinking_enabled=thinking,
+                   json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
+
+
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
@@ -161,11 +172,8 @@ class NativeAgentLoop:
         cfg.attempt_observer = on_attempt
 
         def phase_config() -> LLMConfig:
-            phase = state["next_phase"]
-            default = p.reflection_reasoning_effort if phase == "reflect" and p.reflection_reasoning_effort else cfg.reasoning_effort
-            return replace(cfg, reasoning_effort=state["phase_efforts"].get(phase, default),
-                           json_mode=phase == "reflect" or not native,
-                           tools=wire_tools if native and phase != "reflect" else ())
+            return phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
+                                    wire_tools=wire_tools, effort_overrides=state["phase_efforts"])
 
         def recover_completion(reason: object) -> bool:
             plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
@@ -224,6 +232,7 @@ class NativeAgentLoop:
                 trace.emit("context_packed", manifest)
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
+                                             "thinking_enabled": call_config.thinking_enabled,
                                              "max_tokens": call_config.max_tokens},
                            visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)

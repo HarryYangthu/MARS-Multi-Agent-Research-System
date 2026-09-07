@@ -77,6 +77,9 @@ idea:
     protocol: native_tools
     mode: react
     trace: full
+    # Tool-free Reflection may reason independently of the native action protocol.
+    reflection_thinking_enabled: true
+    reflection_reasoning_effort: high
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
