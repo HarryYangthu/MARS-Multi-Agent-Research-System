@@ -161,7 +161,8 @@ class NativeAgentLoop:
             phase = state["next_phase"]
             counts["protocol_repairs"] += 1
             state["phase_efforts"][phase] = plan["reasoning_effort"]
-            state["feedback"] = plan["feedback"]
+            state["feedback"] = (plan["feedback"].replace("JSON response", "Markdown document beginning with YAML frontmatter, without preamble or code fences")
+                                 if native and state["next_phase"] != "reflect" else plan["feedback"])
             state["pending"] = None
             state["status"] = "running"
             state["last_model_error"] = None
@@ -196,7 +197,7 @@ class NativeAgentLoop:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 messages, manifest = pack_context(
                     pinned + extra, state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
+                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars, native=native,
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget

@@ -189,6 +189,11 @@ class BaseAgent(ABC):
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
+        if self.loop_policy.protocol == "native_tools" and not text.startswith("---\n"):
+            return ["/format: the first four characters must be --- followed by a newline. "
+                    "Remove ALL leading explanations, JSON wrappers, and Markdown code fences. "
+                    "A schema field inside a fenced block is not frontmatter. Return only the complete raw "
+                    "Markdown document, beginning with its YAML frontmatter; preserve the existing content."]
         validation = validate_document(text, expected_schema=self.output_schema)
         errors = [f"{error.path}: {error.message}" for error in validation.errors]
         if validation.valid:

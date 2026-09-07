@@ -74,3 +74,20 @@ def test_native_idea_prompt_has_no_legacy_json_instruction() -> None:
     text = '\n'.join(m.content for m in agent._messages_for_context(request,context,purpose='contract'))
     assert 'final.metadata' not in text and 'final.body' not in text
     assert 'YAML frontmatter' in text
+
+
+def test_native_candidate_is_not_rewrapped_as_json() -> None:
+    candidate = '---\nschema: proposal.v1\n---\n# Draft'
+    messages, _ = pack_context([Message('system','task')], [], '', candidate,
+                               budget=4000, observation_chars=512, native=True)
+    assert messages[-1].content == candidate
+
+
+@pytest.mark.asyncio
+async def test_fenced_frontmatter_gets_actionable_format_feedback() -> None:
+    from app.agents.idea.agent import IdeaAgent
+    from app.agents.base import RunRequest
+    errors = await IdeaAgent().validate_candidate(RunRequest(project='pimc',user_request='test'),
+        'Explanation\n```markdown\n---\nschema: proposal.v1\n---\ntext\n```', [])
+    assert len(errors) == 1 and errors[0].startswith('/format:')
+    assert 'code fences' in errors[0]
