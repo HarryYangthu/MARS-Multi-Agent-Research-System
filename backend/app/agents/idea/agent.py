@@ -65,6 +65,15 @@ class IdeaAgent(BaseAgent):
                 budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1}
                 budget_properties[prefix + "_parameters"] = {"type": "integer", "minimum": 1}
                 budget_properties[prefix + "_components"] = components
+            budget_properties["evaluation_cases"] = {
+                "type": "array", "minItems": 1, "maxItems": 32,
+                "description": "Every proposed evaluated size, including primary variables; same formulas, tensors and host limit apply to all cases.",
+                "items": {"type": "object", "additionalProperties": False,
+                          "required": ["name", "variables", "baseline_parameters", "candidate_parameters"],
+                          "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120},
+                                         "variables": {"type": "object", "additionalProperties": {"type": "number"}},
+                                         "baseline_parameters": {"type": "integer", "minimum": 1},
+                                         "candidate_parameters": {"type": "integer", "minimum": 1}}}}
             schema["properties"]["parameter_budget"] = {"type": "object", "required": list(budget_properties),
                                                           "properties": budget_properties}
             schema["properties"]["signal_contract"] = {"type": "object", "minProperties": 1}
@@ -100,6 +109,10 @@ class IdeaAgent(BaseAgent):
             "If require_parameter_budget is true: parameter_budget uses unit real_scalar, variables, "
             "baseline_formula, candidate_formula, integer baseline_parameters/candidate_parameters, "
             "and baseline_components/candidate_components lists of {name,formula,dtype,shape}; "
+            "Declare parameter_budget.evaluation_cases for every configuration proposed for evaluation, "
+            "including the primary variables, with unique name, full variables map, baseline_parameters "
+            "and candidate_parameters. Each case uses the same formulas and tensor definitions and must "
+            "meet the host budget. Do not introduce additional evaluated dimensions only in free text. "
             "dtype is real or complex (count twice), shape=[] means one scalar. Arithmetic formulas "
             "use only declared numeric variables and +,-,*,/,integer powers. Compare at least two "
             "feasible alternatives, each with name, feasible, parameters, components (same component format), "

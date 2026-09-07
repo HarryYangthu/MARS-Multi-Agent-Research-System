@@ -94,6 +94,8 @@ def count_component(component: dict[str, Any], variables: dict[str, Any]) -> flo
 
 
 def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
+    if not math.isfinite(max_ratio) or max_ratio <= 0:
+        return ["/parameter_budget: evaluation max_ratio must be finite and positive"]
     if not isinstance(raw, dict):
         return ["/parameter_budget: required structured object"]
     errors: list[str] = []
@@ -140,6 +142,45 @@ def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
             errors.append(f"/parameter_budget/{label}: {exc}")
     if len(totals) == 2 and totals["candidate"] / totals["baseline"] > max_ratio + 1e-12:
         errors.append(f"/parameter_budget: candidate/baseline exceeds evaluation limit {max_ratio}")
+    if "evaluation_cases" in raw:
+        errors.extend(_parameter_case_errors(raw, max_ratio=max_ratio))
+    return errors
+
+
+def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str]:
+    """Check each declared configuration against the same tensor ledger and limit.
+
+    No free-text dimensions are inferred and no passing cases are generated.
+    Historical ledgers without evaluation_cases retain their original contract.
+    """
+    cases = raw["evaluation_cases"]
+    prefix = "/parameter_budget/evaluation_cases"
+    if not isinstance(cases, list) or not 1 <= len(cases) <= 32:
+        return [prefix + ": declare 1..32 configurations, including the primary variables"]
+    errors: list[str] = []
+    names: set[str] = set()
+    includes_primary = False
+    for index, case in enumerate(cases):
+        path = f"{prefix}/{index}"
+        if not isinstance(case, dict) or set(case) != {"name", "variables", "baseline_parameters", "candidate_parameters"}:
+            errors.append(path + ": require only name, variables, baseline_parameters, candidate_parameters")
+            continue
+        name = case["name"]
+        if not isinstance(name, str) or not name.strip() or len(name) > 120 or name in names:
+            errors.append(path + "/name: use a nonempty unique configuration name (max 120 characters)")
+        else:
+            names.add(name)
+        variables = case["variables"]
+        if not isinstance(variables, dict) or set(variables) != set(raw["variables"]):
+            errors.append(path + "/variables: explicitly assign exactly the primary variable names")
+            continue
+        includes_primary = includes_primary or variables == raw["variables"]
+        ledger = {key: value for key, value in raw.items() if key != "evaluation_cases"}
+        ledger.update({key: case[key] for key in ("variables", "baseline_parameters", "candidate_parameters")})
+        errors.extend(path + error.removeprefix("/parameter_budget")
+                      for error in parameter_errors(ledger, max_ratio=max_ratio))
+    if not includes_primary:
+        errors.append(prefix + ": primary variables must be included explicitly")
     return errors
 
 
