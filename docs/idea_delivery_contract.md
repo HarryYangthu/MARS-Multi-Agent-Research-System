@@ -18,7 +18,7 @@ The Idea stage receives a research question and optional caller-supplied context
 
 ## Two audiences, one canonical proposal
 
-`human_summary` is one paragraph, 1-2 sentences and at most 240 characters. It explains the concrete change and intended benefit without claiming an experiment that did not happen. It is not sufficient input to the Experiment agent by itself.
+`human_summary` is one paragraph, 1-2 sentences and at most 240 characters. It explains the concrete change and intended benefit without claiming an experiment that did not happen. New generated documents must use that exact summary as their Markdown body; definitions stay in structured metadata so the body cannot introduce a contradictory second algorithm. This `summary_only` policy is recorded in validation receipts. It is not sufficient input to the Experiment agent by itself.
 
 `handoff` contains:
 
@@ -42,7 +42,7 @@ Idea writes concise messages for research actions, candidate generation, validat
 
 ## Acceptance and artifacts
 
-The generic ReAct action loop is retained. Optional Reflection uses separate reviewer instructions with the task, actual source context, candidate and real observations. Observations are supplied as untrusted documents, without replaying the generator's native assistant/tool conversation to a reviewer with no tools. The candidate is also user-supplied review data, not an assistant continuation prefix. Review protocol recovery requests a review JSON object, never a research call. This is a separate model call using the configured provider, not an independent expert guarantee. Review checks concrete definition, evidence and handoff blockers; it cannot demand completed downstream experiments from an explicitly untested method proposal. Incorrect prior review claims may be withdrawn with an explanation.
+The generic ReAct action loop is retained. Optional Reflection uses separate reviewer instructions with the task, actual source context, candidate and real observations. Observations are supplied as untrusted documents, without replaying the generator's native assistant/tool conversation to a reviewer with no tools. The candidate is also user-supplied review data, not an assistant continuation prefix. Earlier review issues remain pinned for the author, but are excluded from fresh reviewer input to avoid anchoring on stale or false claims. Each reviewer must identify current fields, supporting excerpts and any mathematical counterexample. Review protocol recovery requests a review JSON object, never a research call. This is a separate model call using the configured provider, not an independent expert guarantee. Review checks concrete definition, evidence and handoff blockers; it cannot demand completed downstream experiments from an explicitly untested method proposal.
 
 Successful runs write `proposal.md`, `proposal.json`, `summary.txt`, and `acceptance.json` in a fresh `idea/deliveries/<invocation>/<export-id>/` directory. Resuming an invocation preserves earlier exports. The JSON metadata and Markdown represent the same model-written proposal. The original trace and candidate digest remain authoritative. `scientific_validated` and `simulation_executed` stay false until a real downstream process supplies the corresponding evidence. Method-only proposals explicitly require real baseline and data before project execution.
 
