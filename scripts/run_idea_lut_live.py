@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.validator import validate_document
 from app.settings import reset_settings_cache
 from scripts.idea_live_resume import exclusive_run, load_resume, record_resumption, resume_scenario
+from scripts.watch_agent_trace import monitor
 
 
 def git_value(*args: str) -> str:
@@ -134,6 +136,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         logger.info("prepared only; no model or tool request performed")
         return 0
     started = time.monotonic()
+    progress_task = asyncio.create_task(monitor(root))
     try:
         artifact = await asyncio.wait_for(agent.run_loop(request, context), timeout=args.max_seconds)
         target = root / "idea" / "idea_proposal.v1.md"
@@ -152,6 +155,9 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         summary.update(status="failed", error_type=type(exc).__name__, error=str(exc)[:1000])
         logger.error("real Idea run failed: {}", type(exc).__name__)
     finally:
+        progress_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await progress_task
         summary["attempt_duration_seconds"] = time.monotonic() - started
         summary["duration_seconds"] = float(prior_summary.get("duration_seconds", 0)) + summary["attempt_duration_seconds"]
         summary["trace_root"] = context.metadata.get("loop_trace_root")
