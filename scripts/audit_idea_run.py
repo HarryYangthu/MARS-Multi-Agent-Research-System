@@ -14,9 +14,9 @@ from typing import Any
 
 from loguru import logger
 
+from app.agents.idea.acceptance import validation_record_delivery_errors
 from app.agents.idea.research import evidence_inventory, material_errors
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
-from app.harness.schema.frontmatter_parser import parse
 from app.harness.schema.validator import validate_document
 from scripts.idea_live_resume import audit_resumptions
 
@@ -38,6 +38,126 @@ def recorded_proposal(root: Path, summary: dict[str, Any]) -> Path:
     return path
 
 
+def recorded_delivery(root: Path, summary: dict[str, Any], *, invocation: str) -> Path | None:
+    """Resolve the recorded export without substituting a neighbouring revision."""
+    raw = summary.get("delivery_root")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("delivery_root must name a recorded delivery directory")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    base = (root / "idea" / "deliveries").resolve()
+    if (not path.is_relative_to(root.resolve()) or path.parent.parent != base
+            or path.parent.name != invocation):
+        raise ValueError("recorded delivery must stay in this run's invocation/export directory")
+    return path
+
+
+def audit_delivery(
+    root: Path, summary: dict[str, Any], text: str, *, invocation: str, scope: str,
+    model_review_passed: bool,
+) -> dict[str, Any]:
+    """Recheck exact-candidate receipts and export bytes without running an Agent."""
+    errors: list[str] = []
+    validation = validate_document(text, expected_schema="proposal.v1")
+    metadata = validation.metadata
+    candidate_sha = digest(text)
+    receipts: list[tuple[Path, dict[str, Any]]] = []
+    has_versioned_receipt = False
+    for path in sorted((root / "idea" / "validation").glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            errors.append(f"unreadable validation receipt: {path.name}")
+            continue
+        if not isinstance(record, dict):
+            errors.append(f"invalid validation receipt: {path.name}")
+            continue
+        has_versioned_receipt = has_versioned_receipt or record.get("delivery_contract_version") is not None
+        if record.get("candidate_sha256") == candidate_sha:
+            receipts.append((path, record))
+    versioned = [(path, record) for path, record in receipts if record.get("delivery_contract_version") is not None]
+    contract_errors: list[str] = []
+    if not validation.valid:
+        contract_errors.extend(f"{error.path}: {error.message}" for error in validation.errors)
+    elif versioned:
+        for path, record in versioned:
+            if record.get("scope", "method_proposal") != scope:
+                contract_errors.append(f"{path.name}: delivery receipt scope differs from the recorded request")
+            contract_errors.extend(validation_record_delivery_errors(metadata, record, body=validation.body))
+    elif not receipts and (has_versioned_receipt or summary.get("delivery_root") is not None):
+        contract_errors.append("no exact-candidate validation receipt for the recorded delivery")
+    errors.extend(contract_errors)
+    contract_valid: bool | None = not contract_errors if versioned else None
+    bundle_errors: list[str] = []
+    delivery_root: Path | None = None
+    try:
+        delivery_root = recorded_delivery(root, summary, invocation=invocation)
+    except ValueError as exc:
+        bundle_errors.append(str(exc))
+    if versioned and delivery_root is None and not bundle_errors:
+        bundle_errors.append("versioned candidate has no recorded delivery_root")
+    if delivery_root is not None:
+        files: dict[str, str] = {}
+        for name in ("proposal.md", "proposal.json", "summary.txt", "acceptance.json"):
+            path = delivery_root / name
+            try:
+                if path.resolve().parent != delivery_root:
+                    raise ValueError("file resolves outside the recorded delivery directory")
+                files[name] = path.read_text(encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                bundle_errors.append(f"{name}: {type(exc).__name__} reading the recorded delivery file")
+        if "proposal.md" in files and files["proposal.md"] != text:
+            bundle_errors.append("delivery proposal.md differs from the accepted candidate")
+        if "proposal.json" in files:
+            try:
+                if json.loads(files["proposal.json"]) != metadata:
+                    bundle_errors.append("delivery proposal.json differs from the accepted candidate metadata")
+            except ValueError:
+                bundle_errors.append("delivery proposal.json is not valid JSON")
+        human_summary = metadata.get("human_summary")
+        if "summary.txt" in files and files["summary.txt"] != str(human_summary) + "\n":
+            bundle_errors.append("delivery summary.txt differs from the accepted human_summary")
+        if summary.get("human_summary") != human_summary:
+            bundle_errors.append("runner summary human_summary differs from the accepted candidate")
+        if summary.get("handoff") != metadata.get("handoff"):
+            bundle_errors.append("runner summary handoff differs from the accepted candidate")
+        if "acceptance.json" in files:
+            try:
+                acceptance = json.loads(files["acceptance.json"])
+            except ValueError:
+                acceptance = None
+            if not isinstance(acceptance, dict):
+                bundle_errors.append("delivery acceptance.json must be a JSON object")
+            else:
+                handoff = metadata.get("handoff", {})
+                prerequisites = handoff.get("required_context", []) if isinstance(handoff, dict) else []
+                expected_flags = {"schema_valid": validation.valid,
+                                  "delivery_contract_valid": not contract_errors,
+                                  "model_review_passed": model_review_passed,
+                                  "scientific_validated": False, "simulation_executed": False,
+                                  "execution_requires_context": any(isinstance(item, dict) and item.get("blocks_execution") is True
+                                                                    for item in prerequisites)}
+                for key, expected in expected_flags.items():
+                    if acceptance.get(key) is not expected:
+                        bundle_errors.append(f"delivery acceptance.json/{key} differs from audited facts")
+                if acceptance.get("proposal_sha256") != candidate_sha:
+                    bundle_errors.append("delivery acceptance.json is bound to a different candidate hash")
+                if acceptance.get("scope") != scope:
+                    bundle_errors.append("delivery acceptance.json scope differs from the recorded request")
+    errors.extend(bundle_errors)
+    bundle_checked = bool(versioned) or summary.get("delivery_root") is not None
+    return {"delivery_contract_valid": contract_valid,
+            "delivery_bundle_valid": not bundle_errors if bundle_checked else None,
+            "delivery_root": str(delivery_root) if delivery_root is not None else None,
+            "validation_receipts": [path.relative_to(root).as_posix() for path, _ in receipts],
+            "delivery_contract_versions": list(dict.fromkeys(str(record["delivery_contract_version"]) for _, record in versioned)),
+            "errors": errors}
+
+
 def audit_run(root: Path) -> dict[str, Any]:
     root = root.resolve()
     request = json.loads((root / "input" / "request.json").read_text())
@@ -55,21 +175,30 @@ def audit_run(root: Path) -> dict[str, Any]:
     resumptions, errors = audit_resumptions(root, trace_root)
     schema_valid = False
     material_valid = False
+    delivery: dict[str, Any] = {"delivery_contract_valid": None, "delivery_bundle_valid": None,
+                                "delivery_root": None, "validation_receipts": [], "delivery_contract_versions": []}
     metadata: dict[str, Any] = {}
+    reflections = [e for e in events if e["kind"] == "reflection"]
+    model_review_passed = bool(state.get("reflection_accepted") and reflections and reflections[-1].get("accept") is True)
     if proposal.is_file():
         text = proposal.read_text()
         validation = validate_document(text, expected_schema="proposal.v1")
         schema_valid = validation.valid
         errors.extend(f"{e.path}: {e.message}" for e in validation.errors)
         if schema_valid:
-            metadata = parse(text).metadata
+            metadata = validation.metadata
             requirements = request["scenario"]["requirements"]
-            errors.extend(material_errors(metadata, observations,
+            material_failures = material_errors(metadata, observations,
                                           min_sources=int(requirements["min_sources"]),
                                           min_pdfs=int(requirements["min_pdfs"]),
                                           require_budget=bool(requirements["require_parameter_budget"]),
-                                          max_ratio=float(requirements["max_parameter_ratio"])))
-            material_valid = not errors
+                                          max_ratio=float(requirements["max_parameter_ratio"]))
+            errors.extend(material_failures)
+            material_valid = not material_failures
+            delivery = audit_delivery(root, summary, text, invocation=trace_root.name,
+                                      scope=str(request.get("scope", request["scenario"].get("scope", "method_proposal"))),
+                                      model_review_passed=model_review_passed)
+            errors.extend(delivery.pop("errors"))
         if text != state["candidate"] or digest(text) != summary.get("proposal_sha256"):
             errors.append("final artifact differs from checkpoint or recorded summary hash")
     else:
@@ -78,7 +207,6 @@ def audit_run(root: Path) -> dict[str, Any]:
         errors.append("loop has not reached passed with no pending operation")
     if not audit["consistent"]:
         errors.append("trace audit is inconsistent")
-    reflections = [e for e in events if e["kind"] == "reflection"]
     if request["loop_policy"]["mode"] == "reflection":
         if not reflections or reflections[-1].get("accept") is not True or not state["reflection_accepted"]:
             errors.append("Reflection mode lacks a final accepting review")
@@ -111,7 +239,9 @@ def audit_run(root: Path) -> dict[str, Any]:
         "recorded_status": summary["status"], "loop_status": state["status"], "pending": state["pending"],
         "audit_passed": not errors, "errors": errors, "trace_consistent": audit["consistent"],
         "schema_valid": schema_valid, "material_valid": material_valid,
+        **delivery, "human_summary": metadata.get("human_summary"), "handoff": metadata.get("handoff"),
         "reflection_accepted": state["reflection_accepted"],
+        "model_review_passed": model_review_passed,
         "scientific_validated": False, "project_ready": False, "simulation_executed": False,
         "duration_seconds": summary.get("duration_seconds"), "counts": state["counts"],
         "sdk_attempt_failures": sum(e["kind"] == "sdk_attempt_failed" for e in events),
@@ -145,14 +275,20 @@ def render_report(report: dict[str, Any]) -> str:
     counts = report["counts"]
     lines = ["# Idea Agent 真实运行审计", "", f"运行：`{report['run_id']}`", "",
              f"源码：`{report['source_commit']}`；文件树：`{report['source_tree']}`", "",
-             f"结构与材料审计通过：**{report['audit_passed']}**。记录状态：{report['recorded_status']}。", "",
+             f"运行、材料与交付审计通过：**{report['audit_passed']}**。记录状态：{report['recorded_status']}。", "",
              f"Schema：{report['schema_valid']}；材料：{report['material_valid']}；"
-             f"Reflection 接受：{report['reflection_accepted']}；trace 一致：{report['trace_consistent']}。", "",
+             f"交付契约：{report.get('delivery_contract_valid')}；交付文件一致：{report.get('delivery_bundle_valid')}；"
+             f"trace 一致：{report['trace_consistent']}。", "",
+             f"模型审查通过：{report.get('model_review_passed', report['reflection_accepted'])}；"
+             f"实验执行：{report.get('simulation_executed', False)}；科学验证：{report.get('scientific_validated', False)}。"
+             "模型审查不等于实验或独立科学验证；交付检查为 None 表示历史记录未声明新版合同。", "",
              f"模型请求 {counts['model_requests']} 次，返回 {counts['model_responses']} 次；"
              f"SDK 尝试 {counts['sdk_attempts']} 次；工具 {counts['tool_dispatches']} 次，Observation {counts['observations']} 次。", "",
              f"协议修复 {counts['protocol_repairs']} 次，材料/Schema 修复 {counts['validation_repairs']} 次，"
              f"Reflection {counts['reflections']} 次。", "",
              f"Token 用量：{report['usage']}；记录完整：{report['usage_complete']}（不完整时仅为下界）。", "",
+             "## 方案概括", "", str(report.get("human_summary") or "本轮没有可审计的方案概括。"), "",
+             "## 下游交接", "", "```json", json.dumps(report.get("handoff"), ensure_ascii=False, indent=2), "```", "",
              "## 工具操作与选择理由", "", "| 步骤 | 工具 | 成功 | Agent 提供的行动理由 |",
              "| --- | --- | --- | --- |"]
     for row in report["tools"]:
