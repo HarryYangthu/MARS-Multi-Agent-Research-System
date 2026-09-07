@@ -22,8 +22,12 @@ def resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
         raise ValueError("reference must be an absolute JSON pointer")
     value: Any = document
     for token in pointer[1:].split("/"):
+        if re.search(r"~(?![01])", token):
+            raise ValueError(f"invalid JSON pointer escape: {pointer}")
         key = token.replace("~1", "/").replace("~0", "~")
         try:
+            if isinstance(value, list) and not re.fullmatch(r"0|[1-9][0-9]*", key):
+                raise ValueError("array indices must be canonical nonnegative integers")
             value = value[int(key)] if isinstance(value, list) else value[key]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ValueError(f"reference does not resolve: {pointer}") from exc

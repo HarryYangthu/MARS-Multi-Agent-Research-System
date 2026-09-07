@@ -61,6 +61,12 @@ def test_json_pointer_handles_escaped_keys_and_array_indices() -> None:
         resolve_pointer({"method_spec": {}}, "/method_spec/missing")
 
 
+@pytest.mark.parametrize("pointer", ["/items/-1", "/items/01", "/items/+1", "/items/١", "/bad~2key"])
+def test_handoff_pointers_reject_python_specific_indices_and_invalid_escapes(pointer: str) -> None:
+    with pytest.raises(ValueError):
+        resolve_pointer({"items": ["first", "second"], "bad~2key": "value"}, pointer)
+
+
 @pytest.mark.asyncio
 async def test_progress_persists_public_message_not_raw_candidate(tmp_path: Path) -> None:
     request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path), "run_id": "run-1"})
