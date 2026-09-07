@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest
+from app.bridge.research_context import ResearchContext
 from app.bridge.run_observability import build_run_observability
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 from app.storage.data_source_store import DataSourceStore
@@ -35,6 +36,8 @@ class CreateRunPayload(BaseModel):
     idea_mode: Literal["auto", "fast", "deep"] | None = None
     idea_budget_profile: Literal["fast", "balanced", "thorough"] | None = None
     project_inputs: dict[str, Any] = Field(default_factory=dict)
+    research_context: ResearchContext = Field(default_factory=ResearchContext)
+    idea_scope: Literal["method_proposal", "project_proposal"] | None = None
 
 
 class DataSourceSelection(BaseModel):
@@ -98,6 +101,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         request_extra["idea_budget_profile"] = payload.idea_budget_profile
     if payload.project_inputs:
         request_extra["project_inputs"] = dict(payload.project_inputs)
+    if payload.idea_scope is not None:
+        request_extra["scope"] = payload.idea_scope
     request = RunRequest(
         task=payload.task,
         project=payload.project,
@@ -107,6 +112,7 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         auto_approve=payload.auto_approve,
         data_source=data_source,
         extra=request_extra,
+        research_context=payload.research_context.supplied(),
     )
     try:
         session = orch.create_session(request)

@@ -404,7 +404,9 @@ def load_agent_handoff_context(
     identity = parse_node_key(node_key)
     stage, attempt = identity.stage, identity.attempt
     # Pick up upstream approved artifacts as handoff.
-    upstream: dict[str, str] = {}
+    from app.bridge.research_context import load_research_context
+
+    upstream = load_research_context(run, _load_run_request_extra(run))
     selected_data_source = _load_selected_data_source(run)
     if selected_data_source:
         upstream["input.selected_data_source"] = selection_summary(selected_data_source)
@@ -514,14 +516,14 @@ def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.warning("run request options are unreadable: {}", path)
-        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("run request options are unreadable; refusing to drop task inputs") from exc
     if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
-        logger.warning("run request options use an unsupported schema: {}", path)
-        return {}
+        raise ValueError("run request options use an unsupported schema")
     extra = raw.get("extra")
-    return {str(key): value for key, value in extra.items()} if isinstance(extra, dict) else {}
+    if not isinstance(extra, dict):
+        raise ValueError("run request options must contain an extra object")
+    return {str(key): value for key, value in extra.items()}
 
 
 def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str:

@@ -6,6 +6,27 @@ The Idea stage receives a research question and optional caller-supplied context
 
 `RunRequest.user_request` contains the objective and constraints. `upstream_artifacts` carries labeled source text; useful labels are `background`, `baseline_code`, `data_description`, `analysis_results`, and `metric_definition`. Existing Bridge context loading supplies approved upstream artifacts. Attached text remains source data, not privileged instructions.
 
+The task creation page exposes these fields under **补充研究材料**, together with `literature` for source links/excerpts and a method/project scope selector. `POST /api/runs` accepts the same six optional text fields as `research_context`, plus `idea_scope` (`method_proposal` or `project_proposal`). These are text inputs, not server file paths; code files must be supplied as text or connected through the existing repository integration. Links are research hints, not reading receipts.
+
+Bridge validates the material before creating a run, archives its exact nonblank values in `input/research_context.v1.json`, and binds the archive checksum into the persisted run options. Idea and downstream agents receive those original texts alongside complete approved artifacts. Both normal execution and recovered sessions reject missing, corrupted or mismatched material instead of silently dropping it. Existing runs without research context retain their previous behavior. Supplying background or a snippet is not evidence that a performance target has been achieved; project scope still requires baseline evidence and the existing proposal checks.
+
+```json
+{
+  "task": "lut-research",
+  "project": "pimc",
+  "entrypoint": "idea",
+  "standalone": true,
+  "user_request": "比较改善二维 LUT 表达能力的方案，输出可实施的实验交接包。",
+  "idea_scope": "method_proposal",
+  "research_context": {
+    "background": "在这里填写信号含义、工作条件与允许修改范围。",
+    "metric_definition": "在这里填写实际指标公式、单位、目标和参数预算。"
+  }
+}
+```
+
+The text above demonstrates the request shape; placeholders are not a completed PIMC task or baseline. The API creates a task; the existing start endpoint starts it, subject to the existing admission and review rules. Material is retained as untrusted user context, never promoted to system instructions. Large inputs remain subject to the loop's recorded context budget and fail explicitly if required material cannot fit.
+
 | Context | Useful contents | Consequence if missing |
 |---|---|---|
 | Background | PIMC signal definition, operating conditions, protected interfaces | Assumptions must be explicit |
