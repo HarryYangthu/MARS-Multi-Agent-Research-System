@@ -94,9 +94,11 @@ export function EventLog(): JSX.Element {
             const fromState = (e.payload?.from_state as string) ?? "";
             const toState = (e.payload?.to_state as string) ?? "";
             const event = (e.payload?.event as string) ?? "";
-            const summary = toState
-              ? `${stateLabel(fromState || "?")} → ${stateLabel(toState)}`
-              : event || JSON.stringify(e.payload).slice(0, 80);
+            const summary = event === "agent.progress" && typeof e.payload.message === "string"
+              ? e.payload.message
+              : toState
+                ? `${stateLabel(fromState || "?")} → ${stateLabel(toState)}`
+                : event || JSON.stringify(e.payload).slice(0, 80);
             return (
               <li
                 key={`${e.run_id}-${i}-${e.timestamp}`}

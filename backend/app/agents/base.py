@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.harness.agent_loop import AgentLoopExecutor, AgentLoopPolicy, LoopInput, NativeAgentLoop
+from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
@@ -24,6 +25,7 @@ class RunRequest:
     user_request: str
     upstream_artifacts: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
+    progress_sink: ProgressSink | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -205,6 +207,12 @@ class BaseAgent(ABC):
     def reflection_rubric(self) -> str:
         return "Verify evidence, definitions, every numerical claim, falsifiability, and downstream implementation completeness."
 
+    def loop_progress_sink(self, request: RunRequest, invocation: str) -> ProgressSink | None:
+        return request.progress_sink
+
+    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message] | None:
+        return None
+
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
                              debate_role: str | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext, get_registry
@@ -232,10 +240,13 @@ class BaseAgent(ABC):
                                      extra={"run_root": str(run_root)}),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
+            progress_sink=self.loop_progress_sink(request, invocation),
+            review_messages=self.review_messages(request, context),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))
         context.metadata["loop_status"] = result.status
+        context.metadata["reflection_accepted"] = result.reflection_accepted
         if result.status != "passed":
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,

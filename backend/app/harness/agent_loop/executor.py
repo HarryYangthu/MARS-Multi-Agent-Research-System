@@ -18,6 +18,7 @@ from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProv
 from app.harness.tools.registry import ToolContext, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
+ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def truncation_recovery(reason: object, *, repairs: int, limit: int, effort: str | None) -> dict[str, Any] | None:
@@ -46,6 +47,8 @@ class LoopInput:
     reflection_rubric: str = "Check evidence, definitions, arithmetic, internal consistency and falsifiability."
     resume: bool = False
     external_review: ExternalReview | None = None
+    progress_sink: ProgressSink | None = None
+    review_messages: list[Message] | None = None
 
 
 @dataclass
@@ -81,6 +84,8 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs})
+        if request.review_messages is not None:
+            fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
         state: dict[str, Any] = {
             "fingerprint": fingerprint, "status": "running", "pending": None,
@@ -114,6 +119,9 @@ class NativeAgentLoop:
         state.setdefault("protocol_output", "")
         state.setdefault("reviewed_candidate_sha", "")
         state.setdefault("phase_efforts", {})
+        async def progress(kind: str, **payload: Any) -> None:
+            if request.progress_sink is not None:
+                await request.progress_sink({"kind": kind, "phase": state["next_phase"], **payload})
         if request.resume and "last_model_error" not in state:
             prior_events = [json.loads(line) for line in trace.events.read_text().splitlines()]
             state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
@@ -178,6 +186,8 @@ class NativeAgentLoop:
                 recover_completion(state.get("last_model_error"))
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
                 reviewing = state["next_phase"] == "reflect"
+                if counts["model_requests"] == 0:
+                    await progress("started")
                 extra: list[Message] = []
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"]))
@@ -196,7 +206,8 @@ class NativeAgentLoop:
                 if counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 messages, manifest = pack_context(
-                    pinned + extra, state["history"], feedback, state["candidate"],
+                    (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
+                    state["history"], feedback, state["candidate"],
                     budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars, native=native,
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
@@ -269,6 +280,7 @@ class NativeAgentLoop:
                     state["review_issues"] = decision["issues"]
                     trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
                                               "host_conflict_rejection": review_conflict}, visible=decision)
+                    await progress("review", accepted=decision["accept"], issues=decision["issues"])
                     if decision["accept"]:
                         state["reflection_accepted"] = True
                         state["feedback"] = ""
@@ -283,10 +295,12 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    await progress("candidate", text=state["candidate"])
                     errors = await request.validate(state["candidate"], state["history"])
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
                         errors.append("/candidate: unresolved review issues require a revised candidate")
                     trace.emit("validation", {"valid": not errors}, visible=errors)
+                    await progress("validation", valid=not errors, issues=errors)
                     if errors:
                         counts["validation_repairs"] += 1
                         state["feedback"] = canonical({"validation_errors": errors})
@@ -328,6 +342,7 @@ class NativeAgentLoop:
                             counts["tool_dispatches"] += 1
                             trace.emit("tool_dispatch", {"step": counts["tool_dispatches"], "tool": tool}, visible=decision)
                             trace.snapshot(state)
+                            await progress("action", tool=tool, reason=decision.get("reason", ""), args=decision["args"])
                             result = await request.registry.dispatch(tool, decision["args"], request.tool_context)
                             observation = {**decision, "ok": result.ok, "output": result.output, "error": result.error,
                                            "status": result.status, "blocked_by_gate": result.blocked_by_gate}
@@ -345,6 +360,7 @@ class NativeAgentLoop:
                             state["feedback"] = ""
                             trace.emit("observation", {"step": counts["tool_dispatches"], "tool": tool, "ok": result.ok},
                                        visible=observation)
+                            await progress("observation", tool=tool, ok=result.ok, error=result.error)
                             if result.requires_approval or result.blocked_by_gate:
                                 state["status"] = "blocked"
                                 break
@@ -369,5 +385,6 @@ class NativeAgentLoop:
             trace.snapshot(state)
             await request.provider.close()
             cfg.attempt_observer = None
+            await progress("finished", status=state["status"])
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
                           request.trace_root, state["reflection_accepted"])

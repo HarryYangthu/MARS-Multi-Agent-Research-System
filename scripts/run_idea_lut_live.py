@@ -181,6 +181,9 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         summary.update(status="passed_method_proposal",
                        schema_valid=validate_document(artifact.text, expected_schema="proposal.v1").valid,
                        material_ready=True, proposal_path=str(target), proposal_sha256=digest(artifact.text))
+        summary.update(human_summary=artifact.metadata.get("human_summary"),
+                       delivery_root=context.metadata.get("idea_delivery_root"),
+                       handoff=artifact.metadata.get("handoff"))
     except (asyncio.CancelledError, KeyboardInterrupt):
         summary.update(status="interrupted", error_type="Cancelled", error="run interrupted; pending request usage may be unknown")
     except Exception as exc:

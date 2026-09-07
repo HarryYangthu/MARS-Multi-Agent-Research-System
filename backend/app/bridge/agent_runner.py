@@ -16,6 +16,7 @@ from typing import Any
 from loguru import logger
 
 from app.bridge.agent_registry import AgentRegistry, get_registry
+from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.harness.execution_intent import (
@@ -124,6 +125,7 @@ async def run_agent_node(
         user_request=user_request,
         upstream_artifacts=upstream,
         extra=request_extra,
+        progress_sink=build_agent_progress_sink(run=run, node_key=node_key, bus=bus),
     )
     failure_phase = "build_context"
     try:
