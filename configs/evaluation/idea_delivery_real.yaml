@@ -36,7 +36,7 @@ model:
   max_retries: 1
 loop:
   mode: reflection
-  reflection_reasoning_effort: high
+  reflection_reasoning_effort: low
   reflection_thinking_enabled: true
   trace: full
   max_model_calls: 30
