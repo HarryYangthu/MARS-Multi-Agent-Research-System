@@ -315,12 +315,17 @@ def test_runtime_key_survives_a_fresh_settings_load_through_the_volume_symlink(
 
 def test_windows_ci_exercises_both_powershell_runtimes() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
-    job = workflow["jobs"]["windows-deployment-scripts"]
-    assert job["runs-on"] == "windows-latest"
-    assert set(job["strategy"]["matrix"]["shell"]) == {"powershell", "pwsh"}
+    shells = {
+        step.get("shell")
+        for job in workflow["jobs"].values() if job["runs-on"] == "windows-latest"
+        for step in job["steps"] if "Test-DeploymentScripts.ps1" in step.get("run", "")
+    }
+    assert shells == {"powershell", "pwsh"}
     script = WINDOWS_DEPLOY / "tests" / "Test-DeploymentScripts.ps1"
     assert script.read_bytes().startswith(b"\xef\xbb\xbf")
     source = script.read_text(encoding="utf-8")
-    assert "TEST DOUBLES" in source
+    assert "pure validation inputs" in source
+    assert "function docker" not in source
+    assert "FakeDocker" not in source
     assert "Assert-MarsReadiness" in source
     assert "Resolve-MarsImageArchive" in source

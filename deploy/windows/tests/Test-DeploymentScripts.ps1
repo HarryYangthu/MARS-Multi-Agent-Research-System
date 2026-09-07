@@ -2,14 +2,12 @@
 param()
 
 # Dependency-free tests for both Windows PowerShell 5.1 and PowerShell 7.
-# All Docker responses below are TEST DOUBLES. No daemon, image, provider,
-# user configuration, or existing MARS volume is touched by this script.
+# Checks use actual temporary files, configuration, and pure validation inputs.
+# No Docker command or network service is replaced; container execution is untested.
 $ErrorActionPreference = "Stop"
 $sourceDeployRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $sourceDeployRoot "Common.ps1")
 $script:AssertionCount = 0
-$script:FakeDockerExit = 0
-$script:FakeDockerPlatform = "linux/amd64"
 
 function Assert-Test {
     param([bool]$Condition, [string]$Description)
@@ -31,23 +29,15 @@ function Assert-TestThrows {
     throw "FAILED: expected an error matching '$Pattern'"
 }
 
-function New-TestReadiness {
+function New-ReadinessContractInput {
     return [PSCustomObject]@{
         ready = $true
         runtime_mode = "development"
-        mock_mode = "auto"
+        mock_mode = "never"
         execution_device = "cpu"
-        execution_backend = "mock"
+        execution_backend = "local_command"
         checks = @()
     }
-}
-
-function docker {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-    $global:LASTEXITCODE = $script:FakeDockerExit
-    if ($Arguments[0] -eq "version") { return "linux|amd64" }
-    if ($Arguments[0] -eq "compose") { return "Docker Compose version v2.39.0-test" }
-    if ($Arguments[0] -eq "image") { return $script:FakeDockerPlatform }
 }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("mars-windows-script-test-" + [guid]::NewGuid().ToString("N"))
@@ -87,11 +77,13 @@ try {
     $context = Initialize-MarsDeployment
     Assert-Test -Condition ($context.FrontendPort -eq 3001 -and $context.BackendPort -eq 8000) -Description "default ports"
     Assert-Test -Condition ($context.ExecutionDevice -eq "cpu") -Description "CPU first"
-    Assert-Test -Condition ($context.RuntimeMode -eq "development" -and $context.MockMode -eq "auto") -Description "demo defaults"
+    Assert-Test -Condition ($context.RuntimeMode -eq "development" -and $context.MockMode -eq "never") -Description "real execution only"
     Assert-Test -Condition (-not $context.Settings.ContainsKey("DEEPSEEK_API_KEY")) -Description "no blank credential overriding UI persistence"
     Assert-MarsOfflinePorts -Context $context
-    Assert-MarsDocker
-    Assert-MarsImagePlatform -Image "test-image"
+
+    $env:MARS_MOCK_MODE = "auto"
+    Assert-TestThrows -Action { Initialize-MarsDeployment } -Pattern "*never*"
+    $env:MARS_MOCK_MODE = "never"
 
     $env:MARS_EXECUTION_DEVICE = "invalid-device"
     Assert-TestThrows -Action { Initialize-MarsDeployment } -Pattern "*cpu*gpu*"
@@ -126,25 +118,26 @@ try {
     Assert-Test -Condition ($productionContext.ComposeArguments -contains (Join-Path $script:MarsDeployRoot "compose.production.yaml")) -Description "production mount override is applied"
 
     $health = [PSCustomObject]@{ status = "ok"; distribution = "v31-wireless" }
-    $ready = New-TestReadiness
+    $ready = New-ReadinessContractInput
     Assert-MarsReadiness -Context $context -Health $health -Readiness $ready
     $ready.ready = $false
     $ready.checks = @([PSCustomObject]@{ severity = "blocker"; ready = $false; message = "missing provider fixture" })
     Assert-TestThrows -Action { Assert-MarsReadiness -Context $context -Health $health -Readiness $ready } -Pattern "*missing provider fixture*"
-    $ready = New-TestReadiness
+    $ready = New-ReadinessContractInput
     $ready.execution_device = "gpu"
     Assert-TestThrows -Action { Assert-MarsReadiness -Context $context -Health $health -Readiness $ready } -Pattern "*不一致*"
-    $ready = New-TestReadiness
+    $ready = New-ReadinessContractInput
     $ready.ready = "true"
     Assert-TestThrows -Action { Assert-MarsReadiness -Context $context -Health $health -Readiness $ready } -Pattern "*尚不能创建任务*"
-    $ready = New-TestReadiness
+    $ready = New-ReadinessContractInput
     $ready.runtime_mode = "production"
     $ready.mock_mode = "never"
+    $ready.execution_backend = "mock"
     Assert-TestThrows -Action { Assert-MarsReadiness -Context $productionContext -Health $health -Readiness $ready } -Pattern "*mock*"
     $ready.execution_backend = "local_command"
     Assert-MarsReadiness -Context $productionContext -Health $health -Readiness $ready
     Assert-TestThrows -Action {
-        Assert-MarsReadiness -Context $context -Health ([PSCustomObject]@{ status = "ok" }) -Readiness (New-TestReadiness)
+        Assert-MarsReadiness -Context $context -Health ([PSCustomObject]@{ status = "ok" }) -Readiness (New-ReadinessContractInput)
     } -Pattern "*distribution*"
 
     $archive = Join-Path $testRoot "fixture.tar"
@@ -159,13 +152,8 @@ try {
     [IO.File]::Delete($archive + ".sha256")
     Assert-TestThrows -Action { Resolve-MarsImageArchive -Path $archive } -Pattern "*缺少 SHA256*"
 
-    $script:FakeDockerPlatform = "linux/arm64"
-    Assert-TestThrows -Action { Assert-MarsImagePlatform -Image "test-image" } -Pattern "*架构错误*"
-    $script:FakeDockerExit = 7
-    Assert-TestThrows -Action { Invoke-MarsDocker -Arguments @("test-only") -Description "fixture" } -Pattern "*7*"
-    $global:LASTEXITCODE = 0
 
-    Write-Host "PASS: $script:AssertionCount Windows deployment script assertions (Docker mocked)." -ForegroundColor Green
+    Write-Host "PASS: $script:AssertionCount Windows file/configuration contract assertions; no container execution claimed." -ForegroundColor Green
 }
 finally {
     foreach ($name in $settingNames) {
