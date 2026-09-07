@@ -24,6 +24,19 @@ from app.settings import get_settings
 MAX_BYTES = 12 * 1024 * 1024
 
 
+def source_batch(sources: list[Any], limit: int) -> tuple[list[Any], dict[str, Any]]:
+    """Report every omission instead of implying all requested sources were handled."""
+    if isinstance(limit, bool) or not 1 <= limit <= 5:
+        raise ValueError("max_sources must be between 1 and 5")
+    selected = sources[:limit]
+    return selected, {
+        "requested_sources": len(sources), "selected_sources": len(selected),
+        "skipped_sources": len(sources) - len(selected), "max_sources": limit,
+        "skipped": [{"source": source, "reason": "max_sources limit; not attempted"}
+                    for source in sources[limit:]],
+    }
+
+
 def allowed_url(url: str) -> str:
     parsed = urlparse(url)
     allowed = {x.strip().lower() for x in get_settings().mars_web_search_allowlist.split(",") if x.strip()}
@@ -96,12 +109,13 @@ async def fetch_sources_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResu
     sources = args.get("sources")
     if not isinstance(sources, list) or not sources:
         return ToolResult(ok=False, error="sources must be a nonempty array")
+    selected, batch = source_batch(sources, int(args.get("max_sources", 1)))
     index_path = root / "source_fetch_index.v1.json"
     previous = json.loads(index_path.read_text()) if index_path.exists() else []
     rows: list[dict[str, Any]] = []
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
-        for source in sources[:min(5, max(1, int(args.get("max_sources", 1))))]:
+        for source in selected:
             row: dict[str, Any] = {"ok": False, "network_download_attempted": False,
                                   "network_download_performed": False, "reused": False}
             try:
@@ -167,5 +181,5 @@ async def fetch_sources_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResu
             atomic_json(index_path, previous)
     return ToolResult(ok=any(row["ok"] for row in rows),
                       error=None if any(row["ok"] for row in rows) else "source fetch failed; see individual errors",
-                      output={"download_dir": str(root), "index_path": str(index_path), "sources": rows},
+                      output={"download_dir": str(root), "index_path": str(index_path), "sources": rows, **batch},
                       evidence_refs=[str(index_path)])

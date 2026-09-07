@@ -90,15 +90,6 @@ export async function loadDiscoverySnapshot(
   signal?: AbortSignal,
 ): Promise<DiscoverySnapshot> {
   signal?.throwIfAborted();
-  if (runId === "synthetic-preview") {
-    const { syntheticDiscoveryReplay } = await import("./fixtures/synthetic-replay");
-    signal?.throwIfAborted();
-    return {
-      source: "contract_fixture",
-      replay: syntheticDiscoveryReplay,
-      loaded_at: new Date().toISOString(),
-    };
-  }
   const [run, replay] = await Promise.all([
     getDiscoveryRun(runId, signal),
     getDiscoveryReplay(runId, signal),

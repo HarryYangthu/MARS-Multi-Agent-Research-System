@@ -231,6 +231,8 @@ class NativeAgentLoop:
                 state["status"] = "budget_exhausted"
         except asyncio.CancelledError:
             state["status"] = "interrupted"
+            if state["pending"] == "model":
+                state["usage_complete"] = False
             trace.emit("interrupted", {"pending": state["pending"]})
             raise
         except Exception as exc:

@@ -42,6 +42,9 @@ async def run(args: argparse.Namespace) -> int:
         os.environ["ZHIPU_API_KEY"] = key
     if not args.prepare_only and not os.environ.get("ZHIPU_API_KEY"):
         raise RuntimeError("ZHIPU_API_KEY is missing; no request made")
+    runtime_changes = git_value("diff", "HEAD", "--name-only", "--", "backend/app", "configs", "scripts/run_idea_lut_live.py")
+    if runtime_changes and not args.prepare_only:
+        raise RuntimeError("commit runtime/config changes before a live evaluation so the source is reproducible")
     run_id = "idea_lut_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
     root = (args.runs_root / run_id).resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -73,6 +76,7 @@ async def run(args: argparse.Namespace) -> int:
     context = await agent.build_context(request)
     messages = agent._messages_for_context(request, context, purpose="live_preflight")
     initial = {"run_id": run_id, "source_commit": git_value("rev-parse", "HEAD"),
+               "source_tree": git_value("rev-parse", "HEAD^{tree}"),
                "source_dirty": bool(git_value("status", "--porcelain")),
                "scenario": scenario, "loop_policy": asdict(policy),
                "messages": [asdict(m) for m in messages],
@@ -89,13 +93,15 @@ async def run(args: argparse.Namespace) -> int:
         return 0
     started = time.monotonic()
     try:
-        artifact = await agent.run_loop(request, context)
+        artifact = await asyncio.wait_for(agent.run_loop(request, context), timeout=args.max_seconds)
         target = root / "idea" / "idea_proposal.v1.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(artifact.text, encoding="utf-8")
         summary.update(status="passed_method_proposal",
                        schema_valid=validate_document(artifact.text, expected_schema="proposal.v1").valid,
                        material_ready=True, proposal_path=str(target), proposal_sha256=digest(artifact.text))
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        summary.update(status="interrupted", error_type="Cancelled", error="run interrupted; pending request usage may be unknown")
     except Exception as exc:
         summary.update(status="failed", error_type=type(exc).__name__, error=str(exc)[:1000])
         logger.error("real Idea run failed: {}", type(exc).__name__)
@@ -127,6 +133,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=["react", "reflection"])
     parser.add_argument("--prompt-key", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--max-seconds", type=float, default=1200.0,
+                        help="overall live evaluation deadline; no unlimited retry")
     args = parser.parse_args()
     try:
         return asyncio.run(run(args))

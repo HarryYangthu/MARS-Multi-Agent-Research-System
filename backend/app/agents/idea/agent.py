@@ -23,7 +23,8 @@ class IdeaAgent(BaseAgent):
         "必须通过工具读取实际资料，不能凭模型记忆填充引用。PDF下载不等于读过全文；"
         "如方法未出现在返回节选中，应选择新页窗口。不要改写工具错误或把空历史当成新颖性证明。"
         "方法迁移必须区分论文原结论、你的推断、尚待实验验证的假设。"
-        "最终给出完整 YAML frontmatter + 中文 Markdown 方案，不要填补虚构 baseline、投票或实验结果。"
+        "最终以 final.metadata（JSON 对象）和 final.body（中文 Markdown）输出完整方案，由宿主序列化 YAML。"
+        "不要填补虚构 baseline、投票或实验结果。"
     )
 
     async def build_context(self, request: RunRequest) -> ContextPack:
