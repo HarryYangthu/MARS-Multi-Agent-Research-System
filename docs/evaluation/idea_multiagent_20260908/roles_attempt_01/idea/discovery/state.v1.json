@@ -1,0 +1,29 @@
+{
+  "backend_mode": "llm_roles",
+  "completed_stages": [],
+  "config": {
+    "budget_profile": "balanced",
+    "children_per_round": 1,
+    "elo_k": 32.0,
+    "evolution_rounds": 1,
+    "initial_hypotheses": 3,
+    "max_pairwise_matches": 4,
+    "proximity_threshold": 0.72,
+    "schema_id": "idea_deep_discovery_config.v1",
+    "seed": 0,
+    "top_k": 1
+  },
+  "hypotheses": [],
+  "input_hash": "b7c1acaef701582b6e413508098d55456432a78ade19df54aa44d781ac580b95",
+  "matches": [],
+  "meta_reviews": [],
+  "project": "synthetic_regression",
+  "proximity_graphs": [],
+  "reflections": [],
+  "run_id": "idea_roles_20260907T192347_e1c416",
+  "schema_id": "idea_deep_discovery_state.v1",
+  "selected_hypothesis_id": "",
+  "status": "running",
+  "top_hypothesis_ids": [],
+  "warnings": []
+}
