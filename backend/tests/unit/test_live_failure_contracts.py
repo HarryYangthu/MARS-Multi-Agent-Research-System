@@ -33,8 +33,10 @@ def test_failed_attempt_keeps_usage_incomplete_after_success(tmp_path: Path) -> 
 @pytest.mark.parametrize("tool", ["search.arxiv_search", "search.web_search"])
 @pytest.mark.parametrize("args", [{"query": "LUT", "table": ""}, {"query": "LUT", "q": "different"}, {}, {"query": ""}])
 def test_search_rejects_ambiguous_args_before_network(tool: str, args: dict[str, str]) -> None:
+    schema = tool_config(tool).input_schema
+    assert schema is not None
     with pytest.raises(ValidationError):
-        validate(args, tool_config(tool).input_schema)
+        validate(args, schema)
 
 
 def test_zhipu_serializes_explicit_thinking_modes_without_network() -> None:

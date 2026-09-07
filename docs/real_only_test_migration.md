@@ -75,3 +75,29 @@ Do not merge main until relevant regressions and live validation are complete.
 - 53 loop/parser/ledger/configuration contract checks passed; two changed
   provider/trace modules passed mypy in the Python 3.12 environment. These are
   preparation checks, not a successful live-agent evaluation.
+
+## Research-contract and build checkpoint
+
+- Migrated the Idea and search test modules individually: real context loading,
+  parameter arithmetic, negative provenance validation, filesystem archives,
+  URL/domain/network gates, and parser inputs. Positive external search/PDF
+  integration cases call the actual services when explicitly enabled. No model
+  or HTTP-response replacements are used. Removed recipe-specific expectations
+  do not establish a passing end-to-end agent run.
+- Verification reports: `idea_revision_contracts.xml` has 78 passing cases;
+  `idea_regression_20260907.xml` has 277 passes and 3 missing-gitleaks skips;
+  `research_migration_20260907.xml` has 51 passes and 2 external-service opt-in
+  skips. These suites overlap and must not be summed as distinct coverage.
+  Six migrated test modules also passed targeted mypy.
+- The test-migration inventory still flags 10 files / 12 patterns. Full
+  collection also exposes imports of removed deterministic role backends; the
+  heuristic inventory is incomplete. Full-suite readiness is not established.
+- Fixed the npm lockfile's actual picomatch resolution mismatch, then completed
+  `npm ci`, frontend type checking and the production build. Existing image and
+  hook lint warnings remain. Generated build caches were not committed.
+- The earlier CPU-loss ripple and architecture-surrogate findings are now fixed;
+  the CPU solver reports its computed loss and rejects unsupported architecture
+  parameters. This numerical reference is not a real PIMC baseline experiment.
+- Live run `idea_lut_20260907T082315_8dd75f` completed its loop but was rejected
+  in independent implementation review; see `idea_live_review_20260907.md`.
+  A subsequent run is testing actual candidate revision after review rejection.

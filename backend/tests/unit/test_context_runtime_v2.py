@@ -40,6 +40,7 @@ async def test_actual_permission_failure_keeps_raw_evidence_and_manifest(tmp_pat
                                                 extra={"run_root": str(tmp_path)}))
     assert not result.ok
     assert result.status == "not_allowed"
+    assert result.error is not None
     assert not (tmp_path / "forbidden.py").exists()
     observation = {"tool": "code.write_file", "args": args, "reason": "permission contract",
                    "ok": result.ok, "error": result.error, "output": result.output}
