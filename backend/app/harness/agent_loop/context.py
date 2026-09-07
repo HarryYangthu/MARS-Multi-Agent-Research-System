@@ -30,9 +30,15 @@ def compact(value: Any, chars: int) -> Any:
 def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
-    reviewing: bool = False,
+    reviewing: bool = False, review_issues: Sequence[str] = (),
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
+    if review_issues and not reviewing:
+        # The author needs revision history. A fresh reviewer must judge the
+        # current document without treating earlier model criticism as facts.
+        required.append(Message(role="user", content=(
+            "[unresolved review issues pinned through protocol/schema repairs]\n"
+            + canonical(list(review_issues)))))
     if history:
         # The full observations may be compressed/omitted, but the agent must
         # still know which actions really happened and where their receipts live.
@@ -73,4 +79,5 @@ def pack_context(
                       "estimator": "utf8_byte_upper_bound", "budget": budget,
                       "compressed_history": compressed, "omitted_history": omitted,
                       "reviewing": reviewing,
+                      "prior_review_issues_visible": bool(review_issues) and not reviewing,
                       "visible_sha256": digest([m.to_wire() for m in messages])}

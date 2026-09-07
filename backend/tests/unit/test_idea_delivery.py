@@ -86,7 +86,7 @@ async def test_reviewer_has_separate_instructions_and_supplied_context() -> None
     assert "Return the complete Markdown" not in text
     assert "Idea acceptance scope: method_proposal" in text
     assert "Missing measured improvement" in text
-    assert "not authoritative facts" in text
+    assert "Judge this document independently" in text
 
 
 def test_candidate_progress_never_claims_acceptance() -> None:
@@ -100,12 +100,12 @@ def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
 
 def test_repeated_delivery_preserves_exact_prior_artifact(tmp_path: Path) -> None:
     metadata = authored_metadata()
-    original = dumps(metadata, "Human-authored serialization input.")
+    original = dumps(metadata, metadata["human_summary"])
     request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path), "scope": "method_proposal"})
     first = write_delivery(Artifact(original, "proposal.v1", metadata, ""), request,
                            invocation="same-invocation", reviewed=False)
     metadata["human_summary"] = "比较两个修订后的方法，确认哪个值得进入后续实验。"
-    revised = dumps(metadata, "Another authored serialization input.")
+    revised = dumps(metadata, metadata["human_summary"])
     second = write_delivery(Artifact(revised, "proposal.v1", metadata, ""), request,
                             invocation="same-invocation", reviewed=False)
     assert first != second
@@ -115,6 +115,16 @@ def test_repeated_delivery_preserves_exact_prior_artifact(tmp_path: Path) -> Non
     acceptance = json.loads((second / "acceptance.json").read_text())
     assert not acceptance["simulation_executed"]
     assert not acceptance["scientific_validated"]
+
+
+def test_current_body_contract_prevents_duplicate_method_definitions() -> None:
+    from app.agents.idea.acceptance import validation_record_delivery_errors
+    metadata = authored_metadata()
+    assert not delivery_errors(metadata, "method_proposal", body=metadata["human_summary"])
+    record = {"delivery_contract_version": "idea.handoff.v1", "body_policy": "summary_only"}
+    assert any("/body" in issue for issue in validation_record_delivery_errors(metadata, record, body="A second definition."))
+    record.pop("body_policy")
+    assert not validation_record_delivery_errors(metadata, record, body="Legacy narrative body.")
 
 
 def test_submission_schema_requires_full_method_without_changing_legacy_parser() -> None:

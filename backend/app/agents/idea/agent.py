@@ -83,7 +83,8 @@ class IdeaAgent(BaseAgent):
         context.task += (
             "\nDeliver one coherent proposal for the next Experiment agent. Include human_summary: "
             "one or two short Chinese sentences describing exactly what changes and why it may help; "
-            "never present a hypothesis as a measured gain. The body should repeat that summary only. "
+            "never present a hypothesis as a measured gain. The body must equal human_summary exactly; "
+            "no headings, duplicated equations or extra sections in body. "
             "Put the full method in method_spec and refer to its fields through handoff.changes[].spec_ref. "
             "handoff must follow idea.handoff.v1, target experiment, match the task scope, define next_step, "
             "changes, verification_requirements and required_context. Use blocks_execution for actual "
@@ -93,6 +94,8 @@ class IdeaAgent(BaseAgent):
             "Define baseline and candidate equations, input/output and phase semantics, all trainable/fixed "
             "quantities, initialization, boundary handling, training objective and limitations. "
             "All quantities must have a single definition and the equations must be implementable. "
+            "Prefer one minimal change to the baseline; add a second change only with a concrete justification "
+            "and a distinct ablation. An ablation must actually change behavior on the specified evaluation domain. "
             "If require_parameter_budget is true: parameter_budget uses unit real_scalar, variables, "
             "baseline_formula, candidate_formula, integer baseline_parameters/candidate_parameters, "
             "and baseline_components/candidate_components lists of {name,formula,dtype,shape}; "
@@ -146,13 +149,14 @@ class IdeaAgent(BaseAgent):
         if errors:
             return errors
         requirements = request.extra.get("idea_requirements", {})
-        metadata = parse(text).metadata
+        parsed = parse(text)
+        metadata = parsed.metadata
         candidate_sha = digest(text)
         input_receipt = archive_baseline_input(
             run_root=Path(str(request.extra["run_root"])), project=request.project,
             content=request.upstream_artifacts.get("baseline_code", ""), candidate_sha256=candidate_sha,
         )
-        errors.extend(delivery_errors(metadata, str(request.extra.get("scope", "method_proposal"))))
+        errors.extend(delivery_errors(metadata, str(request.extra.get("scope", "method_proposal")), body=parsed.body))
         errors.extend(material_errors(
             metadata, observations,
             min_sources=int(requirements.get("min_sources", 1)),
@@ -168,6 +172,7 @@ class IdeaAgent(BaseAgent):
             "schema_valid": True, "material_ready": not errors, "errors": errors,
             "candidate_sha256": candidate_sha, "requirements": requirements,
             "delivery_contract_version": "idea.handoff.v1",
+            "body_policy": "summary_only",
             "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,
@@ -185,11 +190,10 @@ class IdeaAgent(BaseAgent):
                             "A schema pass is not scientific proof. Report only concrete blockers to this stage: "
                             "contradictory or unimplementable definitions, missing essential decisions, incorrect "
                             "arithmetic, unobserved evidence claims, or claims stronger than their stated support. "
-                            "Do not invent extra acceptance requirements. Prior review issues are claims to recheck, "
-                            "not authoritative facts; explicitly explain in rationale any withdrawn false positive "
-                            "or issue outside scope. Only actual unresolved blockers belong in issues. "
+                            "Do not invent extra acceptance requirements. Judge this document independently; "
+                            "only actual current blockers belong in issues. "
                             "For each blocker name the exact current field and missing or contradictory definition; "
-                            "reread the current candidate rather than copying a previous issue list."),
+                            "quote supporting text and calculate any claimed counterexample."),
                     Message("system", "Idea acceptance scope: " + str(request.extra.get("scope", "method_proposal"))
                             + ". This stage delivers a falsifiable research proposal for downstream experiments. "
                             "It does not perform those experiments. Missing measured improvement, novelty proof, "

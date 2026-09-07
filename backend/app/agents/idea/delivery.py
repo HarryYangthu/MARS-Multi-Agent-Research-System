@@ -32,13 +32,15 @@ def resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
     return value
 
 
-def delivery_errors(metadata: dict[str, Any], scope: str) -> list[str]:
+def delivery_errors(metadata: dict[str, Any], scope: str, *, body: str | None = None) -> list[str]:
     errors: list[str] = []
     summary = metadata.get("human_summary")
     if not isinstance(summary, str) or not 8 <= len(summary.strip()) <= 240 or "\n" in summary:
         errors.append("/human_summary: write one plain-language paragraph of 1-2 sentences, 8-240 characters, explaining the change and intended benefit")
     elif len([s for s in re.split(r"[。！？!?]+|(?<!\d)\.(?!\d)", summary) if s.strip()]) > 2:
         errors.append("/human_summary: at most two sentences; move details into method_spec")
+    if body is not None and isinstance(summary, str) and body.strip() != summary.strip():
+        errors.append("/body: copy human_summary exactly as the body; keep all method definitions in structured metadata to prevent contradictory duplicate specifications")
     handoff = metadata.get("handoff")
     if not isinstance(handoff, dict):
         return errors + ["/handoff: required versioned downstream contract; follow the handoff schema"]
@@ -128,7 +130,8 @@ def progress_sink(request: RunRequest, invocation: str) -> ProgressSink:
 
 def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, reviewed: bool) -> Path:
     validation = validate_document(artifact.text, expected_schema="proposal.v1")
-    errors = [error.message for error in validation.errors] + delivery_errors(validation.metadata, str(request.extra.get("scope", "method_proposal")))
+    errors = [error.message for error in validation.errors] + delivery_errors(
+        validation.metadata, str(request.extra.get("scope", "method_proposal")), body=parse(artifact.text).body)
     if errors:
         raise ValueError("cannot publish an invalid Idea delivery: " + "; ".join(errors))
     # A resumed invocation may produce another accepted revision. Keep each

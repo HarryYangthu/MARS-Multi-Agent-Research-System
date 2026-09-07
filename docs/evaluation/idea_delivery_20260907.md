@@ -40,4 +40,16 @@ Run `idea_lut_20260907T171439_e7bf4b` used clean local commit `7d101cf3198bbeb57
 
 This exposed incomplete context separation: although reviewer instructions differed, the reviewer still received the generator's native assistant/tool history while tools were disabled, and the candidate appeared as an assistant continuation. Review observations are now untrusted data documents, and candidates are user-provided documents in both phases. The protocol error branch now requests review JSON when reviewing instead of incorrectly requesting a tool call or proposal. No DSML fragment is interpreted as an executable tool call. The changed context format is bound into the resume fingerprint.
 
+## Fifth complete run: interrupted, recovered, then review rejected
+
+Run `idea_lut_20260907T172319_1c9c26` began on clean `51e923f4d387f4a325bf515c4457df03d5554c84`. The process disappeared while awaiting model request 4. An automatic approval review had questioned whether private repository content could be sent. Inspection of the persisted request confirmed public tools only, isolated memory, disabled project/repository context and no upstream artifacts. No private baseline was supplied.
+
+Recovery exposed two actual CLI defects: a vanished process left status `running`, and serialized empty lists were compared directly with in-memory tuples. The explicit abandoned-request recovery now requires an exclusive run lock and a pending model request, rejects unknown tool outcomes, and preserves budgets. Prompt equality uses canonical serialized content. The invocation resumed on clean `6e10e3f27e6b1d04ebde3d7a1a59ec6e24245795` with a source journal; no counters or old evidence were replaced.
+
+Final counts: 14 model requests, 13 responses, 12 research tools, one protocol repair, one validation repair, three reviews; terminal status `reflection_rejected`. API-reported usage is **at least 295,023 tokens**: the lost request makes usage incomplete. The summary's 339.1 seconds covers the resumed attempt only, not all elapsed time since initial launch. No accepted delivery was published.
+
+The reviewer repeatedly copied stale complaints. Independent deterministic checks found the current structured Catmull-Rom basis/indexing and mirror mapping correct. However, the author adopted a false index explanation in the Markdown body, contradicting its correct structured formula. Actual remaining defects also included overlapping reject/inconclusive rules and an ablation that changed no behavior on the declared input domain. This was not a successful scientific review.
+
+The next revision removes prior model criticism from fresh reviewer input while retaining it for the author. Reviewers must identify current fields and calculate counterexamples. New deliveries enforce a summary-only body, leaving a single structured method definition; legacy receipts retain their prior body policy. The author is instructed to prefer one justified core change and meaningful ablations. Context format changes remain resume-fingerprinted.
+
 Further fresh-run results will be appended after execution. All failures remain preserved in the evidence package.

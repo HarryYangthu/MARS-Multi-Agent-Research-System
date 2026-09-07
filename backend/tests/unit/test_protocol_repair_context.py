@@ -22,7 +22,8 @@ def test_unparsed_output_is_preserved_as_data_with_candidate_and_review() -> Non
                                       "Keep the unresolved boundary issue", candidate,
                                       budget=5000, observation_chars=1000)
     assert messages[1] == message
-    assert json.loads(messages[-2].content)["candidate"] == candidate
+    assert messages[-2].role == "user"
+    assert json.loads(messages[-2].content.split("\n", 1)[1])["candidate"] == candidate
     assert "unresolved boundary issue" in messages[-1].content
     assert not manifest["omitted_history"]
 

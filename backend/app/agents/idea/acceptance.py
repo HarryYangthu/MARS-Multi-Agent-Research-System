@@ -120,14 +120,15 @@ def _baseline_was_model_input(trace_root: Path, content: str) -> bool:
     return False
 
 
-def validation_record_delivery_errors(metadata: dict[str, Any], record: dict[str, Any]) -> list[str]:
+def validation_record_delivery_errors(metadata: dict[str, Any], record: dict[str, Any], *, body: str = "") -> list[str]:
     """Recheck the version actually enforced; do not upgrade historical receipts."""
     version = record.get("delivery_contract_version")
     if version is None:
         return []
     if version != "idea.handoff.v1":
         return ["/delivery_contract_version: unsupported recorded delivery contract"]
-    return delivery_errors(metadata, str(record.get("scope", "method_proposal")))
+    return delivery_errors(metadata, str(record.get("scope", "method_proposal")),
+                           body=body if record.get("body_policy") == "summary_only" else None)
 
 
 def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, Any]:
@@ -175,7 +176,7 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
         material_failures = []
         for record in records:
             req = record.get("requirements", {})
-            delivery_failures = validation_record_delivery_errors(parse(text).metadata, record)
+            delivery_failures = validation_record_delivery_errors(parse(text).metadata, record, body=parse(text).body)
             if record.get("delivery_contract_version") is not None:
                 delivery_contract_valid = delivery_contract_valid is not False and not delivery_failures
             material_failures.extend(delivery_failures)

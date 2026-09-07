@@ -161,3 +161,18 @@ def test_review_context_contains_evidence_but_no_native_call_conversation() -> N
     assert any("Authored parser input" in m.content for m in messages)
     assert messages[-1].role == "user" and messages[-1].content.endswith(candidate)
     assert manifest["reviewing"] is True
+
+
+def test_prior_critique_reaches_author_but_not_independent_reviewer() -> None:
+    issues = ["previous model claimed the boundary was undefined"]
+    candidate = "Current document defines the boundary explicitly."
+    kwargs = {"budget": 5000, "observation_chars": 512, "native": True}
+    author, author_manifest = pack_context([Message("system", "Author")], [], "", candidate,
+                                           review_issues=issues, **kwargs)
+    reviewer, review_manifest = pack_context([Message("system", "Review")], [], "", candidate,
+                                             review_issues=issues, reviewing=True, **kwargs)
+    assert any(issues[0] in message.content for message in author)
+    assert all(issues[0] not in message.content for message in reviewer)
+    assert any(candidate in message.content for message in reviewer)
+    assert author_manifest["prior_review_issues_visible"] is True
+    assert review_manifest["prior_review_issues_visible"] is False

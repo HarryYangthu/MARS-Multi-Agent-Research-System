@@ -85,7 +85,7 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 2})
+                              "context_format_version": 3})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.review_messages is not None:
@@ -199,25 +199,22 @@ class NativeAgentLoop:
                 extra: list[Message] = []
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"]))
-                if state["review_issues"]:
-                    extra.append(Message(role="user", content=(
-                        "[unresolved review issues pinned through protocol/schema repairs]\n"
-                        + canonical(state["review_issues"]))))
                 if reviewing:
                     extra.append(Message(role="system", content=(
                         "You are reviewing the current candidate, not generating tool actions. "
                         'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
                         "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
-                        + request.reflection_rubric + "\nVerify the revised candidate resolves every prior issue:\n"
-                        + canonical(state["review_issues"]))))
+                        + request.reflection_rubric + "\nEvaluate the current document independently. "
+                        "For each issue identify the exact current field and supporting excerpt, or precisely "
+                        "name the missing definition. Calculate any claimed mathematical counterexample.")))
                 feedback = state["feedback"]
-                if counts["tool_dispatches"] >= p.max_tool_steps:
+                if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 messages, manifest = pack_context(
                     (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
                     state["history"], feedback, state["candidate"],
                     budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
-                    native=native, reviewing=reviewing,
+                    native=native, reviewing=reviewing, review_issues=state["review_issues"],
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
