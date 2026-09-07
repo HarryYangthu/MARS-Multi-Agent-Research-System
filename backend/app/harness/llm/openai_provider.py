@@ -21,6 +21,7 @@ from app.harness.llm.provider_base import (
     MAX_LLM_RETRIES,
     Message,
     ReasoningEffort,
+    ToolCall,
 )
 
 
@@ -126,7 +127,7 @@ class _OpenAICompatProvider(LLMProvider):
             "model": config.model,
             "max_tokens": config.max_tokens,
             "messages": [
-                {"role": message.role, "content": message.content}
+                message.to_wire()
                 for message in messages
             ],
             "timeout": config.request_timeout_seconds,
@@ -134,6 +135,13 @@ class _OpenAICompatProvider(LLMProvider):
         if not (self.name == "deepseek" and thinking_enabled):
             kwargs["temperature"] = config.temperature
             kwargs["top_p"] = config.top_p
+        if config.tools:
+            if self.name == "zhipu":
+                raise ValueError("native tool streaming is not implemented for zhipu")
+            if thinking_enabled:
+                raise ValueError("native tools currently require explicit non-thinking mode")
+            kwargs["tools"] = list(config.tools)
+            kwargs["parallel_tool_calls"] = False
         if config.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if stream:
@@ -151,6 +159,8 @@ class _OpenAICompatProvider(LLMProvider):
                 raise ValueError("GLM-5.3 reasoning_effort must be low, high or max")
             if forced or config.thinking_enabled is not None:
                 kwargs["extra_body"] = {"thinking": {"type": "enabled" if forced or thinking_enabled else "disabled"}}
+        elif self.name == "deepseek" and thinking_enabled is False:
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         elif thinking_enabled:
             # DeepSeek exposes thinking mode as an OpenAI-compatible extension.
             # Keep it in extra_body so other compatible endpoints are unchanged
@@ -234,10 +244,16 @@ class _OpenAICompatProvider(LLMProvider):
         finish_reason = _optional_string(
             getattr(response_choice, "finish_reason", None)
         )
-        self._check_final(config, finish_reason, bool(text.strip()),
+        calls = tuple(ToolCall(id=call.id, name=call.function.name,
+                               arguments=call.function.arguments)
+                      for call in (getattr(message, "tool_calls", None) or ()))
+        if calls and not config.tools:
+            raise ValueError("unsolicited tool calls without configured tools")
+        self._check_final(config, finish_reason, bool(text.strip()) or bool(calls),
                           usage=_usage_payload(getattr(resp, "usage", None)))
         return Completion(
             text=text,
+            tool_calls=calls,
             provider=self.name,
             model=config.model,
             is_mock=False,

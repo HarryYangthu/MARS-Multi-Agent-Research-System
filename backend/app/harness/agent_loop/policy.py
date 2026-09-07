@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 @dataclass(frozen=True)
 class AgentLoopPolicy:
+    protocol: Literal["json_actions", "native_tools"] = "json_actions"
     mode: Literal["react", "reflection"] = "react"
     trace: Literal["full", "metadata", "off"] = "full"
     reflection_reasoning_effort: Literal["low", "medium", "high", "max"] | None = None
@@ -20,6 +21,8 @@ class AgentLoopPolicy:
     observation_chars: int = 6000
 
     def __post_init__(self) -> None:
+        if self.protocol not in {"json_actions", "native_tools"}:
+            raise ValueError("unsupported loop protocol")
         if self.mode not in {"react", "reflection"}:
             raise ValueError("mode must be react or reflection")
         if self.trace not in {"full", "metadata", "off"}:
@@ -27,7 +30,7 @@ class AgentLoopPolicy:
         if self.reflection_reasoning_effort not in {None, "low", "medium", "high", "max"}:
             raise ValueError("unsupported reflection_reasoning_effort")
         for item in fields(self):
-            if item.name in {"mode", "trace", "reflection_reasoning_effort"}:
+            if item.name in {"mode", "trace", "reflection_reasoning_effort", "protocol"}:
                 continue
             value = getattr(self, item.name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:

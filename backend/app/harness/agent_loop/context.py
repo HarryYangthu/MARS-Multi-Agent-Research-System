@@ -6,12 +6,13 @@ from typing import Any
 
 from app.harness.agent_loop.trace import canonical, digest
 from app.harness.llm.provider_base import Message
+from app.harness.agent_loop.native_protocol import observation_messages
 
 
 def token_upper_bound(messages: Sequence[Message]) -> int:
     # UTF-8 bytes are a deliberately conservative tokenizer-independent bound.
     # The small per-message allowance includes message framing.
-    return sum(len(m.content.encode("utf-8")) + 16 for m in messages)
+    return sum(len(canonical(m.to_wire()).encode("utf-8")) + 16 for m in messages)
 
 
 def compact(value: Any, chars: int) -> Any:
@@ -50,17 +51,17 @@ def pack_context(
     for index in reversed(range(len(history))):
         item = history[index]
         content = "[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars))
-        message = Message(role="user", content=content)
-        if token_upper_bound(required + selected + [message]) > budget:
+        group = observation_messages(item, content)
+        if token_upper_bound(required + selected + group) > budget:
             minimal = {k: item.get(k) for k in ("tool", "args", "reason", "ok", "error", "raw_ref")}
-            message = Message(role="user", content="[compressed evidence reference]\n" + canonical(minimal))
+            group = observation_messages(item, "[compressed evidence reference]\n" + canonical(minimal))
             compressed.append(index)
-        if token_upper_bound(required + selected + [message]) <= budget:
-            selected.insert(0, message)
+        if token_upper_bound(required + selected + group) <= budget:
+            selected[0:0] = group
         else:
             omitted.append(index)
     messages = list(pinned) + selected + required[len(pinned):]
     return messages, {"estimated_upper_bound_tokens": token_upper_bound(messages),
                       "estimator": "utf8_byte_upper_bound", "budget": budget,
                       "compressed_history": compressed, "omitted_history": omitted,
-                      "visible_sha256": digest([{"role": m.role, "content": m.content} for m in messages])}
+                      "visible_sha256": digest([m.to_wire() for m in messages])}

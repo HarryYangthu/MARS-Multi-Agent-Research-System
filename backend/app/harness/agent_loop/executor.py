@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from app.harness.agent_loop.context import pack_context
+from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
@@ -70,8 +71,14 @@ class NativeAgentLoop:
             if spec is None or spec.bridge_only:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
-        pinned = list(request.messages) + [Message(role="system", content=INSTRUCTION + "\nTools:\n" + canonical(specs))]
-        fingerprint = digest({"messages": [asdict(x) for x in pinned], "policy": asdict(p),
+        native = p.protocol == "native_tools"
+        if native and request.config.thinking_enabled is not False:
+            raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
+        wire_tools = native_specs(specs) if native else ()
+        tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
+        instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
+        pinned = list(request.messages) + [Message(role="system", content=instructions)]
+        fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
@@ -119,8 +126,7 @@ class NativeAgentLoop:
                                            "candidate_digest": request.external_review.candidate_digest,
                                            "budgets_reset": False}, visible=list(request.external_review.issues))
         trace.snapshot(state)
-        cfg = request.config
-        cfg.json_mode = True
+        cfg = replace(request.config, json_mode=not native)
 
         def on_attempt(kind: str, data: dict[str, Any]) -> None:
             trace.record_attempt(state, kind, data)
@@ -141,7 +147,9 @@ class NativeAgentLoop:
         def phase_config() -> LLMConfig:
             phase = state["next_phase"]
             default = p.reflection_reasoning_effort if phase == "reflect" and p.reflection_reasoning_effort else cfg.reasoning_effort
-            return replace(cfg, reasoning_effort=state["phase_efforts"].get(phase, default))
+            return replace(cfg, reasoning_effort=state["phase_efforts"].get(phase, default),
+                           json_mode=phase == "reflect" or not native,
+                           tools=wire_tools if native and phase != "reflect" else ())
 
         def recover_completion(reason: object) -> bool:
             plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
@@ -186,8 +194,10 @@ class NativeAgentLoop:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 messages, manifest = pack_context(
                     pinned + extra, state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget, observation_chars=p.observation_chars,
+                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
                 )
+                manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
+                manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
                 counts["model_requests"] += 1
                 state["pending"] = "model"
                 call_config = phase_config()
@@ -195,7 +205,7 @@ class NativeAgentLoop:
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "max_tokens": call_config.max_tokens},
-                           visible=[asdict(m) for m in messages])
+                           visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)
                 try:
                     completion = await asyncio.wait_for(
@@ -222,10 +232,12 @@ class NativeAgentLoop:
                 state["last_model_error"] = None
                 trace.emit("model_response", {"request": counts["model_requests"], "provider": completion.provider,
                                               "model": completion.model, "usage": completion.raw.get("usage")},
-                           visible=completion.text)
+                           visible=({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]}
+                                    if native else completion.text))
                 review_conflict = False
                 try:
-                    decision = parse_review(completion.text) if reviewing else parse_action(completion.text)
+                    decision = (parse_review(completion.text) if reviewing else
+                                native_decision(completion, request.tools) if native else parse_action(completion.text))
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
@@ -234,10 +246,13 @@ class NativeAgentLoop:
                     trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
                     counts["protocol_repairs"] += 1
-                    state["protocol_output"] = completion.text
+                    state["protocol_output"] = (canonical({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]})
+                                                if native else completion.text)
                     state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
+                    if native:
+                        state["feedback"] = f"Protocol error: {exc}. Use one valid native tool call or submit the complete Markdown candidate. No rejected action was executed."
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"

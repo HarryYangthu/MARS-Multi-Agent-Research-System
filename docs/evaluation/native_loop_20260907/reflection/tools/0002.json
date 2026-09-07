@@ -1,0 +1,1 @@
+{"args":{"name":"b.json"},"blocked_by_gate":null,"error":null,"native_call":{"arguments":"{\"name\": \"b.json\"}","id":"call_00_OitDXi1TbZhPKjjyBbab4978","name":"mars_907e33b24e1307397610d2c8"},"ok":true,"output":{"content":"[13, 29, 37]"},"reason":"","status":"success","tool":"verification.read"}
