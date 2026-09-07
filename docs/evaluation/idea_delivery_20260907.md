@@ -52,4 +52,12 @@ The reviewer repeatedly copied stale complaints. Independent deterministic check
 
 The next revision removes prior model criticism from fresh reviewer input while retaining it for the author. Reviewers must identify current fields and calculate counterexamples. New deliveries enforce a summary-only body, leaving a single structured method definition; legacy receipts retain their prior body policy. The author is instructed to prefer one justified core change and meaningful ablations. Context format changes remain resume-fingerprinted.
 
+## Sixth complete run: delivery formatting passed, model review still rejected
+
+Run `idea_lut_20260907T174135_95d606` used clean runtime commit `364dbec304db7fa07eb38ae228c0e8df8cb6cbbb`. It took 697.9 seconds: 17 model calls, 12 research tools, zero validation repairs, two protocol repairs and three reviews. API usage was 422,079 tokens, complete, with consistent trace counters. There were two memory calls, seven arXiv searches and three fetch calls: 21 distinct search results, two downloaded PDFs, four read windows and two cache reuses.
+
+All three submitted candidates passed host validation immediately, including the summary-only body and structured handoff. The terminal status was still `reflection_rejected`, so no accepted delivery was published. The initial candidate had genuinely overlapping decision branches, ambiguous initialization wording and speculative domain expansion. The reviewer also raised false complaints about correct standard B-spline equations, contradicted its own arithmetic within an issue, and treated some acknowledged risks as missing implementation guarantees. One reviewer protocol error and one oversized author response required recovery. The final revision corrected the ordinary decision overlap but did not receive model acceptance.
+
+Inspection of the actual phase configuration revealed that `reflection_reasoning_effort=high` inherited `thinking_enabled=false` from the native action model. The new independent `reflection_thinking_enabled` policy enables reasoning for the tool-free reviewer while retaining non-thinking native action calls. Both settings are recorded per request. This is a configuration fix being tested, not a claim that stronger self-review proves scientific correctness. The author is also told not to guess undefined domain acronyms, signal meanings or hardware.
+
 Further fresh-run results will be appended after execution. All failures remain preserved in the evidence package.
