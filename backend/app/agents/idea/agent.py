@@ -8,6 +8,10 @@ from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
+from app.agents.idea.delivery import delivery_errors, progress_sink, write_delivery
+from app.agents.idea.acceptance import archive_baseline_input
+from app.harness.agent_loop.executor import ProgressSink
+from app.harness.llm.provider_base import Message
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.schema.frontmatter_parser import parse
 from app.storage.artifact_store import ArtifactRef
@@ -17,76 +21,109 @@ from app.storage.run_store import RunHandle
 class IdeaAgent(BaseAgent):
     name = "idea"
     output_schema = "proposal.v1"
+    native_structured_delivery = True
     agent_brief = (
         "将研究问题转化为有证据、可证伪、可实现的方案。自主决定检索词、来源、下载与页窗口，"
         "每次工具行动说明理由。优先查真实 Memory，再查用户指定或允许网站的论文。"
         "必须通过工具读取实际资料，不能凭模型记忆填充引用。PDF下载不等于读过全文；"
         "如方法未出现在返回节选中，应选择新页窗口。不要改写工具错误或把空历史当成新颖性证明。"
         "方法迁移必须区分论文原结论、你的推断、尚待实验验证的假设。"
+        "用户未定义的领域缩写、物理信号和硬件架构不得凭字母猜测；将它们列为需要确认的背景。"
         "检索应有明确的信息缺口；当已取得要求数量的相关来源并读到方法页段后，应形成候选方案。"
         "只有具体定义、证据或比较仍缺失时再补检索，不为增加篇数反复扩展检索。"
         "最终输出遵循宿主指定的协议，方案必须包含完整元数据和中文正文。"
         "不要填补虚构 baseline、投票或实验结果。"
     )
 
+    def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
+        schema = super().submission_schema(request)
+        if schema is None:
+            return None
+        # New submissions require the full delivery contract, while historical
+        # proposal.v1 documents retain their original compatibility contract.
+        schema["required"] += ["human_summary", "handoff", "method_spec", "decision_rule",
+                               "related_literature", "testable_predictions", "risk_register"]
+        for field in ("method_spec", "decision_rule"):
+            schema["properties"][field] = {"type": "object", "minProperties": 1,
+                "description": "Canonical complete structured definition; never put this only in body."}
+        if request.extra.get("idea_requirements", {}).get("require_parameter_budget"):
+            schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
+            component = {"type": "object", "required": ["name", "formula", "dtype", "shape"],
+                         "properties": {"name": {"type": "string", "minLength": 1},
+                                        "formula": {"type": "string", "minLength": 1},
+                                        "dtype": {"enum": ["real", "complex"]},
+                                        "shape": {"type": "array", "maxItems": 8,
+                                                  "items": {"anyOf": [{"type": "integer", "minimum": 1},
+                                                                       {"type": "string", "minLength": 1}]}}}}
+            components = {"type": "array", "minItems": 1, "items": component}
+            budget_properties: dict[str, Any] = {
+                "unit": {"const": "real_scalar"},
+                "variables": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"},
+                              "description": "Numeric values only. Put variable explanations in a different field."},
+            }
+            for prefix in ("baseline", "candidate"):
+                budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1}
+                budget_properties[prefix + "_parameters"] = {"type": "integer", "minimum": 1}
+                budget_properties[prefix + "_components"] = components
+            schema["properties"]["parameter_budget"] = {"type": "object", "required": list(budget_properties),
+                                                          "properties": budget_properties}
+            schema["properties"]["signal_contract"] = {"type": "object", "minProperties": 1}
+            for field, minimum in (("alternatives", 2), ("ablation_plan", 3)):
+                schema["properties"][field] = {"type": "array", "minItems": minimum,
+                                                "items": {"type": "object"}}
+            schema["properties"]["alternatives"]["items"] = {"type": "object",
+                "required": ["name", "feasible", "parameters", "components"],
+                "properties": {"name": {"type": "string"}, "feasible": {"type": "boolean"},
+                               "parameters": {"type": "integer", "minimum": 1}, "components": components}}
+        return schema
+
     async def build_context(self, request: RunRequest) -> ContextPack:
         context = await super().build_context(request)
         requirements = request.extra.get("idea_requirements", {})
         context.task += "\n\nHost evaluation requirements (not experimental facts):\n" + json.dumps(requirements, ensure_ascii=False)
         context.task += (
-            "\nIf require_parameter_budget is true, frontmatter must include: "
-            "method_spec (precise baseline and proposed equations, interpolation basis, boundary, initialization, "
-            "all trainables and frozen values); signal_contract (input/output shapes, real/complex semantics, "
-            "phase handling, target metric formula and direction); alternatives (>=2 feasible methods with "
-            "selection/rejection reasons); ablation_plan (>=3 comparisons, changed factor, held-fixed budget, "
-            "metrics and rejection criteria). parameter_budget must contain unit: real_scalar, variables: numeric map, "
-            "baseline_formula and candidate_formula: arithmetic strings, baseline_parameters and candidate_parameters: integers, "
-            "baseline_components and candidate_components: lists of {name,formula,dtype,shape}. "
-            "dtype must be real or complex; shape is a list of positive integer dimensions or arithmetic strings "
-            "using variables (empty [] for one scalar). Formula counts real scalars and must match shape times "
-            "the dtype multiplier (1 for real, 2 for complex). Count every trainable scalar; "
-            "complex coefficient=2 real scalars, real knots count once, and normalization/gates are not free. "
-            "Formulas only allow variable names, numbers, +,-,*,/,integer powers. "
-            "Explain expressivity without assuming smoother functions contain all piecewise-linear functions. "
-            "Specify knot multiplicities, degree/order, control point counts if using splines; prove any inclusion "
-            "claim constructively or withdraw it. Gains and approximation rates require stated assumptions. "
-            "Every formula must be directly implementable: no undefined corrective factors, ellipses or competing definitions. "
-            "Define how ordered nodes remain inside fixed endpoints for every trainable state; check local-cell corner "
-            "values and continuity across shared cell boundaries using the declared axis/index convention. "
-            "C0 continuity does not imply complex phase equivariance or preserve a PIMC phase contract. "
-            "Compare at least two distinct methods feasible under the budget; check every proposed grid size. "
-            "Each alternative must include feasible (boolean), parameters (integer real-scalar count), "
-            "and components (the same {name,formula,dtype,shape} format using parameter_budget.variables). "
-            "Include at least two alternatives with feasible=true; the selected method may be one. "
-            "Distinguish acceptance, rejection and inconclusive thresholds consistently. "
-            "Put the primary comparison in one decision_rule object: define signed improvement, resampling "
-            "unit, confidence interval, and exhaustive mutually exclusive accept/reject/inconclusive rules. "
-            "Ablations refer to that rule rather than paraphrasing it with reversed inequalities or new thresholds. "
-            "Use one output dtype and one parameter ledger throughout the proposal; do not switch between "
-            "real-output and complex-output budgets. Every alternative must use that same baseline unit. "
-            "State a single reproducible initialization procedure, including its sample locations, solver, "
-            "and what happens if approximation error is unacceptable. Linear coefficients alone imply neither "
-            "well-conditioning nor monotonic optimizer loss. A fit into a non-nested function space cannot "
-            "guarantee no-worse initialization. Any complex-valued regularizer must be real and nonnegative. "
-            "Do not repeat the full method in body: put definitions once in metadata and use a short body "
-            "(at most 600 Chinese characters) explaining the selection and remaining experimental prerequisites. "
-            "A method comparison is not an executed debate: omit debate_summary or set rounds=0. "
-            "Describe only Memory tools actually invoked and PDF excerpts actually returned, including truncation."
-            " Numerical contracts must hold for extreme finite logits, including floating-point softmax underflow; "
-            "an additive minimum interval may be necessary. Distinguish number of nodes from number of cells. "
-            "Do not call two representable function sets identical and then exhibit a function in only one. "
-            "Use a single decision_rule reference in ablation rejection_criteria; put stability diagnostics "
-            "in a separate field without silently changing statistical acceptance. Specify angular conversion "
-            "and handling of zero predicted as well as zero reference magnitude. If clipping one coordinate, "
-            "interpolate along the remaining coordinate on the boundary edge."
+            "\nDeliver one coherent proposal for the next Experiment agent. Include human_summary: "
+            "one or two short Chinese sentences describing exactly what changes and why it may help; "
+            "never present a hypothesis as a measured gain. The body must equal human_summary exactly; "
+            "no headings, duplicated equations or extra sections in body. "
+            "Put the full method in method_spec and refer to its fields through handoff.changes[].spec_ref. "
+            "handoff must follow idea.handoff.v1, target experiment, match the task scope, define next_step, "
+            "changes, verification_requirements and required_context. Use blocks_execution for actual "
+            "missing prerequisites, not hypothetical bureaucracy. Do not invent paths or data. "
+            "Before important actions, give a short visible Chinese explanation of the information gap "
+            "you are resolving. After finding enough relevant method evidence, draft rather than repeating searches. "
+            "Define baseline and candidate equations, input/output and phase semantics, all trainable/fixed "
+            "quantities, initialization, boundary handling, training objective and limitations. "
+            "All quantities must have a single definition and the equations must be implementable. "
+            "Prefer one minimal change to the baseline; add a second change only with a concrete justification "
+            "and a distinct ablation. An ablation must actually change behavior on the specified evaluation domain. "
+            "If require_parameter_budget is true: parameter_budget uses unit real_scalar, variables, "
+            "baseline_formula, candidate_formula, integer baseline_parameters/candidate_parameters, "
+            "and baseline_components/candidate_components lists of {name,formula,dtype,shape}; "
+            "dtype is real or complex (count twice), shape=[] means one scalar. Arithmetic formulas "
+            "use only declared numeric variables and +,-,*,/,integer powers. Compare at least two "
+            "feasible alternatives, each with name, feasible, parameters, components (same component format), "
+            "and selection/rejection reasons. Provide at least three meaningful ablations. "
+            "Define one decision_rule with metric direction, comparison, resampling unit and disjoint "
+            "accept/reject/inconclusive cases. Both ablations and handoff refer to it. "
+            "Distinguish paper findings, your inference and untested hypotheses. Global novelty, "
+            "approximation-rate, stability and function-inclusion claims require supporting assumptions "
+            "and evidence; otherwise withdraw the guarantee. A numerical example is not a universal proof. "
+            "Report only actual memory, tools, PDF page excerpts and review/debate activity."
         )
-        if request.extra.get("scope", "method_proposal") == "method_proposal":
+        scope = request.extra.get("scope", "method_proposal")
+        if scope not in {"method_proposal", "project_proposal"}:
+            raise ValueError("Idea scope must be method_proposal or project_proposal")
+        context.task += "\nRequested scope: " + str(scope)
+        if scope == "method_proposal":
             context.task += (
-                "\nThis is a baseline-independent method proposal. No real project repository, dataset, "
-                "historical experiments or GPU results have been supplied. Define a symbolic reference LUT explicitly. "
-                "Do not claim production readiness, residual 2dB achievement, measured gain or globally novel work. "
-                "Parameter ratio limit is an evaluation assumption, not a user-confirmed business specification."
+                "\nNo real project repository is assumed in this method-only scope. Define any symbolic "
+                "baseline explicitly; do not claim project readiness or measured performance. "
+                "handoff.required_context must list baseline_code and data_description as prerequisites "
+                "for actual project execution. Evaluation ratio limits are assumptions, not business facts."
             )
+        if request.upstream_artifacts:
+            context.task += "\nCaller-supplied context is available under these exact references: " + ", ".join(request.upstream_artifacts)
         return context
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
@@ -94,7 +131,12 @@ class IdeaAgent(BaseAgent):
         if mode != "fast":
             raise ValueError("deep discovery is not wired to the audited loop yet; use fast with reflection mode")
         try:
-            return await self._draft_via_llm(request, context)
+            artifact = await self._draft_via_llm(request, context)
+            trace_root = Path(str(context.metadata["loop_trace_root"]))
+            reviewed = bool(context.metadata.get("reflection_accepted"))
+            delivery_root = write_delivery(artifact, request, invocation=trace_root.name, reviewed=reviewed)
+            context.metadata["idea_delivery_root"] = str(delivery_root)
+            return artifact
         finally:
             trace_root = Path(str(context.metadata.get("loop_trace_root", "")))
             checkpoint = trace_root / "checkpoint.json"
@@ -108,7 +150,14 @@ class IdeaAgent(BaseAgent):
         if errors:
             return errors
         requirements = request.extra.get("idea_requirements", {})
-        metadata = parse(text).metadata
+        parsed = parse(text)
+        metadata = parsed.metadata
+        candidate_sha = digest(text)
+        input_receipt = archive_baseline_input(
+            run_root=Path(str(request.extra["run_root"])), project=request.project,
+            content=request.upstream_artifacts.get("baseline_code", ""), candidate_sha256=candidate_sha,
+        )
+        errors.extend(delivery_errors(metadata, str(request.extra.get("scope", "method_proposal")), body=parsed.body))
         errors.extend(material_errors(
             metadata, observations,
             min_sources=int(requirements.get("min_sources", 1)),
@@ -117,17 +166,48 @@ class IdeaAgent(BaseAgent):
             max_ratio=float(requirements.get("max_parameter_ratio", 1.2)),
         ))
         if request.extra.get("scope", "method_proposal") == "project_proposal":
-            if not any(o.get("ok") and o.get("tool") == "code.repo_reader" for o in observations):
+            if input_receipt is None and not any(o.get("ok") and o.get("tool") == "code.repo_reader" for o in observations):
                 errors.append("/scope: project proposal requires actual baseline code evidence")
         root = Path(str(request.extra["run_root"])) / "idea" / "validation"
         atomic_json(root / (uuid.uuid4().hex + ".json"), {
             "schema_valid": True, "material_ready": not errors, "errors": errors,
-            "candidate_sha256": digest(text), "requirements": requirements,
+            "candidate_sha256": candidate_sha, "requirements": requirements,
+            "delivery_contract_version": "idea.handoff.v1",
+            "body_policy": "summary_only",
+            "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,
             "note": "Host structural/evidence/arithmetic checks are not independent scientific review.",
         })
         return errors
+
+    def loop_progress_sink(self, request: RunRequest, invocation: str) -> ProgressSink:
+        return progress_sink(request, invocation)
+
+    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
+        messages = [Message("system", "You are a critical scientific methods reviewer. Assess the "
+                            "candidate and actual evidence. Do not author a new proposal or tools. "
+                            "Return only the review JSON requested below; write rationale and issues in concise Chinese. "
+                            "A schema pass is not scientific proof. Report only concrete blockers to this stage: "
+                            "contradictory or unimplementable definitions, missing essential decisions, incorrect "
+                            "arithmetic, unobserved evidence claims, or claims stronger than their stated support. "
+                            "Do not invent extra acceptance requirements. Judge this document independently; "
+                            "only actual current blockers belong in issues. "
+                            "For each blocker name the exact current field and missing or contradictory definition; "
+                            "quote supporting text and calculate any claimed counterexample."),
+                    Message("system", "Idea acceptance scope: " + str(request.extra.get("scope", "method_proposal"))
+                            + ". This stage delivers a falsifiable research proposal for downstream experiments. "
+                            "It does not perform those experiments. Missing measured improvement, novelty proof, "
+                            "hardware verification, or an equivalence theorem is not itself a blocker when the "
+                            "proposal explicitly treats the gain as a hypothesis and the transfer as an inference. "
+                            "For method_proposal, a fully defined symbolic I/O contract is allowed; real-project "
+                            "mapping may be an explicit required_context prerequisite. Reject asserted guarantees "
+                            "without support, and still require executable definitions and fair falsification criteria."),
+                    Message("user", request.user_request),
+                    Message("user", "Project constraints:\n" + context.project)]
+        messages.extend(Message("user", "[untrusted supplied context:" + key + "]\n" + value)
+                        for key, value in context.upstream.items())
+        return messages
 
     def reflection_rubric(self) -> str:
         return (

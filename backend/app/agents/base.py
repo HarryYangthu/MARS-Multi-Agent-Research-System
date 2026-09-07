@@ -10,7 +10,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from app.harness.agent_loop import AgentLoopExecutor, AgentLoopPolicy, LoopInput, NativeAgentLoop
+from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
@@ -24,6 +27,7 @@ class RunRequest:
     user_request: str
     upstream_artifacts: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
+    progress_sink: ProgressSink | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -73,6 +77,7 @@ class BaseAgent(ABC):
     output_schema = ""
     agent_brief = ""
     max_tool_steps = 18
+    native_structured_delivery = False
 
     def __init__(self, *, agent_config: AgentConfig | None = None,
                  loop_executor: AgentLoopExecutor | None = None) -> None:
@@ -176,10 +181,18 @@ class BaseAgent(ABC):
             "Return final.metadata as a native JSON object matching this schema, "
             "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
         )
+        schema_instruction = output_instruction + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        if self.loop_policy.protocol == "native_tools" and self.native_structured_delivery:
+            schema_instruction = (
+                "Submit the complete candidate with mars_submit_document. Its metadata argument must match "
+                + self.output_schema + ", whose JSON Schema is supplied in that function's parameters. "
+                "Pass native JSON metadata and a Markdown body; never write YAML in arguments. "
+                "Do not return a proposal in assistant text. Submission is followed by host validation and, "
+                "when configured, review; it does not claim approval or experimental success."
+            )
         messages = [Message(role="system", content=context.system),
                     Message(role="system", content=context.project),
-                    Message(role="system", content=output_instruction
-                            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))),
+                    Message(role="system", content=schema_instruction),
                     Message(role="user", content=context.task)]
         for label, content in context.upstream.items():
             # Complete upstream artifacts stay pinned. Fail on budget overflow rather than
@@ -200,10 +213,26 @@ class BaseAgent(ABC):
             metadata = parse_frontmatter(text).metadata
             if metadata.get("project") != request.project:
                 errors.append("/project: must equal the requested project")
+            submission_schema = self.submission_schema(request)
+            if submission_schema is not None:
+                errors.extend("/" + "/".join(str(p) for p in error.absolute_path) + ": " + error.message
+                              for error in Draft202012Validator(submission_schema).iter_errors(validation.metadata))
         return errors
 
     def reflection_rubric(self) -> str:
         return "Verify evidence, definitions, every numerical claim, falsifiability, and downstream implementation completeness."
+
+    def loop_progress_sink(self, request: RunRequest, invocation: str) -> ProgressSink | None:
+        return request.progress_sink
+
+    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message] | None:
+        return None
+
+    def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
+        if not self.native_structured_delivery or self.loop_policy.protocol != "native_tools":
+            return None
+        schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
+        return schema
 
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
                              debate_role: str | None = None) -> Artifact:
@@ -232,17 +261,23 @@ class BaseAgent(ABC):
                                      extra={"run_root": str(run_root)}),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
+            progress_sink=self.loop_progress_sink(request, invocation),
+            review_messages=self.review_messages(request, context),
+            final_schema=self.submission_schema(request),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))
         context.metadata["loop_status"] = result.status
+        context.metadata["reflection_accepted"] = result.reflection_accepted
         if result.status != "passed":
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,
                                                          model=config.model, debate_role=debate_role))
 
     def _artifact_from_completion(self, completion: Completion) -> Artifact:
-        cleaned = self._unwrap_llm_text(completion.text)
+        # The loop already validated this exact text. Preserve even trailing
+        # whitespace so the published artifact stays bound to its review digest.
+        cleaned = completion.text
         try:
             parsed = parse_frontmatter(cleaned)
         except Exception:

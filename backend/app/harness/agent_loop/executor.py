@@ -18,6 +18,7 @@ from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProv
 from app.harness.tools.registry import ToolContext, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
+ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def truncation_recovery(reason: object, *, repairs: int, limit: int, effort: str | None) -> dict[str, Any] | None:
@@ -46,6 +47,9 @@ class LoopInput:
     reflection_rubric: str = "Check evidence, definitions, arithmetic, internal consistency and falsifiability."
     resume: bool = False
     external_review: ExternalReview | None = None
+    progress_sink: ProgressSink | None = None
+    review_messages: list[Message] | None = None
+    final_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -62,6 +66,17 @@ class AgentLoopExecutor(Protocol):
     async def run(self, request: LoopInput) -> LoopResult: ...
 
 
+def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
+                     native: bool, wire_tools: tuple[dict[str, Any], ...],
+                     effort_overrides: dict[str, Any]) -> LLMConfig:
+    reviewing = phase == "reflect"
+    effort = policy.reflection_reasoning_effort if reviewing and policy.reflection_reasoning_effort else config.reasoning_effort
+    thinking = (policy.reflection_thinking_enabled
+                if reviewing and policy.reflection_thinking_enabled is not None else config.thinking_enabled)
+    return replace(config, reasoning_effort=effort_overrides.get(phase, effort), thinking_enabled=thinking,
+                   json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
+
+
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
@@ -74,13 +89,20 @@ class NativeAgentLoop:
         native = p.protocol == "native_tools"
         if native and request.config.thinking_enabled is not False:
             raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
-        wire_tools = native_specs(specs) if native else ()
+        wire_tools = native_specs(specs, request.final_schema) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
         instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
-                              "project": request.tool_context.project, "tools": specs})
+                              "project": request.tool_context.project, "tools": specs,
+                              "context_format_version": 3})
+        if native:
+            fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
+        if request.review_messages is not None:
+            fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
+        if request.final_schema is not None:
+            fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
         state: dict[str, Any] = {
             "fingerprint": fingerprint, "status": "running", "pending": None,
@@ -114,6 +136,9 @@ class NativeAgentLoop:
         state.setdefault("protocol_output", "")
         state.setdefault("reviewed_candidate_sha", "")
         state.setdefault("phase_efforts", {})
+        async def progress(kind: str, **payload: Any) -> None:
+            if request.progress_sink is not None:
+                await request.progress_sink({"kind": kind, "phase": state["next_phase"], **payload})
         if request.resume and "last_model_error" not in state:
             prior_events = [json.loads(line) for line in trace.events.read_text().splitlines()]
             state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
@@ -147,11 +172,8 @@ class NativeAgentLoop:
         cfg.attempt_observer = on_attempt
 
         def phase_config() -> LLMConfig:
-            phase = state["next_phase"]
-            default = p.reflection_reasoning_effort if phase == "reflect" and p.reflection_reasoning_effort else cfg.reasoning_effort
-            return replace(cfg, reasoning_effort=state["phase_efforts"].get(phase, default),
-                           json_mode=phase == "reflect" or not native,
-                           tools=wire_tools if native and phase != "reflect" else ())
+            return phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
+                                    wire_tools=wire_tools, effort_overrides=state["phase_efforts"])
 
         def recover_completion(reason: object) -> bool:
             plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
@@ -161,7 +183,9 @@ class NativeAgentLoop:
             phase = state["next_phase"]
             counts["protocol_repairs"] += 1
             state["phase_efforts"][phase] = plan["reasoning_effort"]
-            state["feedback"] = (plan["feedback"].replace("JSON response", "Markdown document beginning with YAML frontmatter, without preamble or code fences")
+            final_description = ("mars_submit_document call with complete metadata and body"
+                                 if request.final_schema is not None else "Markdown document beginning with YAML frontmatter, without preamble or code fences")
+            state["feedback"] = (plan["feedback"].replace("JSON response", final_description)
                                  if native and state["next_phase"] != "reflect" else plan["feedback"])
             state["pending"] = None
             state["status"] = "running"
@@ -178,26 +202,27 @@ class NativeAgentLoop:
                 recover_completion(state.get("last_model_error"))
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
                 reviewing = state["next_phase"] == "reflect"
+                if counts["model_requests"] == 0:
+                    await progress("started")
                 extra: list[Message] = []
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"]))
-                if state["review_issues"]:
-                    extra.append(Message(role="user", content=(
-                        "[unresolved review issues pinned through protocol/schema repairs]\n"
-                        + canonical(state["review_issues"]))))
                 if reviewing:
                     extra.append(Message(role="system", content=(
                         "You are reviewing the current candidate, not generating tool actions. "
                         'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
                         "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
-                        + request.reflection_rubric + "\nVerify the revised candidate resolves every prior issue:\n"
-                        + canonical(state["review_issues"]))))
+                        + request.reflection_rubric + "\nEvaluate the current document independently. "
+                        "For each issue identify the exact current field and supporting excerpt, or precisely "
+                        "name the missing definition. Calculate any claimed mathematical counterexample.")))
                 feedback = state["feedback"]
-                if counts["tool_dispatches"] >= p.max_tool_steps:
+                if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 messages, manifest = pack_context(
-                    pinned + extra, state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars, native=native,
+                    (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
+                    state["history"], feedback, state["candidate"],
+                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
+                    native=native, reviewing=reviewing, review_issues=state["review_issues"],
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
@@ -207,6 +232,7 @@ class NativeAgentLoop:
                 trace.emit("context_packed", manifest)
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
+                                             "thinking_enabled": call_config.thinking_enabled,
                                              "max_tokens": call_config.max_tokens},
                            visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)
@@ -240,7 +266,7 @@ class NativeAgentLoop:
                 review_conflict = False
                 try:
                     decision = (parse_review(completion.text) if reviewing else
-                                native_decision(completion, request.tools) if native else parse_action(completion.text))
+                                native_decision(completion, request.tools, structured_final=request.final_schema is not None) if native else parse_action(completion.text))
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
@@ -254,8 +280,17 @@ class NativeAgentLoop:
                     state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
-                    if native:
-                        state["feedback"] = f"Protocol error: {exc}. Use valid native tool calls or submit the complete Markdown candidate. No rejected action was executed."
+                    if reviewing:
+                        state["feedback"] = (
+                            f"Review protocol error: {exc}. Return exactly one JSON object with "
+                            "accept (boolean), issues (array of unresolved blocker strings), and rationale (string). "
+                            "Do not return a proposal, tool invocation, XML, code fence or multiple JSON objects. "
+                            "Review the current candidate and preserve substantive findings while fixing only format."
+                        )
+                    elif native:
+                        final_instruction = ("call mars_submit_document with complete metadata and body"
+                                             if request.final_schema is not None else "submit the complete Markdown candidate")
+                        state["feedback"] = f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. No rejected action was executed."
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
@@ -269,6 +304,7 @@ class NativeAgentLoop:
                     state["review_issues"] = decision["issues"]
                     trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
                                               "host_conflict_rejection": review_conflict}, visible=decision)
+                    await progress("review", accepted=decision["accept"], issues=decision["issues"])
                     if decision["accept"]:
                         state["reflection_accepted"] = True
                         state["feedback"] = ""
@@ -283,10 +319,16 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    if "submission_id" in decision:
+                        trace.emit("document_submission", {"call_id": decision["submission_id"],
+                                                           "candidate_sha256": digest(state["candidate"]),
+                                                           "serialization_only": True})
+                    await progress("candidate", text=state["candidate"])
                     errors = await request.validate(state["candidate"], state["history"])
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
                         errors.append("/candidate: unresolved review issues require a revised candidate")
                     trace.emit("validation", {"valid": not errors}, visible=errors)
+                    await progress("validation", valid=not errors, issues=errors)
                     if errors:
                         counts["validation_repairs"] += 1
                         state["feedback"] = canonical({"validation_errors": errors})
@@ -328,6 +370,7 @@ class NativeAgentLoop:
                             counts["tool_dispatches"] += 1
                             trace.emit("tool_dispatch", {"step": counts["tool_dispatches"], "tool": tool}, visible=decision)
                             trace.snapshot(state)
+                            await progress("action", tool=tool, reason=decision.get("reason", ""), args=decision["args"])
                             result = await request.registry.dispatch(tool, decision["args"], request.tool_context)
                             observation = {**decision, "ok": result.ok, "output": result.output, "error": result.error,
                                            "status": result.status, "blocked_by_gate": result.blocked_by_gate}
@@ -345,6 +388,7 @@ class NativeAgentLoop:
                             state["feedback"] = ""
                             trace.emit("observation", {"step": counts["tool_dispatches"], "tool": tool, "ok": result.ok},
                                        visible=observation)
+                            await progress("observation", tool=tool, ok=result.ok, error=result.error)
                             if result.requires_approval or result.blocked_by_gate:
                                 state["status"] = "blocked"
                                 break
@@ -369,5 +413,6 @@ class NativeAgentLoop:
             trace.snapshot(state)
             await request.provider.close()
             cfg.attempt_observer = None
+            await progress("finished", status=state["status"])
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
                           request.trace_root, state["reflection_accepted"])

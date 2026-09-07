@@ -73,14 +73,16 @@ def test_native_idea_prompt_has_no_legacy_json_instruction() -> None:
     context = ContextPack(system=agent.agent_brief,project='',task='public task')
     text = '\n'.join(m.content for m in agent._messages_for_context(request,context,purpose='contract'))
     assert 'final.metadata' not in text and 'final.body' not in text
-    assert 'YAML frontmatter' in text
+    assert 'mars_submit_document' in text
+    assert 'never write YAML in arguments' in text
 
 
 def test_native_candidate_is_not_rewrapped_as_json() -> None:
     candidate = '---\nschema: proposal.v1\n---\n# Draft'
     messages, _ = pack_context([Message('system','task')], [], '', candidate,
                                budget=4000, observation_chars=512, native=True)
-    assert messages[-1].content == candidate
+    assert messages[-1].content.endswith(candidate)
+    assert messages[-1].role == "user"
 
 
 @pytest.mark.asyncio
@@ -91,3 +93,108 @@ async def test_fenced_frontmatter_gets_actionable_format_feedback() -> None:
         'Explanation\n```markdown\n---\nschema: proposal.v1\n---\ntext\n```', [])
     assert len(errors) == 1 and errors[0].startswith('/format:')
     assert 'code fences' in errors[0]
+
+
+def test_native_submission_serializes_exact_metadata_with_yaml_sensitive_text() -> None:
+    import json
+    from app.harness.agent_loop.native_protocol import SUBMIT_DOCUMENT, native_specs
+    from app.harness.schema.frontmatter_parser import parse
+    metadata = {"schema": "proposal.v1", "human_summary": "检查边界: 保留数值1.2及原文。",
+                "method_spec": {"definition": "f(x): a*x + b", "coefficients": [1, 2]}, "enabled": False}
+    arguments = json.dumps({"metadata": metadata, "body": "Parser input body."}, ensure_ascii=False)
+    call = ToolCall("submission-1", SUBMIT_DOCUMENT, arguments)
+    decision = native_decision(Completion("", "parser", "parser", tool_calls=(call,)), (), structured_final=True)
+    assert decision["submission_id"] == call.id
+    parsed = parse(decision["final"])
+    assert parsed.metadata == metadata
+    assert parsed.body == "Parser input body."
+    assert "tool" not in decision
+    assert native_specs([], {"type": "object"})[0]["function"]["name"] == SUBMIT_DOCUMENT
+
+
+@pytest.mark.parametrize("arguments", [
+    '{"metadata":{"x":1,"x":2},"body":"text"}',
+    '{"metadata":{"x":NaN},"body":"text"}',
+    '{"metadata":{},"body":"text"}',
+    '{"metadata":{"x":1},"body":"text","approved":true}',
+])
+def test_native_submission_rejects_invalid_arguments(arguments: str) -> None:
+    from app.harness.agent_loop.native_protocol import SUBMIT_DOCUMENT
+    with pytest.raises(ValueError):
+        native_decision(Completion("", "parser", "parser", tool_calls=(ToolCall("c", SUBMIT_DOCUMENT, arguments),)),
+                        (), structured_final=True)
+
+
+def test_native_submission_cannot_be_mixed_with_tool_execution() -> None:
+    from app.harness.agent_loop.native_protocol import SUBMIT_DOCUMENT
+    calls = (ToolCall("read", wire_name("file.read"), "{}"),
+             ToolCall("submit", SUBMIT_DOCUMENT, '{"metadata":{"x":1},"body":"text"}'))
+    with pytest.raises(ValueError, match="never batched"):
+        native_decision(Completion("", "parser", "parser", tool_calls=calls), ("file.read",), structured_final=True)
+    with pytest.raises(ValueError, match="mars_submit_document"):
+        native_decision(Completion("raw prose", "parser", "parser"), (), structured_final=True)
+    with pytest.raises(ValueError, match="unknown"):
+        native_decision(Completion("", "parser", "parser", tool_calls=(calls[1],)), ())
+
+
+def test_native_names_are_readable_bounded_and_collision_checked() -> None:
+    from app.harness.agent_loop.native_protocol import native_specs
+    assert wire_name("search.arxiv_search") == "mars_search__arxiv_search"
+    assert len(wire_name("mcp." + "long_server_" * 15)) <= 64
+    with pytest.raises(ValueError, match="duplicate"):
+        native_specs([{"name": "a.b", "description": "one", "args_schema": {}},
+                      {"name": "a__b", "description": "two", "args_schema": {}}])
+    with pytest.raises(ValueError, match="reserved"):
+        native_specs([{"name": "submit_document", "description": "conflict", "args_schema": {}}], {"type": "object"})
+    with pytest.raises(ValueError, match="mars_search__arxiv_search"):
+        native_decision(Completion("", "parser", "parser", tool_calls=(ToolCall("c", "typo", "{}"),)),
+                        ("search.arxiv_search",))
+
+
+def test_review_context_contains_evidence_but_no_native_call_conversation() -> None:
+    history = [{"tool": "read", "args": {}, "reason": "inspect", "ok": True, "output": "Authored parser input",
+                "native_call": {"id": "c1", "name": wire_name("read"), "arguments": "{}"}}]
+    candidate = "---\nschema: proposal.v1\n---\nAuthored document."
+    messages, manifest = pack_context([Message("system", "Review instructions")], history, "", candidate,
+                                     budget=5000, observation_chars=512, native=True, reviewing=True)
+    assert all(m.role in {"system", "user"} and not m.tool_calls and m.tool_call_id is None for m in messages)
+    assert any("Authored parser input" in m.content for m in messages)
+    assert messages[-1].role == "user" and messages[-1].content.endswith(candidate)
+    assert manifest["reviewing"] is True
+
+
+def test_prior_critique_reaches_author_but_not_independent_reviewer() -> None:
+    issues = ["previous model claimed the boundary was undefined"]
+    candidate = "Current document defines the boundary explicitly."
+    author, author_manifest = pack_context([Message("system", "Author")], [], "", candidate,
+                                           review_issues=issues, budget=5000, observation_chars=512, native=True)
+    reviewer, review_manifest = pack_context([Message("system", "Review")], [], "", candidate,
+                                             review_issues=issues, reviewing=True, budget=5000, observation_chars=512, native=True)
+    assert any(issues[0] in message.content for message in author)
+    assert all(issues[0] not in message.content for message in reviewer)
+    assert any(candidate in message.content for message in reviewer)
+    assert author_manifest["prior_review_issues_visible"] is True
+    assert review_manifest["prior_review_issues_visible"] is False
+
+
+def test_tool_free_review_can_enable_thinking_without_changing_native_actions() -> None:
+    from app.harness.agent_loop.executor import phase_llm_config
+    from app.harness.agent_loop.policy import AgentLoopPolicy
+    provider = DeepSeekProvider(api_key="parser-input-not-a-key")
+    config = LLMConfig(provider="deepseek", model="parser-contract", thinking_enabled=False)
+    policy = AgentLoopPolicy(protocol="native_tools", reflection_thinking_enabled=True,
+                             reflection_reasoning_effort="high")
+    tools = ({"type": "function", "function": {"name": "read"}},)
+    author = phase_llm_config(config, policy, phase="act", native=True, wire_tools=tools, effort_overrides={})
+    reviewer = phase_llm_config(config, policy, phase="reflect", native=True, wire_tools=tools, effort_overrides={})
+    author_wire = provider._request_kwargs([Message("user", "Author input")], author)
+    reviewer_wire = provider._request_kwargs([Message("user", "Review input")], reviewer)
+    assert author_wire["extra_body"]["thinking"]["type"] == "disabled"
+    assert author_wire["tools"] == list(tools)
+    assert reviewer_wire["extra_body"]["thinking"]["type"] == "enabled"
+    assert reviewer_wire["reasoning_effort"] == "high"
+    assert reviewer_wire["response_format"] == {"type": "json_object"}
+    assert "tools" not in reviewer_wire
+    assert config.thinking_enabled is False and provider._client is None
+    with pytest.raises(ValueError, match="boolean"):
+        AgentLoopPolicy.from_mapping({"reflection_thinking_enabled": "true"})

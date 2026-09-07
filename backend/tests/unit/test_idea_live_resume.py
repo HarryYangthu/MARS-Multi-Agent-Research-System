@@ -13,6 +13,8 @@ from app.agents.idea.agent import IdeaAgent
 from app.harness.agent_loop.trace import atomic_json, audit_trace
 from app.harness.llm.model_registry import get_agent_config
 from scripts.idea_live_resume import audit_resumptions, exclusive_run, load_resume, record_resumption, resume_scenario
+from scripts.idea_live_resume import check_resume_state, messages_match_snapshot
+from app.harness.llm.provider_base import Message, ToolCall
 
 
 def test_exclusive_run_rejects_a_second_holder_and_releases_on_exception(tmp_path: Path) -> None:
@@ -24,6 +26,29 @@ def test_exclusive_run_rejects_a_second_holder_and_releases_on_exception(tmp_pat
             raise RuntimeError("authored control flow")
     with exclusive_run(tmp_path):
         assert (tmp_path / "evaluation.lock").is_file()
+
+
+def test_abandoned_model_recovery_is_explicit_and_preserves_state() -> None:
+    state = {"status": "running", "pending": "model", "counts": {"model_requests": 4}, "pending_batch": False}
+    original = json.dumps(state)
+    with pytest.raises(ValueError, match="explicit recovery"):
+        check_resume_state(state, has_review=False, recover_abandoned=False)
+    check_resume_state(state, has_review=False, recover_abandoned=True)
+    assert json.dumps(state) == original
+    for status, pending, batch in (("running", "tool", False), ("running", "model", True),
+                                   ("protocol_exhausted", None, False), ("passed", None, False)):
+        with pytest.raises(ValueError):
+            check_resume_state({"status": status, "pending": pending, "pending_batch": batch},
+                               has_review=False, recover_abandoned=True)
+
+
+def test_resume_message_guard_accepts_json_roundtrip_but_rejects_changed_input() -> None:
+    messages = [Message("user", "Authored task with exact whitespace.\n"),
+                Message("assistant", "", (ToolCall("c", "read", '{"path":"public.txt"}'),))]
+    saved = json.loads(json.dumps([asdict(m) for m in messages]))
+    assert messages_match_snapshot(messages, saved)
+    saved[0]["content"] = saved[0]["content"].strip()
+    assert not messages_match_snapshot(messages, saved)
 
 
 @pytest.mark.asyncio

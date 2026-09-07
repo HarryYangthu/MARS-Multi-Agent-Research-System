@@ -12,6 +12,9 @@ class ExperimentAgent(BaseAgent):
         "可复用的历史 run,用 knowledge.experiment_memory 借鉴既有实验设计,再定义自变量/"
         "控制变量/因变量、主次指标、消融矩阵与 GPU 预算估计。能复用 baseline 时给出 "
         "reuse_decision=reuse。"
+        "proposal 的 human_summary 仅用于快速概览，实际设计以 handoff、method_spec、"
+        "signal_contract、参数预算和证据为规范；尊重已标记的上下文缺口与前置条件，"
+        "不得猜测未提供的基线、数据或仿真结果。"
     )
 
     async def draft(

@@ -31,7 +31,8 @@ async def test_schema_repair_feedback_preserves_actual_candidate_and_errors() ->
     feedback = json.dumps({"validation_errors": errors})
     messages, manifest = pack_context(pinned, [], feedback, INVALID_DOCUMENT,
                                       budget=64000, observation_chars=1000)
-    assert INVALID_DOCUMENT in json.loads(messages[-2].content)["candidate"]
+    assert messages[-2].role == "user"
+    assert INVALID_DOCUMENT == json.loads(messages[-2].content.split("\n", 1)[1])["candidate"]
     assert feedback in messages[-1].content
     assert manifest["omitted_history"] == []
     # The host reports validation errors; it does not author a repaired proposal.
