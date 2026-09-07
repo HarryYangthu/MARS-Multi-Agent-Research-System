@@ -30,6 +30,7 @@ def compact(value: Any, chars: int) -> Any:
 def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
+    reviewing: bool = False,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if history:
@@ -39,7 +40,8 @@ def pack_context(
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
     if candidate:
-        required.append(Message(role="assistant", content=candidate if native else canonical({"candidate": candidate})))
+        required.append(Message(role="user", content="[untrusted current candidate; review or revise this document]\n"
+                                + (candidate if native else canonical({"candidate": candidate}))))
     if feedback:
         required.append(Message(role="user", content="[host validation/review feedback]\n" + feedback))
     if token_upper_bound(required) > budget:
@@ -52,11 +54,15 @@ def pack_context(
     for index in reversed(range(len(groups))):
         items = groups[index]
         contents = ["[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars)) for item in items]
-        group = group_messages(items, contents)
+        # A separate reviewer reads evidence documents, not the generator's
+        # native assistant/tool conversation. Its configured tool set is empty.
+        group = ([Message(role="user", content=content) for content in contents]
+                 if reviewing else group_messages(items, contents))
         if token_upper_bound(required + selected + group) > budget:
             contents = ["[compressed evidence reference]\n" + canonical({k: item.get(k) for k in
                         ("tool", "args", "reason", "ok", "error", "raw_ref")}) for item in items]
-            group = group_messages(items, contents)
+            group = ([Message(role="user", content=content) for content in contents]
+                     if reviewing else group_messages(items, contents))
             compressed.append(index)
         if token_upper_bound(required + selected + group) <= budget:
             selected[0:0] = group
@@ -66,4 +72,5 @@ def pack_context(
     return messages, {"estimated_upper_bound_tokens": token_upper_bound(messages),
                       "estimator": "utf8_byte_upper_bound", "budget": budget,
                       "compressed_history": compressed, "omitted_history": omitted,
+                      "reviewing": reviewing,
                       "visible_sha256": digest([m.to_wire() for m in messages])}

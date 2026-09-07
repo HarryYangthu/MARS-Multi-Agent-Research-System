@@ -34,4 +34,10 @@ The new submission protocol removed the preamble/YAML failure. The remaining ear
 
 The review found real definition gaps, including grid ordering, regularization and overlapping decision conditions. It also repeatedly demanded completed experiments, a theory of improvement and verification against unavailable production hardware from a method-only proposal. Some repeated issues contradicted its own acknowledgement that the candidate had already fixed a definition. The reviewer contract now distinguishes executable, falsifiable proposals from downstream experimental proof, requires current field-specific blockers, and allows erroneous prior review claims to be withdrawn with a reason. Genuine contradictions, missing definitions, false evidence and exaggerated guarantees remain blockers.
 
+## Fourth complete run: review transport failed
+
+Run `idea_lut_20260907T171439_e7bf4b` used clean local commit `7d101cf3198bbeb572729ad5c41de61b64c319b2`. It took 384.1 seconds: 14 model calls, 11 research tool dispatches, one arithmetic repair and one completed rejecting review. API usage was 336,153 tokens, complete, with consistent trace counters. The revised candidate reached host schema/material acceptance, but the next reviewer response contained leaked DSML tool-invocation text instead of review JSON; five protocol errors exhausted recovery. No accepted artifact was published.
+
+This exposed incomplete context separation: although reviewer instructions differed, the reviewer still received the generator's native assistant/tool history while tools were disabled, and the candidate appeared as an assistant continuation. Review observations are now untrusted data documents, and candidates are user-provided documents in both phases. The protocol error branch now requests review JSON when reviewing instead of incorrectly requesting a tool call or proposal. No DSML fragment is interpreted as an executable tool call. The changed context format is bound into the resume fingerprint.
+
 Further fresh-run results will be appended after execution. All failures remain preserved in the evidence package.

@@ -84,7 +84,8 @@ class NativeAgentLoop:
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
-                              "project": request.tool_context.project, "tools": specs})
+                              "project": request.tool_context.project, "tools": specs,
+                              "context_format_version": 2})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.review_messages is not None:
@@ -215,7 +216,8 @@ class NativeAgentLoop:
                 messages, manifest = pack_context(
                     (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
                     state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars, native=native,
+                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
+                    native=native, reviewing=reviewing,
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
@@ -272,7 +274,14 @@ class NativeAgentLoop:
                     state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
-                    if native:
+                    if reviewing:
+                        state["feedback"] = (
+                            f"Review protocol error: {exc}. Return exactly one JSON object with "
+                            "accept (boolean), issues (array of unresolved blocker strings), and rationale (string). "
+                            "Do not return a proposal, tool invocation, XML, code fence or multiple JSON objects. "
+                            "Review the current candidate and preserve substantive findings while fixing only format."
+                        )
+                    elif native:
                         final_instruction = ("call mars_submit_document with complete metadata and body"
                                              if request.final_schema is not None else "submit the complete Markdown candidate")
                         state["feedback"] = f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. No rejected action was executed."

@@ -42,7 +42,7 @@ Idea writes concise messages for research actions, candidate generation, validat
 
 ## Acceptance and artifacts
 
-The generic ReAct action loop is retained. Optional Reflection now uses separate reviewer instructions with the task, actual source context, candidate and real observations. This is a separate model call using the configured provider, not an independent expert guarantee.
+The generic ReAct action loop is retained. Optional Reflection uses separate reviewer instructions with the task, actual source context, candidate and real observations. Observations are supplied as untrusted documents, without replaying the generator's native assistant/tool conversation to a reviewer with no tools. The candidate is also user-supplied review data, not an assistant continuation prefix. Review protocol recovery requests a review JSON object, never a research call. This is a separate model call using the configured provider, not an independent expert guarantee. Review checks concrete definition, evidence and handoff blockers; it cannot demand completed downstream experiments from an explicitly untested method proposal. Incorrect prior review claims may be withdrawn with an explanation.
 
 Successful runs write `proposal.md`, `proposal.json`, `summary.txt`, and `acceptance.json` in a fresh `idea/deliveries/<invocation>/<export-id>/` directory. Resuming an invocation preserves earlier exports. The JSON metadata and Markdown represent the same model-written proposal. The original trace and candidate digest remain authoritative. `scientific_validated` and `simulation_executed` stay false until a real downstream process supplies the corresponding evidence. Method-only proposals explicitly require real baseline and data before project execution.
 

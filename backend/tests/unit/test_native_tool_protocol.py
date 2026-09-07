@@ -81,7 +81,8 @@ def test_native_candidate_is_not_rewrapped_as_json() -> None:
     candidate = '---\nschema: proposal.v1\n---\n# Draft'
     messages, _ = pack_context([Message('system','task')], [], '', candidate,
                                budget=4000, observation_chars=512, native=True)
-    assert messages[-1].content == candidate
+    assert messages[-1].content.endswith(candidate)
+    assert messages[-1].role == "user"
 
 
 @pytest.mark.asyncio
@@ -148,3 +149,15 @@ def test_native_names_are_readable_bounded_and_collision_checked() -> None:
     with pytest.raises(ValueError, match="mars_search__arxiv_search"):
         native_decision(Completion("", "parser", "parser", tool_calls=(ToolCall("c", "typo", "{}"),)),
                         ("search.arxiv_search",))
+
+
+def test_review_context_contains_evidence_but_no_native_call_conversation() -> None:
+    history = [{"tool": "read", "args": {}, "reason": "inspect", "ok": True, "output": "Authored parser input",
+                "native_call": {"id": "c1", "name": wire_name("read"), "arguments": "{}"}}]
+    candidate = "---\nschema: proposal.v1\n---\nAuthored document."
+    messages, manifest = pack_context([Message("system", "Review instructions")], history, "", candidate,
+                                     budget=5000, observation_chars=512, native=True, reviewing=True)
+    assert all(m.role in {"system", "user"} and not m.tool_calls and m.tool_call_id is None for m in messages)
+    assert any("Authored parser input" in m.content for m in messages)
+    assert messages[-1].role == "user" and messages[-1].content.endswith(candidate)
+    assert manifest["reviewing"] is True
