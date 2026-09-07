@@ -1,0 +1,8 @@
+{
+  "reviewed_candidate_sha": "af695e96a866540bf0ca03cca020f29f0ae86d3f11f554c5487a1d9ab08e6916",
+  "issues": [
+    "candidate_forward 中查找索引规则声称“因网格严格单调，该 i 存在且唯一”，但当 u_c 恰等于内部节点 gx*_i（0<i<G-1）时，同时满足 gx*_{i-1}≤u_c≤gx*_i 和 gx*_i≤u_c≤gx*_{i+1}，存在两个候选 i，未定义取哪一侧（左闭右开或右闭左开），导致实现歧义。",
+    "testable_predictions 中指标 mean|d_k-Δ|/Δ 未明确 d_k 是指 free_grid 中 softplus 输出的原始间距还是归一化后的实际网格间距。若指原始 d_k，因其总和 L 随训练变化，所有 d_k 等比缩放时归一化后网格仍均匀，该指标无法反映真实网格移动；若指归一化后间距，则应定义为 |(b-a)d_k/L - (b-a)/(G-1)| 除以均匀间距，当前定义不可执行。"
+  ],
+  "note": "Recorded model review, not an infallible scientific verdict."
+}

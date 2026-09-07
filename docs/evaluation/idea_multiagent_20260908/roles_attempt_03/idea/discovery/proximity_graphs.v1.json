@@ -1,0 +1,38 @@
+{
+  "count": 2,
+  "items": [
+    {
+      "clusters": {
+        "cluster_2688795f7b65151c": [
+          "hyp_e3cd4be1b70091d8"
+        ],
+        "cluster_888d9ed9b0850245": [
+          "hyp_11b743e726f6f831"
+        ],
+        "cluster_abd3ed72012f1d40": [
+          "hyp_97a08c0de8765919"
+        ]
+      },
+      "edges": [],
+      "round_index": 0,
+      "schema_id": "proximity_graph.v1"
+    },
+    {
+      "clusters": {
+        "cluster_4751531e829e0295": [
+          "hyp_97a08c0de8765919"
+        ],
+        "cluster_b4cf72de7a6bdb23": [
+          "hyp_11b743e726f6f831"
+        ],
+        "cluster_f77372ac2e021fe2": [
+          "hyp_e3cd4be1b70091d8"
+        ]
+      },
+      "edges": [],
+      "round_index": 1,
+      "schema_id": "proximity_graph.v1"
+    }
+  ],
+  "schema_id": "proximity_graphs.v1"
+}

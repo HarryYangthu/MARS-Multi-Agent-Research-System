@@ -1,0 +1,29 @@
+{
+  "schema": "idea.output_snapshot.v1",
+  "run_id": "idea_lut_20260907T184549_2c8d97",
+  "source_commit": "f00547865aea9f7b5aa9fa3c21b08c66d2f7a0f5",
+  "proposal_sha256": "6df6580d3df9570e0c6853bd3b7f2f3b83f6478a1cd96dd6853add255a17d5ac",
+  "checkpoint_sha256": "5e8e27d141b6163a60c4fc2556516962b541a74197eb1d54b70691e46824aceb",
+  "loop_status": "reflection_rejected",
+  "counts": {
+    "action_rounds": 12,
+    "model_requests": 17,
+    "model_responses": 17,
+    "observations": 12,
+    "protocol_repairs": 2,
+    "reflections": 3,
+    "sdk_attempts": 17,
+    "tool_dispatches": 12,
+    "validation_repairs": 2
+  },
+  "usage": {
+    "completion_tokens": 72821,
+    "prompt_tokens": 373471,
+    "total_tokens": 446292
+  },
+  "external_revision": false,
+  "is_original_model_candidate": true,
+  "accepted_for_downstream": false,
+  "scientific_validated": false,
+  "simulation_executed": false
+}

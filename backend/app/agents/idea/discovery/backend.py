@@ -6,6 +6,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
+from app.agents.idea.discovery.contracts import contract_errors, role_schema
 from app.agents.idea.discovery.models import (
     DiscoveryContext,
     EvolutionRequest,
@@ -74,12 +75,8 @@ class LLMRoleBackend:
         raw = await self._json_call(
             "generation",
             {
-                "task": context.research_question,
-                "project": context.project,
-                "evidence_refs": context.evidence_refs,
-                "constraints": context.constraints,
+                **_task_input(context),
                 "count": count,
-                "required_output": {"hypotheses": "array of hypothesis objects"},
             },
         )
         rows = _mapping_list(raw.get("hypotheses"))
@@ -104,20 +101,17 @@ class LLMRoleBackend:
         raw = await self._json_call(
             "reflection",
             {
-                "task": context.research_question,
+                **_task_input(context),
                 "hypotheses": [item.model_dump(mode="json") for item in hypotheses],
-                "required_output": {"reflections": "array, one per hypothesis_id"},
+                "output_requirement": "Exactly one reflection for every supplied hypothesis_id.",
             },
         )
+        rows = _mapping_list(raw.get("reflections"))
+        _validate_reflection_ids(rows, expected=tuple(item.hypothesis_id for item in hypotheses))
         output: dict[str, ReflectionDraft] = {}
-        for row in _mapping_list(raw.get("reflections")):
+        for row in rows:
             hypothesis_id = _required_text(row, "hypothesis_id")
             output[hypothesis_id] = _reflection_draft(row)
-        missing = {item.hypothesis_id for item in hypotheses} - set(output)
-        if missing:
-            raise DiscoveryProtocolError(
-                "reflection omitted hypotheses: " + ", ".join(sorted(missing))
-            )
         allowed_by_id = {
             item.hypothesis_id: tuple(
                 dict.fromkeys((*context.evidence_refs, *item.evidence_refs))
@@ -140,7 +134,7 @@ class LLMRoleBackend:
         raw = await self._json_call(
             "pairwise_judge",
             {
-                "task": context.research_question,
+                **_task_input(context),
                 "pairs": [
                     {
                         "left": left.model_dump(mode="json"),
@@ -148,9 +142,7 @@ class LLMRoleBackend:
                     }
                     for left, right in pairs
                 ],
-                "required_output": {
-                    "decisions": "ordered array with outcome left|right|draw"
-                },
+                "output_requirement": "Exactly one decision per input pair, in the same order; decisions[i] judges pairs[i].",
             },
         )
         decisions = tuple(_pairwise_decision(row) for row in _mapping_list(raw.get("decisions")))
@@ -176,18 +168,13 @@ class LLMRoleBackend:
         raw = await self._json_call(
             "evolution",
             {
-                "task": context.research_question,
-                "requests": [
-                    {
-                        "round_index": item.round_index,
-                        "operator": item.operator,
-                        "parents": [
-                            parent.model_dump(mode="json") for parent in item.parents
-                        ],
-                    }
-                    for item in requests
-                ],
-                "required_output": {"children": "ordered array of hypothesis objects"},
+                **_task_input(context),
+                "requests": [_evolution_request_input(item) for item in requests],
+                "feedback_policy": "Parent reflections and prior-round guidance are model assessments to check against "
+                    "the task and evidence, not established facts or compulsory conclusions.",
+                "scheduling_limits": "Blocked candidates are excluded from parent selection and have no repair path. "
+                    "The fixed operator cycle is unchanged; one child per round still uses strengthen.",
+                "output_requirement": "Exactly one child per input request, in the same order; children[i] answers requests[i].",
             },
         )
         children = tuple(_hypothesis_draft(row) for row in _mapping_list(raw.get("children")))
@@ -217,7 +204,7 @@ class LLMRoleBackend:
         raw = await self._json_call(
             "meta_review",
             {
-                "task": context.research_question,
+                **_task_input(context),
                 "round_index": round_index,
                 "hypotheses": [item.model_dump(mode="json") for item in hypotheses],
                 "reflections": [item.model_dump(mode="json") for item in reflections],
@@ -232,16 +219,57 @@ class LLMRoleBackend:
         )
 
     async def _json_call(self, role: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        prompt = (
-            "You are an Idea Agent internal Co-Scientist role. Return JSON only. "
-            "Do not invent evidence refs and do not make scientific truth claims.\n"
-            + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-        )
+        schema = role_schema(role)
+        prompt = _role_prompt(payload, schema=schema)
         text = await self._complete(role, prompt)
-        parsed = _extract_json(text)
-        if not isinstance(parsed, Mapping):
-            raise DiscoveryProtocolError(f"{role} must return a JSON object")
-        return parsed
+        return _validate_role_response(text, role=role, schema=schema)
+
+
+def _task_input(context: DiscoveryContext) -> dict[str, Any]:
+    return {"task": context.research_question, "project": context.project,
+            "evidence_refs": context.evidence_refs, "constraints": context.constraints}
+
+
+def _evolution_request_input(request: EvolutionRequest) -> dict[str, Any]:
+    return {"round_index": request.round_index, "operator": request.operator,
+            "parents": [parent.model_dump(mode="json") for parent in request.parents],
+            "parent_reflections": [review.model_dump(mode="json") for review in request.parent_reflections],
+            "previous_meta_review_id": request.previous_meta_review_id,
+            "next_round_guidance": list(request.next_round_guidance)}
+
+
+def _role_prompt(payload: Mapping[str, Any], *, schema: dict[str, Any]) -> str:
+    return (
+        "You are an Idea Agent internal Co-Scientist role. Return JSON only matching response_schema. "
+        "Use exactly the required field names and types; do not substitute aliases or omit fields. "
+        "Do not invent evidence refs and do not make scientific truth claims.\n"
+        + json.dumps({**payload, "response_schema": schema}, ensure_ascii=False, sort_keys=True, default=str)
+    )
+
+
+def _validate_role_response(text: str, *, role: str, schema: dict[str, Any]) -> Mapping[str, Any]:
+    parsed = _extract_json(text)
+    errors = contract_errors(parsed, schema)
+    if errors:
+        raise DiscoveryProtocolError(f"{role} response schema: " + "; ".join(errors[:12]))
+    if not isinstance(parsed, Mapping):
+        raise DiscoveryProtocolError(f"{role} must return a JSON object")
+    return parsed
+
+
+def _validate_reflection_ids(rows: Sequence[Mapping[str, Any]], *, expected: Sequence[str]) -> None:
+    known = set(expected)
+    seen: set[str] = set()
+    for row in rows:
+        hypothesis_id = _required_text(row, "hypothesis_id")
+        if hypothesis_id not in known:
+            raise DiscoveryProtocolError(f"reflection returned unknown hypothesis_id: {hypothesis_id}")
+        if hypothesis_id in seen:
+            raise DiscoveryProtocolError(f"reflection returned duplicate hypothesis_id: {hypothesis_id}")
+        seen.add(hypothesis_id)
+    missing = known - seen
+    if missing:
+        raise DiscoveryProtocolError("reflection omitted hypotheses: " + ", ".join(sorted(missing)))
 
 
 def _extract_json(text: str) -> object:
@@ -268,15 +296,15 @@ def _hypothesis_draft(row: Mapping[str, Any]) -> HypothesisDraft:
         testable_predictions=_texts(row.get("testable_predictions")),
         evidence_refs=_texts(row.get("evidence_refs")),
         constraints=_texts(row.get("constraints")),
-        uncertainty=str(row.get("uncertainty") or "").strip(),
+        uncertainty=_required_text(row, "uncertainty"),
     )
 
 
 def _reflection_draft(row: Mapping[str, Any]) -> ReflectionDraft:
     return ReflectionDraft(
-        correctness=str(row.get("correctness") or "").strip(),
-        novelty=str(row.get("novelty") or "").strip(),
-        falsifiability=str(row.get("falsifiability") or "").strip(),
+        correctness=_required_text(row, "correctness"),
+        novelty=_required_text(row, "novelty"),
+        falsifiability=_required_text(row, "falsifiability"),
         assumptions=_texts(row.get("assumptions")),
         failure_modes=_texts(row.get("failure_modes")),
         evidence_refs=_texts(row.get("evidence_refs")),
@@ -290,7 +318,7 @@ def _pairwise_decision(row: Mapping[str, Any]) -> PairwiseDecision:
         raise DiscoveryProtocolError("pairwise outcome must be left, right, or draw")
     return PairwiseDecision(
         outcome=cast(Literal["left", "right", "draw"], outcome),
-        reason=str(row.get("reason") or "").strip(),
+        reason=_required_text(row, "reason"),
         evidence_refs=_texts(row.get("evidence_refs")),
     )
 

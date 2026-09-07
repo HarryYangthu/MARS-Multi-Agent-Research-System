@@ -155,6 +155,9 @@ class EvolutionRequest:
     round_index: int
     operator: str
     parents: tuple[HypothesisRecord, ...]
+    parent_reflections: tuple[ReflectionRecord, ...] = ()
+    previous_meta_review_id: str = ""
+    next_round_guidance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

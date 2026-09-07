@@ -1,0 +1,60 @@
+{
+  "count": 3,
+  "items": [
+    {
+      "created_at": "2025-06-27T02:42:29Z",
+      "evidence_refs": [
+        "task://public-lut-benchmark"
+      ],
+      "left_id": "hyp_b7e105015e972fde",
+      "left_rating_after": 1016.0,
+      "left_rating_before": 1000.0,
+      "match_id": "match_3dddeab37f8da230",
+      "outcome": "left",
+      "reason": "在总参数不超过256的约束下，左侧方案采用14×14可学习非均匀网格（224参数），直接优化控制点位置以自适应集中到高曲率区域，机制清晰且参数账本明确满足限制；右侧方案引入坐标变换（241参数）虽也满足限制，但分段线性变换节点有限（每维8个），可能不足以平滑适应复杂曲率分布，且优化难度更高。左侧方案在参数效率和机制直接性上更优，因此选择左侧。",
+      "right_id": "hyp_e6c9b98ae6477d25",
+      "right_rating_after": 984.0,
+      "right_rating_before": 1000.0,
+      "round_index": 0,
+      "run_id": "idea_roles_20260907T192749_4e44aa",
+      "schema_id": "pairwise_match.v1"
+    },
+    {
+      "created_at": "2025-02-15T19:42:02Z",
+      "evidence_refs": [
+        "task://public-lut-benchmark"
+      ],
+      "left_id": "hyp_e6c9b98ae6477d25",
+      "left_rating_after": 968.736306793522,
+      "left_rating_before": 984.0,
+      "match_id": "match_0ad1ccd55b979e4f",
+      "outcome": "right",
+      "reason": "右侧假设将固定均匀16×16网格改为可学习的14×14非均匀网格，参数账本清晰（196个控制点值+28个坐标参数=224≤256），机制直接针对局部高曲率且采样不均匀的目标函数，通过梯度下降自适应调整控制点分布。左侧假设引入坐标变换但参数分配复杂（15×15控制点+16个变换参数=241），且分段线性变换每维仅8个节点，对复杂曲率分布的适应能力有限，优化难度更高。右侧假设在机制简洁性、参数利用效率和可证伪性上均优于左侧。",
+      "right_id": "hyp_79a0042d0098c42e",
+      "right_rating_after": 1015.263693206478,
+      "right_rating_before": 1000.0,
+      "round_index": 1,
+      "run_id": "idea_roles_20260907T192749_4e44aa",
+      "schema_id": "pairwise_match.v1"
+    },
+    {
+      "created_at": "2025-07-20T06:12:29Z",
+      "evidence_refs": [
+        "task://public-lut-benchmark"
+      ],
+      "left_id": "hyp_79a0042d0098c42e",
+      "left_rating_after": 999.2976013366472,
+      "left_rating_before": 1015.263693206478,
+      "match_id": "match_21b0824ba4243cdd",
+      "outcome": "right",
+      "reason": "右侧假设（hyp_b7e105015e972fde）是左侧假设（hyp_79a0042d0098c42e）的父代版本，两者机制相同，但右侧版本明确给出了从16×16均匀网格到14×14可学习网格的参数推导过程（288→257→224），并指出14×14是满足256参数约束的必要选择。左侧版本虽为strengthen操作且ELO更高，但机制描述与右侧基本一致，未提供额外的新机制贡献或更清晰的参数账本推导。在两者机制等价的情况下，右侧作为原始生成版本，其表述更直接地展示了设计动机和约束满足过程。",
+      "right_id": "hyp_b7e105015e972fde",
+      "right_rating_after": 1031.9660918698307,
+      "right_rating_before": 1016.0,
+      "round_index": 1,
+      "run_id": "idea_roles_20260907T192749_4e44aa",
+      "schema_id": "pairwise_match.v1"
+    }
+  ],
+  "schema_id": "pairwise_matches.v1"
+}
