@@ -96,6 +96,12 @@ class BaseAgent(ABC):
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         from app.storage.agent_context_store import load_agent_code_repositories
+        sources = {"project_rules": True, "code_repositories": True}
+        configured = request.extra.get("context_sources", {})
+        if (not isinstance(configured, dict) or set(configured) - set(sources)
+                or any(not isinstance(value, bool) for value in configured.values())):
+            raise ValueError("context_sources accepts only project_rules/code_repositories booleans")
+        sources.update(configured)
         required = request.extra.get("required_upstream_refs", [])
         if not isinstance(required, list) or any(x not in request.upstream_artifacts for x in required):
             raise ValueError("required_upstream_refs must name supplied upstream artifacts")
@@ -103,10 +109,12 @@ class BaseAgent(ABC):
         if not project_path.resolve().is_relative_to((repo_root() / "projects").resolve()):
             raise ValueError("invalid project path")
         rules_path = project_path / "AGENTS.md"
-        rules = rules_path.read_text() if rules_path.is_file() else "No project-specific rules supplied."
-        repositories = load_agent_code_repositories(self.name, project=request.project)
+        rules = (rules_path.read_text() if sources["project_rules"] and rules_path.is_file()
+                 else "No project-specific rules supplied in this context.")
+        repositories = (load_agent_code_repositories(self.name, project=request.project)
+                        if sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
-        metadata: dict[str, Any] = {"required_upstream_refs": required}
+        metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources}
         if repositories:
             upstream[f"{self.name}_code_repositories"] = json.dumps(
                 [asdict(repository) for repository in repositories], ensure_ascii=False)
