@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import json
+import re
 from typing import Any
 
 from app.harness.agent_loop.protocol import _finite_float, _reject_constant, _unique_object, parse_action
@@ -25,14 +26,20 @@ SUBMIT_DOCUMENT = "mars_submit_document"
 
 
 def wire_name(name: str) -> str:
-    # Provider function identifiers often forbid dots. Stable, collision-checked aliases.
-    return "mars_" + hashlib.sha256(name.encode()).hexdigest()[:24]
+    # Readable identifiers are easier to reproduce than long opaque hashes.
+    # Collision checking still happens before any model/tool execution.
+    readable = re.sub(r"[^A-Za-z0-9_-]", "__", name)
+    if len(readable) > 59:
+        readable = readable[:40] + "_" + hashlib.sha256(name.encode()).hexdigest()[:12]
+    return "mars_" + readable
 
 
 def native_specs(specs: list[dict[str, Any]], final_schema: dict[str, Any] | None = None) -> tuple[dict[str, Any], ...]:
     names = [wire_name(s["name"]) for s in specs]
     if len(names) != len(set(names)):
         raise ValueError("duplicate native tool alias")
+    if final_schema is not None and SUBMIT_DOCUMENT in names:
+        raise ValueError("native tool alias collides with reserved document submission")
     result = tuple({"type": "function", "function": {
         "name": wire_name(s["name"]), "description": s["name"] + ": " + s["description"],
         "parameters": s["args_schema"]}} for s in specs)
@@ -54,7 +61,7 @@ def native_decision(completion: Completion, tools: tuple[str, ...], *, structure
             raise ValueError("empty candidate")
         return {"final": completion.text}
     if len(completion.tool_calls) > 1:
-        if any(c.name == SUBMIT_DOCUMENT for c in completion.tool_calls):
+        if structured_final and any(c.name == SUBMIT_DOCUMENT for c in completion.tool_calls):
             raise ValueError("document submission must be alone, never batched with research tools; nothing executed")
         ids = [c.id for c in completion.tool_calls]
         if len(ids) != len(set(ids)):
@@ -69,8 +76,11 @@ def native_decision(completion: Completion, tools: tuple[str, ...], *, structure
         # serializes only the model's supplied fields, before normal validation.
         return {**parse_action('{"final":' + call.arguments + '}'), "submission_id": call.id}
     names = {wire_name(name): name for name in tools}
-    if not call.id or call.name not in names:
-        raise ValueError("missing call id or unknown native tool")
+    if not call.id:
+        raise ValueError("missing native call id; nothing executed")
+    if call.name not in names:
+        allowed = sorted(names) + ([SUBMIT_DOCUMENT] if structured_final else [])
+        raise ValueError(f"unknown native tool {call.name!r}; use an exact supplied name: {allowed}; nothing executed")
     args = json.loads(call.arguments, object_pairs_hook=_unique_object,
                       parse_constant=_reject_constant, parse_float=_finite_float)
     if not isinstance(args, dict):

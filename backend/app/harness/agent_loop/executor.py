@@ -85,6 +85,8 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs})
+        if native:
+            fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.review_messages is not None:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:

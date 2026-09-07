@@ -20,4 +20,10 @@ The requested boundary is a research task and supplied context in, a short human
 4. Published artifacts preserve the exact accepted text, including trailing whitespace. Resumed invocations create a fresh export directory and preserve previous deliveries.
 5. Supplied baseline context is archived with a hash and checked against actual model input for project-scope auditing. A generated declaration of code access is insufficient.
 
-The second fresh run and its measured result will be appended after execution. The first failure remains preserved in the evidence package.
+## Second complete run: rejected before tool execution
+
+Run `idea_lut_20260907T170225_3d97fe` used clean local commit `a9522976844eb88d81fc3adb955144be818b3084`. It stopped after 21.2 seconds, five model calls and zero research tool dispatches, with 22,771 API-reported tokens. In each requested batch the model misspelled the opaque arXiv tool alias (omitting a zero). The whole invalid batch was rejected without executing or inventing observations. The generic error failed to identify the exact allowed name, so repeated repair attempts did not recover.
+
+The adapter now uses readable provider-safe names, checks alias collisions before execution, and gives exact allowed names for unknown calls. It still rejects misspelled names instead of guessing a tool. The actual wire schema is part of the resume fingerprint, preventing an incompatible adapter version from replaying an old invocation.
+
+Further fresh-run results will be appended after execution. Both failures remain preserved in the evidence package.

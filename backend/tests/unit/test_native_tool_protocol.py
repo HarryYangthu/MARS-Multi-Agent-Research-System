@@ -134,3 +134,17 @@ def test_native_submission_cannot_be_mixed_with_tool_execution() -> None:
         native_decision(Completion("raw prose", "parser", "parser"), (), structured_final=True)
     with pytest.raises(ValueError, match="unknown"):
         native_decision(Completion("", "parser", "parser", tool_calls=(calls[1],)), ())
+
+
+def test_native_names_are_readable_bounded_and_collision_checked() -> None:
+    from app.harness.agent_loop.native_protocol import native_specs
+    assert wire_name("search.arxiv_search") == "mars_search__arxiv_search"
+    assert len(wire_name("mcp." + "long_server_" * 15)) <= 64
+    with pytest.raises(ValueError, match="duplicate"):
+        native_specs([{"name": "a.b", "description": "one", "args_schema": {}},
+                      {"name": "a__b", "description": "two", "args_schema": {}}])
+    with pytest.raises(ValueError, match="reserved"):
+        native_specs([{"name": "submit_document", "description": "conflict", "args_schema": {}}], {"type": "object"})
+    with pytest.raises(ValueError, match="mars_search__arxiv_search"):
+        native_decision(Completion("", "parser", "parser", tool_calls=(ToolCall("c", "typo", "{}"),)),
+                        ("search.arxiv_search",))
