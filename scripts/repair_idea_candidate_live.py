@@ -67,7 +67,7 @@ async def run(prior: Path, target: Path, review: Path) -> None:
         tool_context=ToolContext(target.name,'pimc','idea'),
         policy=AgentLoopPolicy(protocol='native_tools',mode='react',max_model_calls=4,max_tool_steps=0,
                                max_validation_repairs=3,input_token_budget=128000),
-        trace_root=target/'trace',validate=validate))
+        trace_root=target/'trace',validate=validate,final_schema=agent.submission_schema(request)))
     (target/'candidate.md').write_text(result.text)
     atomic_json(target/'summary.json',{'status':result.status,'counts':result.counts,
                                      'scientific_validated':False,'prior_evidence_run':str(prior)})

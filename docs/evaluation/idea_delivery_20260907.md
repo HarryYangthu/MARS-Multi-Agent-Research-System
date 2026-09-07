@@ -26,4 +26,12 @@ Run `idea_lut_20260907T170225_3d97fe` used clean local commit `a9522976844eb88d8
 
 The adapter now uses readable provider-safe names, checks alias collisions before execution, and gives exact allowed names for unknown calls. It still rejects misspelled names instead of guessing a tool. The actual wire schema is part of the resume fingerprint, preventing an incompatible adapter version from replaying an old invocation.
 
-Further fresh-run results will be appended after execution. Both failures remain preserved in the evidence package.
+## Third complete run: schema/material passed, review rejected
+
+Run `idea_lut_20260907T170451_397567` used clean local commit `f62cebe943cb8e0bbb33b6d091d6ee2b56f94c57`. It took 487.9 seconds: 14 model requests/responses, 12 research tool calls, zero protocol repairs, two schema/material repairs and three model reviews. API usage was 325,523 tokens and trace counts were consistent. The candidate passed host schema/material validation before each review, but the loop ended `reflection_rejected`; no accepted delivery was published.
+
+The new submission protocol removed the preamble/YAML failure. The remaining early repairs concerned numeric variable values, tensor shape arrays and exact parameter-count fields, so those requirements are now explicit in the submitted JSON Schema as well as the arithmetic checker.
+
+The review found real definition gaps, including grid ordering, regularization and overlapping decision conditions. It also repeatedly demanded completed experiments, a theory of improvement and verification against unavailable production hardware from a method-only proposal. Some repeated issues contradicted its own acknowledgement that the candidate had already fixed a definition. The reviewer contract now distinguishes executable, falsifiable proposals from downstream experimental proof, requires current field-specific blockers, and allows erroneous prior review claims to be withdrawn with a reason. Genuine contradictions, missing definitions, false evidence and exaggerated guarantees remain blockers.
+
+Further fresh-run results will be appended after execution. All failures remain preserved in the evidence package.

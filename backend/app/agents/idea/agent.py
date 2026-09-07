@@ -47,11 +47,33 @@ class IdeaAgent(BaseAgent):
                 "description": "Canonical complete structured definition; never put this only in body."}
         if request.extra.get("idea_requirements", {}).get("require_parameter_budget"):
             schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
-            for field in ("parameter_budget", "signal_contract"):
-                schema["properties"][field] = {"type": "object", "minProperties": 1}
+            component = {"type": "object", "required": ["name", "formula", "dtype", "shape"],
+                         "properties": {"name": {"type": "string", "minLength": 1},
+                                        "formula": {"type": "string", "minLength": 1},
+                                        "dtype": {"enum": ["real", "complex"]},
+                                        "shape": {"type": "array", "maxItems": 8,
+                                                  "items": {"anyOf": [{"type": "integer", "minimum": 1},
+                                                                       {"type": "string", "minLength": 1}]}}}}
+            components = {"type": "array", "minItems": 1, "items": component}
+            budget_properties: dict[str, Any] = {
+                "unit": {"const": "real_scalar"},
+                "variables": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"},
+                              "description": "Numeric values only. Put variable explanations in a different field."},
+            }
+            for prefix in ("baseline", "candidate"):
+                budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1}
+                budget_properties[prefix + "_parameters"] = {"type": "integer", "minimum": 1}
+                budget_properties[prefix + "_components"] = components
+            schema["properties"]["parameter_budget"] = {"type": "object", "required": list(budget_properties),
+                                                          "properties": budget_properties}
+            schema["properties"]["signal_contract"] = {"type": "object", "minProperties": 1}
             for field, minimum in (("alternatives", 2), ("ablation_plan", 3)):
                 schema["properties"][field] = {"type": "array", "minItems": minimum,
                                                 "items": {"type": "object"}}
+            schema["properties"]["alternatives"]["items"] = {"type": "object",
+                "required": ["name", "feasible", "parameters", "components"],
+                "properties": {"name": {"type": "string"}, "feasible": {"type": "boolean"},
+                               "parameters": {"type": "integer", "minimum": 1}, "components": components}}
         return schema
 
     async def build_context(self, request: RunRequest) -> ContextPack:
@@ -160,7 +182,22 @@ class IdeaAgent(BaseAgent):
         messages = [Message("system", "You are a critical scientific methods reviewer. Assess the "
                             "candidate and actual evidence. Do not author a new proposal or tools. "
                             "Return only the review JSON requested below; write rationale and issues in concise Chinese. "
-                            "A schema pass is not scientific proof."),
+                            "A schema pass is not scientific proof. Report only concrete blockers to this stage: "
+                            "contradictory or unimplementable definitions, missing essential decisions, incorrect "
+                            "arithmetic, unobserved evidence claims, or claims stronger than their stated support. "
+                            "Do not invent extra acceptance requirements. Prior review issues are claims to recheck, "
+                            "not authoritative facts; explicitly explain in rationale any withdrawn false positive "
+                            "or issue outside scope. Only actual unresolved blockers belong in issues. "
+                            "For each blocker name the exact current field and missing or contradictory definition; "
+                            "reread the current candidate rather than copying a previous issue list."),
+                    Message("system", "Idea acceptance scope: " + str(request.extra.get("scope", "method_proposal"))
+                            + ". This stage delivers a falsifiable research proposal for downstream experiments. "
+                            "It does not perform those experiments. Missing measured improvement, novelty proof, "
+                            "hardware verification, or an equivalence theorem is not itself a blocker when the "
+                            "proposal explicitly treats the gain as a hypothesis and the transfer as an inference. "
+                            "For method_proposal, a fully defined symbolic I/O contract is allowed; real-project "
+                            "mapping may be an explicit required_context prerequisite. Reject asserted guarantees "
+                            "without support, and still require executable definitions and fair falsification criteria."),
                     Message("user", request.user_request),
                     Message("user", "Project constraints:\n" + context.project)]
         messages.extend(Message("user", "[untrusted supplied context:" + key + "]\n" + value)

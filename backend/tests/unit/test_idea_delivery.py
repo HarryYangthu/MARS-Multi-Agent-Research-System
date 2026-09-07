@@ -84,6 +84,9 @@ async def test_reviewer_has_separate_instructions_and_supplied_context() -> None
     assert "critical scientific methods reviewer" in text
     assert "user supplied facts" in text
     assert "Return the complete Markdown" not in text
+    assert "Idea acceptance scope: method_proposal" in text
+    assert "Missing measured improvement" in text
+    assert "not authoritative facts" in text
 
 
 def test_candidate_progress_never_claims_acceptance() -> None:
@@ -120,6 +123,10 @@ def test_submission_schema_requires_full_method_without_changing_legacy_parser()
     assert schema is not None
     assert {"human_summary", "handoff", "method_spec", "parameter_budget", "ablation_plan"} <= set(schema["required"])
     assert schema["properties"]["alternatives"]["minItems"] == 2
+    budget = schema["properties"]["parameter_budget"]
+    assert budget["properties"]["variables"]["additionalProperties"] == {"type": "number"}
+    assert "baseline_parameters" in budget["required"]
+    assert budget["properties"]["baseline_components"]["items"]["properties"]["shape"]["type"] == "array"
     legacy = {"schema": "proposal.v1", "project": "pimc", "agent": "idea", "research_question": "Authored input?",
               "hypothesis": "Hypothesis input.", "novelty": "Novelty unknown."}
     assert validate_metadata(legacy).valid
