@@ -38,3 +38,23 @@ temporary files, not mocked model or tool execution. They are not a substitute
 for running the full suite after migration or for a successful live API run.
 
 Do not merge main until relevant regressions and live validation are complete.
+
+## Follow-up checkpoint
+
+- Seven restored test modules have now been migrated individually. Gate 5 uses
+  the actual registry, release checks use the actual filesystem/Git and real
+  gitleaks when installed, and missing execution/model dependencies must fail.
+- Selected schema, storage, loop and migrated tests: 320 passed, 3 skipped for
+  missing gitleaks, zero failures (323 cases in the JUnit report). A separate
+  three-case CPU/removed-simulator check also passed. This is not the full suite.
+- `scripts/audit_real_test_migration.py` flags 15 remaining test files (24 known
+  patterns) for manual migration. The heuristic does not prove other files are
+  free of doubles and never deletes or automatically skips tests.
+- Live run `idea_lut_20260907T073746_8b0556` was stopped by external-payload
+  approval review before completion. Its last checkpoint records 11 logical
+  model requests, 10 responses, 12 SDK attempts, 9 dispatched tools/observations,
+  and one protocol repair. There is no final accepted proposal. The saved
+  `running`/pending-model checkpoint is interrupted evidence, not an active run.
+- Review also found artificial ripple applied to the legacy CPU loss curve in
+  `pim_cancellation.py`. Removal and numerical regression are still pending;
+  the new numerical test uses a full batch so it does not exercise that ripple.
