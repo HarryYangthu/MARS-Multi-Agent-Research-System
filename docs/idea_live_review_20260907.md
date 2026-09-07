@@ -298,3 +298,25 @@ https://docs.bigmodel.cn/cn/guide/capabilities/struct-output 。
 将本轮实际发现的两篇公开论文链接作为起点；Agent 仍须通过工具核对、读取、
 比较并生成方案。它是单独的 URL 调研评测，不冒充无预置线索的文献发现测试，
 不更改或重置本轮失败的原始状态和预算。
+
+### 当前实际阻塞：智谱账户错误 1113（11:16 UTC）
+
+URL 变体 run `idea_lut_20260907T111009_db0f44`（clean source `f190ebe`，
+GitHub `dda5f2a`）的首个请求两次返回 HTTP 429。旧诊断仅记录 HTTP 状态，
+无法区分短期限流和账户问题。已增加限长业务错误码与 Retry-After 的提取，
+不保存错误正文、请求头或凭证；账户/套餐/额度错误停止重试。
+Retry-After 超过当前请求的退避预算时明确延后，不提前重试或暗中延长总超时。
+30 项 provider/超时相关检查通过，含真实 SDK 连接拒绝。
+
+约 5 分钟后，用 clean source `f1c6da8` 对同一 invocation 做一次受控续跑，
+收到真实 `RateLimitError:status=429:code=1113`。智谱官方将 1113 定义为账户欠费：
+https://docs.bigmodel.cn/cn/api/api-code 。新分类器本次只尝试一次便停止，
+没有再重试该账户错误、换 Key/模型或绕过服务限制。
+累计 2 次模型请求、0 次模型响应、3 次 SDK 尝试、0 次工具，实际运行 40.20 秒。
+用量未知，不能将未收到的 token 统计写成免费调用。原输入、计数、事件前缀及
+续跑前 checkpoint 的哈希全部通过审计。最后一个 SDK 错误也会进入 CLI 和派生审计报告。
+
+**当前仍未达到 Idea Agent 的最终可用验收。** 最近一次完整研究测试停在格式校验，
+新的带原稿修复尚待实际模型验证，当前真实续测被账户错误 1113 阻断。
+工程修复、原始失败证据与可恢复 checkpoint 均保留；恢复账户额度后可在同一
+URL 变体的 checkpoint 上继续，旧失败 run 不改成通过。

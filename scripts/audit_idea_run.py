@@ -115,6 +115,7 @@ def audit_run(root: Path) -> dict[str, Any]:
         "scientific_validated": False, "project_ready": False, "simulation_executed": False,
         "duration_seconds": summary.get("duration_seconds"), "counts": state["counts"],
         "sdk_attempt_failures": sum(e["kind"] == "sdk_attempt_failed" for e in events),
+        "provider_error": audit.get("provider_error"),
         "usage": state["usage"], "recorded_usage_complete": state["usage_complete"],
         "usage_complete": bool(state["usage_complete"] and state["pending"] != "model"
                                and not any(e["kind"] == "sdk_attempt_failed" for e in events)),
@@ -167,6 +168,8 @@ def render_report(report: dict[str, Any]) -> str:
         pages = ", ".join(str(p["page"]) + ("（节选截断）" if p.get("truncated") else "") for p in row["pages"])
         lines.append(f"- {row['title']}：可见页 {pages}；理由：{row['reason']}。")
     lines.extend(["", "## 阻塞或限制", ""])
+    if report.get("provider_error"):
+        lines.append(f"- 最后一次 SDK 尝试的错误：`{report['provider_error']}`。")
     lines.extend(f"- {error}" for error in report["errors"])
     lines.extend(f"- {limit}" for limit in report["limits"])
     return "\n".join(lines) + "\n"

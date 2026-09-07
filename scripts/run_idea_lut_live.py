@@ -192,6 +192,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
             summary["counts"] = audit["facts"]["counts"]
             summary["usage"] = audit["facts"]["usage"]
             summary["usage_complete"] = audit["facts"]["usage_complete"]
+            summary["provider_error"] = audit.get("provider_error")
             checkpoint = trace_root / "checkpoint.json"
             if checkpoint.exists():
                 state = json.loads(checkpoint.read_text())

@@ -180,6 +180,8 @@ class _OpenAICompatProvider(LLMProvider):
                     config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1,
                                                                   "error": _safe_error_label(exc), "details": details})
                 if attempt >= max_retries or not _is_retryable_error(exc, provider_name=self.name):
+                    logger.error("LLM request stopped provider={} model={} reason={}",
+                                 self.name, config.model, _safe_error_label(exc))
                     raise
                 delay = base_delay * (2**attempt)
                 if details.get("retry_after_seconds", 0) > delay:
@@ -190,6 +192,8 @@ class _OpenAICompatProvider(LLMProvider):
                             "reason": "provider Retry-After exceeds this call's backoff budget",
                             "retry_after_seconds": details["retry_after_seconds"],
                         })
+                    logger.error("LLM retry deferred provider={} model={} retry_after_seconds={}",
+                                 self.name, config.model, details["retry_after_seconds"])
                     raise
                 if config.attempt_observer:
                     config.attempt_observer("sdk_retry_scheduled", {"next_attempt": attempt + 2, "delay": delay})
