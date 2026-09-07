@@ -24,7 +24,7 @@ def test_real_cpu_result_and_callbacks_use_computed_residuals() -> None:
     # A real numerical smoke test on generated signals, not production PIMC evidence.
     data, result = run_pim_cancellation(
         n_points=1024, steps=8, seed=11,
-        ablation_config={"memory": 2, "order": 3, "loss_batch_size": 1024},
+        ablation_config={"memory": 2, "order": 3, "loss_batch_size": 128},
         on_step=record_step,
     )
     assert data.x.shape == data.y.shape == (1024,)
@@ -33,7 +33,17 @@ def test_real_cpu_result_and_callbacks_use_computed_residuals() -> None:
     assert [value for _, value in observed] == result.loss_curve
     assert all(math.isfinite(value) and value >= 0 for value in result.loss_curve)
     assert result.loss_curve[0] > result.final_loss
+    assert all(a >= b for a, b in zip(result.loss_curve, result.loss_curve[1:]))
     assert math.isclose(result.res_db, 10 * math.log10(result.final_loss), abs_tol=0.002)
+    _, full_batch = run_pim_cancellation(n_points=1024, steps=8, seed=11,
+                                        ablation_config={"memory": 2, "order": 3, "loss_batch_size": 1024})
+    assert result.loss_curve == full_batch.loss_curve
+
+
+@pytest.mark.parametrize("config", [{"expert_count": 4}, {"router": "hard"}])
+def test_cpu_model_refuses_unimplemented_architecture_ablations(config: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="does not implement"):
+        run_pim_cancellation(n_points=1024, steps=2, ablation_config=config)
 
 
 @pytest.mark.asyncio

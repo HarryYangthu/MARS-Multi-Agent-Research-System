@@ -1,268 +1,88 @@
+"""Context, trace privacy and write permissions using real components."""
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
-from app.harness.llm.mock_provider import build_fake_metadata
-from app.harness.llm.model_registry import AgentConfig
-from app.harness.llm.provider_base import Completion
-from app.harness.schema.frontmatter_parser import dumps as fm_dumps
-from app.harness.schema.validator import validate_document
-from app.harness.tools.registry import (
-    ToolContext,
-    ToolPolicy,
-    ToolResult,
-    ToolSpec,
-)
-
-
-def _agent_config(*, tools: tuple[str, ...] = ()) -> AgentConfig:
-    return AgentConfig(
-        name="idea",
-        enabled=True,
-        output_schema="proposal.v1",
-        model_provider="mock",
-        model_name="mock-1",
-        temperature=0.0,
-        max_tokens=1024,
-        debate_enabled=False,
-        debate_rounds=1,
-        debate_participants=(),
-        tools=tools,
-        raw={"loop": {"max_validation_repairs": 1, "max_tool_steps": 2}},
-    )
-
-
-def _valid_proposal(seed: str = "context-runtime") -> str:
-    return fm_dumps(
-        build_fake_metadata("proposal.v1", seed=seed),
-        "# proposal\n\n用于 Context V2 runtime 回归测试。",
-    )
-
-
-class _RuntimeAgent(BaseAgent):
-    name = "idea"
-    output_schema = "proposal.v1"
-
-    def __init__(self, *, tools: tuple[str, ...] = ()) -> None:
-        super().__init__(agent_config=_agent_config(tools=tools))
-        self.completions: list[str] = []
-
-    async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
-        text = _valid_proposal("draft")
-        return self._artifact_from_completion(
-            Completion(text=text, provider="test", model="test", is_mock=True)
-        )
-
-    async def _call_llm(
-        self,
-        messages: Sequence[object],
-        *,
-        debate_role: str | None = None,
-    ) -> Completion:
-        text = self.completions.pop(0) if self.completions else _valid_proposal("fallback")
-        return Completion(
-            text=text,
-            provider="test",
-            model="test",
-            is_mock=True,
-            debate_role=debate_role,
-        )
-
-
-class _FakeToolRegistry:
-    def __init__(self) -> None:
-        self.dispatched: list[str] = []
-
-    def spec(self, tool_name: str) -> ToolSpec | None:
-        mutation_level = "write" if tool_name == "code.write_file" else "read"
-        return ToolSpec(
-            name=tool_name,
-            namespace=tool_name.split(".", 1)[0],
-            description="test tool",
-            policy=ToolPolicy(mutation_level=mutation_level),
-        )
-
-    async def dispatch(
-        self,
-        tool_name: str,
-        args: dict[str, Any],
-        ctx: ToolContext,
-    ) -> ToolResult:
-        self.dispatched.append(tool_name)
-        return ToolResult(
-            ok=True,
-            output={
-                "tool": tool_name,
-                "args": args,
-                "payload": "x" * 2000,
-                "run_id": ctx.run_id,
-            },
-            metrics={"rows": 1},
-        )
-
-
-def _manifest_payloads(run_root: Path) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    for path in sorted((run_root / "context").glob("context_manifest.v2.*.json")):
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            payloads.append(raw)
-    return payloads
+from app.agents.base import RunRequest
+from app.agents.idea.agent import IdeaAgent
+from app.harness.agent_loop.context import pack_context
+from app.harness.agent_loop.trace import LoopTrace, digest
+from app.harness.llm.provider_base import Message
+from app.harness.tools.registry import ToolContext, get_registry
 
 
 @pytest.mark.asyncio
-async def test_schema_repair_writes_precall_manifest(tmp_path: Path) -> None:
-    run_root = tmp_path / "run"
-    request = RunRequest(
-        project="pimc",
-        user_request="repair manifest",
-        extra={"run_id": "run-1", "run_root": str(run_root), "node_key": "idea"},
-    )
-    context = ContextPack(system="system", project="project", task="task")
-    invalid = Artifact(
-        text="---\nschema: proposal.v1\n---\n# missing required fields\n",
-        schema_id="proposal.v1",
-        metadata={"schema": "proposal.v1"},
-        body="# missing required fields",
-    )
-    validation = validate_document(invalid.text, expected_schema="proposal.v1")
-    assert not validation.valid
-    agent = _RuntimeAgent()
-    agent.completions.append(_valid_proposal("repair"))
-
-    repaired = await agent.repair_after_validation_failure(
-        request=request,
-        context=context,
-        artifact=invalid,
-        validation=validation,
-        attempt=1,
-    )
-
-    assert validate_document(repaired.text, expected_schema="proposal.v1").valid
-    manifests = _manifest_payloads(run_root)
-    assert any(item["purpose"] == "schema_repair_1" for item in manifests)
-    repair = next(item for item in manifests if item["purpose"] == "schema_repair_1")
-    assert repair["messages_preview"]
-    assert any(segment["kind"] == "task" for segment in repair["segments"])
+async def test_context_preserves_full_upstream_and_validation_manifest() -> None:
+    agent = IdeaAgent()
+    upstream = "Complete approved draft:\n" + "proof boundary condition\n" * 250
+    request = RunRequest(project="pimc", user_request="Improve LUT capacity",
+                         upstream_artifacts={"approved": upstream},
+                         extra={"required_upstream_refs": ["approved"]})
+    context = await agent.build_context(request)
+    pinned = agent._messages_for_context(request, context, purpose="repair-contract")
+    messages, manifest = pack_context(pinned, [], "Missing exact parameter counts", "Current draft",
+                                      budget=64000, observation_chars=1000)
+    assert upstream in "\n".join(message.content for message in messages)
+    assert messages[-1].content.endswith("Missing exact parameter counts")
+    assert manifest["visible_sha256"] == digest([{"role": m.role, "content": m.content} for m in messages])
+    assert manifest["omitted_history"] == []
 
 
 @pytest.mark.asyncio
-async def test_tool_gather_writes_message_manifest_and_raw_ref(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_root = tmp_path / "run"
-    request = RunRequest(
-        project="pimc",
-        user_request="gather context",
-        extra={"run_id": "run-2", "run_root": str(run_root), "node_key": "idea"},
-    )
-    context = ContextPack(system="system", project="project", task="task")
-    agent = _RuntimeAgent(tools=("search.local_docs",))
-    agent.max_tool_steps = 2
-    agent.completions.extend(
-        [
-            '{"tool_calls": [{"tool": "search.local_docs", "args": {"query": "router"}}]}',
-            '{"done": true}',
-        ]
-    )
-    monkeypatch.setattr(agent, "_tools_enabled", lambda: True)
-
-    import app.harness.tools.registry as registry_mod
-
-    monkeypatch.setattr(registry_mod, "get_registry", lambda: _FakeToolRegistry())
-
-    observations = await agent._gather_with_tools(request, context)
-
-    assert observations
-    assert observations[0]["raw_ref"]
-    manifests = _manifest_payloads(run_root)
-    assert any(item["purpose"] == "tool_gather_1" for item in manifests)
-    assert any(item["diagnostics"].get("capture_mode") == "messages" for item in manifests)
-    raw_files = list((run_root / "context" / "raw").glob("**/*.json"))
-    assert raw_files
+async def test_actual_permission_failure_keeps_raw_evidence_and_manifest(tmp_path: Path) -> None:
+    registry = get_registry()
+    args = {"path": str(tmp_path / "forbidden.py"), "content": "unauthorized"}
+    result = await registry.dispatch("code.write_file", args,
+                                    ToolContext("context-permission", "pimc", "idea",
+                                                extra={"run_root": str(tmp_path)}))
+    assert not result.ok
+    assert result.status == "not_allowed"
+    assert not (tmp_path / "forbidden.py").exists()
+    observation = {"tool": "code.write_file", "args": args, "reason": "permission contract",
+                   "ok": result.ok, "error": result.error, "output": result.output}
+    trace = LoopTrace(tmp_path / "trace", "full")
+    trace.emit("permission_contract", {}, visible=observation)
+    rows = [json.loads(line) for line in trace.events.read_text().splitlines()]
+    assert rows[0]["visible"]["error"] == result.error
+    messages, manifest = pack_context([Message("system", "rules")], [observation], "", "",
+                                      budget=5000, observation_chars=512)
+    assert result.error in messages[-1].content
+    assert manifest["omitted_history"] == []
 
 
-@pytest.mark.asyncio
-async def test_tool_raw_externalize_can_be_disabled(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MARS_CONTEXT_TOOL_RAW_EXTERNALIZE", "false")
-    import app.settings as settings_mod
+@pytest.mark.parametrize("mode", ["metadata", "off"])
+def test_trace_recording_can_exclude_visible_payloads(tmp_path: Path, mode: str) -> None:
+    trace = LoopTrace(tmp_path, mode)
+    content = "User-supplied trace privacy sentinel"
+    trace.emit("privacy_contract", {}, visible=content)
+    if mode == "off":
+        assert not trace.events.exists()
+    else:
+        row = json.loads(trace.events.read_text())
+        assert "visible" not in row
+        assert row["visible_sha256"] == digest(content)
+        assert content not in trace.events.read_text()
 
-    settings_mod._settings = None
-    run_root = tmp_path / "run"
-    request = RunRequest(
-        project="pimc",
-        user_request="gather without raw",
-        extra={"run_id": "run-3", "run_root": str(run_root), "node_key": "idea"},
-    )
-    context = ContextPack(system="system", project="project", task="task")
-    agent = _RuntimeAgent(tools=("search.local_docs",))
-    agent.max_tool_steps = 1
-    agent.completions.append(
-        '{"tool_calls": [{"tool": "search.local_docs", "args": {"query": "router"}}]}'
-    )
-    monkeypatch.setattr(agent, "_tools_enabled", lambda: True)
 
-    import app.harness.tools.registry as registry_mod
-
-    monkeypatch.setattr(registry_mod, "get_registry", lambda: _FakeToolRegistry())
-
-    observations = await agent._gather_with_tools(request, context)
-
-    assert observations
-    assert observations[0]["raw_ref"] is None
-    assert not (run_root / "context" / "raw").exists()
-    settings_mod._settings = None
+def test_idea_tool_configuration_excludes_write_capabilities() -> None:
+    agent = IdeaAgent()
+    registry = get_registry()
+    assert agent.config.tools
+    for name in agent.config.tools:
+        spec = registry.spec(name)
+        assert spec is not None
+        assert spec.policy.mutation_level == "read"
+    assert "code.write_file" not in agent.config.tools
+    assert "code.apply_patch" not in agent.config.tools
 
 
 @pytest.mark.asyncio
-async def test_tool_gather_never_dispatches_model_requested_write_tool(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = RunRequest(
-        project="pimc",
-        user_request="read-only gather",
-        extra={
-            "run_id": "run-read-only",
-            "run_root": str(tmp_path / "run"),
-            "node_key": "coding",
-        },
-    )
-    context = ContextPack(system="system", project="project", task="task")
-    agent = _RuntimeAgent(tools=("search.local_docs", "code.write_file"))
-    agent.max_tool_steps = 1
-    agent.completions.append(
-        '{"tool_calls": [{"tool": "code.write_file", "args": '
-        '{"path": "libs/evil.py", "content": "owned"}}]}'
-    )
-    monkeypatch.setattr(agent, "_tools_enabled", lambda: True)
-    registry = _FakeToolRegistry()
-
-    import app.harness.tools.registry as registry_mod
-
-    monkeypatch.setattr(registry_mod, "get_registry", lambda: registry)
-
-    observations = await agent._gather_with_tools(request, context)
-
-    assert registry.dispatched == []
-    assert observations == [
-        {
-            "tool": "code.write_file",
-            "args": {"path": "libs/evil.py", "content": "owned"},
-            "ok": False,
-            "output": {},
-            "error": "tool is unavailable in the read-only gather phase",
-            "blocked_by_gate": "agent_gather_read_only",
-            "raw_ref": None,
-        }
-    ]
+async def test_missing_required_upstream_fails_before_model_request() -> None:
+    agent = IdeaAgent()
+    request = RunRequest(project="pimc", user_request="Respect complete upstream",
+                         extra={"required_upstream_refs": ["missing"]})
+    with pytest.raises(ValueError, match="required_upstream_refs"):
+        await agent.build_context(request)

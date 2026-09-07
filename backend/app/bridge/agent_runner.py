@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any
 
 from loguru import logger
@@ -38,9 +39,7 @@ async def run_agent_node(
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
-    Falls back to a no-op if the agent isn't registered (e.g. during
-    Phase 2 tests). This keeps the orchestrator capable of progressing
-    without breaking schema-pillar guarantees.
+    A missing agent is an explicit configuration failure.
     """
     identity = parse_node_key(node_key)
     stage = identity.stage
@@ -48,8 +47,7 @@ async def run_agent_node(
 
     reg = get_registry()
     if not reg.has(stage):
-        logger.debug("no agent registered for '{}', running stub", node_key)
-        return
+        raise RuntimeError(f"no agent registered for {stage!r}; node was not executed")
 
     agent: Any = reg.get(stage)
 
@@ -251,7 +249,7 @@ async def run_agent_node(
             exc,
         )
     if stage == "coding" and attempt > 1:
-        _write_patch_diff(run=run, version=ref.version, attempt=attempt)
+        _write_patch_diff(run=run, version=ref.version, artifact_text=artifact.text)
     # Phase 4: orchestrator owns the approval transition (HITL or auto).
 
     # Fallback: if the agent didn't stream the transcript directly to disk
@@ -422,22 +420,14 @@ def _write_agent_failure_diagnostic(
     )
 
 
-def _write_patch_diff(*, run: RunHandle, version: str, attempt: int) -> None:
+def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> None:
     target = run.subdir("coding") / f"patch.{version}.diff"
-    diff = (
-        "diff --git a/libs/router_v2.py b/libs/router_v2.py\n"
-        "index 0000000..1111111 100644\n"
-        "--- a/libs/router_v2.py\n"
-        "+++ b/libs/router_v2.py\n"
-        "@@ -1,3 +1,8 @@\n"
-        "+# V2 feedback-loop patch proposal.\n"
-        f"+DIAGNOSIS_ATTEMPT = {attempt}\n"
-        "+ROUTER_STABILITY_CLAMP = 0.02\n"
-        "+\n"
-        " class RouterV2:\n"
-        "     pass\n"
-    )
-    target.write_text(diff, encoding="utf-8")
+    blocks = re.findall(r"^```(?:diff|patch)\s*\n(.*?)^```\s*$", artifact_text, re.MULTILINE | re.DOTALL)
+    if not blocks:
+        run.write_event("agent_events", {"event": "coding.patch_not_provided", "version": version})
+        return
+    # Copy the actual proposal for review; application still requires ToolRegistry.
+    target.write_text("\n".join(block.rstrip() for block in blocks) + "\n", encoding="utf-8")
 
 
 def _handoff_summary(*, text: str, source_ref: str) -> str:

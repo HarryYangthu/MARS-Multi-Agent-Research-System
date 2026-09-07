@@ -155,6 +155,9 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
     inventory = evidence_inventory(observations)
     papers = {p["identity"]: p for p in inventory["papers"]}
     errors: list[str] = []
+    debate = metadata.get("debate_summary")
+    if isinstance(debate, dict) and debate.get("rounds", 0) != 0:
+        errors.append("/debate_summary/rounds: this research loop has no debate tool receipts; comparisons are not executed debate rounds")
     citations = metadata.get("related_literature", [])
     if not isinstance(citations, list):
         citations = []

@@ -4,13 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
 from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.policy import AgentLoopPolicy
-from app.harness.agent_loop.protocol import INSTRUCTION, parse_action, parse_review
+from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.registry import ToolContext, ToolRegistry
@@ -69,6 +69,7 @@ class NativeAgentLoop:
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "usage_complete": True, "history": [], "candidate": "", "feedback": "",
             "next_phase": "act", "seen": {}, "reflection_accepted": False,
+            "review_issues": [], "reviewed_candidate_sha": "",
         }
         if request.resume:
             if p.trace != "full":
@@ -82,6 +83,8 @@ class NativeAgentLoop:
                 state["usage_complete"] = False
             state["status"] = "running"
             state["pending"] = None
+        state.setdefault("review_issues", [])
+        state.setdefault("reviewed_candidate_sha", "")
         counts = state["counts"]
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
         trace.snapshot(state)
@@ -112,7 +115,8 @@ class NativeAgentLoop:
                         "You are reviewing the current candidate, not generating tool actions. "
                         'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
                         "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
-                        + request.reflection_rubric))]
+                        + request.reflection_rubric + "\nVerify the revised candidate resolves every prior issue:\n"
+                        + canonical(state["review_issues"]))) ]
                 feedback = state["feedback"]
                 if counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
@@ -126,9 +130,11 @@ class NativeAgentLoop:
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"]},
                            visible=[asdict(m) for m in messages])
                 trace.snapshot(state)
+                call_config = replace(cfg, reasoning_effort=p.reflection_reasoning_effort) if (
+                    reviewing and p.reflection_reasoning_effort is not None) else cfg
                 try:
                     completion = await asyncio.wait_for(
-                        request.provider.complete(messages, cfg), timeout=llm_call_deadline_seconds(cfg))
+                        request.provider.complete(messages, call_config), timeout=llm_call_deadline_seconds(call_config))
                 except Exception as exc:
                     usage(getattr(exc, "usage", None))
                     if isinstance(exc, LLMCompletionError):
@@ -148,8 +154,15 @@ class NativeAgentLoop:
                 trace.emit("model_response", {"request": counts["model_requests"], "provider": completion.provider,
                                               "model": completion.model, "usage": completion.raw.get("usage")},
                            visible=completion.text)
+                review_conflict = False
                 try:
                     decision = parse_review(completion.text) if reviewing else parse_action(completion.text)
+                except ReviewConflictError as exc:
+                    # Keep the original response in trace, but never fix this by
+                    # asking the reviewer to erase its issue list without revision.
+                    review_conflict = True
+                    decision = {**exc.review, "accept": False}
+                    trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
                     counts["protocol_repairs"] += 1
                     state["feedback"] = f"Protocol error: {exc}. Return the required JSON object."
@@ -161,12 +174,18 @@ class NativeAgentLoop:
                     continue
                 if reviewing:
                     counts["reflections"] += 1
-                    trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"]}, visible=decision)
+                    state["reviewed_candidate_sha"] = digest(state["candidate"])
+                    state["review_issues"] = decision["issues"]
+                    trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
+                                              "host_conflict_rejection": review_conflict}, visible=decision)
                     if decision["accept"]:
                         state["reflection_accepted"] = True
+                        state["feedback"] = ""
                         state["status"] = "passed"
                         break
-                    state["feedback"] = canonical(decision)
+                    state["feedback"] = canonical({"required_revision": decision["issues"],
+                                                   "review_rationale": decision["rationale"],
+                                                   "instruction": "Revise the complete candidate to resolve these issues. Do not merely remove warnings."})
                     state["next_phase"] = "act"
                     if counts["reflections"] >= p.max_reflections:
                         state["status"] = "reflection_rejected"
@@ -174,6 +193,8 @@ class NativeAgentLoop:
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
                     errors = await request.validate(state["candidate"], state["history"])
+                    if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
+                        errors.append("/candidate: unresolved review issues require a revised candidate")
                     trace.emit("validation", {"valid": not errors}, visible=errors)
                     if errors:
                         counts["validation_repairs"] += 1

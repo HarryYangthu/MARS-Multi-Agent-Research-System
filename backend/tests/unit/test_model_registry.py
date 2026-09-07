@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import (
     available_providers,
     get_agent_config,
     list_agent_configs,
     select_provider,
+    reset_cache_for_tests,
 )
 
 
@@ -19,7 +21,7 @@ def test_agent_configs_loaded_from_yaml() -> None:
 
 def test_idea_config_has_debate_participants() -> None:
     cfg = get_agent_config("idea")
-    assert cfg.debate_enabled is True
+    assert cfg.debate_enabled is False
     assert len(cfg.debate_participants) >= 2
     assert cfg.output_schema == "proposal.v1"
     assert cfg.model_name == "deepseek-v4-pro"
@@ -44,27 +46,13 @@ def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
             assert cfg.max_tokens >= 32_768
 
 
-def test_select_provider_falls_back_to_mock_without_keys(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Force absence of all keys.
-    for env in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "QWEN_API_KEY",
-        "GEMINI_API_KEY",
-        "DEEPSEEK_API_KEY",
-    ):
-        monkeypatch.setenv(env, "")
-    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
-    monkeypatch.setenv("MARS_MOCK_MODE", "auto")
-    from app.settings import _settings  # noqa
-    import app.settings as settings_mod
-
-    settings_mod._settings = None  # invalidate cache
-    cfg = get_agent_config("idea")
+def test_local_provider_selection_preserves_agent_configuration() -> None:
+    # Construct the real adapter; this does not assert endpoint connectivity.
+    cfg = replace(get_agent_config("idea"), model_provider="local_vllm",
+                  base_url="http://127.0.0.1:1/v1", base_url_env="MARS_TEST_UNUSED_ENDPOINT",
+                  api_key_env="MARS_TEST_UNUSED_KEY")
     provider, llm_cfg = select_provider(cfg)
-    assert isinstance(provider, MockProvider)
+    assert provider.name == "local_vllm"
     assert llm_cfg.response_schema == "proposal.v1"
     assert llm_cfg.thinking_enabled is True
     assert llm_cfg.reasoning_effort == "high"
@@ -74,29 +62,21 @@ def test_select_provider_falls_back_to_mock_without_keys(
     assert llm_cfg.max_retries == 3
 
 
-def test_available_providers_always_includes_mock() -> None:
-    assert "mock" in available_providers()
+def test_available_providers_excludes_removed_simulated_provider() -> None:
+    assert "mock" not in available_providers()
 
 
-def test_select_provider_rejects_mock_fallback_in_production(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("runtime", ["production", "development"])
+def test_missing_explicit_provider_fails_in_every_runtime(
+    monkeypatch: pytest.MonkeyPatch, runtime: str,
 ) -> None:
-    for env in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "QWEN_API_KEY",
-        "GEMINI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "LOCAL_VLLM_BASE_URL",
-    ):
-        monkeypatch.setenv(env, "")
-    monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
+    monkeypatch.setenv("MARS_RUNTIME_MODE", runtime)
     monkeypatch.setenv("MARS_MOCK_MODE", "never")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    cfg = get_agent_config("idea")
-    with pytest.raises(RuntimeError, match="not configured"):
-        select_provider(cfg)
-    monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
-    settings_mod._settings = None
+    reset_cache_for_tests()
+    # An unsupported explicit provider cannot be replaced by any configured one.
+    cfg = replace(get_agent_config("idea"), model_provider="unconfigured")
+    try:
+        with pytest.raises(RuntimeError, match="not configured"):
+            select_provider(cfg)
+    finally:
+        reset_cache_for_tests()

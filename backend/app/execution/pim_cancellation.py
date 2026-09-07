@@ -91,19 +91,6 @@ def _standard_normal(size: int, *, seed: int, stream: int) -> NDArray[np.float64
     return cast(NDArray[np.float64], np.asarray(values, dtype=np.float64))
 
 
-def _scalar_standard_normal(*, seed: int, stream: int) -> float:
-    values = _standard_normal(1, seed=seed, stream=stream)
-    return float(values[0]) if values.size else 0.0
-
-
-def _integers(low: int, high: int, *, size: int, seed: int, stream: int) -> NDArray[np.int64]:
-    if high <= low or size <= 0:
-        return cast(NDArray[np.int64], np.zeros(max(0, size), dtype=np.int64))
-    values = _uniform01(size, seed=seed, stream=stream)
-    out = low + np.floor(values * (high - low))
-    return cast(NDArray[np.int64], np.asarray(out, dtype=np.int64))
-
-
 def generate_dual_carrier_pim(
     *,
     n_points: int = DEFAULT_N_POINTS,
@@ -176,23 +163,12 @@ def _build_basis(x: np.ndarray, *, order: int, memory: int) -> np.ndarray:
 
 
 def _ablation_capacity(config: dict[str, Any]) -> tuple[int, int]:
-    """Map an ablation config to (order, memory). More capacity -> better RES.
-
-    The canceller order is fixed high enough to match the true nonlinearity;
-    MEMORY DEPTH is the bottleneck that ablations vary, so expert_count (which
-    maps to memory taps) produces physically meaningful RES differences:
-    too few taps -> can't cancel the memory effects -> higher residual.
-    """
+    """Configure the actual memory-polynomial model, not a surrogate MoE."""
+    unsupported = {"expert_count", "experts", "n_experts", "router", "router_type"} & config.keys()
+    if unsupported:
+        raise ValueError(f"CPU polynomial canceller does not implement expert/router ablations: {sorted(unsupported)}")
     order = 7
     memory = 8
-    # Common ablation knobs we might see from experiment_plan:
-    for key in ("expert_count", "experts", "n_experts"):
-        if key in config:
-            try:
-                ec = int(config[key])
-                memory = max(2, min(32, ec))      # more experts -> deeper memory
-            except (TypeError, ValueError):
-                pass
     if "memory" in config:
         try:
             memory = max(1, min(48, int(config["memory"])))
@@ -203,9 +179,6 @@ def _ablation_capacity(config: dict[str, Any]) -> tuple[int, int]:
             order = max(1, min(9, int(config["order"]) | 1))  # force odd
         except (TypeError, ValueError):
             pass
-    router = str(config.get("router_type") or config.get("router") or "")
-    if router in {"hard-topk", "hard_top2", "hard"}:
-        order = min(9, order + 2)                 # hard routing -> richer basis
     return order, memory
 
 
@@ -244,30 +217,13 @@ def run_pim_cancellation(
     loss_curve: list[float] = []
     residual = y.copy()
     n_steps = max(1, steps)
-    loss_seed = _normalize_seed(None if seed is None else seed + 17)
-    batch_size = max(128, min(data.x.shape[0], int(config.get("loss_batch_size", 4096))))
     for step in range(n_steps):
         residual = y - q @ z
         grad = q.conj().T @ residual             # Qᴴ r  (Gram = I in Q-space)
         full_loss = float(np.mean(np.abs(residual) ** 2) / y_power)
-        if batch_size < residual.shape[0]:
-            idx = _integers(
-                0,
-                residual.shape[0],
-                size=batch_size,
-                seed=loss_seed,
-                stream=step + 11,
-            )
-            local_y_power = float(np.mean(np.abs(y[idx]) ** 2)) + 1e-12
-            batch_loss = float(np.mean(np.abs(residual[idx]) ** 2) / local_y_power)
-            ripple = (
-                1.0
-                + 0.08 * np.sin(0.55 * step)
-                + 0.035 * _scalar_standard_normal(seed=loss_seed, stream=step + 101)
-            )
-            observed_loss = max(1e-12, (0.82 * full_loss + 0.18 * batch_loss) * ripple)
-        else:
-            observed_loss = full_loss
+        # Report the measured full residual objective. Never add display noise
+        # or mix another loss into the curve to make an iterative solve look real.
+        observed_loss = full_loss
         loss_curve.append(float(observed_loss))
         if on_step is not None:
             on_step(step, float(observed_loss), list(loss_curve))

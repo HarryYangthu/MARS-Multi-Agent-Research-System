@@ -19,6 +19,7 @@ model:
   max_retries: 1
 loop:
   mode: reflection
+  reflection_reasoning_effort: high
   trace: full
   max_model_calls: 32
   max_tool_steps: 18

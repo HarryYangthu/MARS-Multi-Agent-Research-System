@@ -22,6 +22,14 @@ If a tool fails, inspect its error; do not repeat successful or permanent-failed
 """
 
 
+class ReviewConflictError(ValueError):
+    """A review lists issues while claiming acceptance; revision is mandatory."""
+
+    def __init__(self, review: dict[str, Any]) -> None:
+        self.review = review
+        super().__init__("review contains unresolved issues; revise the candidate before reviewing again")
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -84,7 +92,7 @@ def parse_review(text: str) -> dict[str, Any]:
     if not isinstance(result["rationale"], str) or not result["rationale"].strip():
         raise ValueError("review requires rationale")
     if result["accept"] and result["issues"]:
-        raise ValueError("an accepted review must have no unresolved issues")
+        raise ReviewConflictError(result)
     if not result["accept"] and not result["issues"]:
         raise ValueError("rejection must identify actionable issues")
     return result

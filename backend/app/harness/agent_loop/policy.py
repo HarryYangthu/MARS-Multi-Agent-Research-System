@@ -10,6 +10,7 @@ from typing import Any, Literal
 class AgentLoopPolicy:
     mode: Literal["react", "reflection"] = "react"
     trace: Literal["full", "metadata", "off"] = "full"
+    reflection_reasoning_effort: Literal["low", "medium", "high", "max"] | None = None
     max_model_calls: int = 36
     max_tool_steps: int = 18
     max_protocol_repairs: int = 4
@@ -23,8 +24,10 @@ class AgentLoopPolicy:
             raise ValueError("mode must be react or reflection")
         if self.trace not in {"full", "metadata", "off"}:
             raise ValueError("trace must be full, metadata or off")
+        if self.reflection_reasoning_effort not in {None, "low", "medium", "high", "max"}:
+            raise ValueError("unsupported reflection_reasoning_effort")
         for item in fields(self):
-            if item.name in {"mode", "trace"}:
+            if item.name in {"mode", "trace", "reflection_reasoning_effort"}:
                 continue
             value = getattr(self, item.name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
