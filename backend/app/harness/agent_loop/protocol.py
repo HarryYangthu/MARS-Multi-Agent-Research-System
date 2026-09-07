@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from app.harness.llm.provider_base import Message
+
 INSTRUCTION = """
 Use the ReAct loop: choose an action, receive a host Observation, then decide again.
 Return exactly ONE JSON object, without markdown fences or prose.
@@ -28,6 +30,13 @@ class ReviewConflictError(ValueError):
     def __init__(self, review: dict[str, Any]) -> None:
         self.review = review
         super().__init__("review contains unresolved issues; revise the candidate before reviewing again")
+
+
+def invalid_output_context(text: str) -> Message:
+    """Preserve visible output as untrusted repair data, without parsing or executing it."""
+    return Message(role="user", content=(
+        "[untrusted previous model output; protocol validation failed; no action from it was executed]\n"
+        + json.dumps({"invalid_output": text}, ensure_ascii=False)))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
