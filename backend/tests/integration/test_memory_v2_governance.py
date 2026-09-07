@@ -6,13 +6,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.bridge.agent_registry import get_registry, reset_registry_for_tests
-from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.harness.kb.config import reset_config_cache_for_tests
 from app.harness.kb.ingester import ingest_memory
 from app.harness.kb.models import EvalStatus
 from app.harness.kb.stores import MAIN_ZONES, reset_for_tests as reset_kb_stores
-from app.harness.runtime.event_bus import InProcessEventBus
 from app.harness.sedimentation.hooks import sediment_approved_artifact
 from app.main import create_app
 from app.storage.artifact_store import ArtifactRef
@@ -27,66 +24,16 @@ def _memory_profile(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     reset_config_cache_for_tests()
 
 
-def _register_mock_agents(monkeypatch: pytest.MonkeyPatch) -> None:
-    for env in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "QWEN_API_KEY",
-        "GEMINI_API_KEY",
-        "DEEPSEEK_API_KEY",
-    ):
-        monkeypatch.delenv(env, raising=False)
-    monkeypatch.setenv("MARS_MOCK_MODE", "always")
-    monkeypatch.setenv("LOCAL_VLLM_BASE_URL", "")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    reset_registry_for_tests()
-    from app.agents.coding.agent import CodingAgent
-    from app.agents.execution.agent import ExecutionAgent
-    from app.agents.experiment.agent import ExperimentAgent
-    from app.agents.idea.agent import IdeaAgent
-    from app.agents.writing.agent import WritingAgent
-
-    reg = get_registry()
-    for cls in (IdeaAgent, ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent):
-        agent = cls()
-        reg.register(agent.name, agent)
-
-
-@pytest.mark.asyncio
-async def test_mock_pipeline_sediments_only_to_quarantine(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _register_mock_agents(monkeypatch)
+def test_legacy_mock_source_is_quarantined_without_running_a_mock(tmp_path: Path) -> None:
     stores = reset_kb_stores(tmp_path / "knowledge")
-    orch = Orchestrator(
-        run_store=RunStore(tmp_path / "runs"),
-        bus=InProcessEventBus(),
-    )
-    session = orch.create_session(
-        RunRequest(
-            task="memory-governance-mock",
-            project="pimc",
-            entrypoint="pipeline",
-            user_request="Run mock pipeline and keep long-term KB clean.",
-            auto_approve=True,
-        )
-    )
-
-    await orch.run(session.run.run_id)
-
-    main_records = [
-        record
-        for zone in MAIN_ZONES
-        for record in stores.zone(zone).all(exclude_mock=False)
-    ]
-    quarantined = stores.zone("quarantine").all(exclude_mock=False)
-    assert all(record.metadata.get("is_mock") is not True for record in main_records)
-    assert quarantined
-    assert all(record.metadata.get("is_mock") is True for record in quarantined)
-    reset_registry_for_tests()
+    records = ingest_memory(zone="methodology", text="Untrusted historical synthetic outcome",
+        metadata={"project": "pimc", "origin": "legacy_import"}, memory_type="procedural",
+        source_path="legacy/report.md", is_mock=True, approved=True, stores=stores)
+    assert records
+    assert all(record.metadata["is_mock"] is True for record in records)
+    from app.harness.kb.selector import select_memory
+    result = select_memory(query="Untrusted historical", zones=["methodology"], project="pimc", stores=stores)
+    assert result == []
 
 
 def test_research_profile_eval_fail_does_not_enter_main_zones(tmp_path: Path) -> None:
@@ -188,7 +135,8 @@ def test_knowledge_api_defaults_filter_unsafe_memory(tmp_path: Path) -> None:
 
     assert response.status_code == 200, response.text
     ids = [item["item"]["id"] for item in response.json()]
-    assert ids == [good.id]
+    # Human-authored metadata without a host retrieval receipt is also excluded.
+    assert ids == []
     assert mock.id not in ids
     assert old.id not in ids
 

@@ -1,21 +1,9 @@
-"""Multi-model debate runner.
-
-Three modes (DESIGN §16.3):
-
-* ``real_multi_model``  — every participant uses its declared provider.
-* ``single_model_simulated`` — only one provider is available; reuse it
-  while swapping system prompts to fake distinct roles.
-* ``mock_debate`` — no real providers; uses ``MockProvider`` everywhere.
-
-The runner picks the mode automatically based on ``available_providers()``
-and the agent's debate config. The output is a list of ``Turn`` objects
-plus a synthesized final artifact (the *judge* role's last turn).
-"""
+"""Debate with actual model calls; no fabricated roles or provider fallback."""
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -23,7 +11,6 @@ from loguru import logger
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.debate.roles import role_prompt
-from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.model_registry import (
     AgentConfig,
     available_providers,
@@ -44,7 +31,6 @@ from app.settings import get_settings
 class DebateMode(str, Enum):
     REAL_MULTI_MODEL = "real_multi_model"
     SINGLE_MODEL_SIMULATED = "single_model_simulated"
-    MOCK_DEBATE = "mock_debate"
 
 
 class DebateRoleOutputError(RuntimeError):
@@ -78,31 +64,17 @@ class DebateResult:
 
 
 def _auto_mode(agent_config: AgentConfig) -> DebateMode:
-    """Replicates the auto-degrade logic from DESIGN §16.3."""
-    settings = get_settings()
-    if settings.mars_mock_mode == "always":
-        if settings.is_production:
-            raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
-        return DebateMode.MOCK_DEBATE
+    """All configured roles must have real providers."""
+    if not provider_configured_for_agent(agent_config):
+        raise RuntimeError("debate primary provider is not configured")
     avail = available_providers()
-    if not agent_config.debate_enabled:
-        return DebateMode.MOCK_DEBATE
-    required = {
-        str(p.get("provider")) for p in agent_config.debate_participants if p.get("provider")
-    }
     if provider_configured_for_agent(agent_config):
         avail.add(agent_config.model_provider)
+    required = {str(p.get("provider", agent_config.model_provider)) for p in agent_config.debate_participants}
     missing = required - avail
-    if missing and (settings.is_production or settings.mars_mock_mode == "never"):
-        raise RuntimeError(
-            f"debate provider(s) not configured for agent '{agent_config.name}': "
-            + ", ".join(sorted(missing))
-        )
-    if required.issubset(avail) and required - {"mock"}:
-        return DebateMode.REAL_MULTI_MODEL
-    if avail - {"mock"}:
-        return DebateMode.SINGLE_MODEL_SIMULATED
-    return DebateMode.MOCK_DEBATE
+    if missing or not avail:
+        raise RuntimeError(f"debate providers missing: {sorted(missing)}")
+    return DebateMode.REAL_MULTI_MODEL
 
 
 def _select_role_provider(
@@ -118,19 +90,8 @@ def _select_role_provider(
     Returns (provider, config, provider_name, model_name).
     In real_multi_model mode each participant's own provider is used.
     In single_model_simulated mode the fallback (the agent's primary) is
-    used for every role. In mock_debate mode MockProvider is forced.
+    used for every role. No synthetic completions are supported.
     """
-    settings = get_settings()
-    if mode == DebateMode.MOCK_DEBATE:
-        if settings.is_production or settings.mars_mock_mode == "never":
-            raise RuntimeError("mock debate is disabled by runtime settings")
-        return (
-            MockProvider(),
-            _role_llm_config(fallback[1], provider="mock", model="mock-1"),
-            "mock",
-            "mock-1",
-        )
-
     if mode == DebateMode.SINGLE_MODEL_SIMULATED:
         return (
             fallback[0],
@@ -161,12 +122,7 @@ def _select_role_provider(
                 base_url_env=str(p.get("base_url_env") or ""),
             )
             if real is None:
-                if settings.is_production or settings.mars_mock_mode == "never":
-                    raise RuntimeError(
-                        f"debate provider '{cfg.provider}' failed to initialize "
-                        f"for role '{role}'"
-                    )
-                real = MockProvider()
+                raise RuntimeError(f"debate provider {cfg.provider!r} failed to initialize for {role}")
             return real, cfg, cfg.provider, cfg.model
     return (
         fallback[0],
@@ -188,20 +144,7 @@ def _role_llm_config(
 ) -> LLMConfig:
     """Clone every bounded generation control while changing role routing only."""
 
-    return LLMConfig(
-        provider=provider,
-        model=model,
-        temperature=base.temperature,
-        max_tokens=base.max_tokens,
-        top_p=base.top_p,
-        response_schema=base.response_schema,
-        thinking_enabled=base.thinking_enabled,
-        reasoning_effort=base.reasoning_effort,
-        request_timeout_seconds=base.request_timeout_seconds,
-        max_retries=base.max_retries,
-        retry_base_delay_seconds=base.retry_base_delay_seconds,
-        extra=dict(base.extra),
-    )
+    return replace(base, provider=provider, model=model, extra=dict(base.extra))
 
 
 def _resolve_roles(participants: tuple[Mapping[str, Any], ...]) -> list[str]:
@@ -349,31 +292,9 @@ async def run_debate(
                     output_schema=output_schema,
                 )
             except Exception as exc:
-                settings = get_settings()
-                if (
-                    isinstance(exc, LLMCompletionError)
-                    and exc.reason.get("code") == "empty_final_content"
-                ):
-                    raise
-                if settings.is_production or settings.mars_mock_mode == "never":
-                    if isinstance(exc, (DebateRoleOutputError, LLMCompletionError)):
-                        raise
-                    raise RuntimeError(
-                        f"debate role '{role}' provider '{p_name}' failed"
-                    ) from exc
-                logger.warning(
-                    "debate role {} provider {} failed ({}); falling back to mock",
-                    role,
-                    p_name,
-                    exc,
-                )
-                mock = MockProvider(default_schema=output_schema)
-                completion = await mock.complete(messages, cfg)
-                role_text = _validate_role_completion(
-                    role=role,
-                    text=completion.text,
-                    output_schema=output_schema,
-                )
+                raise RuntimeError(f"debate role {role!r} failed") from exc
+            finally:
+                await provider.close()
             last_text = role_text
             turns.append(
                 Turn(role=role, provider=p_name, model=m_name, text=role_text)
@@ -453,8 +374,7 @@ def _validate_role_completion(
     if role != "judge" or not output_schema:
         return text
 
-    # Match BaseAgent's normal completion boundary: fenced documents and a
-    # short preamble are transport noise, not schema failures.
+    # Preserve the same unmodified document boundary as BaseAgent.
     normalized = BaseAgent._unwrap_llm_text(text)
     if not normalized.strip():
         raise DebateRoleOutputError(
@@ -477,10 +397,9 @@ def _validate_role_completion(
 
 
 def _artifact_from_text(text: str, output_schema: str) -> Artifact:
-    from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
     from app.harness.schema.frontmatter_parser import parse as parse_fm
 
-    cleaned = close_unclosed_frontmatter(BaseAgent._unwrap_llm_text(text))
+    cleaned = BaseAgent._unwrap_llm_text(text)
     try:
         parsed = parse_fm(cleaned)
         metadata = parsed.metadata

@@ -187,13 +187,13 @@ $envPath
         "never"
     }
     else {
-        Get-MarsSetting -Name "MARS_MOCK_MODE" -Values $values -Default "auto"
+        Get-MarsSetting -Name "MARS_MOCK_MODE" -Values $values -Default "never"
     }
     if ($runtimeMode -notin @("development", "staging", "production")) {
         throw "MARS_RUNTIME_MODE 只能是 development、staging 或 production。"
     }
-    if ($mockMode -notin @("auto", "always", "never")) {
-        throw "MARS_MOCK_MODE 只能是 auto、always 或 never。"
+    if ($mockMode -ne "never") {
+        throw "MARS_MOCK_MODE 必须为 never；模拟执行已移除。"
     }
     if ($runtimeMode -eq "production" -and -not $Production -and -not $SkipMountValidation) {
         throw "生产模式请使用 Start-Mars.ps1 -Production，以确保真实仓库和数据只读挂载。"
@@ -351,8 +351,8 @@ function Assert-MarsReadiness {
         $Readiness.mock_mode -ne $Context.MockMode) {
         throw "后端实际运行模式与本次启动配置不一致，请检查端口冲突或旧容器。"
     }
-    if ($Context.Production -and $Readiness.execution_backend -eq "mock") {
-        throw "生产模式不允许使用 mock 执行器。"
+    if ($Readiness.execution_backend -eq "mock") {
+        throw "不允许使用 mock 执行器。"
     }
     if ($Readiness.ready -isnot [bool] -or -not $Readiness.ready) {
         $messages = @($Readiness.checks | Where-Object {

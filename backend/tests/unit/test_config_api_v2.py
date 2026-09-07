@@ -43,14 +43,11 @@ def test_agent_llm_config_view_masks_local_secret(
         encoding="utf-8",
     )
     monkeypatch.setattr(config_api, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        config_api,
-        "env_or_local",
-        lambda name: "sk-test-secret" if name == "IDEA_DEEPSEEK_API_KEY" else "",
-    )
+    monkeypatch.setenv("IDEA_DEEPSEEK_API_KEY", "sk-test-secret")
 
     view = config_api._read_agent_llm_config()
 
+    assert "mock" not in view.providers
     assert view.agents[0].agent == "idea"
     assert view.agents[0].api_key_env == "IDEA_DEEPSEEK_API_KEY"
     assert view.agents[0].api_key_configured is True
@@ -77,3 +74,21 @@ def test_write_local_env_values_preserves_existing_lines(
     assert "OLD_KEY=old" in text
     assert "IDEA_KEY=new-value" in text
     assert 'SPACED_KEY="value with spaces"' in text
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_cannot_be_saved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import HTTPException
+    from app.api.config import AgentLlmUpdatePayload
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    source = config_dir / "agents.yaml"
+    source.write_text("idea:\n  model:\n    provider: unconfigured\n")
+    (config_dir / "models.yaml").write_text("providers: {}\n")
+    before = source.read_bytes()
+    monkeypatch.setattr(config_api, "repo_root", lambda: tmp_path)
+    payload = AgentLlmUpdatePayload.model_validate({"agents": [{"agent": "idea", "provider": "mock", "model": "mock-1"}]})
+    with pytest.raises(HTTPException) as error:
+        await config_api.update_agent_llm_config(payload)
+    assert error.value.status_code == 422
+    assert source.read_bytes() == before

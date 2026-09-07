@@ -176,11 +176,6 @@ export function CandidateWorkbench({
   return (
     <main className="min-h-screen bg-[#090c12] text-slate-100">
       <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
-        {source === "contract_fixture" ? (
-          <div className="mb-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-xs text-amber-100">
-            Contract preview · deterministic synthetic data · not a live research result
-          </div>
-        ) : null}
         {error ? (
           <div className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-xs text-rose-200">
             Refresh failed; showing the last REST snapshot. {error.message}
@@ -235,11 +230,7 @@ export function CandidateWorkbench({
                 The service records the decision and audit reference first. Candidate state changes only after the authoritative replay refreshes.
               </p>
             </div>
-            {source === "contract_fixture" ? (
-              <Badge value="pending" label="REST required" />
-            ) : (
-              <Badge value={decisionPending ? "running" : "pending"} label={decisionPending ? `${decisionPending} pending` : "ready"} />
-            )}
+            <Badge value={decisionPending ? "running" : "pending"} label={decisionPending ? `${decisionPending} pending` : "ready"} />
           </div>
           <label className="mt-5 block">
             <span className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Reason</span>

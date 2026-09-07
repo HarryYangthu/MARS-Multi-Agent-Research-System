@@ -1,405 +1,176 @@
+"""Search parsing, real filesystem archives and real network gates; no transport doubles."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 import pytest
+from pypdf import PdfWriter
 
 from app.harness.tools import search as search_tools
-from app.harness.llm.model_registry import reset_cache_for_tests as reset_model_cache
+from app.harness.tools.search.source_fetch import allowed_url, extract_pdf
 from app.harness.tools.registry import ToolContext, reset_for_tests
+from app.harness.llm.model_registry import reset_cache_for_tests as reset_model_cache
+from app.harness.kb.stores import reset_for_tests as reset_stores
+from app.settings import reset_settings_cache
 
 
 @pytest.fixture(autouse=True)
-def _reset_settings_cache() -> Iterator[None]:
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
+def reset_search_settings() -> Iterator[None]:
+    reset_settings_cache()
     yield
-    settings_mod._settings = None
+    reset_settings_cache()
 
 
 @pytest.mark.asyncio
-async def test_arxiv_enabled_but_network_switch_blocks_call(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_arxiv_enabled_but_network_switch_blocks_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "false")
     reset_model_cache()
     reg = reset_for_tests()
     spec = reg.spec("search.arxiv_search")
-
-    result = await reg.dispatch(
-        "search.arxiv_search",
-        {"q": "massive MIMO", "top_k": 1},
-        ToolContext(
-            run_id="r1",
-            project="pimc",
-            agent="idea",
-            extra={"run_root": str(tmp_path / "runs" / "r1")},
-        ),
-    )
-
-    assert spec is not None
-    assert spec.policy.network is True
+    result = await reg.dispatch("search.arxiv_search", {"q": "massive MIMO", "top_k": 1},
+                                ToolContext("r1", "pimc", "idea", extra={"run_root": str(tmp_path)}))
+    assert spec is not None and spec.policy.network is True
     assert result.ok is False
     assert "network tools are disabled" in str(result.error)
 
 
-@pytest.mark.asyncio
-async def test_arxiv_search_parses_httpx_response_and_uses_cache(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
-    import app.settings as settings_mod
+def test_arxiv_parser_and_date_filter_on_authored_xml() -> None:
+    # Parser input, not an HTTP response or retrieved publication.
+    xml = """<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+      <id>http://arxiv.org/abs/2501.00001v1</id><title> Authored parser input </title>
+      <summary>  Whitespace normalization contract. </summary>
+      <published>2025-01-01T00:00:00Z</published><author><name>Parser author</name></author>
+    </entry></feed>"""
+    hits = search_tools._parse_arxiv(xml, date_from="")
+    assert hits[0]["id"] == "2501.00001v1"
+    assert hits[0]["title"] == "Authored parser input"
+    assert hits[0]["authors"] == ["Parser author"]
+    assert hits[0]["pdf_url"] == "https://arxiv.org/pdf/2501.00001v1.pdf"
+    assert search_tools._parse_arxiv(xml, date_from="2026-01-01") == []
 
-    settings_mod._settings = None
-    cache_dir = tmp_path / "arxiv_cache"
-    calls: list[str] = []
-    writes: list[dict[str, Any]] = []
-    xml = """\
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <entry>
-    <id>http://arxiv.org/abs/2501.00001v1</id>
-    <title> Massive MIMO PIM </title>
-    <summary> Summary text </summary>
-    <published>2025-01-01T00:00:00Z</published>
-    <author><name>Ada</name></author>
-  </entry>
-</feed>
-"""
 
-    class FakeResponse:
-        text = xml
-
-        def raise_for_status(self) -> None:
-            return None
-
-    class FakeAsyncClient:
-        def __init__(self, *, timeout: float) -> None:
-            self.timeout = timeout
-
-        async def __aenter__(self) -> "FakeAsyncClient":
-            return self
-
-        async def __aexit__(
-            self,
-            exc_type: object,
-            exc: object,
-            traceback: object,
-        ) -> None:
-            return None
-
-        async def get(self, url: str) -> FakeResponse:
-            calls.append(url)
-            return FakeResponse()
-
-    async def no_rate_limit() -> None:
-        return None
-
-    def fake_write_to_zone(**kwargs: Any) -> str:
-        writes.append(kwargs)
-        return "memory-id"
-
-    monkeypatch.setattr("app.harness.tools.search.httpx.AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(search_tools, "_respect_arxiv_rate_limit", no_rate_limit)
-    monkeypatch.setattr(search_tools, "_cache_dir", lambda: cache_dir)
-    monkeypatch.setattr(search_tools, "write_to_zone", fake_write_to_zone)
-
-    first = await search_tools.arxiv_search_tool(
-        {"q": "massive MIMO", "top_k": 1, "sort_by": "relevance"},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
-    assert first.ok is True
-    assert first.output["cached"] is False
-    assert first.output["hits"][0]["id"] == "2501.00001v1"
-    assert first.output["hits"][0]["title"] == "Massive MIMO PIM"
-    assert first.output["hits"][0]["authors"] == ["Ada"]
-    assert writes[0]["metadata"]["source"] == "arxiv"
-    assert len(calls) == 1
-    assert "sortBy=relevance" in calls[0]
-    assert len(list(cache_dir.glob("*.json"))) == 1
-
-    second = await search_tools.arxiv_search_tool(
-        {"q": "massive MIMO", "top_k": 1, "sort_by": "relevance"},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
-    assert second.ok is True
-    assert second.output["cached"] is True
-    assert second.output["hits"][0]["id"] == "2501.00001v1"
-    assert len(calls) == 1
-    assert len(writes) == 1
+def test_pdf_signature_and_blank_pages_cannot_claim_a_read() -> None:
+    with pytest.raises(ValueError, match="signature"):
+        extract_pdf(b"not PDF content", start_page=1, max_pages=1, max_chars=1000)
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    stream = BytesIO()
+    writer.write(stream)
+    with pytest.raises(ValueError, match="no extractable text"):
+        extract_pdf(stream.getvalue(), start_page=1, max_pages=1, max_chars=1000)
+    with pytest.raises(ValueError, match="start_page"):
+        extract_pdf(stream.getvalue(), start_page=2, max_pages=1, max_chars=1000)
 
 
 @pytest.mark.asyncio
-async def test_fetch_sources_writes_download_and_context_summary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_unallowlisted_download_keeps_an_honest_failure_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    calls: list[str] = []
-
-    class FakeResponse:
-        content = (
-            b"<html><body><h1>Passive intermodulation notes</h1>"
-            b"<p>Massive MIMO PIM cancellation implementation detail.</p></body></html>"
-        )
-        encoding = "utf-8"
-
-        def raise_for_status(self) -> None:
-            return None
-
-    class FakeAsyncClient:
-        def __init__(self, *, timeout: float, follow_redirects: bool = False) -> None:
-            self.timeout = timeout
-            self.follow_redirects = follow_redirects
-
-        async def __aenter__(self) -> "FakeAsyncClient":
-            return self
-
-        async def __aexit__(
-            self,
-            exc_type: object,
-            exc: object,
-            traceback: object,
-        ) -> None:
-            return None
-
-        async def get(self, url: str) -> FakeResponse:
-            calls.append(url)
-            return FakeResponse()
-
-    monkeypatch.setattr("app.harness.tools.search.httpx.AsyncClient", FakeAsyncClient)
-
+    monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org")
     result = await search_tools.fetch_sources_tool(
-        {
-            "sources": [
-                {
-                    "title": "PIM implementation blog",
-                    "url": "https://example.edu/pim-blog",
-                    "snippet": "Practical passive intermodulation notes.",
-                }
-            ],
-            "max_sources": 1,
-        },
-        ToolContext(
-            run_id="r1",
-            project="pimc",
-            agent="idea",
-            extra={"run_root": str(tmp_path / "run")},
-        ),
-    )
-
-    assert result.ok is True
-    assert calls == ["https://example.edu/pim-blog"]
-    source = result.output["sources"][0]
-    assert Path(source["download_path"]).exists()
-    summary_path = Path(source["summary_path"])
-    assert summary_path.exists()
-    assert "作为上下文的用法" in summary_path.read_text(encoding="utf-8")
+        {"sources": [{"title": "Unauthorized input", "url": "https://not-allowed.example/paper"}]},
+        ToolContext("blocked-download", "pimc", "idea", extra={"run_root": str(tmp_path)}))
+    assert result.ok is False
+    row = result.output["sources"][0]
+    assert row["ok"] is False
+    assert row["network_download_attempted"] is False
+    assert "not allowlisted" in row["error"]
+    saved = json.loads(Path(result.output["index_path"]).read_text())
+    assert saved[-1] == row
+    assert not list(tmp_path.rglob("*.pdf"))
 
 
-@pytest.mark.asyncio
-async def test_fetch_sources_keeps_partial_pdf_success_on_later_timeout(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
-    import app.settings as settings_mod
+@pytest.mark.parametrize("url", [
+    "http://arxiv.org/pdf/a", "https://user:password@arxiv.org/pdf/a",
+    "https://arxiv.org:8443/pdf/a", "https://arxiv.org.not-allowed.example/pdf/a",
+])
+def test_source_url_rejects_scheme_credentials_port_and_host_spoofing(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org")
+    with pytest.raises(ValueError):
+        allowed_url(url)
 
-    settings_mod._settings = None
-    calls: list[str] = []
 
-    class FakeResponse:
-        content = b"%PDF-1.4\nPassive intermodulation cancellation in MIMO systems.\n"
-        encoding = "utf-8"
-
-        def raise_for_status(self) -> None:
-            return None
-
-    class FakeAsyncClient:
-        def __init__(self, *, timeout: float, follow_redirects: bool = False) -> None:
-            self.timeout = timeout
-            self.follow_redirects = follow_redirects
-
-        async def __aenter__(self) -> "FakeAsyncClient":
-            return self
-
-        async def __aexit__(
-            self,
-            exc_type: object,
-            exc: object,
-            traceback: object,
-        ) -> None:
-            return None
-
-        async def get(self, url: str) -> FakeResponse:
-            calls.append(url)
-            if "slow" in url:
-                raise search_tools.httpx.ReadTimeout("slow pdf")
-            return FakeResponse()
-
-    monkeypatch.setattr("app.harness.tools.search.httpx.AsyncClient", FakeAsyncClient)
-
-    result = await search_tools.fetch_sources_tool(
-        {
-            "sources": [
-                {
-                    "title": "Relevant PIM PDF",
-                    "url": "https://arxiv.org/abs/2509.19382v2",
-                    "pdf_url": "https://arxiv.org/pdf/2509.19382v2.pdf",
-                    "summary": "Neural passive intermodulation cancellation for MIMO.",
-                },
-                {
-                    "title": "Slow PDF",
-                    "url": "https://arxiv.org/abs/slow",
-                    "pdf_url": "https://arxiv.org/pdf/slow.pdf",
-                },
-            ],
-            "max_sources": 2,
-        },
-        ToolContext(
-            run_id="r1",
-            project="pimc",
-            agent="idea",
-            extra={"run_root": str(tmp_path / "run")},
-        ),
-    )
-
-    assert result.ok is True
-    assert calls == [
-        "https://arxiv.org/pdf/2509.19382v2.pdf",
-        "https://arxiv.org/pdf/slow.pdf",
-    ]
-    sources = result.output["sources"]
-    assert sources[0]["ok"] is True
-    assert sources[0]["source_type"] == "pdf"
-    assert Path(sources[0]["download_path"]).exists()
-    assert Path(sources[0]["summary_path"]).exists()
-    assert sources[1]["ok"] is False
-    assert "source download failed" in sources[1]["error"]
+def test_domain_filter_is_not_a_substring_match() -> None:
+    # Untrusted rows supplied to the pure filter, not fake service replies.
+    rows = [{"url": "https://arxiv.org/abs/a"}, {"url": "https://export.arxiv.org/api/query"},
+            {"url": "https://arxiv.org.evil.example/a"}, {"url": "https://evil.example/arxiv.org"}]
+    assert search_tools._filter_hits_by_domain(rows, ("arxiv.org",)) == rows[:2]
 
 
 @pytest.mark.asyncio
-async def test_web_search_requires_provider_when_network_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_web_search_requires_provider_when_network_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
     monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org")
     monkeypatch.setenv("MARS_WEB_SEARCH_PROVIDER", "")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-
-    result = await search_tools.web_search_tool(
-        {"q": "massive mimo", "domains": ["arxiv.org"]},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
+    result = await search_tools.web_search_tool({"q": "massive mimo", "domains": ["arxiv.org"]},
+                                                ToolContext("r1", "pimc", "idea"))
     assert result.ok is False
     assert "provider is not configured" in str(result.error)
 
 
 @pytest.mark.asyncio
-async def test_web_search_filters_provider_results_to_allowlisted_domains(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
-    monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org,example.edu")
-    monkeypatch.setenv("MARS_WEB_SEARCH_PROVIDER", "tavily")
-    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-
-    async def fake_provider(**_kwargs: Any) -> list[dict[str, str]]:
-        return [
-            {
-                "title": "allowed",
-                "url": "https://arxiv.org/abs/1234.5678",
-                "snippet": "paper",
-                "source": "fake",
-            },
-            {
-                "title": "blocked",
-                "url": "https://not-allowed.example/search",
-                "snippet": "nope",
-                "source": "fake",
-            },
-        ]
-
-    monkeypatch.setattr(search_tools, "_call_web_search_provider", fake_provider)
-
-    result = await search_tools.web_search_tool(
-        {"q": "massive mimo", "domains": ["arxiv.org"], "top_k": 5},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
-    assert result.ok is True
-    assert result.output["hits"] == [
-        {
-            "title": "allowed",
-            "url": "https://arxiv.org/abs/1234.5678",
-            "snippet": "paper",
-            "source": "fake",
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_web_search_rejects_domains_outside_allowlist(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_web_search_rejects_domains_outside_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
     monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org")
-    monkeypatch.setenv("MARS_WEB_SEARCH_PROVIDER", "tavily")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-
-    result = await search_tools.web_search_tool(
-        {"q": "massive mimo", "domains": ["example.com"]},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
+    result = await search_tools.web_search_tool({"q": "massive mimo", "domains": ["example.com"]},
+                                                ToolContext("r1", "pimc", "idea"))
     assert result.ok is False
     assert "not allowlisted" in str(result.error)
 
 
 @pytest.mark.asyncio
-async def test_web_search_provider_external_smoke_when_configured(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_real_arxiv_cache_and_pdf_archive_when_network_opted_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     if os.environ.get("MARS_RUN_EXTERNAL_TOOL_SMOKE") != "true":
-        pytest.skip("external web search smoke is opt-in")
-    provider = os.environ.get("MARS_WEB_SEARCH_PROVIDER", "")
-    if provider not in {"brave", "tavily", "serper"}:
-        pytest.skip("set MARS_WEB_SEARCH_PROVIDER=brave|tavily|serper")
-    key_env = {
-        "brave": "BRAVE_SEARCH_API_KEY",
-        "tavily": "TAVILY_API_KEY",
-        "serper": "SERPER_API_KEY",
-    }[provider]
-    if not os.environ.get(key_env):
-        pytest.skip(f"{key_env} is required for external web search smoke")
+        pytest.skip("actual external arXiv/PDF integration requires network opt-in")
+    monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
+    monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org,export.arxiv.org")
+    reset_stores(tmp_path / "knowledge")
+    ctx = ToolContext("actual-download", "pimc", "idea", extra={"run_root": str(tmp_path)})
+    try:
+        first = await search_tools.arxiv_search_tool({"query": "id:1907.02350", "top_k": 1}, ctx)
+        assert first.ok, first.error
+        assert first.output["hits"]
+        second = await search_tools.arxiv_search_tool({"query": "id:1907.02350", "top_k": 1}, ctx)
+        assert second.ok and second.output["cached"] is True
+        assert second.output["hits"] == first.output["hits"]
+        source = first.output["hits"][0]
+        result = await search_tools.fetch_sources_tool({"sources": [source], "max_pages": 2}, ctx)
+        assert result.ok, result.output
+        row = result.output["sources"][0]
+        assert Path(row["download_path"]).read_bytes().startswith(b"%PDF-")
+        assert hashlib.sha256(Path(row["download_path"]).read_bytes()).hexdigest() == row["sha256"]
+        reused = await search_tools.fetch_sources_tool({"sources": [source], "start_page": 2, "max_pages": 1}, ctx)
+        assert reused.ok, reused.output
+        assert reused.output["sources"][0]["reused"] is True
+        assert reused.output["sources"][0]["network_download_performed"] is False
+        assert reused.output["sources"][0]["visible_pages"][0]["page"] == 2
+        # A disallowed second source must not erase an earlier successful download.
+        partial = await search_tools.fetch_sources_tool(
+            {"sources": [source, {"title": "Unallowlisted input", "url": "https://not-allowed.example/p"}],
+             "max_sources": 2}, ctx)
+        assert partial.ok
+        assert partial.output["sources"][0]["ok"] is True
+        assert partial.output["sources"][1]["ok"] is False
+    finally:
+        reset_stores()
 
+
+@pytest.mark.asyncio
+async def test_web_search_provider_external_smoke_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    if os.environ.get("MARS_RUN_EXTERNAL_TOOL_SMOKE") != "true":
+        pytest.skip("actual external web search requires network opt-in")
+    provider = os.environ.get("MARS_WEB_SEARCH_PROVIDER", "")
+    key_env = {"brave": "BRAVE_SEARCH_API_KEY", "tavily": "TAVILY_API_KEY",
+               "serper": "SERPER_API_KEY", "zhipu": "ZHIPU_API_KEY"}.get(provider)
+    if not key_env or not os.environ.get(key_env):
+        pytest.skip("a real configured web search provider/key is required")
     monkeypatch.setenv("MARS_ENABLE_NETWORK_TOOLS", "true")
     monkeypatch.setenv("MARS_WEB_SEARCH_ALLOWLIST", "arxiv.org")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
-    result = await search_tools.web_search_tool(
-        {"q": "massive MIMO", "domains": ["arxiv.org"], "top_k": 1},
-        ToolContext(run_id="r1", project="pimc", agent="idea"),
-    )
-
-    assert result.ok is True
+    result = await search_tools.web_search_tool({"q": "massive MIMO", "domains": ["arxiv.org"], "top_k": 1},
+                                                ToolContext("external-search", "pimc", "idea"))
+    assert result.ok, result.error
     assert result.output["hits"]

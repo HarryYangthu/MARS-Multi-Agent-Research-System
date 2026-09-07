@@ -7,8 +7,8 @@
   "properties": {
     "mode": {
       "type": "string",
-      "enum": ["config-only", "mock", "synthetic"],
-      "default": "mock"
+      "enum": ["synthetic"],
+      "default": "synthetic"
     },
     "candidate_count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 20},
     "seed": {"type": "integer", "default": 0},

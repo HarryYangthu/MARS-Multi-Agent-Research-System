@@ -232,9 +232,9 @@ def _score_run_log(metadata: dict[str, Any], _body: str) -> dict[str, float]:
         "reproducibility": 1.0 if metadata.get("run_id") and metadata.get("fingerprint_hash") else 0.3,
         "failure_isolation": 1.0 if status == "completed" else 0.65 if status == "failed" else 0.5,
         "resource_trace": 1.0
-        if metadata.get("duration_seconds") is not None or metadata.get("gpu_used") or metadata.get("is_mock") is not None
+        if metadata.get("duration_seconds") is not None or metadata.get("gpu_used")
         else 0.55,
-        "mock_real_parity": 1.0 if metadata.get("is_mock") is not None else 0.7,
+        "execution_origin": 0.0 if metadata.get("is_mock") is True else 1.0 if metadata.get("is_mock") is False else 0.7,
     }
 
 

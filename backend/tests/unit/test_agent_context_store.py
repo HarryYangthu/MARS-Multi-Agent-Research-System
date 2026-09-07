@@ -12,11 +12,11 @@ from app.storage import agent_context_store as store
 
 
 @pytest.fixture
-def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    def fake_repo_root() -> Path:
+def temporary_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    def temporary_repo_root() -> Path:
         return tmp_path
 
-    monkeypatch.setattr(store, "repo_root", fake_repo_root)
+    monkeypatch.setattr(store, "repo_root", temporary_repo_root)
     idea_root = tmp_path / "backend" / "app" / "agents" / "idea"
     (idea_root / "docs").mkdir(parents=True)
     (idea_root / "docs" / "principles.md").write_text("先调研，再提案。", encoding="utf-8")
@@ -98,8 +98,8 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_context_store_lists_runtime_and_editable_files(fake_repo: Path) -> None:
-    del fake_repo
+def test_context_store_lists_runtime_and_editable_files(temporary_repo: Path) -> None:
+    del temporary_repo
     files = store.list_agent_context_files("idea")
     by_path = {item.path: item for item in files}
     assert by_path["docs/principles.md"].editable
@@ -108,8 +108,8 @@ def test_context_store_lists_runtime_and_editable_files(fake_repo: Path) -> None
     assert by_path["agent.py"].source == "runtime_code"
 
 
-def test_context_store_supports_all_v2_agents(fake_repo: Path) -> None:
-    del fake_repo
+def test_context_store_supports_all_v2_agents(temporary_repo: Path) -> None:
+    del temporary_repo
     for agent in ("commander", "idea", "experiment", "coding", "execution", "writing"):
         files = store.list_agent_context_files(agent)
         assert files, agent
@@ -117,8 +117,8 @@ def test_context_store_supports_all_v2_agents(fake_repo: Path) -> None:
         assert any(item.source == "runtime_code" for item in files), agent
 
 
-def test_agent_context_blueprint_exposes_storage_strategy(fake_repo: Path) -> None:
-    del fake_repo
+def test_agent_context_blueprint_exposes_storage_strategy(temporary_repo: Path) -> None:
+    del temporary_repo
     blueprint = store.load_agent_context_blueprint("idea")
     assert blueprint.goal == "Generate hypotheses."
     assert blueprint.storage_layout.agent_root == "runs/<run_id>/context/agents/idea/"
@@ -128,7 +128,7 @@ def test_agent_context_blueprint_exposes_storage_strategy(fake_repo: Path) -> No
     assert blueprint.packing_order == ("system role", "task")
 
 
-def test_code_repository_config_is_visible_to_all_agents(fake_repo: Path) -> None:
+def test_code_repository_config_is_visible_to_all_agents(temporary_repo: Path) -> None:
     for agent in ("idea", "experiment", "coding", "execution", "writing"):
         repos = store.load_agent_code_repositories(agent, project="pimc")
         assert len(repos) == 1
@@ -138,8 +138,8 @@ def test_code_repository_config_is_visible_to_all_agents(fake_repo: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_non_idea_agent_context_includes_code_repository(fake_repo: Path) -> None:
-    del fake_repo
+async def test_non_idea_agent_context_includes_code_repository(temporary_repo: Path) -> None:
+    del temporary_repo
     agent = ExperimentAgent()
 
     context = await agent.build_context(
@@ -151,8 +151,8 @@ async def test_non_idea_agent_context_includes_code_repository(fake_repo: Path) 
     assert context.metadata["experiment_code_repository_count"] == 1
 
 
-def test_context_store_create_update_delete_uploaded_code(fake_repo: Path) -> None:
-    del fake_repo
+def test_context_store_create_update_delete_uploaded_code(temporary_repo: Path) -> None:
+    del temporary_repo
     created = store.create_agent_context_file(
         "idea",
         category="uploads/code",
@@ -174,8 +174,8 @@ def test_context_store_create_update_delete_uploaded_code(fake_repo: Path) -> No
     assert created.path not in paths
 
 
-def test_research_sites_can_be_replaced(fake_repo: Path) -> None:
-    del fake_repo
+def test_research_sites_can_be_replaced(temporary_repo: Path) -> None:
+    del temporary_repo
     saved = store.save_agent_research_sites(
         "idea",
         [
@@ -194,8 +194,8 @@ def test_research_sites_can_be_replaced(fake_repo: Path) -> None:
     assert loaded[0].url == "https://example.com/papers"
 
 
-def test_context_files_register_as_governed_memory(fake_repo: Path) -> None:
-    stores = KBStores(fake_repo / "knowledge")
+def test_context_files_register_as_governed_memory(temporary_repo: Path) -> None:
+    stores = KBStores(temporary_repo / "knowledge")
     store.create_agent_context_file(
         "idea",
         category="prompts",
@@ -240,8 +240,8 @@ def test_context_files_register_as_governed_memory(fake_repo: Path) -> None:
     assert literature[0].metadata["source_path"] == "agents/idea/uploads/docs/paper.md"
 
 
-def test_context_file_sync_upserts_and_delete_cleans_memory(fake_repo: Path) -> None:
-    stores = KBStores(fake_repo / "knowledge")
+def test_context_file_sync_upserts_and_delete_cleans_memory(temporary_repo: Path) -> None:
+    stores = KBStores(temporary_repo / "knowledge")
     created = store.create_agent_context_file(
         "idea",
         category="prompts",

@@ -22,14 +22,17 @@ tools:
     description: Search arXiv and cache results into literature KB.
     mutation_level: read
     allowed_agents: [idea]
-    timeout_seconds: 15
+    timeout_seconds: 65
     network: true
     input_schema:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      oneOf:
+        - required: [query]
+        - required: [q]
       properties:
-        q: {type: string}
-        query: {type: string}
+        q: {type: string, minLength: 1}
+        query: {type: string, minLength: 1}
         top_k: {type: integer, minimum: 1, maximum: 20}
         date_from: {type: string}
         sort_by:
@@ -44,18 +47,21 @@ tools:
       additionalProperties: true
 
   search.web_search:
-    enabled: false
+    enabled: true
     description: Provider-backed web search with domain allowlist.
     mutation_level: read
     allowed_agents: [idea]
-    timeout_seconds: 15
+    timeout_seconds: 65
     network: true
     input_schema:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      oneOf:
+        - required: [query]
+        - required: [q]
       properties:
-        q: {type: string}
-        query: {type: string}
+        q: {type: string, minLength: 1}
+        query: {type: string, minLength: 1}
         domains:
           type: array
           items: {type: string}
@@ -67,16 +73,19 @@ tools:
 
   search.fetch_sources:
     enabled: true
-    description: Download selected paper/blog sources and write source summaries into the run research workspace.
+    description: Archive selected sources and read PDF page windows. Default max_sources=1; set explicitly for a batch. Reuse cached PDFs to read more pages.
     mutation_level: read
     allowed_agents: [idea]
-    timeout_seconds: 30
+    timeout_seconds: 125
     network: true
     input_schema:
       type: object
       required: [sources]
-      additionalProperties: true
+      additionalProperties: false
       properties:
+        start_page: {type: integer, minimum: 1}
+        max_pages: {type: integer, minimum: 1, maximum: 10}
+        max_chars: {type: integer, minimum: 1000, maximum: 16000}
         max_sources: {type: integer, minimum: 1, maximum: 5}
         sources:
           type: array
@@ -347,7 +356,7 @@ tools:
       Run one dual-carrier PIM cancellation ablation (memory-polynomial canceller)
       and emit RES (residual dB, lower=better) / PIM suppression dB / APE deg / loss.
       config knobs: expert_count (→memory taps), order, router_type, snr_db, learning_rate.
-      backend ∈ {mock, pim_cpu, paper_static, local_command}.
+      backend ∈ {pim_cpu, paper_static, local_command}.
     mutation_level: write
     allowed_agents: [execution, system, bridge]
     timeout_seconds: 180

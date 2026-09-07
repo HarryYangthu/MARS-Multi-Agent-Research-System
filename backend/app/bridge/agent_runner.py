@@ -10,16 +10,15 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
+import re
 from typing import Any
 
 from loguru import logger
 
-from app.bridge.agent_registry import get_registry
+from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.harness.execution_intent import (
-    default_experiment_count,
     requested_experiment_count,
     wants_execution_sweep,
 )
@@ -37,21 +36,19 @@ async def run_agent_node(
     *,
     bus: Any | None = None,
     revision_reason: str = "",
+    registry: AgentRegistry | None = None,
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
-    Falls back to a no-op if the agent isn't registered (e.g. during
-    Phase 2 tests). This keeps the orchestrator capable of progressing
-    without breaking schema-pillar guarantees.
+    A missing agent is an explicit configuration failure.
     """
     identity = parse_node_key(node_key)
     stage = identity.stage
     attempt = identity.attempt
 
-    reg = get_registry()
+    reg = registry if registry is not None else get_registry()
     if not reg.has(stage):
-        logger.debug("no agent registered for '{}', running stub", node_key)
-        return
+        raise RuntimeError(f"no agent registered for {stage!r}; node was not executed")
 
     agent: Any = reg.get(stage)
 
@@ -84,45 +81,8 @@ async def run_agent_node(
     if user_request_path.exists():
         user_request = user_request_path.read_text(encoding="utf-8")
 
-    # Pick up upstream approved artifacts as handoff.
-    upstream: dict[str, str] = {}
-    selected_data_source = _load_selected_data_source(run)
-    if selected_data_source:
-        upstream["input.selected_data_source"] = selection_summary(selected_data_source)
-    for sub in ("idea", "experiment", "coding", "execution", "diagnosis"):
-        if sub == stage:
-            break
-        d = run.subdir(sub)
-        if not d.exists():
-            continue
-        for p in sorted(d.glob("*.approved.md")):
-            upstream[p.name] = _handoff_summary(
-                text=p.read_text(encoding="utf-8"),
-                source_ref=p.relative_to(run.root).as_posix(),
-            )
-    feedback_context: dict[str, Any] | None = None
-    if attempt > 1 and stage in {"experiment", "coding"}:
-        feedback_context = load_feedback_context_for_agent(
-            run=run,
-            agent=stage,
-            attempt=attempt,
-        )
-        if feedback_context is not None:
-            upstream["commander_feedback"] = str(feedback_context["text"])
-    if stage == "writing":
-        upstream.update(_execution_result_handoffs(run))
-        diagnosis_versions = sorted(run.subdir("diagnosis").glob("diagnosis.v*.md"))
-        if diagnosis_versions:
-            latest_diagnosis = diagnosis_versions[-1]
-            upstream[latest_diagnosis.name] = _handoff_summary(
-                text=latest_diagnosis.read_text(encoding="utf-8"),
-                source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
-            )
+    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason)
     if revision_reason:
-        upstream["human_revision_request"] = (
-            "Human reviewer rejected the current draft and requested a revised "
-            f"version. Feedback: {revision_reason}"
-        )
         run.write_event(
             "agent_events",
             {
@@ -156,6 +116,7 @@ async def run_agent_node(
             "run_root": str(run.root),
             "agent_dir": str(run.subdir(stage)),
             "revision_reason": revision_reason,
+            "required_upstream_refs": list(upstream),
         }
     )
     request = AgentRunRequest(
@@ -253,7 +214,7 @@ async def run_agent_node(
             exc,
         )
     if stage == "coding" and attempt > 1:
-        _write_patch_diff(run=run, version=ref.version, attempt=attempt)
+        _write_patch_diff(run=run, version=ref.version, artifact_text=artifact.text)
     # Phase 4: orchestrator owns the approval transition (HITL or auto).
 
     # Fallback: if the agent didn't stream the transcript directly to disk
@@ -424,31 +385,69 @@ def _write_agent_failure_diagnostic(
     )
 
 
-def _write_patch_diff(*, run: RunHandle, version: str, attempt: int) -> None:
+def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> None:
     target = run.subdir("coding") / f"patch.{version}.diff"
-    diff = (
-        "diff --git a/libs/router_v2.py b/libs/router_v2.py\n"
-        "index 0000000..1111111 100644\n"
-        "--- a/libs/router_v2.py\n"
-        "+++ b/libs/router_v2.py\n"
-        "@@ -1,3 +1,8 @@\n"
-        "+# V2 feedback-loop patch proposal.\n"
-        f"+DIAGNOSIS_ATTEMPT = {attempt}\n"
-        "+ROUTER_STABILITY_CLAMP = 0.02\n"
-        "+\n"
-        " class RouterV2:\n"
-        "     pass\n"
-    )
-    target.write_text(diff, encoding="utf-8")
+    blocks = re.findall(r"^```(?:diff|patch)\s*\n(.*?)^```\s*$", artifact_text, re.MULTILINE | re.DOTALL)
+    if not blocks:
+        run.write_event("agent_events", {"event": "coding.patch_not_provided", "version": version})
+        return
+    # Copy the actual proposal for review; application still requires ToolRegistry.
+    target.write_text("\n".join(block.rstrip() for block in blocks) + "\n", encoding="utf-8")
+
+
+def load_agent_handoff_context(
+    run: RunHandle, node_key: str, *, revision_reason: str = "",
+) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """Load actual approved upstream documents without silently truncating them."""
+    identity = parse_node_key(node_key)
+    stage, attempt = identity.stage, identity.attempt
+    # Pick up upstream approved artifacts as handoff.
+    upstream: dict[str, str] = {}
+    selected_data_source = _load_selected_data_source(run)
+    if selected_data_source:
+        upstream["input.selected_data_source"] = selection_summary(selected_data_source)
+    for sub in ("idea", "experiment", "coding", "execution", "diagnosis"):
+        if sub == stage:
+            break
+        d = run.subdir(sub)
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("*.approved.md")):
+            upstream[p.name] = _handoff_summary(
+                text=p.read_text(encoding="utf-8"),
+                source_ref=p.relative_to(run.root).as_posix(),
+            )
+    feedback_context: dict[str, Any] | None = None
+    if attempt > 1 and stage in {"experiment", "coding"}:
+        feedback_context = load_feedback_context_for_agent(
+            run=run,
+            agent=stage,
+            attempt=attempt,
+        )
+        if feedback_context is not None:
+            upstream["commander_feedback"] = str(feedback_context["text"])
+    if stage == "writing":
+        upstream.update(_execution_result_handoffs(run))
+        diagnosis_versions = sorted(run.subdir("diagnosis").glob("diagnosis.v*.md"))
+        if diagnosis_versions:
+            latest_diagnosis = diagnosis_versions[-1]
+            upstream[latest_diagnosis.name] = _handoff_summary(
+                text=latest_diagnosis.read_text(encoding="utf-8"),
+                source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
+            )
+    if revision_reason:
+        upstream["human_revision_request"] = (
+            "Human reviewer rejected the current draft and requested a revised "
+            f"version. Feedback: {revision_reason}"
+        )
+    return upstream, feedback_context
 
 
 def _handoff_summary(*, text: str, source_ref: str) -> str:
-    try:
-        from app.harness.context.engine import summarize_handoff_artifact
+    # Compression belongs to the loop packer, which records a manifest.
+    # A bridge exception must never silently discard an approved contract.
+    return f"[upstream artifact: {source_ref}]\n{text}"
 
-        return summarize_handoff_artifact(text=text, source_ref=source_ref)
-    except Exception:
-        return text[:3000]
 
 
 def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
@@ -724,9 +723,7 @@ async def _run_execution_batch(
             abl_specs = []
     planned_before_intent = len(abl_specs)
     if not abl_specs:
-        default_count = default_experiment_count(intent_text)
-        abl_specs = _default_execution_specs(limit=default_count)
-        plan_source = "default_sweep" if intent_wants_sweep else "default_single"
+        raise RuntimeError("no valid approved experiment configurations; execution was not started")
     elif intent_count is not None and len(abl_specs) > intent_count:
         abl_specs = abl_specs[:intent_count]
         plan_source = f"{plan_source}_intent_capped"
@@ -751,12 +748,8 @@ async def _run_execution_batch(
         abl_specs = injected_specs
     execution_raw = load_execution_config().get("execution", {})
     execution_cfg = execution_raw if isinstance(execution_raw, dict) else {}
-    backend = str(execution_cfg.get("backend", "mock") or "mock")
+    backend = str(execution_cfg.get("backend", "local_command") or "local_command")
     runtime_backend = get_settings().mars_execution_backend
-    if backend == "mock" or os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
-        # Mock/demo-only shaping. Real backends consume the approved run config unchanged.
-        abl_specs = [(name, _capacity_for_attempt(cfg, attempt)) for name, cfg in abl_specs]
-
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
         if bus is not None:
             await bus.publish(channel, payload)
@@ -791,7 +784,6 @@ async def _run_execution_batch(
             experiment_id=name,
             project=run.project,
             config={**cfg, "label": name, "attempt": attempt},
-            template=_template_for_execution(cfg=cfg, backend=backend, attempt=attempt, index=i),
             seed=_stable_seed(name),
             run_root=run.root,
             plot_every_steps=int(cfg.get("plot_every_steps", 5)),
@@ -809,7 +801,7 @@ async def _run_execution_batch(
         write_run_log(run_root=run.root, result=r, project=run.project)
         # Persist the REAL loss curve when the runner captured one; otherwise
         # fall back to a re-derived synthetic curve.
-        curve_values = r.loss_curve if getattr(r, "loss_curve", None) else _metrics_to_curve(r)
+        curve_values = r.loss_curve if getattr(r, "loss_curve", None) else []
         write_curve(
             run_root=run.root,
             experiment_id=r.experiment_id,
@@ -823,7 +815,7 @@ async def _run_execution_batch(
             r.experiment_id: (
                 [float(v) for v in r.loss_curve]
                 if getattr(r, "loss_curve", None)
-                else _metrics_to_curve(r)
+                else []
             )
             for r in outcome.results
         }
@@ -869,72 +861,6 @@ def _representative_execution_spec() -> tuple[str, dict[str, Any]]:
     )
 
 
-def _default_execution_specs(
-    *, limit: int | None = None
-) -> list[tuple[str, dict[str, Any]]]:
-    # Generic mock/demo exploration grid. Real-project capacity, channel count,
-    # and file format come from the approved config and the connected code.
-    if limit == 1:
-        return [_representative_execution_spec()]
-
-    memories = [2, 4, 8, 16]
-    learning_rates = [0.045, 0.055, 0.065, 0.08]
-    out: list[tuple[str, dict[str, Any]]] = []
-    for memory in memories:
-        for lr in learning_rates:
-            out.append(
-                (
-                    f"mem_{memory:02d}_lr_{str(lr).replace('.', 'p')}",
-                    {
-                        "expert_count": memory,
-                        "learning_rate": lr,
-                        "plot_every_steps": 5,
-                    },
-                )
-            )
-    if limit is not None:
-        return out[:limit]
-    return out
-
-
-# Mock/demo capacity schedule used only for synthetic runs. Real backends should
-# not inherit these values or use them as project facts.
-_ATTEMPT1_MEMORY_CAP = 6
-_REPAIR_MEMORY_FLOOR = 16
-
-
-def _capacity_for_attempt(cfg: dict[str, Any], attempt: int) -> dict[str, Any]:
-    out = dict(cfg)
-    base = out.get("expert_count")
-    if base is None:
-        base = out.get("memory")
-    ec = _positive_int(base, 4)
-    if attempt <= 1:
-        if os.environ.get("MARS_DEMO_FORCE_BACKTRACK") == "1":
-            ec = min(ec, _ATTEMPT1_MEMORY_CAP)
-        elif get_settings().mars_execution_backend == "mock":
-            ec = max(12, ec)
-    else:
-        ec = min(28, max(_REPAIR_MEMORY_FLOOR, ec) + 2 * (attempt - 2))
-    out["expert_count"] = ec
-    return out
-
-
-def _template_for_execution(
-    *,
-    cfg: dict[str, Any],
-    backend: str,
-    attempt: int,
-    index: int,
-) -> str:
-    requested = cfg.get("template")
-    if requested in {"exponential_decay", "noisy_decay", "plateau"}:
-        return str(requested)
-    if backend == "mock":
-        return "exponential_decay"
-    return "exponential_decay" if attempt > 1 or index % 2 == 0 else "noisy_decay"
-
-
 def _stable_seed(value: str) -> int:
     return int(hashlib.sha256(value.encode("utf-8")).hexdigest()[:8], 16)
 
@@ -945,15 +871,6 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
-
-
-def _metrics_to_curve(result: Any) -> list[float]:
-    # Re-derive a deterministic curve from the result's seed so the file
-    # matches what the WS stream pushed.
-    from app.execution.mock_simulation import _loss_curve
-
-    seed = abs(hash(f"{result.run_id}:{result.experiment_id}")) & 0xFFFFFF
-    return _loss_curve(20, template="exponential_decay", seed=seed)
 
 
 __all__ = ["run_agent_node"]

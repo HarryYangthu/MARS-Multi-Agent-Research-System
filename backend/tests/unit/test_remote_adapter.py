@@ -1,3 +1,4 @@
+"""Actual worker filesystem/environment checks and pure request binding; no fabricated remote jobs."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,9 +18,9 @@ from app.execution.adapters.workspace import (
     workspace_binding_for_receipt,
     workspace_binding_from_request,
 )
-from app.execution.remote.adapter import RemoteProjectAdapter
+from app.execution.remote.adapter import RemoteProjectAdapter, _adapter_request_file, _canonical_request, _remote_request_id
 from app.execution.remote.adapter_worker import run_worker
-from app.execution.remote.executor import RemoteInputUpload
+from app.execution.remote.executor import RemoteExecutor, RemoteExecutorConfig
 from app.execution.remote.records import (
     RemoteFetchResult,
     RemoteJobRecord,
@@ -41,86 +42,6 @@ from app.harness.discovery.code_workspace_transfer import (
     build_code_workspace_transfer,
 )
 from app.harness.discovery.snapshots import SnapshotPolicy, create_snapshot
-
-
-class FakeRemoteClient:
-    def __init__(self) -> None:
-        self.remote_request: RemoteJobRequest | None = None
-        self.remote_request_ids: list[str] = []
-        self.uploaded_request: AdapterRequest | None = None
-        self.uploads: tuple[RemoteInputUpload, ...] = ()
-        self.record: RemoteJobRecord | None = None
-
-    async def readiness(self) -> RemoteReadiness:
-        return RemoteReadiness(status="ready", runner_version="test")
-
-    async def submit(
-        self,
-        request: RemoteJobRequest,
-        *,
-        uploads: tuple[RemoteInputUpload, ...] = (),
-    ) -> RemoteJobRecord:
-        self.remote_request = request
-        self.remote_request_ids.append(request.request_id)
-        self.uploads = uploads
-        upload = next(item for item in uploads if item.name == "adapter_request")
-        self.uploaded_request = AdapterRequest.model_validate_json(
-            upload.local_path.read_text(encoding="utf-8")
-        )
-        now = datetime(2026, 8, 25, tzinfo=timezone.utc)
-        self.record = RemoteJobRecord(
-            request_id=request.request_id,
-            job_id=derive_remote_job_id(request.request_id),
-            request_sha256="a" * 64,
-            state=RemoteJobState.RUNNING,
-            submitted_at=now,
-            started_at=now,
-            heartbeat_at=now,
-        )
-        return self.record
-
-    async def status(self, job_id: str) -> RemoteJobRecord:
-        assert self.record is not None
-        assert self.uploaded_request is not None
-        assert job_id == self.record.job_id
-        self.record = self.record.model_copy(
-            update={
-                "state": RemoteJobState.SUCCEEDED,
-                "finished_at": datetime(2026, 8, 25, tzinfo=timezone.utc),
-                "adapter_response": AdapterResponse(
-                    request_id=self.uploaded_request.request_id,
-                    status="ok",
-                    raw_metrics={"RES": -27.2},
-                    resource_usage={"wall_seconds": 2.0, "gpu_seconds": 3.0},
-                ),
-                "resource_usage": RemoteResourceUsage(
-                    wall_seconds=5.0,
-                    allocated_gpu_seconds=10.0,
-                    adapter={"wall_seconds": 2.0, "gpu_seconds": 3.0},
-                ),
-            }
-        )
-        return self.record
-
-    async def fetch(self, job_id: str, destination: Path) -> RemoteFetchResult:
-        assert self.record is not None
-        assert job_id == self.record.job_id
-        return RemoteFetchResult(record=self.record)
-
-
-async def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-class _StaticWorkspaceResolver:
-    def __init__(self, package: CodeWorkspaceTransferPackage) -> None:
-        self.package = package
-
-    async def resolve(
-        self,
-        _request: AdapterRequest,
-    ) -> CodeWorkspaceTransferPackage:
-        return self.package
 
 
 @pytest.mark.asyncio
@@ -145,7 +66,7 @@ async def test_adapter_worker_runs_trusted_process_over_stdin(
         "    'protocol': 'adapter.v1',\n"
         "    'request_id': request['request_id'],\n"
         "    'status': 'ok',\n"
-        "    'raw_metrics': {'RES': -27.2},\n"
+        "    'raw_metrics': {},\n"
         "}\n"
         "sys.stdout.write(json.dumps(response))\n",
         encoding="utf-8",
@@ -182,116 +103,55 @@ async def test_adapter_worker_runs_trusted_process_over_stdin(
     assert persisted == response
 
 
-@pytest.mark.asyncio
-async def test_remote_project_adapter_preserves_original_request_id_and_payload(
-    tmp_path: Path,
-) -> None:
-    client = FakeRemoteClient()
+def test_remote_adapter_serializes_actual_request_file_and_keeps_payload_out_of_argv(tmp_path: Path) -> None:
     adapter = RemoteProjectAdapter(
-        name="pimc-remote",
-        client=client,
-        trusted_adapter_argv=("/opt/mars/bin/python", "-m", "pimc_adapter"),
-        artifact_root=tmp_path / "artifacts",
-        poll_interval_seconds=0.01,
-        sleep=_no_sleep,
+        name="remote-contract", client=RemoteExecutor(RemoteExecutorConfig()),
+        trusted_adapter_argv=("/opt/mars/bin/python", "-m", "approved_adapter"), artifact_root=tmp_path,
     )
-    request = AdapterRequest(
-        action=AdapterAction.EVALUATE,
-        request_id="evaluate:0:candidate-with-colons",
-        project="pimc",
-        run_id="run/unsafe-for-paths",
-        candidate_id="candidate/unsafe-for-paths",
-        config={"candidate_source_marker": "must-not-enter-argv"},
-    )
+    request = AdapterRequest(action=AdapterAction.EVALUATE, request_id="evaluate:0:candidate",
+                             project="pimc", run_id="run/unsafe", candidate_id="candidate/unsafe",
+                             config={"authored_input": "must-not-enter-argv"})
+    with _adapter_request_file(request) as path:
+        parsed = AdapterRequest.model_validate_json(path.read_text())
+        assert parsed == request
+    assert not path.exists()
+    assert "must-not-enter-argv" not in " ".join(adapter._workload_argv())
+    identity = _remote_request_id(_canonical_request(request))
+    assert identity.startswith("adapter-") and ":" not in identity and "/" not in identity
 
+
+@pytest.mark.asyncio
+async def test_unconfigured_real_executor_cannot_return_remote_metrics(tmp_path: Path) -> None:
+    adapter = RemoteProjectAdapter(
+        name="unconfigured", client=RemoteExecutor(RemoteExecutorConfig()),
+        trusted_adapter_argv=("python3", "-m", "approved_adapter"), artifact_root=tmp_path,
+    )
+    request = AdapterRequest(action=AdapterAction.EVALUATE, request_id="evaluate:1",
+                             project="pimc", run_id="run", candidate_id="candidate")
     response = await adapter.invoke(request)
-
-    assert response.status == "ok"
-    assert response.request_id == request.request_id
-    assert response.resource_usage["wall_seconds"] == 5.0
-    assert response.resource_usage["gpu_seconds"] == 10.0
-    assert response.resource_usage["remote_wall_seconds"] == 5.0
-    assert response.resource_usage["remote_allocated_gpu_seconds"] == 10.0
-    assert client.remote_request is not None
-    assert client.remote_request.request_id.startswith("adapter-")
-    assert ":" not in client.remote_request.request_id
-    assert client.remote_request.result_request_id == request.request_id
-    assert "must-not-enter-argv" not in " ".join(
-        client.remote_request.workload_argv
-    )
-    assert client.uploaded_request is not None
-    assert client.uploaded_request.config == request.config
-    assert client.uploaded_request.output_dir == "artifacts"
+    assert response.status == "failed" and response.raw_metrics == {}
+    assert response.error_code == "remote_adapter_transport_failed"
 
 
 def test_remote_project_adapter_rejects_shell_as_inner_adapter(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="shell interpreters"):
-        RemoteProjectAdapter(
-            name="unsafe",
-            client=FakeRemoteClient(),
-            trusted_adapter_argv=("bash", "adapter.sh"),
-            artifact_root=tmp_path,
-        )
+        RemoteProjectAdapter(name="unsafe", client=RemoteExecutor(RemoteExecutorConfig()),
+                             trusted_adapter_argv=("bash", "adapter.sh"), artifact_root=tmp_path)
 
 
-@pytest.mark.asyncio
-async def test_remote_adapter_uploads_bound_workspace_and_content_keys_job_id(
-    tmp_path: Path,
-) -> None:
-    first_package = _workspace_package(tmp_path / "first", replacement_version=2)
-    second_package = _workspace_package(tmp_path / "second", replacement_version=3)
-    request = AdapterRequest(
-        action=AdapterAction.EVALUATE,
-        request_id="evaluate:workspace:candidate-1",
-        project="pimc",
-        run_id="run-1",
-        candidate_id="candidate-1",
-    )
-
-    first_client = FakeRemoteClient()
-    first_adapter = RemoteProjectAdapter(
-        name="pimc-remote",
-        client=first_client,
-        trusted_adapter_argv=("/opt/mars/bin/python", "-m", "pimc_adapter"),
-        artifact_root=tmp_path / "artifacts",
-        workspace_resolver=_StaticWorkspaceResolver(first_package),
-        poll_interval_seconds=0.01,
-        sleep=_no_sleep,
-    )
-    assert (await first_adapter.invoke(request)).status == "ok"
-    assert (await first_adapter.invoke(request)).status == "ok"
-
-    assert tuple(item.name for item in first_client.uploads) == (
-        "adapter_request",
-        WORKSPACE_ARCHIVE_UPLOAD_NAME,
-        WORKSPACE_RECEIPT_UPLOAD_NAME,
-    )
-    assert tuple(item.relative_path for item in first_client.uploads) == (
-        "inputs/adapter_request.json",
-        WORKSPACE_ARCHIVE_REMOTE_PATH,
-        WORKSPACE_RECEIPT_REMOTE_PATH,
-    )
-    assert first_client.uploaded_request is not None
-    first_binding = workspace_binding_from_request(first_client.uploaded_request)
-    assert first_binding is not None
-    assert first_binding.relative_path == "workspace"
-    assert first_binding.archive_sha256 == first_package.receipt.archive_sha256
-    assert first_client.remote_request_ids[0] == first_client.remote_request_ids[1]
-
-    second_client = FakeRemoteClient()
-    second_adapter = RemoteProjectAdapter(
-        name="pimc-remote",
-        client=second_client,
-        trusted_adapter_argv=("/opt/mars/bin/python", "-m", "pimc_adapter"),
-        artifact_root=tmp_path / "artifacts",
-        workspace_resolver=_StaticWorkspaceResolver(second_package),
-        poll_interval_seconds=0.01,
-        sleep=_no_sleep,
-    )
-    assert (await second_adapter.invoke(request)).status == "ok"
-    assert second_client.remote_request is not None
-    assert first_client.remote_request is not None
-    assert second_client.remote_request.request_id != first_client.remote_request.request_id
+def test_actual_workspace_bytes_determine_bound_request_identity(tmp_path: Path) -> None:
+    first = _workspace_package(tmp_path / "first", replacement_version=2)
+    second = _workspace_package(tmp_path / "second", replacement_version=3)
+    request = AdapterRequest(action=AdapterAction.EVALUATE, request_id="evaluate:workspace:candidate-1",
+                             project="pimc", run_id="run-1", candidate_id="candidate-1")
+    identities = []
+    for package in (first, second):
+        binding = workspace_binding_for_receipt(package.receipt, receipt_sha256=package.receipt_sha256)
+        bound = bind_workspace_request(request, binding)
+        restored = workspace_binding_from_request(bound)
+        assert restored is not None and restored.archive_sha256 == package.receipt.archive_sha256
+        identities.append(_remote_request_id(_canonical_request(bound)))
+    assert identities[0] != identities[1]
 
 
 @pytest.mark.asyncio

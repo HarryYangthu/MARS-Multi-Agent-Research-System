@@ -17,12 +17,12 @@ def _reset_settings() -> Iterator[None]:
     settings_mod._settings = None
 
 
-def test_development_readiness_allows_mock_execution(
+def test_development_readiness_inspects_real_cpu_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MARS_RUNTIME_MODE", "development")
     monkeypatch.setenv("MARS_EXECUTION_DEVICE", "cpu")
-    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "mock")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "pim_cpu")
     report = check_readiness(project="pimc")
     assert report.runtime_mode == "development"
     assert report.execution_device == "cpu"
@@ -52,7 +52,7 @@ def test_gpu_device_fails_closed_without_remote_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MARS_EXECUTION_DEVICE", "gpu")
-    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "mock")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "paper_static")
     monkeypatch.setenv("MARS_REMOTE_ENABLED", "false")
 
     report = check_readiness(project="pimc")
@@ -66,7 +66,7 @@ def test_gpu_device_fails_closed_without_remote_configuration(
     assert device.details["effective_adapter_backend"] == "remote_gpu"
 
 
-def test_production_readiness_blocks_missing_llm_and_mock_execution(
+def test_production_readiness_blocks_missing_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for env in (
@@ -79,7 +79,7 @@ def test_production_readiness_blocks_missing_llm_and_mock_execution(
     ):
         monkeypatch.setenv(env, "")
     monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
-    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "mock")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "paper_static")
     import app.settings as settings_mod
 
     settings_mod._settings = None
@@ -88,10 +88,10 @@ def test_production_readiness_blocks_missing_llm_and_mock_execution(
         c.name for c in report.checks if c.severity == "blocker" and not c.ready
     }
     assert not report.ready
-    assert {"llm_providers", "execution_backend"}.issubset(blockers)
+    assert "llm_providers" in blockers
 
 
-def test_mock_never_blocks_missing_llm_in_development(
+def test_missing_llm_blocks_readiness_in_development(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for env in (
@@ -164,10 +164,6 @@ def test_remote_gpu_backend_accepts_complete_local_prerequisites(
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(
-        "app.harness.runtime.readiness.shutil.which",
-        lambda name: f"/usr/bin/{name}",
-    )
 
     report = check_readiness(project="pimc")
     execution = next(item for item in report.checks if item.name == "execution_backend")

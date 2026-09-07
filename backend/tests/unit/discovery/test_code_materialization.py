@@ -341,10 +341,9 @@ def test_rejects_blob_root_blob_and_workspace_symlinks(
         )
 
 
-def test_atomic_failure_cleans_staging_and_stale_staging_does_not_block_retry(
+def test_actual_destination_collision_and_stale_staging_do_not_block_retry(
     tmp_path: Path,
     source_snapshot: tuple[SnapshotHandle, Path],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     snapshot, _source = source_snapshot
     blob_root = tmp_path / "blobs"
@@ -365,13 +364,10 @@ def test_atomic_failure_cleans_staging_and_stale_staging_does_not_block_retry(
     stale.mkdir()
     (stale / "incomplete").write_text("crash residue", encoding="utf-8")
 
-    real_replace = os.replace
-
-    def fail_replace(_source: Path, _destination: Path) -> None:
-        raise OSError("injected atomic rename failure")
-
-    monkeypatch.setattr(os, "replace", fail_replace)
-    with pytest.raises(MaterializationError, match="atomic workspace publication failed"):
+    # A real non-workspace destination must not be silently overwritten.
+    destination = workspaces / "cand_atomic"
+    destination.write_text("preserve this existing file")
+    with pytest.raises(MaterializationError):
         materialize_code_workspace(
             snapshot_root=snapshot.root,
             blob_root=blob_root,
@@ -380,10 +376,9 @@ def test_atomic_failure_cleans_staging_and_stale_staging_does_not_block_retry(
             bundle=bundle,
             allowed_paths=("pkg",),
         )
-    assert not (workspaces / "cand_atomic").exists()
-    assert sorted(path.name for path in workspaces.iterdir()) == [stale.name]
-
-    monkeypatch.setattr(os, "replace", real_replace)
+    assert destination.read_text() == "preserve this existing file"
+    assert sorted(path.name for path in workspaces.iterdir()) == sorted([stale.name, destination.name])
+    destination.unlink()
     published = materialize_code_workspace(
         snapshot_root=snapshot.root,
         blob_root=blob_root,

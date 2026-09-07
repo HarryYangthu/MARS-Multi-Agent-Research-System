@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -20,6 +21,49 @@ from app.harness.llm.provider_base import (
 
 
 _T = TypeVar("_T")
+
+
+@dataclass
+class VisibleStreamAccumulator:
+    """Pure public-output parser; reasoning fields are never copied or retained."""
+
+    pieces: list[str] = field(default_factory=list)
+    usage: dict[str, Any] | None = None
+    finish_reason: str | None = None
+    fingerprint: str | None = None
+    chunks: int = 0
+    visible_chars: int = 0
+
+    def add(self, chunk: Any) -> None:
+        self.chunks += 1
+        usage = _usage_payload(getattr(chunk, "usage", None))
+        if usage is not None:
+            self.usage = usage
+        fingerprint = getattr(chunk, "system_fingerprint", None)
+        if fingerprint:
+            self.fingerprint = str(fingerprint)
+        if not chunk.choices:
+            return
+        choice = chunk.choices[0]
+        piece = str(choice.delta.content or "")
+        if piece:
+            self.pieces.append(piece)
+            self.visible_chars += len(piece)
+        reason = getattr(choice, "finish_reason", None)
+        if reason is not None:
+            self.finish_reason = str(reason)
+
+    def completion(self, *, provider: str, model: str) -> Completion:
+        text = "".join(self.pieces)
+        code = ("output_truncated" if self.finish_reason == "length" else
+                "incomplete_stream" if self.finish_reason != "stop" else
+                "empty_final_content" if not text.strip() else "")
+        if code:
+            raise LLMCompletionError(code=code, provider=provider, model=model,
+                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip()), usage=self.usage)
+        return Completion(text=text, provider=provider, model=model,
+                          raw={"usage": self.usage, "finish_reason": self.finish_reason,
+                               "system_fingerprint": self.fingerprint, "streamed": True, "stream_chunks": self.chunks})
 
 
 class _OpenAICompatProvider(LLMProvider):
@@ -43,6 +87,11 @@ class _OpenAICompatProvider(LLMProvider):
         self._default_thinking_enabled = default_thinking_enabled
         self._default_reasoning_effort = default_reasoning_effort
         self._client: Any = None
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -81,6 +130,8 @@ class _OpenAICompatProvider(LLMProvider):
         if not (self.name == "deepseek" and thinking_enabled):
             kwargs["temperature"] = config.temperature
             kwargs["top_p"] = config.top_p
+        if config.json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
         if stream:
             kwargs["stream"] = True
 
@@ -88,7 +139,15 @@ class _OpenAICompatProvider(LLMProvider):
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
 
-        if thinking_enabled:
+        if self.name == "zhipu":
+            forced = config.model.lower().startswith("glm-5.3")
+            if forced and config.thinking_enabled is False:
+                raise ValueError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
+            if forced and reasoning_effort not in {None, "low", "high", "max"}:
+                raise ValueError("GLM-5.3 reasoning_effort must be low, high or max")
+            if forced or config.thinking_enabled is not None:
+                kwargs["extra_body"] = {"thinking": {"type": "enabled" if forced or thinking_enabled else "disabled"}}
+        elif thinking_enabled:
             # DeepSeek exposes thinking mode as an OpenAI-compatible extension.
             # Keep it in extra_body so other compatible endpoints are unchanged
             # unless their own config explicitly enables it.
@@ -104,12 +163,21 @@ class _OpenAICompatProvider(LLMProvider):
         max_retries = min(max(config.max_retries, 0), MAX_LLM_RETRIES)
         base_delay = max(config.retry_base_delay_seconds, 0.0)
         for attempt in range(max_retries + 1):
+            if config.attempt_observer:
+                config.attempt_observer("sdk_attempt_started", {"attempt": attempt + 1})
             try:
-                return await operation()
+                result = await operation()
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_succeeded", {"attempt": attempt + 1})
+                return result
             except Exception as exc:
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1, "error": _safe_error_label(exc)})
                 if attempt >= max_retries or not _is_retryable_error(exc):
                     raise
                 delay = base_delay * (2**attempt)
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_retry_scheduled", {"next_attempt": attempt + 2, "delay": delay})
                 logger.warning(
                     "LLM request retry {}/{} provider={} model={} reason={} "
                     "delay_seconds={}",
@@ -133,6 +201,10 @@ class _OpenAICompatProvider(LLMProvider):
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
         )
+        return self._completion_from_response(resp, config)
+
+    def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
+        """Pure SDK-envelope parsing; it performs no model/service execution."""
         if not resp.choices:
             raise RuntimeError(f"{self.name} returned no completion choices")
         response_choice = resp.choices[0]
@@ -143,22 +215,8 @@ class _OpenAICompatProvider(LLMProvider):
         finish_reason = _optional_string(
             getattr(response_choice, "finish_reason", None)
         )
-        if finish_reason == "length":
-            raise LLMCompletionError(
-                code="output_truncated",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=not bool(text.strip()),
-            )
-        if not text.strip():
-            raise LLMCompletionError(
-                code="empty_final_content",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=True,
-            )
+        self._check_final(config, finish_reason, bool(text.strip()),
+                          usage=_usage_payload(getattr(resp, "usage", None)))
         return Completion(
             text=text,
             provider=self.name,
@@ -173,6 +231,22 @@ class _OpenAICompatProvider(LLMProvider):
             },
         )
 
+    def _check_final(self, config: LLMConfig, finish_reason: str | None, visible_content_seen: bool,
+                     *, usage: dict[str, Any] | None = None) -> None:
+        if finish_reason == "length" or not visible_content_seen:
+            raise LLMCompletionError(
+                code="output_truncated" if finish_reason == "length" else "empty_final_content",
+                provider=self.name, model=config.model, finish_reason=finish_reason,
+                empty_final=not visible_content_seen, usage=usage,
+            )
+
+    @staticmethod
+    def _visible_stream_delta(chunk: Any) -> tuple[str, str | None]:
+        if not chunk.choices:
+            return "", None
+        choice = chunk.choices[0]
+        return str(choice.delta.content or ""), _optional_string(getattr(choice, "finish_reason", None))
+
     async def stream(
         self, messages: list[Message], config: LLMConfig
     ) -> AsyncIterator[Delta]:
@@ -185,36 +259,42 @@ class _OpenAICompatProvider(LLMProvider):
         finish_reason: str | None = None
         visible_content_seen = False
         async for chunk in stream:
-            if not chunk.choices:
-                continue
-            response_choice = chunk.choices[0]
-            chunk_finish_reason = _optional_string(
-                getattr(response_choice, "finish_reason", None)
-            )
+            piece, chunk_finish_reason = self._visible_stream_delta(chunk)
             if chunk_finish_reason is not None:
                 finish_reason = chunk_finish_reason
-            delta = response_choice.delta
-            piece = str(delta.content or "")
             if piece:
                 visible_content_seen = visible_content_seen or bool(piece.strip())
                 yield Delta(text=piece)
-        if finish_reason == "length":
-            raise LLMCompletionError(
-                code="output_truncated",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=not visible_content_seen,
-            )
-        if not visible_content_seen:
-            raise LLMCompletionError(
-                code="empty_final_content",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=True,
-            )
+        self._check_final(config, finish_reason, visible_content_seen)
         yield Delta(text="", finish_reason=finish_reason or "stop")
+
+
+class ZhipuProvider(_OpenAICompatProvider):
+    def __init__(self, *, api_key: str, base_url: str = "https://open.bigmodel.cn/api/paas/v4") -> None:
+        super().__init__(api_key=api_key, base_url=base_url, provider_name="zhipu")
+
+    async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
+        """Consume real SSE to avoid waiting for a complete long response at a gateway.
+
+        Each retry owns a fresh accumulator. Partial content from an unsuccessful
+        attempt can never be concatenated with a subsequent attempt's answer.
+        """
+        client = self._get_client()
+        kwargs = self._request_kwargs(messages, config, stream=True)
+
+        async def consume() -> Completion:
+            state = VisibleStreamAccumulator()
+            stream = await client.chat.completions.create(**kwargs)
+            async with stream:
+                async for chunk in stream:
+                    state.add(chunk)
+                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
+                        config.attempt_observer("sdk_stream_progress", {
+                            "chunks": state.chunks, "visible_chars": state.visible_chars,
+                        })
+            return state.completion(provider=self.name, model=config.model)
+
+        return await self._request_with_retries(consume, config=config)
 
 
 class OpenAIProvider(_OpenAICompatProvider):

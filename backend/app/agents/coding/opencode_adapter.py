@@ -76,16 +76,7 @@ class OpenCodeAdapter:
         executable = shutil.which("opencode")
         settings = get_settings()
         if executable is None:
-            if settings.is_production or settings.mars_mock_mode == "never":
-                raise RuntimeError("MARS_CODING_BACKEND=opencode but opencode is not installed")
-            transcript_path.write_text(_mock_transcript(packet), encoding="utf-8")
-            return OpenCodeResult(
-                backend="opencode",
-                status="mock_fallback",
-                task_packet_path=_rel(run_root, packet_path),
-                transcript_path=_rel(run_root, transcript_path),
-                checks=[{"name": "opencode.available", "status": "skipped"}],
-            )
+            raise RuntimeError("MARS_CODING_BACKEND=opencode but opencode is not installed")
 
         prompt = _prompt_from_packet()
         try:
@@ -592,17 +583,6 @@ def _risk_for(path: str, project_repo: ProjectRepo) -> str:
         if protected_path and path == protected_path:
             return "high"
     return "medium" if path.endswith(".py") else "low"
-
-
-def _mock_transcript(packet: dict[str, Any]) -> str:
-    return (
-        "# opencode mock transcript\n\n"
-        "opencode was not available, so MARS generated a governed mock coding "
-        "packet for end-to-end validation.\n\n"
-        "```json\n"
-        + json.dumps(packet, ensure_ascii=False, indent=2, default=str)
-        + "\n```\n"
-    )
 
 
 def _extract_unified_diff(text: str) -> str:

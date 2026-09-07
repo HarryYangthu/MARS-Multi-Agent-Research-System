@@ -1,13 +1,13 @@
 """LLM provider abstraction.
 
 Every provider implements ``complete()`` (one-shot) and ``stream()`` (delta
-iterator). The same interface is used by real APIs, by ``mock_provider``,
-and by ``local_vllm_provider`` (OpenAI-compatible).
+iterator). The same interface is used by real APIs and by local vLLM
+(OpenAI-compatible). Missing providers must fail explicitly.
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -31,12 +31,14 @@ class LLMConfig:
     temperature: float = 0.7
     max_tokens: int = 4096
     top_p: float = 1.0
-    response_schema: str | None = None  # informs mock_provider what to fake
+    response_schema: str | None = None
     thinking_enabled: bool | None = None
     reasoning_effort: ReasoningEffort | None = None
     request_timeout_seconds: float = 120.0
     max_retries: int = 3
     retry_base_delay_seconds: float = 1.0
+    json_mode: bool = False
+    attempt_observer: Callable[[str, dict[str, Any]], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -61,7 +63,9 @@ class LLMCompletionError(RuntimeError):
         model: str,
         finish_reason: str | None,
         empty_final: bool,
+        usage: dict[str, Any] | None = None,
     ) -> None:
+        self.usage = usage
         self.reason: dict[str, str | bool | None] = {
             "code": code,
             "provider": provider,
@@ -83,6 +87,9 @@ class Delta:
 
 class LLMProvider(ABC):
     name: str = "base"
+
+    async def close(self) -> None:
+        """Release any resources owned by the provider."""
 
     @abstractmethod
     async def complete(

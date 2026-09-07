@@ -21,3 +21,7 @@ providers:
     api_key_env: DEEPSEEK_API_KEY
     base_url_env: DEEPSEEK_BASE_URL
     base_url: https://api.deepseek.com/v1
+
+  zhipu:
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4

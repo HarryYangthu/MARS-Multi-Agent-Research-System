@@ -55,7 +55,7 @@ idea:
       max_retries: 3
       base_delay_seconds: 1
   debate:
-    enabled: true
+    enabled: false
     rounds: 1
     participants:
     - role: proposer
@@ -74,8 +74,11 @@ idea:
     source_download_limit: 1
     web_search: true
   loop:
-    max_validation_repairs: 1
-    max_tool_steps: 10
+    mode: react
+    trace: full
+    max_model_calls: 36
+    max_validation_repairs: 6
+    max_tool_steps: 18
   tools:
   - search.local_docs
   - search.arxiv_search

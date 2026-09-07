@@ -35,7 +35,7 @@ def resolve_for_write(
             text=old.text,
             metadata=old.metadata,
         )
-        if old_memory.content_hash == memory.content_hash:
+        if old_memory.content_hash == memory.content_hash and old.metadata.get("origin") == record.metadata.get("origin"):
             return None
     if replace_source and memory.source_path:
         zone.delete_by_source(memory.source_path)

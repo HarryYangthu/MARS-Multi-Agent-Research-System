@@ -13,6 +13,7 @@ from app.harness.memory.conflict import assess_conflict
 from app.harness.memory.episode import search_episode_index
 from app.harness.memory.evals import evaluate_pollution, evaluate_retrieval_precision
 from app.harness.memory.importance import calculate_importance
+from tests.local_memory import authored_note
 from app.main import create_app
 from app.storage.run_store import RunStore
 from app.storage.self_evolution_store import append_learning_event
@@ -22,8 +23,8 @@ def test_context_v2_injects_approved_memory_and_writes_usage(tmp_path: Path) -> 
     stores = reset_for_tests(base=tmp_path / "knowledge")
     ingest_memory(
         zone="methodology",
-        text="Verified router methodology lowers RES under beam switching.",
-        metadata={"project": "pimc", "kind": "methodology"},
+        text="Human note: compare router methodology RES under beam switching.",
+        metadata={"project": "pimc", "kind": "methodology", **authored_note(tmp_path, "Human note: compare router methodology RES under beam switching.")},
         memory_type="procedural",
         source_path="tests/methodology.md",
         eval_status=EvalStatus(passed=True, decision="pass"),
@@ -95,10 +96,10 @@ def test_importance_scoring_and_semantic_graph_bonus(tmp_path: Path) -> None:
 
     record = ingest_memory(
         zone="run_archive",
-        text="Run archive: deeper memory taps fixed RES failure.",
-        metadata={"project": "pimc", "kind": "run_log", "schema": "run_log.v1"},
+        text="Human design note: investigate whether deeper memory taps change RES failure.",
+        metadata={"project": "pimc", "kind": "design_note", **authored_note(tmp_path, "Human design note: investigate whether deeper memory taps change RES failure.")},
         memory_type="episodic",
-        source_path="runs/a/execution/run_log.approved.md",
+        source_path="authored/design_note.md",
         eval_status=EvalStatus(passed=True, decision="pass"),
         approved=True,
         stores=stores,
@@ -156,8 +157,8 @@ def test_conflict_and_memory_evals(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path / "knowledge")
     record = ingest_memory(
         zone="methodology",
-        text="Hard routing improves RES.",
-        metadata={"project": "pimc", "kind": "methodology"},
+        text="Human hypothesis: hard routing may improve RES.",
+        metadata={"project": "pimc", "kind": "methodology", **authored_note(tmp_path, "Human hypothesis: hard routing may improve RES.")},
         memory_type="procedural",
         eval_status=EvalStatus(passed=True, decision="pass"),
         approved=True,
@@ -165,7 +166,7 @@ def test_conflict_and_memory_evals(tmp_path: Path) -> None:
     )[0]
 
     conflict = assess_conflict(
-        old_text="Hard routing improves RES.",
+        old_text="Human hypothesis: hard routing may improve RES.",
         new_text="Hard routing does not improve RES.",
     )
     assert conflict.decision in {"conflict", "complementary", "duplicate_or_update"}

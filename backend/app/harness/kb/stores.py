@@ -9,6 +9,7 @@ V2 work.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from importlib import import_module
 from pathlib import Path
@@ -107,7 +108,7 @@ class FileZoneBackend:
             candidates = [
                 r for r in self._records
                 if _record_matches(
-                    r,
+                    r, base=self.path.parent.parent,
                     filters=filters,
                     exclude_superseded=exclude_superseded,
                     exclude_mock=exclude_mock,
@@ -128,7 +129,7 @@ class FileZoneBackend:
             return [
                 r for r in self._records
                 if _record_matches(
-                    r,
+                    r, base=self.path.parent.parent,
                     filters=filters,
                     exclude_superseded=exclude_superseded,
                     exclude_mock=exclude_mock,
@@ -183,7 +184,7 @@ class FileMemoryBackend:
     name = "file"
 
     def __init__(self, base: Path | None = None) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self._zones: dict[str, FileZoneBackend] = {
             zone: FileZoneBackend(zone, self.base / zone / "_index.json")
             for zone in ZONES
@@ -235,9 +236,10 @@ class FileMemoryBackend:
 
 
 class ChromaZoneBackend:
-    def __init__(self, zone: str, collection: Any) -> None:
+    def __init__(self, zone: str, collection: Any, *, base: Path) -> None:
         self.zone = zone
         self._collection = collection
+        self.base = base
 
     def add(self, record: KBRecord) -> None:
         self._collection.add(
@@ -323,7 +325,7 @@ class ChromaZoneBackend:
             record
             for record in records
             if _record_matches(
-                record,
+                record, base=self.base,
                 filters=filters,
                 exclude_superseded=exclude_superseded,
                 exclude_mock=exclude_mock,
@@ -351,14 +353,14 @@ class ChromaMemoryBackend:
     name = "chroma"
 
     def __init__(self, base: Path | None = None) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self.path = self.base / ".chromadb"
         self.path.mkdir(parents=True, exist_ok=True)
         chromadb = _load_chromadb()
         client_cls = getattr(chromadb, "PersistentClient")
         self._client = client_cls(path=str(self.path))
         self._zones: dict[str, ChromaZoneBackend] = {
-            zone: ChromaZoneBackend(zone, self._collection(zone))
+            zone: ChromaZoneBackend(zone, self._collection(zone), base=self.base)
             for zone in ZONES
         }
 
@@ -423,7 +425,7 @@ class KBStores:
         store: str = "file",
         backend: MemoryBackend | None = None,
     ) -> None:
-        self.base = base or (repo_root() / "knowledge")
+        self.base = base or Path(os.environ.get("MARS_KNOWLEDGE_ROOT", str(repo_root() / "knowledge")))
         self._backend = backend or _build_backend(store=store, base=self.base)
 
     @property
@@ -583,6 +585,7 @@ def _sequence_item(value: object, index: int) -> object:
 def _record_matches(
     record: KBRecord,
     *,
+    base: Path,
     filters: dict[str, Any] | None,
     exclude_superseded: bool,
     exclude_mock: bool,
@@ -595,7 +598,8 @@ def _record_matches(
     )
     if exclude_superseded and memory.superseded_by:
         return False
-    if exclude_mock and memory.is_mock:
+    from app.harness.kb.provenance import verified_memory
+    if exclude_mock and (memory.is_mock or not verified_memory(record.text, record.metadata, base=base)):
         return False
     if not filters:
         return True

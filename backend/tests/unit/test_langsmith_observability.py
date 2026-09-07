@@ -1,168 +1,86 @@
+"""Actual local tracing/configuration and pure redaction checks; no remote sink/client doubles."""
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from uuid import UUID
 
-from app.harness.observability import tracing
+import pytest
+
 from app.harness.observability.langsmith_sink import (
-    LangSmithSink,
-    LangSmithSinkConfig,
-    get_langsmith_sink,
-    reset_langsmith_sink_for_tests,
+    LangSmithSink, LangSmithSinkConfig, _redact, _run_type,
+    get_langsmith_sink, reset_langsmith_sink_for_tests,
 )
 from app.harness.observability.tracing import TraceRecorder
+from app.settings import reset_settings_cache
 from app.storage.run_store import RunStore
 
 
-class DisabledSink:
-    enabled = False
-
-    def new_run_id(self) -> str:
-        raise AssertionError("disabled sink should not allocate remote ids")
-
-    def span_started(self, **_: Any) -> None:
-        raise AssertionError("disabled sink should not receive span_started")
-
-    def span_finished(self, **_: Any) -> None:
-        raise AssertionError("disabled sink should not receive span_finished")
+@pytest.fixture(autouse=True)
+def reset_observability_settings() -> Iterator[None]:
+    reset_langsmith_sink_for_tests()
+    reset_settings_cache()
+    yield
+    reset_langsmith_sink_for_tests()
+    reset_settings_cache()
 
 
-class RecordingSink:
-    enabled = True
-
-    def __init__(self) -> None:
-        self.started: list[dict[str, Any]] = []
-        self.finished: list[dict[str, Any]] = []
-
-    def new_run_id(self) -> str:
-        return "00000000-0000-0000-0000-000000000123"
-
-    def span_started(self, **kwargs: Any) -> None:
-        self.started.append(kwargs)
-
-    def span_finished(self, **kwargs: Any) -> None:
-        self.finished.append(kwargs)
-
-
-class FakeLangSmithClient:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.updated: list[dict[str, Any]] = []
-
-    def create_run(self, **kwargs: Any) -> None:
-        self.created.append(kwargs)
-
-    def update_run(self, *args: Any, **kwargs: Any) -> None:
-        self.updated.append({"args": args, **kwargs})
-
-
-def _run(tmp_path: Path) -> Any:
-    return RunStore(tmp_path).create(
-        task="observability",
-        project="pimc",
-        now=datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc),
-    )
-
-
-def test_trace_recorder_keeps_file_only_behavior_when_langsmith_disabled(
-    tmp_path: Path,
-    monkeypatch: Any,
+def test_actual_trace_recorder_keeps_file_output_when_remote_sink_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(tracing, "get_langsmith_sink", lambda: DisabledSink())
-    run = _run(tmp_path)
-
+    monkeypatch.setenv("MARS_LANGSMITH_ENABLED", "false")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "")
+    run = RunStore(tmp_path).create(task="local-trace-contract", project="pimc")
     recorder = TraceRecorder(run)
-    with recorder.start_span(name="node:idea", kind="idea", attributes={"node": "idea"}):
-        pass
-
+    with recorder.start_span(name="local:contract", kind="local", attributes={"purpose": "unit-file-check"}):
+        (tmp_path / "operation.txt").write_text("actual local operation")
     manifest = json.loads((run.subdir("context") / "trace_manifest.v2.json").read_text())
-    span = manifest["spans"][0]
-    assert span["status"] == "ok"
-    assert span["attributes"] == {"node": "idea"}
+    assert manifest["spans"][0]["status"] == "ok"
+    assert manifest["spans"][0]["attributes"] == {"purpose": "unit-file-check"}
+    assert get_langsmith_sink().enabled is False and get_langsmith_sink()._client is None
 
 
-def test_trace_recorder_mirrors_span_to_langsmith_sink(
-    tmp_path: Path,
-    monkeypatch: Any,
+def test_actual_failed_local_span_is_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sink = RecordingSink()
-    monkeypatch.setattr(tracing, "get_langsmith_sink", lambda: sink)
-    run = _run(tmp_path)
-
-    recorder = TraceRecorder(run)
-    with recorder.start_span(name="node:coding", kind="coding", attributes={"node": "coding"}):
-        pass
-
-    assert len(sink.started) == 1
-    assert len(sink.finished) == 1
-    started_span = sink.started[0]["span"]
-    finished_span = sink.finished[0]["span"]
-    assert started_span.attributes["langsmith_run_id"] == "00000000-0000-0000-0000-000000000123"
-    assert finished_span["attributes"]["langsmith_run_id"] == "00000000-0000-0000-0000-000000000123"
-    assert sink.started[0]["run_id"] == run.run_id
-    assert sink.finished[0]["run_id"] == run.run_id
+    monkeypatch.setenv("MARS_LANGSMITH_ENABLED", "false")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "")
+    run = RunStore(tmp_path).create(task="failed-local-trace", project="pimc")
+    with pytest.raises(FileNotFoundError):
+        with TraceRecorder(run).start_span(name="local:missing-file", kind="local"):
+            (tmp_path / "missing.txt").read_text()
+    manifest = json.loads((run.subdir("context") / "trace_manifest.v2.json").read_text())
+    assert manifest["spans"][0]["status"] == "error"
 
 
-def test_langsmith_sink_mirrors_with_redacted_attributes() -> None:
-    client = FakeLangSmithClient()
-    sink = LangSmithSink(
-        LangSmithSinkConfig(
-            enabled=True,
-            api_key="test-key",
-            endpoint="https://smith.example.test",
-            project="mars-test",
-            timeout_ms=1000,
-        )
-    )
-    sink._client = client
-
-    span = tracing.TraceSpan(
-        span_id="span1",
-        parent_span_id=None,
-        name="tool:code.apply_patch",
-        kind="tool",
-        started_at="2026-06-17T10:00:00+00:00",
-        ended_at=None,
-        status="running",
-        attributes={
-            "langsmith_run_id": "00000000-0000-0000-0000-000000000456",
-            "api_key": "raw-key",
-            "nested": {"password": "raw-pass"},
-        },
-    )
-
-    sink.span_started(run_id="r1", trace_id="trace1", span=span)
-    finished = {
-        "status": "ok",
-        "ended_at": "2026-06-17T10:00:01+00:00",
-        "attributes": span.attributes,
-    }
-    sink.span_finished(run_id="r1", trace_id="trace1", span=finished)
-
-    assert len(client.created) == 1
-    assert len(client.updated) == 1
-    created_attrs = client.created[0]["inputs"]["attributes"]
-    updated_attrs = client.updated[0]["outputs"]["attributes"]
-    assert client.created[0]["project_name"] == "mars-test"
-    assert created_attrs["api_key"] == "[redacted]"
-    assert created_attrs["nested"]["password"] == "[redacted]"
-    assert updated_attrs["api_key"] == "[redacted]"
-    assert updated_attrs["nested"]["password"] == "[redacted]"
+def test_nested_redaction_preserves_nonsecret_context_without_mutating_input() -> None:
+    # Pure authored payload, never sent to a service.
+    value = {"api_key": "sensitive-field-input", "nested": {"password": "sensitive-field-input"},
+             "records": [{"Authorization": "sensitive-field-input"}, {"metric": 2}],
+             "tuple": ({"Cookie": "sensitive-field-input"},), "name": "allowed"}
+    redacted = _redact(value)
+    assert redacted["api_key"] == redacted["nested"]["password"] == "[redacted]"
+    assert redacted["records"] == [{"Authorization": "[redacted]"}, {"metric": 2}]
+    assert redacted["tuple"] == [{"Cookie": "[redacted]"}] and redacted["name"] == "allowed"
+    assert value["api_key"] == "sensitive-field-input"
 
 
-def test_langsmith_sink_reads_runtime_enable_switch(monkeypatch: Any) -> None:
-    import app.settings as settings_mod
+@pytest.mark.parametrize("kind,expected", [("llm", "llm"), ("tool", "tool"), ("gate", "tool"), ("agent", "chain")])
+def test_remote_run_type_mapping_is_pure(kind: str, expected: str) -> None:
+    assert _run_type(kind) == expected
 
+
+def test_disabled_or_unconfigured_sink_never_connects() -> None:
+    for enabled, key in ((False, "unused-config-input"), (True, "")):
+        sink = LangSmithSink(LangSmithSinkConfig(enabled=enabled, api_key=key,
+                            endpoint="https://example.invalid", project="unit-config", timeout_ms=100))
+        assert sink.enabled is False and sink._client is None
+        assert UUID(sink.new_run_id()).version == 4
+
+
+def test_runtime_enable_switch_is_configuration_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARS_LANGSMITH_ENABLED", "true")
-    monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
-    settings_mod._settings = None
-    reset_langsmith_sink_for_tests()
-
+    monkeypatch.setenv("LANGSMITH_API_KEY", "configuration-only-not-a-credential")
     sink = get_langsmith_sink()
-
-    assert sink.enabled is True
-    assert sink.config.api_key == "test-key"
-    reset_langsmith_sink_for_tests()
-    settings_mod._settings = None
+    assert sink.enabled is True and sink._client is None

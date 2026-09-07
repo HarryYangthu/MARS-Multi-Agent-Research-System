@@ -1,14 +1,10 @@
 # Execution / simulation scheduling for the dual-carrier PIM cancellation sweep.
-# `backend: mock` selects the mock curve template; the real-vs-mock simulator is
-# chosen at runtime by MARS_EXECUTION_BACKEND (`pim_cpu` runs the in-repo numpy
-# memory-polynomial canceller; `paper_static` runs Harry's external static PIMC
-# training code against the real .pth capture). MARS-compatible RES is lower is
-# better and the pass gate lives in projects/pimc/diagnostics.yaml.
+# Explicit backend selection; no generated metrics when dependencies are missing.
 execution:
   # Mirrored runtime default. MARS_EXECUTION_DEVICE is the authoritative switch:
   # cpu -> local ProcessAdapter; gpu -> fail-closed remote_gpu over SSH.
   device: cpu
-  backend: mock
+  backend: local_command
   max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
   batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
   command_timeout_seconds: 60
@@ -37,18 +33,8 @@ execution:
       - model.lut_n_spline
       - model.lut_rmax
       - model.lut_init
-  # Smoke-test stub only: used when a tool call explicitly requests
-  # backend=local_command. Values are a believable deep-canceller point
-  # (loss≈10^(RES/10), RES below the -26 dB gate); the real metrics come from
-  # the pim_cpu backend. Commands run without a shell and must match the
-  # configs/tools.yaml allowlist.
-  local_commands:
-    - id: python_metric_echo
-      label: Python metric echo (smoke-test stub)
-      argv:
-        - python
-        - -c
-        - 'import json; print(json.dumps({"metrics": {"loss": 0.0019, "RES": -27.2, "PIM": 27.2, "APE": 23.4}}))'
+  # Configure explicit real commands for local execution. No canned metrics.
+  local_commands: []
   remote_gpu:
     enabled: false
     endpoint: ""               # Deprecated V2 status field; remote_job.v1 uses system OpenSSH.

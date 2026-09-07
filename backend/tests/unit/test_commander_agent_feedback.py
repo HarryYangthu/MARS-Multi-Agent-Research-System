@@ -6,9 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
-from app.bridge.agent_registry import get_registry, reset_registry_for_tests
-from app.bridge.agent_runner import run_agent_node
+from app.bridge.agent_runner import load_agent_handoff_context
 from app.bridge.commander_agent import (
     CommanderAgent,
     CommanderAttribution,
@@ -24,7 +22,6 @@ from app.bridge.diagnostics import (
     SuspectedCause,
 )
 from app.harness.context.budget_policy import ContextBudgetPolicy
-from app.harness.llm.mock_provider import build_fake_metadata
 from app.harness.kb.stores import KBStores
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.schema.validator import validate_document
@@ -51,6 +48,7 @@ def _write_metrics_and_artifacts(
     high_code_risk: bool = False,
     empty_ablations: bool = False,
 ) -> None:
+    """Author diagnostic input files; no agent/service/GPU execution is represented."""
     (run.subdir("execution") / "metrics.json").write_text(
         '[{"metrics": {"loss": %.4f, "RES": -42.0}}]' % loss,
         encoding="utf-8",
@@ -195,111 +193,38 @@ def test_feedback_context_is_target_only_and_bounded(tmp_path: Path) -> None:
     assert experiment_ctx is None
 
 
-class _CaptureCodingAgent(BaseAgent):
-    name = "coding"
-    output_schema = "code_spec.v1"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.captured_upstream: dict[str, str] = {}
-
-    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
-        self.captured_upstream = dict(request.upstream_artifacts)
-        metadata = build_fake_metadata("code_spec.v1", seed="capture")
-        body = "# captured\n"
-        return Artifact(
-            text=fm_dumps(metadata, body),
-            schema_id="code_spec.v1",
-            metadata=metadata,
-            body=body,
-        )
-
-    async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
-        return await self.run_loop(request, context)
+def test_handoff_context_injects_commander_feedback_only_for_target(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task="runner", project="pimc")
+    _write_metrics_and_artifacts(run, high_code_risk=True)
+    CommanderAgent().diagnose(run=run, attempt=1)
+    upstream, feedback = load_agent_handoff_context(run, "coding_attempt_2")
+    assert feedback is not None and "commander_feedback" in upstream
+    assert "diagnosis.v1.md" not in upstream
+    other, other_feedback = load_agent_handoff_context(run, "experiment_attempt_2")
+    assert other_feedback is None and "commander_feedback" not in other
 
 
-class _CaptureWritingAgent(BaseAgent):
-    name = "writing"
-    output_schema = "report.v1"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.captured_upstream: dict[str, str] = {}
-
-    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
-        self.captured_upstream = dict(request.upstream_artifacts)
-        metadata = {
-            "schema": "report.v1",
-            "project": request.project,
-            "agent": "writing",
-            "deliverable_type": "research_report",
-            "target_audience": "phd_advisor",
-            "chain_refs": {"proposal": "idea_proposal.approved.md"},
-        }
-        body = "# captured report\n"
-        return Artifact(
-            text=fm_dumps(metadata, body),
-            schema_id="report.v1",
-            metadata=metadata,
-            body=body,
-        )
-
-    async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
-        return await self.run_loop(request, context)
+def test_handoff_context_loads_authored_execution_records_for_writing(tmp_path: Path) -> None:
+    # Files below are authored diagnostic inputs, not a simulated execution job.
+    run = RunStore(tmp_path).create(task="runner", project="pimc")
+    _write_metrics_and_artifacts(run, loss=0.031)
+    (run.subdir("execution") / "batch_summary.json").write_text(json.dumps({
+        "experiments": ["authored-input"], "failures": [], "max_concurrency": 1, "attempt": 2, "total": 1,
+    }))
+    upstream, _ = load_agent_handoff_context(run, "writing")
+    assert "execution.metrics.json" in upstream and "RES: min=-42" in upstream["execution.metrics.json"]
+    assert "execution.batch_summary.json" in upstream
+    assert not list(run.root.glob("writing/report*.md"))
 
 
-@pytest.mark.asyncio
-async def test_agent_runner_injects_commander_feedback_only_for_target(
-    tmp_path: Path,
-) -> None:
-    reset_registry_for_tests()
-    try:
-        run = RunStore(tmp_path).create(task="runner", project="pimc")
-        _write_metrics_and_artifacts(run, high_code_risk=True)
-        CommanderAgent().diagnose(run=run, attempt=1)
-        agent = _CaptureCodingAgent()
-        get_registry().register("coding", agent)
-
-        await run_agent_node(run, "coding_attempt_2")
-
-        assert "commander_feedback" in agent.captured_upstream
-        assert "diagnosis.v1.md" not in agent.captured_upstream
-    finally:
-        reset_registry_for_tests()
-
-
-@pytest.mark.asyncio
-async def test_agent_runner_injects_execution_results_for_writing(
-    tmp_path: Path,
-) -> None:
-    reset_registry_for_tests()
-    try:
-        run = RunStore(tmp_path).create(task="runner", project="pimc")
-        _write_metrics_and_artifacts(run, loss=0.031)
-        (run.subdir("execution") / "batch_summary.json").write_text(
-            json.dumps(
-                {
-                    "experiments": ["mem_16_lr_0p08"],
-                    "failures": [],
-                    "max_concurrency": 16,
-                    "attempt": 2,
-                    "total": 1,
-                }
-            ),
-            encoding="utf-8",
-        )
-        agent = _CaptureWritingAgent()
-        get_registry().register("writing", agent)
-
-        await run_agent_node(run, "writing")
-
-        assert "execution.metrics.json" in agent.captured_upstream
-        assert "measured post-run evidence" in agent.captured_upstream["execution.metrics.json"]
-        assert "RES: min=-42" in agent.captured_upstream["execution.metrics.json"]
-        assert "execution.batch_summary.json" in agent.captured_upstream
-        assert "This is post-run evidence" in agent.captured_upstream["execution.batch_summary.json"]
-    finally:
-        reset_registry_for_tests()
+def test_bridge_never_silently_truncates_approved_handoff(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task="full-contract", project="pimc")
+    text = "# Human-authored contract\n" + "constraint\n" * 1000 + "REQUIRED_END_CONDITION"
+    (run.subdir("idea") / "idea_proposal.approved.md").write_text(text)
+    upstream, _ = load_agent_handoff_context(run, "experiment", revision_reason="preserve endpoints")
+    assert text in upstream["idea_proposal.approved.md"]
+    assert "idea/idea_proposal.approved.md" in upstream["idea_proposal.approved.md"]
+    assert "preserve endpoints" in upstream["human_revision_request"]
 
 
 def test_pending_memory_does_not_load_until_approved(

@@ -237,7 +237,7 @@ export interface DiscoveryReplayView {
   events: DiscoveryEvent[];
 }
 
-export type DiscoveryDataSource = "rest" | "contract_fixture";
+export type DiscoveryDataSource = "rest";
 
 export interface DiscoverySnapshot {
   source: DiscoveryDataSource;

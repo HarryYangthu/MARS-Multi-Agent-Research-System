@@ -1,4 +1,4 @@
-"""Persist mock-simulation results into a run's ``execution/`` subdir."""
+"""Persist actual execution results without adding unobserved resource claims."""
 from __future__ import annotations
 
 import json
@@ -6,30 +6,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.execution.mock_simulation import MockResult
+from app.execution.results import SimulationResult
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 
 
-def write_run_log(*, run_root: Path, result: MockResult, project: str) -> Path:
-    """Write a `run_log.v1` artifact derived from MockResult."""
+def write_run_log(*, run_root: Path, result: SimulationResult, project: str) -> Path:
+    """Write a `run_log.v1` artifact derived from SimulationResult."""
+    if result.is_mock:
+        raise ValueError("simulated results cannot be published as execution artifacts")
     metadata: dict[str, Any] = {
         "schema": "run_log.v1",
         "project": project,
         "agent": "execution",
-        "upstream_artifact": "code_spec.approved.md",
         "run_id": f"{result.run_id}_{result.experiment_id}",
-        "batch_size": 512,
-        "gpu_used": [],
         "duration_seconds": float(result.duration_seconds),
         "status": result.status,
         "metrics": dict(result.metrics),
         "fingerprint_hash": result.fingerprint_hash,
         "is_mock": result.is_mock,
     }
-    backend = "mock simulation" if result.is_mock else "PIM CPU simulation"
     body = (
         f"# Run log — {result.experiment_id}\n\n"
-        f"{backend} completed at "
+        f"Execution status: {result.status}. Recorded at "
         f"{datetime.now(tz=timezone.utc).isoformat()}.\n"
     )
     text = fm_dumps(metadata, body)
@@ -40,7 +38,9 @@ def write_run_log(*, run_root: Path, result: MockResult, project: str) -> Path:
     return target
 
 
-def write_metrics_json(*, run_root: Path, results: list[MockResult]) -> Path:
+def write_metrics_json(*, run_root: Path, results: list[SimulationResult]) -> Path:
+    if any(result.is_mock for result in results):
+        raise ValueError("simulated results cannot be published as measured metrics")
     target = run_root / "execution" / "metrics.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = [

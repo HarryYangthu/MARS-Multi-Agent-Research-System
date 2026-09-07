@@ -1,296 +1,136 @@
+"""Provider serialization/parsing and actual transport failures; no SDK/service replacements."""
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
-from typing import Any
+import socket
+from typing import Any, cast
 
+import httpx
 import pytest
+from openai import APIConnectionError, APIStatusError
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
-from app.harness.llm.openai_provider import DeepSeekProvider, OpenAIProvider
+from app.harness.llm.openai_provider import DeepSeekProvider, OpenAIProvider, ZhipuProvider, VisibleStreamAccumulator, _is_retryable_error
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, Message
 
 
-class _StatusError(Exception):
-    def __init__(self, status_code: int) -> None:
-        super().__init__(f"status={status_code}")
-        self.status_code = status_code
+def test_deepseek_request_serializer_and_extension_isolation() -> None:
+    config = LLMConfig(provider="deepseek", model="configured-model", thinking_enabled=True,
+                       reasoning_effort="high", request_timeout_seconds=120, max_tokens=4096)
+    provider = DeepSeekProvider(api_key="serializer-input-not-a-credential")
+    kwargs = provider._request_kwargs([Message("user", "authored serializer input")], config)
+    assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert kwargs["reasoning_effort"] == "high" and kwargs["timeout"] == 120
+    assert kwargs["max_tokens"] == 4096
+    assert "temperature" not in kwargs and "top_p" not in kwargs
+    assert provider._client is None
+    generic = OpenAIProvider(api_key="serializer-input-not-a-credential")
+    request = generic._request_kwargs([], LLMConfig(provider="openai", model="configured-model"))
+    assert "extra_body" not in request and "reasoning_effort" not in request
 
 
-class _Usage:
-    def model_dump(self, *, exclude_none: bool) -> dict[str, int]:
-        assert exclude_none is True
-        return {
-            "prompt_tokens": 11,
-            "completion_tokens": 7,
-            "total_tokens": 18,
-        }
-
-
-class _FakeCompletions:
-    def __init__(self, outcomes: list[Any]) -> None:
-        self._outcomes = list(outcomes)
-        self.calls: list[dict[str, Any]] = []
-
-    async def create(self, **kwargs: Any) -> Any:
-        self.calls.append(kwargs)
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
-
-
-def _client(completions: _FakeCompletions) -> Any:
-    return SimpleNamespace(chat=SimpleNamespace(completions=completions))
-
-
-def _response(
-    *,
-    content: str | None = "visible",
-    finish_reason: str = "stop",
-) -> Any:
-    message = SimpleNamespace(
-        content=content,
-        reasoning_content="hidden chain of thought",
-    )
-    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
-    return SimpleNamespace(
-        choices=[choice],
-        usage=_Usage(),
-        system_fingerprint="fp-test",
-    )
-
-
-def _config(**overrides: Any) -> LLMConfig:
-    values: dict[str, Any] = {
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "temperature": 0.2,
-        "max_tokens": 4096,
-        "thinking_enabled": True,
-        "reasoning_effort": "high",
-        "request_timeout_seconds": 120.0,
-        "max_retries": 3,
-        "retry_base_delay_seconds": 0.0,
-    }
-    values.update(overrides)
-    return LLMConfig(**values)
-
-
-@pytest.mark.asyncio
-async def test_deepseek_complete_passes_thinking_and_records_safe_metadata() -> None:
-    completions = _FakeCompletions([_response()])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    completion = await provider.complete(
-        [Message(role="user", content="question")],
-        _config(),
-    )
-
-    assert completion.text == "visible"
-    assert completion.raw == {
-        "usage": {
-            "prompt_tokens": 11,
-            "completion_tokens": 7,
-            "total_tokens": 18,
-        },
-        "system_fingerprint": "fp-test",
-        "finish_reason": "stop",
-    }
-    assert "hidden chain of thought" not in repr(completion.raw)
-    request = completions.calls[0]
-    assert request["reasoning_effort"] == "high"
-    assert request["extra_body"] == {"thinking": {"type": "enabled"}}
-    assert request["timeout"] == 120.0
-    assert request["max_tokens"] == 4096
-    assert "temperature" not in request
-    assert "top_p" not in request
-
-
-@pytest.mark.asyncio
-async def test_complete_never_promotes_reasoning_content_to_final_text() -> None:
-    completions = _FakeCompletions([_response(content=None)])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    with pytest.raises(LLMCompletionError) as exc_info:
-        await provider.complete(
-            [Message(role="user", content="question")],
-            _config(),
-        )
-
-    assert exc_info.value.reason == {
-        "code": "empty_final_content",
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "finish_reason": "stop",
-        "empty_final": True,
-    }
-    assert "hidden chain of thought" not in repr(exc_info.value)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("content", [None, "partial visible document"])
-async def test_complete_fails_closed_on_length_truncation(
-    content: str | None,
+@pytest.mark.parametrize("content,finish,expected", [
+    ("authored parser input", "stop", None), (None, "stop", "empty_final_content"),
+    (None, "length", "output_truncated"), ("partial authored input", "length", "output_truncated"),
+])
+def test_envelope_parser_preserves_usage_and_never_promotes_private_fields(
+    content: str | None, finish: str, expected: str | None,
 ) -> None:
-    completions = _FakeCompletions(
-        [_response(content=content, finish_reason="length")]
-    )
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    with pytest.raises(LLMCompletionError) as exc_info:
-        await provider.complete(
-            [Message(role="user", content="question")],
-            _config(),
-        )
-
-    assert exc_info.value.reason["code"] == "output_truncated"
-    assert exc_info.value.reason["finish_reason"] == "length"
-    assert exc_info.value.reason["empty_final"] is (content is None)
-    assert "hidden chain of thought" not in repr(exc_info.value.reason)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "error",
-    [asyncio.TimeoutError(), _StatusError(429), _StatusError(503)],
-)
-async def test_complete_retries_retryable_failures(error: Exception) -> None:
-    completions = _FakeCompletions([error, _response()])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    completion = await provider.complete(
-        [Message(role="user", content="question")],
-        _config(),
-    )
-
-    assert completion.text == "visible"
-    assert len(completions.calls) == 2
+    # A typed, manually authored SDK envelope is pure parser input. No call to
+    # complete(), client assignment, service response, or real-run claim occurs.
+    envelope = ChatCompletion.model_validate({
+        "id": "authored-parser-envelope", "object": "chat.completion", "created": 0, "model": "parser-contract",
+        "choices": [{"index": 0, "finish_reason": finish,
+                     "message": {"role": "assistant", "content": content, "reasoning_content": "private-field-marker"}}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+        "system_fingerprint": "authored-parser-metadata",
+    })
+    provider = OpenAIProvider(api_key="parser-input-not-a-credential")
+    config = LLMConfig(provider="openai", model="parser-contract")
+    if expected:
+        with pytest.raises(LLMCompletionError) as caught:
+            provider._completion_from_response(envelope, config)
+        assert caught.value.reason["code"] == expected
+        assert caught.value.reason["empty_final"] is (content is None)
+        assert caught.value.usage is not None and caught.value.usage["total_tokens"] == 18
+        assert "private-field-marker" not in repr(caught.value)
+    else:
+        result = provider._completion_from_response(envelope, config)
+        assert result.text == content and result.raw["usage"]["total_tokens"] == 18
+        assert result.raw["finish_reason"] == "stop"
+        assert "private-field-marker" not in repr(result)
+    assert provider._client is None
 
 
-@pytest.mark.asyncio
-async def test_complete_bounds_retries_at_three() -> None:
-    completions = _FakeCompletions([_StatusError(503) for _ in range(4)])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
+@pytest.mark.parametrize("content,finish", [(None, None), ("authored delta", "length"), (None, "stop")])
+def test_stream_delta_parser_excludes_private_fields(content: str | None, finish: str | None) -> None:
+    chunk = ChatCompletionChunk.model_validate({
+        "id": "authored-delta-envelope", "object": "chat.completion.chunk", "created": 0, "model": "parser-contract",
+        "choices": [{"index": 0, "finish_reason": finish,
+                     "delta": {"content": content, "reasoning_content": "private-field-marker"}}],
+    })
+    provider = OpenAIProvider(api_key="parser-input-not-a-credential")
+    assert provider._visible_stream_delta(chunk) == (content or "", finish)
+    config = LLMConfig(provider="openai", model="parser-contract")
+    if finish is not None:
+        with pytest.raises(LLMCompletionError) as caught:
+            provider._check_final(config, finish, bool(content))
+        assert caught.value.reason["code"] == ("output_truncated" if finish == "length" else "empty_final_content")
 
-    with pytest.raises(_StatusError):
-        await provider.complete(
-            [Message(role="user", content="question")],
-            _config(max_retries=99),
-        )
 
-    assert len(completions.calls) == 4
-
-
-@pytest.mark.asyncio
-async def test_complete_fails_closed_without_retry_for_client_error() -> None:
-    completions = _FakeCompletions([_StatusError(400), _response()])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    with pytest.raises(_StatusError):
-        await provider.complete(
-            [Message(role="user", content="question")],
-            _config(),
-        )
-
-    assert len(completions.calls) == 1
+@pytest.mark.parametrize("status,retryable", [(400, False), (401, False), (429, True), (503, True)])
+def test_retry_classifier_on_typed_error_inputs(status: int, retryable: bool) -> None:
+    # Exception classification only: this response is never injected into a transport.
+    # Some SDK builds vendor HTTPX types; the exception only reads this interface.
+    response = httpx.Response(status, request=httpx.Request("POST", "https://example.invalid"))
+    error = APIStatusError("authored classifier input", response=cast(Any, response), body=None)
+    assert _is_retryable_error(error) is retryable
+    assert _is_retryable_error(asyncio.TimeoutError())
 
 
 @pytest.mark.asyncio
-async def test_stream_ignores_reasoning_deltas_and_uses_provider_finish_reason() -> None:
-    async def chunks() -> Any:
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="hidden stream reasoning",
-                    ),
-                    finish_reason=None,
-                )
-            ]
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content="answer"),
-                    finish_reason="length",
-                )
-            ]
-        )
-
-    completions = _FakeCompletions([chunks()])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    deltas = []
-    with pytest.raises(LLMCompletionError) as exc_info:
-        async for delta in provider.stream(
-            [Message(role="user", content="question")],
-            _config(),
-        ):
-            deltas.append(delta)
-
-    assert [delta.text for delta in deltas] == ["answer"]
-    assert exc_info.value.reason["code"] == "output_truncated"
-    assert exc_info.value.reason["finish_reason"] == "length"
-    assert exc_info.value.reason["empty_final"] is False
-    assert "hidden stream reasoning" not in repr(exc_info.value.reason)
+@pytest.mark.parametrize("provider_class", [DeepSeekProvider, ZhipuProvider])
+async def test_actual_connection_refusal_obeys_retry_cap(provider_class: type[DeepSeekProvider] | type[ZhipuProvider]) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    def observe(kind: str, row: dict[str, Any]) -> None:
+        events.append((kind, row))
+    # Reserve a real local port without listening: the actual SDK must encounter
+    # connection refusal. No server returns a response and no execution succeeds.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        provider = provider_class(api_key="transport-contract-not-a-credential",
+                                    base_url=f"http://127.0.0.1:{port}/v1")
+        config = LLMConfig(provider="deepseek", model="unavailable-local-model", max_retries=99,
+                           retry_base_delay_seconds=0, request_timeout_seconds=0.3, attempt_observer=observe)
+        try:
+            with pytest.raises(APIConnectionError):
+                await asyncio.wait_for(provider.complete([Message("user", "transport failure check")], config), timeout=10)
+        finally:
+            await provider.close()
+    assert len([e for e in events if e[0] == "sdk_attempt_started"]) == 4
+    assert len([e for e in events if e[0] == "sdk_attempt_failed"]) == 4
+    assert not [e for e in events if e[0] == "sdk_attempt_succeeded"]
 
 
-@pytest.mark.asyncio
-async def test_stream_fails_closed_when_only_reasoning_is_returned() -> None:
-    async def chunks() -> Any:
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="hidden stream reasoning",
-                    ),
-                    finish_reason="stop",
-                )
-            ]
-        )
-
-    completions = _FakeCompletions([chunks()])
-    provider = DeepSeekProvider(api_key="test")
-    provider._client = _client(completions)
-
-    with pytest.raises(LLMCompletionError) as exc_info:
-        async for _delta in provider.stream(
-            [Message(role="user", content="question")],
-            _config(),
-        ):
-            pass
-
-    assert exc_info.value.reason == {
-        "code": "empty_final_content",
-        "provider": "deepseek",
-        "model": "deepseek-v4-pro",
-        "finish_reason": "stop",
-        "empty_final": True,
-    }
-    assert "hidden stream reasoning" not in repr(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_openai_compatible_defaults_do_not_enable_deepseek_extensions() -> None:
-    completions = _FakeCompletions([_response()])
-    provider = OpenAIProvider(api_key="test")
-    provider._client = _client(completions)
-
-    completion = await provider.complete(
-        [Message(role="user", content="question")],
-        LLMConfig(provider="openai", model="gpt-test", max_retries=0),
-    )
-
-    assert completion.text == "visible"
-    request = completions.calls[0]
-    assert "reasoning_effort" not in request
-    assert "extra_body" not in request
+@pytest.mark.parametrize("finish", [None, "length", "stop"])
+def test_stream_assembly_requires_final_marker_and_preserves_only_public_content(finish: str | None) -> None:
+    state = VisibleStreamAccumulator()
+    for content in (None, "authored ", "parser input"):
+        state.add(ChatCompletionChunk.model_validate({
+            "id": "authored-stream", "object": "chat.completion.chunk", "created": 0, "model": "parser",
+            "choices": [{"index": 0, "finish_reason": finish if content == "parser input" else None,
+                         "delta": {"content": content, "reasoning_content": "private-field-marker"}}],
+        }))
+    state.add(ChatCompletionChunk.model_validate({
+        "id": "authored-usage", "object": "chat.completion.chunk", "created": 0, "model": "parser",
+        "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }))
+    assert "private-field-marker" not in repr(state)
+    if finish == "stop":
+        result = state.completion(provider="zhipu", model="parser")
+        assert result.text == "authored parser input" and result.raw["usage"]["total_tokens"] == 7
+    else:
+        with pytest.raises(LLMCompletionError) as caught:
+            state.completion(provider="zhipu", model="parser")
+        assert caught.value.reason["code"] == ("output_truncated" if finish == "length" else "incomplete_stream")

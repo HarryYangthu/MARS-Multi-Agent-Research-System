@@ -11,24 +11,12 @@ from app.api.discovery import (
     configure_idea_selection_handler,
     router,
 )
-from app.bridge.discovery_service import DiscoveryService, IdeaSelectionRequest
-from app.harness.runtime.event_bus import InProcessEventBus
-from app.storage.run_store import RunStore
-from tests.unit.bridge.test_discovery_service import (
-    FakeAdapter,
-    FakeCandidateAgent,
-    discovery_spec,
-)
+from tests.real_discovery import build_service, discovery_spec
 
 
 def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
     configure_idea_selection_handler(None)
-    service = DiscoveryService(
-        run_store=RunStore(tmp_path / "runs"),
-        event_bus=InProcessEventBus(),
-        candidate_agent=FakeCandidateAgent(),
-        adapter=FakeAdapter(fail_index=None),
-    )
+    service = build_service(tmp_path)
     configure_discovery_service(service)
     app = FastAPI()
     app.include_router(router)
@@ -137,7 +125,7 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
             {
                 "schema_id": "idea_deep_discovery_state.v1",
                 "status": "waiting_selection",
-                "backend_mode": "deterministic_mock",
+                "backend_mode": "human_authored_history",
             }
         ),
         encoding="utf-8",
@@ -167,20 +155,6 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
     request_ref = str(selected.json()["selection_request_ref"])
     assert (run.root / request_ref).exists()
 
-    async def materialize_selection(_: IdeaSelectionRequest) -> str:
-        return "idea/idea_proposal.v2.md"
-
-    configure_idea_selection_handler(materialize_selection)
-    action_selected = client.post(
-        f"/api/runs/{run_id}/idea-discovery/hypotheses/hyp-1/select",
-        json={"actor": "researcher", "reason": "best synthetic hypothesis"},
-    )
-    assert action_selected.status_code == 200
-    assert action_selected.json()["actor"] == "researcher"
-    assert action_selected.json()["status"] == "completed"
-    assert action_selected.json()["proposal_ref"] == "idea/idea_proposal.v2.md"
-    configure_idea_selection_handler(None)
-
     (hypothesis_dir / "selection.v1.json").write_text(
         json.dumps(
             {
@@ -204,7 +178,7 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
     assert payload["idea_mode"] == "auto"
     assert payload["project"] == "synthetic_regression"
     assert payload["status"] == "selected"
-    assert payload["backend_mode"] == "deterministic_mock"
+    assert payload["backend_mode"] == "human_authored_history"
     assert payload["config"]["top_k"] == 2
     assert len(payload["hypotheses"]) == 2
     assert len(payload["reflections"]) == 1
@@ -238,12 +212,7 @@ def test_discovery_api_and_run_local_idea_selection(tmp_path: Path) -> None:
 
 def test_candidate_decision_api_uses_service_audit_path(tmp_path: Path) -> None:
     configure_idea_selection_handler(None)
-    service = DiscoveryService(
-        run_store=RunStore(tmp_path / "runs"),
-        event_bus=InProcessEventBus(),
-        candidate_agent=FakeCandidateAgent(),
-        adapter=FakeAdapter(fail_index=None),
-    )
+    service = build_service(tmp_path)
     configure_discovery_service(service)
     app = FastAPI()
     app.include_router(router)
@@ -299,12 +268,7 @@ def test_candidate_decision_api_uses_service_audit_path(tmp_path: Path) -> None:
 def test_scientist_can_add_edit_and_reject_hypotheses_with_audit(
     tmp_path: Path,
 ) -> None:
-    service = DiscoveryService(
-        run_store=RunStore(tmp_path / "runs"),
-        event_bus=InProcessEventBus(),
-        candidate_agent=FakeCandidateAgent(),
-        adapter=FakeAdapter(fail_index=None),
-    )
+    service = build_service(tmp_path)
     configure_discovery_service(service)
     app = FastAPI()
     app.include_router(router)

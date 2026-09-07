@@ -8,7 +8,6 @@ from pathlib import Path
 
 from app.bridge.extension_runtime import build_extension_runtime
 from app.execution.adapters.base import AdapterAction, AdapterRequest
-from app.execution.adapters.process import ProcessAdapter
 from synthetic_regression_adapter import candidate_configs
 
 
@@ -19,17 +18,8 @@ async def run() -> dict[str, object]:
         distribution="v30-core",
         pack_roots=(pack_root,),
     )
-    declaration = runtime.project_packs.get(
-        "synthetic_regression"
-    ).manifest.adapters["evaluator"]
-    adapter = ProcessAdapter(
-        name="synthetic_regression:evaluator",
-        argv=tuple(
-            sys.executable if token == "{python}" else token
-            for token in declaration.argv
-        ),
-        timeout_seconds=declaration.timeout_seconds,
-    )
+    # Retain the Pack's actual source-layout environment and workspace resolver.
+    adapter = runtime.adapters.get(runtime.adapter_name("synthetic_regression", "evaluator"))
     candidates = candidate_configs()
     envelopes: list[dict[str, object]] = []
     for index, candidate in enumerate(candidates):
@@ -53,7 +43,7 @@ async def run() -> dict[str, object]:
                             "hyperparameters.regularization",
                         ),
                     },
-                    "mode": "mock",
+                    "mode": "synthetic",
                     "candidate_count": 20,
                     "seed": index,
                     "fidelity": "F0",

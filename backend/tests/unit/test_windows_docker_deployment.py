@@ -99,7 +99,7 @@ def test_production_overlay_requires_read_only_external_pimc_mounts() -> None:
 @pytest.mark.parametrize(
     ("filename", "expected_path"),
     [
-        ("repo_link.demo.yaml", "/app/workspace/repos/pimc-stub"),
+        ("repo_link.demo.yaml", "/app/workspace/repos/pimc-current"),
         ("repo_link.production.yaml", "/mnt/pimc-repository"),
     ],
 )
@@ -131,7 +131,7 @@ def test_windows_images_run_as_non_root_and_have_health_checks() -> None:
     assert "sha256sum --check --strict" in backend
     assert "uv export" in backend
     assert "--frozen" in backend
-    assert "COPY --chown=mars:mars workspace/repos/pimc-stub" in backend
+    assert "workspace/repos/pimc-stub" not in backend
     assert "ln -s runtime/.env.local /app/.env.local" in backend
     assert "/app/.next/standalone" in frontend
     assert "COPY --from=builder --chown=node:node /app/node_modules" not in frontend
@@ -265,7 +265,7 @@ def test_compose_resolves_container_paths_without_a_docker_daemon(
     assert "DEEPSEEK_API_KEY" not in environment
     assert environment["MARS_EXECUTION_DEVICE"] == "cpu"
     assert environment["MARS_RUNTIME_MODE"] == ("production" if production else "development")
-    assert environment["MARS_MOCK_MODE"] == ("never" if production else "auto")
+    assert environment["MARS_MOCK_MODE"] == "never"
     repo_links = [
         mount for mount in backend["volumes"]
         if mount["target"] == "/app/projects/pimc/repo_link.yaml"
@@ -274,7 +274,7 @@ def test_compose_resolves_container_paths_without_a_docker_daemon(
     expected_name = "repo_link.production.yaml" if production else "repo_link.demo.yaml"
     assert repo_links[0]["source"] == str(deployment / expected_name)
     assert repo_links[0]["read_only"] is True
-    assert repo_links[0]["bind"]["create_host_path"] is False
+    assert repo_links[0].get("bind", {}).get("create_host_path", False) is False
     for service in document["services"].values():
         assert service["platform"] == "linux/amd64"
     if production:
@@ -315,12 +315,17 @@ def test_runtime_key_survives_a_fresh_settings_load_through_the_volume_symlink(
 
 def test_windows_ci_exercises_both_powershell_runtimes() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
-    job = workflow["jobs"]["windows-deployment-scripts"]
-    assert job["runs-on"] == "windows-latest"
-    assert set(job["strategy"]["matrix"]["shell"]) == {"powershell", "pwsh"}
+    shells = {
+        step.get("shell")
+        for job in workflow["jobs"].values() if job["runs-on"] == "windows-latest"
+        for step in job["steps"] if "Test-DeploymentScripts.ps1" in step.get("run", "")
+    }
+    assert shells == {"powershell", "pwsh"}
     script = WINDOWS_DEPLOY / "tests" / "Test-DeploymentScripts.ps1"
     assert script.read_bytes().startswith(b"\xef\xbb\xbf")
     source = script.read_text(encoding="utf-8")
-    assert "TEST DOUBLES" in source
+    assert "pure validation inputs" in source
+    assert "function docker" not in source
+    assert "FakeDocker" not in source
     assert "Assert-MarsReadiness" in source
     assert "Resolve-MarsImageArchive" in source

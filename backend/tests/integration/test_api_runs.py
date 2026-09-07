@@ -222,7 +222,7 @@ def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> No
             "entrypoint": "idea",
             "idea_mode": "auto",
             "idea_budget_profile": "balanced",
-            "project_inputs": {"candidate_count": 20, "mode": "mock"},
+            "project_inputs": {"candidate_count": 20, "mode": "synthetic"},
         },
     )
     assert response.status_code == 200, response.text
@@ -234,7 +234,7 @@ def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> No
     assert session.request.extra == {
         "idea_mode": "auto",
         "idea_budget_profile": "balanced",
-        "project_inputs": {"candidate_count": 20, "mode": "mock"},
+        "project_inputs": {"candidate_count": 20, "mode": "synthetic"},
     }
     options = session.run.subdir("input") / "run_request_options.v1.json"
     payload = json.loads(options.read_text(encoding="utf-8"))
@@ -690,7 +690,7 @@ def test_create_run_blocked_when_production_not_ready(
     ):
         monkeypatch.setenv(env, "")
     monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
-    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "mock")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "remote_gpu")
     import app.settings as settings_mod
 
     settings_mod._settings = None

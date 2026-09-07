@@ -53,7 +53,7 @@ def probe_gpu_resources(*, timeout_seconds: float = 2.0) -> dict[str, Any]:
         return {
             "available": False,
             "source": "nvidia-smi",
-            "message": "nvidia-smi not found; CPU/mock fallback remains available",
+            "message": "nvidia-smi not found; GPU availability is unverified",
             "devices": [],
             "summary": {"count": 0, "memory_total_mb": 0, "memory_used_mb": 0},
         }

@@ -27,7 +27,7 @@ const projects: Project[] = [
       "面向研究链路的多 Agent 底座，用可验证输出、人工门禁和完整 run 沉淀，把 idea、实验、编码、执行和写作串成端到端闭环。",
     proof: [
       "以 Bridge + Harness 解耦产品编排与可信机制",
-      "支持 mock pipeline：无 API key、无 GPU 也能跑通 demo",
+      "支持真实 Agent 调用与审计；缺少服务或数据时明确报告失败",
       "Coding Agent 预留 remote API / local vLLM 后训练模型加载路径",
     ],
     links: [
@@ -100,7 +100,7 @@ const metrics = [
 ];
 
 const timeline = [
-  { time: "2026", title: "MARS V0", detail: "以 mock pipeline 优先跑通端到端研究链路，再逐步替换真实 KB、LLM 与 execution。" },
+  { time: "2026", title: "MARS V0", detail: "通过真实模型、文献检索与可追踪的 Agent 循环推进研究任务。" },
   { time: "2025", title: "智能体架构", detail: "从单点 LLM 能力转向 Harness、HITL、后训练加载和自进化 Agent 工程体系。" },
   { time: "2024", title: "运维大模型", detail: "主责 RAG 链路，完成文档清洗、双索引、query 预处理、混合召回与 badcase 闭环。" },
   { time: "2023", title: "AI 算法工程", detail: "在通信、非线性系统建模和工程诊断场景中积累算法落地经验。" },

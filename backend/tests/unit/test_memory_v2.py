@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.local_memory import authored_note
+
 from pathlib import Path
 
 import pytest
@@ -89,12 +91,13 @@ def test_file_backend_adapter_keeps_legacy_store_surface(tmp_path: Path) -> None
 
 def test_chroma_backend_adapter_round_trip(tmp_path: Path) -> None:
     pytest.importorskip("chromadb")
-    stores = KBStores(base=tmp_path / "knowledge", store="chroma")
+    stores = reset_for_tests(base=tmp_path / "knowledge", store="chroma")
 
     written = ingest_memory(
         zone="methodology",
         text="chroma adapter stores governed procedural memory",
-        metadata={"project": "pimc", "kind": "methodology"},
+        metadata={"project": "pimc", "kind": "methodology",
+                  **authored_note(tmp_path, "chroma adapter stores governed procedural memory")},
         source_path="tests/chroma.md",
         memory_type="procedural",
         approved=True,
@@ -185,8 +188,8 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     eval_status = EvalStatus(passed=True, decision="pass")
     good = ingest_memory(
         zone="methodology",
-        text="stable router methodology with verified RES comparison",
-        metadata={"project": "pimc", "kind": "methodology"},
+        text="human methodology note: compare router RES",
+        metadata={"project": "pimc", "kind": "methodology", **authored_note(tmp_path, "human methodology note: compare router RES")},
         memory_type="procedural",
         confidence=0.9,
         eval_status=eval_status,

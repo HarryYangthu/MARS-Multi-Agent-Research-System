@@ -115,16 +115,6 @@ export function RunWorkbench({ runId }: { runId: string }): JSX.Element {
   return (
     <main className="min-h-screen bg-[#090c12] text-slate-100">
       <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
-        {source === "contract_fixture" ? (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-xs text-amber-100">
-            <span>
-              Contract preview · deterministic synthetic data · not a live research result
-            </span>
-            <Link className="text-amber-200 underline underline-offset-4" href="/discovery/live-run-id">
-              Open a REST-backed run
-            </Link>
-          </div>
-        ) : null}
         {error ? (
           <div className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-xs text-rose-200">
             Refresh failed; the last REST snapshot remains visible. {error.message}
@@ -329,12 +319,6 @@ function LoadError({ runId, error }: { runId: string; error: Error }): JSX.Eleme
         </p>
         <p className="mt-4 font-mono text-xs text-slate-600">{runId}</p>
         <div className="mt-6 flex flex-wrap gap-2">
-          <Link
-            className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-100"
-            href="/discovery/synthetic-preview"
-          >
-            Open contract preview
-          </Link>
           <Link className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300" href="/runs">
             Back to V3.0 runs
           </Link>

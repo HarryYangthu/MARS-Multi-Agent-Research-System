@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Tools V2 invariants against a completed mock demo run."""
+"""Verify Tools V2 invariants against an existing run and its actual tool audit."""
 from __future__ import annotations
 
 import argparse

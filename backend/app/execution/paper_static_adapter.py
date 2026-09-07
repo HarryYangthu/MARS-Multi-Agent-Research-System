@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-from app.execution.mock_simulation import MockResult
+from app.execution.results import SimulationResult
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.settings import repo_root
 
@@ -36,7 +36,7 @@ async def run_paper_static_simulation(
     *,
     bus_publish: Any | None = None,
     steps: int = 1,
-) -> MockResult:
+) -> SimulationResult:
     """Run the external static PIMC script for one MARS experiment."""
     started = time.monotonic()
     cfg = _paper_static_config()
@@ -184,13 +184,16 @@ async def run_paper_static_simulation(
     metrics = _metrics_from_summary(summary)
     if not metrics and loss_curve:
         metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
+    has_measurements = bool(metrics) and all(math.isfinite(value) for value in metrics.values())
     metrics.setdefault("returncode", float(returncode))
     metrics.setdefault("dry_run", 1.0 if dry_run else 0.0)
     metrics.setdefault("max_iters", float(max_iters))
     if summary_path is not None:
         metrics.setdefault("summary_written", 1.0)
 
-    status = "completed" if returncode == 0 else "failed"
+    status = "completed" if returncode == 0 and has_measurements and not dry_run else "failed"
+    if not has_measurements:
+        stderr_lines.append("execution produced no finite research measurements")
     if timed_out:
         status = "failed"
     if loss_curve == [] and "loss" in metrics:
@@ -276,7 +279,7 @@ async def run_paper_static_simulation(
             },
         )
 
-    return MockResult(
+    return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=time.monotonic() - started,
@@ -501,8 +504,8 @@ def _write_manifest(*, run_root: Path, experiment_id: str, payload: dict[str, An
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _failed_result(spec: Any, started: float, message: str) -> MockResult:
-    return MockResult(
+def _failed_result(spec: Any, started: float, message: str) -> SimulationResult:
+    return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
         duration_seconds=time.monotonic() - started,

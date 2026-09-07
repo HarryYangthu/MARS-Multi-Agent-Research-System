@@ -147,7 +147,7 @@ async def update_agent_llm_config(payload: AgentLlmUpdatePayload) -> AgentLlmCon
     for row in payload.agents:
         if row.agent not in agents_raw:
             raise HTTPException(status_code=404, detail=f"unknown agent '{row.agent}'")
-        if row.provider != "mock" and row.provider not in provider_map:
+        if row.provider == "mock" or row.provider not in provider_map:
             raise HTTPException(
                 status_code=422,
                 detail=f"unknown provider '{row.provider}' for agent '{row.agent}'",
@@ -326,7 +326,7 @@ def _read_agent_llm_config() -> AgentLlmConfigView:
     for agent in ordered_agents:
         body = _mutable_mapping(agents_raw.get(agent))
         model = _mutable_mapping(body.get("model"))
-        provider = str(model.get("provider") or "mock")
+        provider = str(model.get("provider") or "unconfigured")
         defaults = provider_map.get(provider, {})
         api_key_env = str(model.get("api_key_env") or defaults.get("api_key_env") or "")
         base_url = str(model.get("base_url") or defaults.get("base_url") or "")
@@ -336,7 +336,7 @@ def _read_agent_llm_config() -> AgentLlmConfigView:
                 agent=agent,
                 enabled=bool(body.get("enabled", True)),
                 provider=provider,
-                model=str(model.get("model") or "mock-1"),
+                model=str(model.get("model") or ""),
                 temperature=float(model.get("temperature", 0.7)),
                 max_tokens=int(model.get("max_tokens", 4096)),
                 api_key_env=api_key_env,
@@ -348,7 +348,7 @@ def _read_agent_llm_config() -> AgentLlmConfigView:
         )
     return AgentLlmConfigView(
         agents=rows,
-        providers=sorted(set(provider_map) | {"mock"}),
+        providers=sorted(set(provider_map) - {"mock"}),
         provider_defaults=provider_defaults,
         secrets_path=".env.local",
         note="API keys are written only to ignored local env files; configs/agents.yaml stores model routing.",

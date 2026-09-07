@@ -12,7 +12,6 @@ from loguru import logger
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.coding.opencode_adapter import OpenCodeAdapter
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
-from app.harness.llm.mock_provider import MockProvider
 from app.harness.llm.openai_provider import CustomEndpointProvider, LocalVllmProvider
 from app.harness.llm.post_training_loader import PostTrainingHandle, load_handle
 from app.harness.llm.provider_base import LLMConfig, LLMProvider
@@ -51,7 +50,6 @@ class CodingAgent(BaseAgent):
         settings = get_settings()
         if (
             settings.mars_coding_backend == "opencode"
-            and settings.mars_mock_mode != "always"
         ):
             adapter = OpenCodeAdapter()
             if not adapter.is_available():
@@ -154,14 +152,6 @@ class CodingAgent(BaseAgent):
         )
 
         settings = get_settings()
-        if settings.mars_mock_mode == "always":
-            if settings.is_production:
-                raise RuntimeError("production mode cannot use MARS_MOCK_MODE=always")
-            logger.info(
-                "MARS_MOCK_MODE=always — coding post-training endpoint uses mock"
-            )
-            return MockProvider(default_schema=self.output_schema), cfg
-
         try:
             api_key = env_or_local(handle.api_key_env or "")
             endpoint = handle.custom_endpoint or ""
@@ -190,15 +180,7 @@ class CodingAgent(BaseAgent):
                 cfg,
             )
         except Exception as exc:
-            if settings.is_production or settings.mars_mock_mode == "never":
-                raise RuntimeError(
-                    "coding post-training provider failed to initialize"
-                ) from exc
-            logger.warning(
-                "coding post-training provider failed to load ({}); falling back to mock",
-                exc,
-            )
-            return MockProvider(default_schema=self.output_schema), cfg
+            raise RuntimeError("coding post-training provider failed to initialize") from exc
 
     @staticmethod
     def _normalize_post_training(raw: object) -> Mapping[str, object]:

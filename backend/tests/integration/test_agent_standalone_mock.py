@@ -1,51 +1,47 @@
-"""5-Agent standalone-mode draft test, fully under MockProvider."""
+"""Five-agent real configuration checks. No fake successful drafts."""
 from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from app.agents.base import RunRequest
+from app.agents.base import BaseAgent, RunRequest
 from app.agents.coding.agent import CodingAgent
 from app.agents.execution.agent import ExecutionAgent
 from app.agents.experiment.agent import ExperimentAgent
 from app.agents.idea.agent import IdeaAgent
 from app.agents.writing.agent import WritingAgent
-from app.harness.schema.validator import validate_document
+from app.harness.agent_loop.executor import NativeAgentLoop
+from app.harness.llm.model_registry import get_agent_config
+
+AGENTS = (IdeaAgent, ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent)
 
 
-@pytest.fixture(autouse=True)
-def _clear_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    for env in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "QWEN_API_KEY",
-        "GEMINI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "CUSTOM_ENDPOINT_URL",
-        "CUSTOM_ENDPOINT_API_KEY",
-    ):
-        monkeypatch.delenv(env, raising=False)
-    monkeypatch.setenv("MARS_MOCK_MODE", "always")
-    monkeypatch.setenv("LOCAL_VLLM_BASE_URL", "")
-    import app.settings as settings_mod
-
-    settings_mod._settings = None
+@pytest.mark.parametrize("agent_cls", AGENTS)
+@pytest.mark.parametrize("mode", ["react", "reflection"])
+def test_each_agent_uses_shared_native_loop(agent_cls: type[BaseAgent], mode: str) -> None:
+    config = get_agent_config(agent_cls.name)
+    config = replace(config, raw={**config.raw, "loop": {"mode": mode}})
+    agent = agent_cls(agent_config=config)
+    assert isinstance(agent._executor, NativeAgentLoop)
+    assert agent.loop_policy.mode == mode
+    assert agent.output_schema == config.output_schema
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "agent_cls,schema",
-    [
-        (IdeaAgent, "proposal.v1"),
-        (ExperimentAgent, "experiment_plan.v1"),
-        (CodingAgent, "code_spec.v1"),
-        (ExecutionAgent, "run_log.v1"),
-        (WritingAgent, "report.v1"),
-    ],
-)
-async def test_each_agent_drafts_valid_artifact(agent_cls: type, schema: str) -> None:
-    agent = agent_cls()
-    request = RunRequest(project="pimc", user_request="standalone test prompt")
+@pytest.mark.parametrize("agent_cls", AGENTS)
+async def test_missing_provider_fails_without_creating_an_answer(
+    agent_cls: type[BaseAgent], tmp_path: Path,
+) -> None:
+    config = get_agent_config(agent_cls.name)
+    config = replace(config, model_provider="not-configured", api_key_env="", base_url="", debate_enabled=False)
+    agent = agent_cls(agent_config=config)
+    request = RunRequest(
+        project="pimc", user_request="Check explicit missing-provider failure.",
+        extra={"run_id": "missing-provider", "run_root": str(tmp_path)},
+    )
     context = await agent.build_context(request)
-    artifact = await agent.draft(request, context)
-    res = validate_document(artifact.text, expected_schema=schema)
-    assert res.valid, f"{agent_cls.__name__}: {res.errors}"
+    with pytest.raises(RuntimeError, match="not configured"):
+        await agent._draft_via_llm(request, context)
+    assert list(tmp_path.rglob("*.md")) == []

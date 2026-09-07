@@ -56,7 +56,7 @@ def load_project_repo(project: str) -> ProjectRepo:
         candidate = Path(raw_path)
         root = candidate if candidate.is_absolute() else (project_dir / candidate)
     else:
-        root = repo_root() / "workspace" / "repos" / "pimc-stub"
+        raise ValueError(f"no real repository configured for project {project!r}")
     allowed = _tuple(raw.get("allowed_paths")) or ("",)
     return ProjectRepo(
         project=project,

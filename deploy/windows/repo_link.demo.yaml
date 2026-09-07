@@ -1,8 +1,8 @@
 # Container paths only. Keep the protection rules aligned with
-# projects/pimc/repo_link.yaml; this is a public demo stub, not real PIMC code.
+# projects/pimc/repo_link.yaml; the real project repository must be supplied separately.
 project: pimc
 repo_mode: local_path
-repo_path: /app/workspace/repos/pimc-stub
+repo_path: /app/workspace/repos/pimc-current
 read_only: true
 sync_strategy: snapshot
 allowed_paths:

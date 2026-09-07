@@ -83,19 +83,15 @@ def test_project_pack_registry_rejects_incompatible_core(tmp_path: Path) -> None
         registry.load_paths([tmp_path])
 
 
-class _Adapter:
-    name = "demo"
-
-    async def invoke(self, request: AdapterRequest) -> AdapterResponse:
-        return AdapterResponse(request_id=request.request_id, status="ok")
-
-
 @pytest.mark.asyncio
 async def test_adapter_contract_and_duplicate_registration() -> None:
+    from app.execution.adapters.process import ProcessAdapter
+    import sys
+    adapter = ProcessAdapter(name="demo", argv=(sys.executable, "-c", "raise SystemExit(2)"))
     registry = AdapterRegistry()
-    registry.register("demo", _Adapter())
+    registry.register("demo", adapter)
     with pytest.raises(ValueError, match="duplicate"):
-        registry.register("demo", _Adapter())
+        registry.register("demo", adapter)
     result = await registry.get("demo").invoke(
         AdapterRequest(
             action=AdapterAction.READINESS,
@@ -103,4 +99,5 @@ async def test_adapter_contract_and_duplicate_registration() -> None:
             project="demo",
         )
     )
-    assert result.status == "ok"
+    assert result.status == "failed"
+    assert result.error_code

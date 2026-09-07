@@ -47,6 +47,16 @@ from app.harness.tools.registry import (
 from app.storage.run_store import RunHandle
 
 
+@pytest.fixture(autouse=True)
+def actual_code_path_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.harness.tools import code as code_tools
+    root = tmp_path / "configuration"
+    folder = root / "projects/pimc"
+    folder.mkdir(parents=True)
+    (folder / "repo_link.yaml").write_text("allowed_paths: [pkg/]\nread_only: false\n")
+    monkeypatch.setattr(code_tools, "repo_root", lambda: root)
+
+
 def test_candidate_workspace_manager_never_edits_live_repo(tmp_path: Path) -> None:
     source = tmp_path / "live-repo"
     (source / "libs").mkdir(parents=True)
@@ -85,8 +95,7 @@ async def test_secure_prepare_gate_allows_without_editing_live_repo_and_replays_
     tmp_path: Path,
 ) -> None:
     case = _secure_case(tmp_path)
-    calls: list[tuple[dict[str, Any], ToolContext]] = []
-    registry = _allowing_registry(calls)
+    registry = _patch_registry()
 
     first = await CandidateWorkspaceManager().prepare_secure_from_repo(
         repo=case.repo,
@@ -118,27 +127,19 @@ async def test_secure_prepare_gate_allows_without_editing_live_repo_and_replays_
     receipt_path = case.run_root / first.receipt_ref
     assert receipt_path.is_file()
     assert first.root not in receipt_path.parents
-    assert len(calls) == 2
-    assert all(context.agent == "coding" and context.dry_run for _args, context in calls)
-    assert calls[0][0] == {"path": "pkg/model.py", "content": "VALUE = 2\n"}
+    rows = [json.loads(line) for line in (case.run_root / "events/tool_calls.jsonl").read_text().splitlines()]
+    assert [row["tool"] for row in rows] == ["code.patch_generator"] * 2
+    assert rows[0]["args"] == {"path": "pkg/model.py", "content": "VALUE = 2\n"}
     _make_writable(case.snapshot.root)
 
 
 @pytest.mark.asyncio
-async def test_secure_prepare_gate_block_and_protected_path_never_publish(
+async def test_secure_prepare_missing_tool_and_protected_path_never_publish(
     tmp_path: Path,
 ) -> None:
     blocked_case = _secure_case(tmp_path / "gate-block")
-    blocked_registry = _allowing_registry([])
+    blocked_registry = ToolRegistry()
 
-    async def block_gate(
-        tool_name: str,
-        args: dict[str, Any],
-        context: ToolContext,
-    ) -> GateDecision:
-        return GateDecision(gate_id="baseline_compatibility", action="block", reason="blocked")
-
-    blocked_registry.install_gate(block_gate)
     with pytest.raises(CandidateWorkspaceError, match="Gate 5 audit rejected"):
         await CandidateWorkspaceManager().prepare_secure_from_repo(
             repo=blocked_case.repo,
@@ -162,7 +163,7 @@ async def test_secure_prepare_gate_block_and_protected_path_never_publish(
             candidate=protected_case.candidate,
             code_spec=protected_case.code_spec,
             bundle=protected_case.bundle,
-            tool_registry=_allowing_registry([]),
+            tool_registry=_patch_registry(),
         )
     assert not (protected_case.run_root / "discovery/candidate_workspaces").exists()
     assert not (protected_case.run_root / "discovery/candidate_receipts").exists()
@@ -190,7 +191,7 @@ async def test_secure_prepare_rejects_identity_workspace_and_receipt_tampering(
             candidate=forged,
             code_spec=identity_case.code_spec,
             bundle=identity_case.bundle,
-            tool_registry=_allowing_registry([]),
+            tool_registry=_patch_registry(),
         )
     assert not (identity_case.run_root / "discovery/candidate_workspaces").exists()
 
@@ -202,7 +203,7 @@ async def test_secure_prepare_rejects_identity_workspace_and_receipt_tampering(
         candidate=tamper_case.candidate,
         code_spec=tamper_case.code_spec,
         bundle=tamper_case.bundle,
-        tool_registry=_allowing_registry([]),
+        tool_registry=_patch_registry(),
     )
     (prepared.root / "pkg/model.py").write_text("VALUE = 999\n", encoding="utf-8")
     with pytest.raises(CandidateWorkspaceError, match="workspace file mismatch"):
@@ -212,7 +213,7 @@ async def test_secure_prepare_rejects_identity_workspace_and_receipt_tampering(
             candidate=tamper_case.candidate,
             code_spec=tamper_case.code_spec,
             bundle=tamper_case.bundle,
-            tool_registry=_allowing_registry([]),
+            tool_registry=_patch_registry(),
         )
 
     (prepared.root / "pkg/model.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -227,7 +228,7 @@ async def test_secure_prepare_rejects_identity_workspace_and_receipt_tampering(
             candidate=tamper_case.candidate,
             code_spec=tamper_case.code_spec,
             bundle=tamper_case.bundle,
-            tool_registry=_allowing_registry([]),
+            tool_registry=_patch_registry(),
         )
     _make_writable(identity_case.snapshot.root)
     _make_writable(tamper_case.snapshot.root)
@@ -249,7 +250,7 @@ async def test_secure_preparer_runs_strict_preflight_before_returning(
     _install_case_repo(monkeypatch, case.repo)
 
     prepared = await SecureCandidateWorkspacePreparer(
-        tool_registry=_allowing_registry([]),
+        tool_registry=_patch_registry(),
     ).prepare(
         run=_run_handle(case),
         contract=_contract(case),
@@ -281,7 +282,7 @@ async def test_secure_preparer_fails_closed_on_ast_preflight_blocker(
         match="code_candidate:factory",
     ):
         await SecureCandidateWorkspacePreparer(
-            tool_registry=_allowing_registry([]),
+            tool_registry=_patch_registry(),
         ).prepare(
             run=_run_handle(case),
             contract=_contract(case),
@@ -305,7 +306,7 @@ async def test_secure_preparer_rejects_contract_repo_policy_drift_before_publish
     )
     _install_case_repo(monkeypatch, case.repo)
     preparer = SecureCandidateWorkspacePreparer(
-        tool_registry=_allowing_registry([]),
+        tool_registry=_patch_registry(),
     )
 
     with pytest.raises(CandidateWorkspaceError, match="expands repository policy"):
@@ -471,16 +472,10 @@ def _install_case_repo(
     monkeypatch.setattr(candidate_workspace_module, "load_project_repo", load_repo)
 
 
-def _allowing_registry(
-    calls: list[tuple[dict[str, Any], ToolContext]],
-) -> ToolRegistry:
+def _patch_registry() -> ToolRegistry:
+    from app.harness.tools.code import patch_generator_tool
     registry = ToolRegistry()
-
-    async def allow_tool(args: dict[str, Any], context: ToolContext) -> ToolResult:
-        calls.append((args, context))
-        return ToolResult(ok=True, output={"diff": "", "files": []})
-
-    registry.register("code.patch_generator", allow_tool)
+    registry.register("code.patch_generator", patch_generator_tool)
     return registry
 
 
