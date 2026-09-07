@@ -10,7 +10,7 @@ import pytest
 from openai import APIConnectionError, APIStatusError
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
-from app.harness.llm.openai_provider import DeepSeekProvider, OpenAIProvider, _is_retryable_error
+from app.harness.llm.openai_provider import DeepSeekProvider, OpenAIProvider, ZhipuProvider, VisibleStreamAccumulator, _is_retryable_error
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, Message
 
 
@@ -89,7 +89,8 @@ def test_retry_classifier_on_typed_error_inputs(status: int, retryable: bool) ->
 
 
 @pytest.mark.asyncio
-async def test_actual_connection_refusal_obeys_retry_cap() -> None:
+@pytest.mark.parametrize("provider_class", [DeepSeekProvider, ZhipuProvider])
+async def test_actual_connection_refusal_obeys_retry_cap(provider_class: type[DeepSeekProvider] | type[ZhipuProvider]) -> None:
     events: list[tuple[str, dict[str, Any]]] = []
     def observe(kind: str, row: dict[str, Any]) -> None:
         events.append((kind, row))
@@ -98,7 +99,7 @@ async def test_actual_connection_refusal_obeys_retry_cap() -> None:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-        provider = DeepSeekProvider(api_key="transport-contract-not-a-credential",
+        provider = provider_class(api_key="transport-contract-not-a-credential",
                                     base_url=f"http://127.0.0.1:{port}/v1")
         config = LLMConfig(provider="deepseek", model="unavailable-local-model", max_retries=99,
                            retry_base_delay_seconds=0, request_timeout_seconds=0.3, attempt_observer=observe)
@@ -110,3 +111,26 @@ async def test_actual_connection_refusal_obeys_retry_cap() -> None:
     assert len([e for e in events if e[0] == "sdk_attempt_started"]) == 4
     assert len([e for e in events if e[0] == "sdk_attempt_failed"]) == 4
     assert not [e for e in events if e[0] == "sdk_attempt_succeeded"]
+
+
+@pytest.mark.parametrize("finish", [None, "length", "stop"])
+def test_stream_assembly_requires_final_marker_and_preserves_only_public_content(finish: str | None) -> None:
+    state = VisibleStreamAccumulator()
+    for content in (None, "authored ", "parser input"):
+        state.add(ChatCompletionChunk.model_validate({
+            "id": "authored-stream", "object": "chat.completion.chunk", "created": 0, "model": "parser",
+            "choices": [{"index": 0, "finish_reason": finish if content == "parser input" else None,
+                         "delta": {"content": content, "reasoning_content": "private-field-marker"}}],
+        }))
+    state.add(ChatCompletionChunk.model_validate({
+        "id": "authored-usage", "object": "chat.completion.chunk", "created": 0, "model": "parser",
+        "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }))
+    assert "private-field-marker" not in repr(state)
+    if finish == "stop":
+        result = state.completion(provider="zhipu", model="parser")
+        assert result.text == "authored parser input" and result.raw["usage"]["total_tokens"] == 7
+    else:
+        with pytest.raises(LLMCompletionError) as caught:
+            state.completion(provider="zhipu", model="parser")
+        assert caught.value.reason["code"] == ("output_truncated" if finish == "length" else "incomplete_stream")

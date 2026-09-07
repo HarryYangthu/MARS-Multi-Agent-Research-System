@@ -45,7 +45,7 @@ _REMOTE_RESPONSE_PATH = "response.json"
 
 
 class RemoteJobClient(Protocol):
-    """Narrow seam implemented by RemoteExecutor and fake clients."""
+    """Narrow seam implemented by configured real execution clients."""
 
     async def readiness(self) -> RemoteReadiness: ...
 

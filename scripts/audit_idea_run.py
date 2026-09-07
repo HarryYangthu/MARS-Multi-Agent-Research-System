@@ -17,6 +17,7 @@ from app.agents.idea.research import evidence_inventory, material_errors
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.schema.validator import validate_document
+from scripts.idea_live_resume import audit_resumptions
 
 
 def audit_run(root: Path) -> dict[str, Any]:
@@ -33,7 +34,7 @@ def audit_run(root: Path) -> dict[str, Any]:
     observations = state["history"]
     inventory = evidence_inventory(observations)
     proposal = root / "idea" / "idea_proposal.v1.md"
-    errors: list[str] = []
+    resumptions, errors = audit_resumptions(root, trace_root)
     schema_valid = False
     material_valid = False
     metadata: dict[str, Any] = {}
@@ -87,6 +88,7 @@ def audit_run(root: Path) -> dict[str, Any]:
                for row in inventory["reads"]]
     return {
         "run_id": summary["run_id"], "source_commit": request["source_commit"], "source_tree": request["source_tree"],
+        "source_resumptions": resumptions,
         "recorded_status": summary["status"], "loop_status": state["status"], "pending": state["pending"],
         "audit_passed": not errors, "errors": errors, "trace_consistent": audit["consistent"],
         "schema_valid": schema_valid, "material_valid": material_valid,
@@ -135,6 +137,10 @@ def render_report(report: dict[str, Any]) -> str:
              "| --- | --- | --- | --- |"]
     for row in report["tools"]:
         lines.append(f"| {row['step']} | {row['tool']} | {row['ok']} | {cell(row['reason'])} |")
+    if report.get("source_resumptions"):
+        lines.extend(["", "## 断点续跑源码", ""])
+        for row in report["source_resumptions"]:
+            lines.append(f"- `{row['source_commit']}`；文件树 `{row['source_tree']}`；沿用原调用计数和预算。")
     lines.extend(["", "## 实际下载与阅读范围", "", f"证据计数：{report['evidence_counts']}", ""])
     for row in report["downloaded_sources"]:
         lines.extend([f"- [{row['title']}]({row['url']})；{row['bytes']} bytes；SHA-256 `{row['sha256']}`。"])

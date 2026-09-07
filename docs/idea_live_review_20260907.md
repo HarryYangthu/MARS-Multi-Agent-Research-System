@@ -96,3 +96,44 @@ Changes made in response:
 The next real run must satisfy these checks and an independent implementation
 review. Real PIMC data, baseline integration and GPU experiments remain outside
 this supplied evaluation; no 2 dB performance claim is supported.
+
+## Interrupted high-effort run and transport repair
+
+Run `idea_lut_20260907T090254_d07f5a` started from clean source `f9623a0`
+(published as `101d129`). Before any resumption it made 9 model requests,
+received 8 model responses, performed 10 SDK attempts and 8 tool calls, and
+failed with `model_error`. The ninth request received HTTP 502 twice, after
+approximately 285 and 287 seconds. This is an observed upstream failure;
+a non-streaming gateway deadline is a hypothesis, not a proven diagnosis.
+Increasing the client timeout alone is not an established fix.
+
+The actual tool history contains two empty memory queries, three arXiv searches
+(10 distinct search sources), and three PDF fetch attempts. KAN and SineKAN
+exceeded the configured 12 MiB limit. Free-Knots KAN was downloaded successfully
+(2,442,172 bytes, SHA-256
+`b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b`).
+Only pages 1–2 and a truncated excerpt of page 3 were visible to the model.
+The run lasted 1,252.95 seconds; reported tokens total 69,858, excluding unknown
+usage from the two failed SDK attempts. No candidate or Reflection was produced.
+
+The Zhipu completion path now consumes the real SDK stream inside each bounded
+retry attempt. A fresh accumulator isolates partial responses between attempts;
+only visible output and usage are retained, with no private reasoning content.
+Missing terminal markers, truncated output and empty content fail explicitly.
+Public progress receipts contain chunk and visible-character counts.
+Official interface reference: https://docs.bigmodel.cn/cn/guide/capabilities/streaming .
+
+The live CLI now supports `--resume-run` for interrupted/model-error runs only.
+It preserves original inputs, invocation, counters, remaining budgets and all
+previous events. Before execution it snapshots the previous checkpoint, facts
+and summary, hashes the old event prefix, and records the new source revision.
+The audit checks these preserved files and lists every resumption source.
+An exclusive filesystem lock rejects concurrent attempts; unknown tool outcomes
+cannot be replayed automatically. Resumption is not a new clean trial.
+
+Validation of this checkpoint: 64 targeted tests passed, including actual SDK
+connection refusal followed by actual failed-request resumption, public stream
+parsing, retry limits, Debate contracts, local trace redaction, real remote-worker
+filesystem validation and real OpenSSH connection refusal. No successful remote
+GPU or model response was invented. Targeted typing passed on the installed
+Python 3.12 environment; Python 3.11 CI remains a separate gate.

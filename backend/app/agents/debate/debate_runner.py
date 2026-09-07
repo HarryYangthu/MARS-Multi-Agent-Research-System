@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -65,6 +65,8 @@ class DebateResult:
 
 def _auto_mode(agent_config: AgentConfig) -> DebateMode:
     """All configured roles must have real providers."""
+    if not provider_configured_for_agent(agent_config):
+        raise RuntimeError("debate primary provider is not configured")
     avail = available_providers()
     if provider_configured_for_agent(agent_config):
         avail.add(agent_config.model_provider)
@@ -142,20 +144,7 @@ def _role_llm_config(
 ) -> LLMConfig:
     """Clone every bounded generation control while changing role routing only."""
 
-    return LLMConfig(
-        provider=provider,
-        model=model,
-        temperature=base.temperature,
-        max_tokens=base.max_tokens,
-        top_p=base.top_p,
-        response_schema=base.response_schema,
-        thinking_enabled=base.thinking_enabled,
-        reasoning_effort=base.reasoning_effort,
-        request_timeout_seconds=base.request_timeout_seconds,
-        max_retries=base.max_retries,
-        retry_base_delay_seconds=base.retry_base_delay_seconds,
-        extra=dict(base.extra),
-    )
+    return replace(base, provider=provider, model=model, extra=dict(base.extra))
 
 
 def _resolve_roles(participants: tuple[Mapping[str, Any], ...]) -> list[str]:
@@ -385,8 +374,7 @@ def _validate_role_completion(
     if role != "judge" or not output_schema:
         return text
 
-    # Match BaseAgent's normal completion boundary: fenced documents and a
-    # short preamble are transport noise, not schema failures.
+    # Preserve the same unmodified document boundary as BaseAgent.
     normalized = BaseAgent._unwrap_llm_text(text)
     if not normalized.strip():
         raise DebateRoleOutputError(
@@ -409,10 +397,9 @@ def _validate_role_completion(
 
 
 def _artifact_from_text(text: str, output_schema: str) -> Artifact:
-    from app.harness.schema.frontmatter_parser import close_unclosed_frontmatter
     from app.harness.schema.frontmatter_parser import parse as parse_fm
 
-    cleaned = close_unclosed_frontmatter(BaseAgent._unwrap_llm_text(text))
+    cleaned = BaseAgent._unwrap_llm_text(text)
     try:
         parsed = parse_fm(cleaned)
         metadata = parsed.metadata

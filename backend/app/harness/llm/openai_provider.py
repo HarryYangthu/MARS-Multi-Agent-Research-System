@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -20,6 +21,49 @@ from app.harness.llm.provider_base import (
 
 
 _T = TypeVar("_T")
+
+
+@dataclass
+class VisibleStreamAccumulator:
+    """Pure public-output parser; reasoning fields are never copied or retained."""
+
+    pieces: list[str] = field(default_factory=list)
+    usage: dict[str, Any] | None = None
+    finish_reason: str | None = None
+    fingerprint: str | None = None
+    chunks: int = 0
+    visible_chars: int = 0
+
+    def add(self, chunk: Any) -> None:
+        self.chunks += 1
+        usage = _usage_payload(getattr(chunk, "usage", None))
+        if usage is not None:
+            self.usage = usage
+        fingerprint = getattr(chunk, "system_fingerprint", None)
+        if fingerprint:
+            self.fingerprint = str(fingerprint)
+        if not chunk.choices:
+            return
+        choice = chunk.choices[0]
+        piece = str(choice.delta.content or "")
+        if piece:
+            self.pieces.append(piece)
+            self.visible_chars += len(piece)
+        reason = getattr(choice, "finish_reason", None)
+        if reason is not None:
+            self.finish_reason = str(reason)
+
+    def completion(self, *, provider: str, model: str) -> Completion:
+        text = "".join(self.pieces)
+        code = ("output_truncated" if self.finish_reason == "length" else
+                "incomplete_stream" if self.finish_reason != "stop" else
+                "empty_final_content" if not text.strip() else "")
+        if code:
+            raise LLMCompletionError(code=code, provider=provider, model=model,
+                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip()), usage=self.usage)
+        return Completion(text=text, provider=provider, model=model,
+                          raw={"usage": self.usage, "finish_reason": self.finish_reason,
+                               "system_fingerprint": self.fingerprint, "streamed": True, "stream_chunks": self.chunks})
 
 
 class _OpenAICompatProvider(LLMProvider):
@@ -228,6 +272,29 @@ class _OpenAICompatProvider(LLMProvider):
 class ZhipuProvider(_OpenAICompatProvider):
     def __init__(self, *, api_key: str, base_url: str = "https://open.bigmodel.cn/api/paas/v4") -> None:
         super().__init__(api_key=api_key, base_url=base_url, provider_name="zhipu")
+
+    async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
+        """Consume real SSE to avoid waiting for a complete long response at a gateway.
+
+        Each retry owns a fresh accumulator. Partial content from an unsuccessful
+        attempt can never be concatenated with a subsequent attempt's answer.
+        """
+        client = self._get_client()
+        kwargs = self._request_kwargs(messages, config, stream=True)
+
+        async def consume() -> Completion:
+            state = VisibleStreamAccumulator()
+            stream = await client.chat.completions.create(**kwargs)
+            async with stream:
+                async for chunk in stream:
+                    state.add(chunk)
+                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
+                        config.attempt_observer("sdk_stream_progress", {
+                            "chunks": state.chunks, "visible_chars": state.visible_chars,
+                        })
+            return state.completion(provider=self.name, model=config.model)
+
+        return await self._request_with_retries(consume, config=config)
 
 
 class OpenAIProvider(_OpenAICompatProvider):
