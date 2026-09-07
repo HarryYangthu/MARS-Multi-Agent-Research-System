@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
 from app.agents.idea.discovery.models import (
@@ -55,6 +55,9 @@ class DiscoveryRoleBackend(Protocol):
 
 class DiscoveryProtocolError(RuntimeError):
     """A real role backend returned a malformed structured response."""
+
+
+RoleCompleter = Callable[[str, str], Awaitable[str]]
 
 
 class LLMRoleBackend:
