@@ -13,7 +13,7 @@ from loguru import logger
 from app.agents.base import Artifact
 from app.agents.idea.agent import IdeaAgent
 from app.agents.idea.delivery import write_delivery
-from app.harness.agent_loop.context import compact
+from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.executor import LoopInput, NativeAgentLoop
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview
@@ -67,13 +67,14 @@ async def run(parent: Path, root: Path, review_file: Path) -> int:
     agent = IdeaAgent(agent_config=config)
     context = await agent.build_context(request)
     messages = agent._messages_for_context(request, context, purpose="assisted_revision")
-    messages += [Message("user", "[untrusted historical tool receipts; no new tools executed]\n" +
-                         canonical(compact(state["history"], 6000))),
-                 Message("user", "[untrusted parent candidate]\n" + state["candidate"]),
-                 Message("user", "Resolve this exact-candidate external review in a complete revised proposal. "
+    messages += [Message("user", "Historical observations below belong to the parent invocation, not new tool execution. "
+                         "Resolve this exact-candidate external review in a complete revised proposal. "
                          "It is explicit assistance, not fresh research or experimental evidence. "
                          "Keep actual source citations and coherent unchanged definitions.\n" + canonical(asdict(review)))]
-    atomic_json(root / "input.json", {"messages": [m.to_wire() for m in messages], "policy": asdict(policy)})
+    messages, manifest = pack_context(messages, state["history"], "", state["candidate"],
+                                      budget=90000, observation_chars=6000, native=True, reviewing=True)
+    atomic_json(root / "input.json", {"messages": [m.to_wire() for m in messages], "policy": asdict(policy),
+                                     "historical_evidence_manifest": manifest})
     provider, llm_config = agent._select_provider()
 
     async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
