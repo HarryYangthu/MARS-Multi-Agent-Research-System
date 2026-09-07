@@ -12,7 +12,7 @@ from app.agents.base import RunRequest
 from app.agents.idea.agent import IdeaAgent
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.llm.model_registry import get_agent_config
-from scripts.idea_live_resume import audit_resumptions, exclusive_run, load_resume, record_resumption
+from scripts.idea_live_resume import audit_resumptions, exclusive_run, load_resume, record_resumption, resume_scenario
 
 
 def test_exclusive_run_rejects_a_second_holder_and_releases_on_exception(tmp_path: Path) -> None:
@@ -67,3 +67,23 @@ def test_missing_checkpoint_cannot_start_a_resumed_evaluation(tmp_path: Path) ->
     atomic_json(tmp_path / "summary.json", {"run_id": tmp_path.name})
     with pytest.raises(ValueError, match="exactly one"):
         load_resume(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_canonical_checkpoint_roundtrip_preserves_original_prompt_order(tmp_path: Path) -> None:
+    scenario = {"question": "Authored context serialization input", "project": "pimc", "scope": "method_proposal",
+                "requirements": {"min_sources": 2, "min_pdfs": 1, "require_parameter_budget": True, "max_parameter_ratio": 1.2}}
+    agent = IdeaAgent()
+    request = RunRequest(project="pimc", user_request=str(scenario["question"]),
+                         extra={"idea_requirements": scenario["requirements"]})
+    context = await agent.build_context(request)
+    messages = [asdict(m) for m in agent._messages_for_context(request, context, purpose="serialization")]
+    atomic_json(tmp_path / "request.json", {"scenario": scenario, "messages": messages})
+    initial = json.loads((tmp_path / "request.json").read_text())
+    restored = resume_scenario(initial)
+    request.extra["idea_requirements"] = restored["requirements"]
+    roundtrip = await agent.build_context(request)
+    assert messages == [asdict(m) for m in agent._messages_for_context(request, roundtrip, purpose="serialization")]
+    initial["scenario"]["requirements"]["min_sources"] = 999
+    with pytest.raises(ValueError, match="requirements differ"):
+        resume_scenario(initial)

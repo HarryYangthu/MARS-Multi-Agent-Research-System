@@ -26,7 +26,7 @@ from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.validator import validate_document
 from app.settings import reset_settings_cache
-from scripts.idea_live_resume import exclusive_run, load_resume, record_resumption
+from scripts.idea_live_resume import exclusive_run, load_resume, record_resumption, resume_scenario
 
 
 def git_value(*args: str) -> str:
@@ -54,7 +54,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
     initial: dict[str, Any] = {}
     if args.resume_run:
         initial, prior_summary, checkpoint, _ = load_resume(root)
-        scenario = initial["scenario"]
+        scenario = resume_scenario(initial)
         if args.mode and args.mode != initial["loop_policy"]["mode"]:
             raise ValueError("resume cannot change the original loop mode")
     else:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fcntl
+import copy
 import hashlib
 import json
 import shutil
@@ -17,6 +18,26 @@ from app.harness.agent_loop.trace import atomic_json, audit_trace
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def resume_scenario(initial: dict[str, Any]) -> dict[str, Any]:
+    """Restore formatting order from the original prompt, without changing values.
+
+    Canonical checkpoint JSON sorts mapping keys, but the original prompt contains
+    a JSON string whose key order is part of its fingerprint. Both the reconstructed
+    messages and the native fingerprint still have to match exactly before resume.
+    """
+    scenario: dict[str, Any] = copy.deepcopy(initial["scenario"])
+    prefix = str(scenario["question"]) + "\n\nHost evaluation requirements (not experimental facts):\n"
+    matches = [m["content"][len(prefix):] for m in initial["messages"]
+               if m["role"] == "user" and m["content"].startswith(prefix)]
+    if len(matches) != 1:
+        raise ValueError("original task requirements are not unambiguous")
+    ordered, _ = json.JSONDecoder().raw_decode(matches[0])
+    if ordered != scenario["requirements"]:
+        raise ValueError("original prompt requirements differ from the saved scenario")
+    scenario["requirements"] = ordered
+    return scenario
 
 
 @contextmanager

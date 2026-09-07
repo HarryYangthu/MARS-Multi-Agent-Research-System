@@ -137,3 +137,10 @@ parsing, retry limits, Debate contracts, local trace redaction, real remote-work
 filesystem validation and real OpenSSH connection refusal. No successful remote
 GPU or model response was invented. Targeted typing passed on the installed
 Python 3.12 environment; Python 3.11 CI remains a separate gate.
+
+The first live resume preflight correctly rejected a prompt fingerprint mismatch:
+canonical checkpoint serialization had sorted the requirements mapping, changing
+the ordering of its JSON string in the prompt. No API request occurred. Resume
+now recovers that order from the preserved original prompt, requires identical
+requirement values, and still checks exact messages plus the native fingerprint.
+This restores serialization identity without weakening configuration checks.
