@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,23 @@ from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.schema.validator import validate_document
 from scripts.idea_live_resume import audit_resumptions
+
+
+def recorded_proposal(root: Path, summary: dict[str, Any]) -> Path:
+    """Audit the recorded version, never substitute an earlier successful draft."""
+    raw = summary.get("proposal_path")
+    if raw is None:
+        return root / "idea" / "idea_proposal.v1.md"
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("proposal_path must name a recorded proposal file")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    if (path.parent != (root / "idea").resolve()
+            or not re.fullmatch(r"idea_proposal\.v[1-9][0-9]*\.md", path.name)):
+        raise ValueError("recorded proposal must stay in this run's versioned idea directory")
+    return path
 
 
 def audit_run(root: Path) -> dict[str, Any]:
@@ -33,7 +51,7 @@ def audit_run(root: Path) -> dict[str, Any]:
     events = [json.loads(line) for line in (trace_root / "events.jsonl").read_text().splitlines()]
     observations = state["history"]
     inventory = evidence_inventory(observations)
-    proposal = root / "idea" / "idea_proposal.v1.md"
+    proposal = recorded_proposal(root, summary)
     resumptions, errors = audit_resumptions(root, trace_root)
     schema_valid = False
     material_valid = False
@@ -88,6 +106,7 @@ def audit_run(root: Path) -> dict[str, Any]:
                for row in inventory["reads"]]
     return {
         "run_id": summary["run_id"], "source_commit": request["source_commit"], "source_tree": request["source_tree"],
+        "audited_proposal": str(proposal),
         "source_resumptions": resumptions,
         "recorded_status": summary["status"], "loop_status": state["status"], "pending": state["pending"],
         "audit_passed": not errors, "errors": errors, "trace_consistent": audit["consistent"],
@@ -96,6 +115,7 @@ def audit_run(root: Path) -> dict[str, Any]:
         "scientific_validated": False, "project_ready": False, "simulation_executed": False,
         "duration_seconds": summary.get("duration_seconds"), "counts": state["counts"],
         "sdk_attempt_failures": sum(e["kind"] == "sdk_attempt_failed" for e in events),
+        "provider_error": audit.get("provider_error"),
         "usage": state["usage"], "recorded_usage_complete": state["usage_complete"],
         "usage_complete": bool(state["usage_complete"] and state["pending"] != "model"
                                and not any(e["kind"] == "sdk_attempt_failed" for e in events)),
@@ -148,6 +168,8 @@ def render_report(report: dict[str, Any]) -> str:
         pages = ", ".join(str(p["page"]) + ("（节选截断）" if p.get("truncated") else "") for p in row["pages"])
         lines.append(f"- {row['title']}：可见页 {pages}；理由：{row['reason']}。")
     lines.extend(["", "## 阻塞或限制", ""])
+    if report.get("provider_error"):
+        lines.append(f"- 最后一次 SDK 尝试的错误：`{report['provider_error']}`。")
     lines.extend(f"- {error}" for error in report["errors"])
     lines.extend(f"- {limit}" for limit in report["limits"])
     return "\n".join(lines) + "\n"

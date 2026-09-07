@@ -10,7 +10,7 @@ import pytest
 
 from app.agents.base import RunRequest
 from app.agents.idea.agent import IdeaAgent
-from app.harness.agent_loop.trace import atomic_json
+from app.harness.agent_loop.trace import atomic_json, audit_trace
 from app.harness.llm.model_registry import get_agent_config
 from scripts.idea_live_resume import audit_resumptions, exclusive_run, load_resume, record_resumption, resume_scenario
 
@@ -54,6 +54,9 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
     assert after["counts"]["model_requests"] == after["counts"]["sdk_attempts"] == 2
     assert after["counts"]["model_responses"] == 0 and after["candidate"] == ""
     assert after["usage_complete"] is False
+    diagnosis = audit_trace(checkpoint.parent)["provider_error"]
+    assert diagnosis["exception_type"] == "APIConnectionError"
+    assert "transport-contract-not-a-credential" not in json.dumps(diagnosis)
     rows, errors = audit_resumptions(tmp_path, checkpoint.parent)
     assert len(rows) == 1 and not errors
     # Real disk tampering must invalidate the preserved evidence.

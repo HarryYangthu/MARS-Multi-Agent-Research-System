@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
-from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, parse_action, parse_review
+from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.registry import ToolContext, ToolRegistry
@@ -102,6 +102,7 @@ class NativeAgentLoop:
             state["status"] = "running"
             state["pending"] = None
         state.setdefault("review_issues", [])
+        state.setdefault("protocol_output", "")
         state.setdefault("reviewed_candidate_sha", "")
         state.setdefault("phase_efforts", {})
         if request.resume and "last_model_error" not in state:
@@ -167,6 +168,8 @@ class NativeAgentLoop:
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
                 reviewing = state["next_phase"] == "reflect"
                 extra: list[Message] = []
+                if state["protocol_output"]:
+                    extra.append(invalid_output_context(state["protocol_output"]))
                 if state["review_issues"]:
                     extra.append(Message(role="user", content=(
                         "[unresolved review issues pinned through protocol/schema repairs]\n"
@@ -231,13 +234,17 @@ class NativeAgentLoop:
                     trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
                     counts["protocol_repairs"] += 1
-                    state["feedback"] = f"Protocol error: {exc}. Return the required JSON object."
+                    state["protocol_output"] = completion.text
+                    state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
+                                         "exactly one required JSON object. No extra braces, prose or second action. "
+                                         "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
                         break
                     trace.snapshot(state)
                     continue
+                state["protocol_output"] = ""
                 if reviewing:
                     counts["reflections"] += 1
                     state["reviewed_candidate_sha"] = digest(state["candidate"])

@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -171,11 +175,26 @@ class _OpenAICompatProvider(LLMProvider):
                     config.attempt_observer("sdk_attempt_succeeded", {"attempt": attempt + 1})
                 return result
             except Exception as exc:
+                details = public_error_details(exc)
                 if config.attempt_observer:
-                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1, "error": _safe_error_label(exc)})
-                if attempt >= max_retries or not _is_retryable_error(exc):
+                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1,
+                                                                  "error": _safe_error_label(exc), "details": details})
+                if attempt >= max_retries or not _is_retryable_error(exc, provider_name=self.name):
+                    logger.error("LLM request stopped provider={} model={} reason={}",
+                                 self.name, config.model, _safe_error_label(exc))
                     raise
                 delay = base_delay * (2**attempt)
+                if details.get("retry_after_seconds", 0) > delay:
+                    # Do not retry earlier than the provider requested or extend
+                    # the caller's configured backoff/deadline behind its back.
+                    if config.attempt_observer:
+                        config.attempt_observer("sdk_retry_deferred", {
+                            "reason": "provider Retry-After exceeds this call's backoff budget",
+                            "retry_after_seconds": details["retry_after_seconds"],
+                        })
+                    logger.error("LLM retry deferred provider={} model={} retry_after_seconds={}",
+                                 self.name, config.model, details["retry_after_seconds"])
+                    raise
                 if config.attempt_observer:
                     config.attempt_observer("sdk_retry_scheduled", {"next_attempt": attempt + 2, "delay": delay})
                 logger.warning(
@@ -398,7 +417,52 @@ def _status_code(exc: Exception) -> int | None:
     return response_status if isinstance(response_status, int) else None
 
 
-def _is_retryable_error(exc: Exception) -> bool:
+def retry_after_seconds(value: object, *, now: datetime | None = None) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            target = parsedate_to_datetime(value)
+            if target.tzinfo is None:
+                return None
+            seconds = (target - (now or datetime.now(timezone.utc))).total_seconds()
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return max(0.0, seconds) if math.isfinite(seconds) else None
+
+
+def public_error_details(exc: Exception) -> dict[str, Any]:
+    """Only bounded codes and Retry-After; never response messages, bodies or auth headers."""
+    details: dict[str, Any] = {"exception_type": type(exc).__name__}
+    status = _status_code(exc)
+    if status is not None:
+        details["http_status"] = status
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, Mapping) else {}
+    code = error.get("code") if isinstance(error, Mapping) else None
+    if code is None:
+        code = getattr(exc, "code", None)
+    if type(code) in {str, int} and re.fullmatch(r"(?:[0-9]{1,8}|[a-z][a-z0-9_]{0,63})", str(code)):
+        details["api_error_code"] = str(code)
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    delay = retry_after_seconds(headers.get("retry-after")) if isinstance(headers, Mapping) else None
+    if delay is not None:
+        details["retry_after_seconds"] = delay
+    return details
+
+
+def _is_retryable_error(exc: Exception, *, provider_name: str = "") -> bool:
+    code = public_error_details(exc).get("api_error_code")
+    if code in {"insufficient_quota", "billing_hard_limit_reached"}:
+        return False
+    # Official BigModel account/quota/access errors also use HTTP 429.
+    if provider_name == "zhipu" and code in {
+        "1113", "1304", "1308", "1309", "1310", "1311", "1313", "1314", "1315",
+        "1316", "1317", "1318", "1319", "1320", "1321",
+    }:
+        return False
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return True
 
@@ -431,6 +495,8 @@ def _is_retryable_error(exc: Exception) -> bool:
 
 def _safe_error_label(exc: Exception) -> str:
     status_code = _status_code(exc)
+    code = public_error_details(exc).get("api_error_code")
+    suffix = f":code={code}" if code is not None else ""
     if status_code is not None:
-        return f"{type(exc).__name__}:status={status_code}"
+        return f"{type(exc).__name__}:status={status_code}{suffix}"
     return type(exc).__name__

@@ -1,0 +1,66 @@
+project: pimc
+scope: method_proposal
+data_scope: public_research
+question: '为 PIMC 非线性层提出一个改善 2D LUT 非线性表达能力、且参数量不大幅膨胀的可实现方案。
+
+  自主查询真实 Memory 和允许网站上的文献；根据实际返回内容选择至少两篇相关论文，
+
+  说明为何相关；至少下载一篇 PDF 并读取含方法定义的页段，必要时追加页窗口。
+
+  比较至少两个可行方向后选择一个，完整定义参考 LUT、候选公式、输入输出与相位契约、
+
+  全部可训练量、初始化、边界处理和训练方式，设计公平消融、证伪和停止标准。
+
+  本测试没有接入项目真实基线、数据或 GPU；可以定义符号化参考模型，但不能伪装已读生产代码。
+
+  参数量上限 1.2 倍仅为本次评测假设，最终效果未做实验验证。请中文输出。
+
+
+  以下是前次真实检索取得的公开线索，可作为调研起点；仍需用工具核对原文，自主决定是否采用，不能仅凭链接声称已经读过：
+
+  - Gradient-Adaptive Spline-Interpolated LUT Methods for Low-Complexity Digital Predistortion:
+  https://arxiv.org/abs/1907.02350v4
+
+  - Free-Knots Kolmogorov-Arnold Network: On the Analysis of Spline Knots and Advancing
+  Stability: https://arxiv.org/abs/2501.09283v1
+
+  '
+model:
+  provider: zhipu
+  name: glm-5.3
+  max_tokens: 16384
+  temperature: 0.1
+  thinking: true
+  reasoning_effort: low
+  timeout_seconds: 300
+  max_retries: 1
+loop:
+  mode: reflection
+  reflection_reasoning_effort: high
+  trace: full
+  max_model_calls: 32
+  max_tool_steps: 18
+  max_protocol_repairs: 4
+  max_validation_repairs: 6
+  max_reflections: 4
+  input_token_budget: 64000
+  observation_chars: 6000
+requirements:
+  min_sources: 2
+  min_pdfs: 1
+  require_parameter_budget: true
+  max_parameter_ratio: 1.2
+domains:
+- arxiv.org
+- export.arxiv.org
+- ieeexplore.ieee.org
+- doi.org
+- openreview.net
+evaluation_variant:
+  name: public_url_start
+  source_of_url_hints: actual search receipts in idea_lut_20260907T105509_5ac81e
+  previous_run_status: protocol_exhausted
+  fresh_invocation: true
+  previous_budget_reset: false
+  interpretation: Same method goal with two public starting URLs; not an unseeded
+    literature-discovery benchmark.

@@ -267,3 +267,56 @@ arxiv_search、web_search、fetch_sources，并使用每轮独立的 Memory 与�
 不读取上传文件，不静默更改旧 run 的输入/工具指纹；旧范围须新建评测。
 新范围的准备检查没有发送请求；26 项相关真实上下文/文件/拒绝请求检查通过，
 涉及 271 个源文件的 strict mypy 通过。实际新的模型结果另行记录。
+
+### 公开文献范围的真实失败与协议修复（11:07 UTC）
+
+run `idea_lut_20260907T105509_5ac81e` 使用 clean source `1d5e664`
+（GitHub `2dc3157`），实际运行 686.39 秒：14 次模型请求/响应/SDK 尝试，
+9 次工具/Observation，5 次格式错误触及 4 次允许修复的上限，最终 protocol_exhausted。
+未形成有效候选、未进行 schema/material 校验或 Reflection，不能称通过。
+已报告完整 152907 tokens；没有私有项目输入，也没有重复被审批阻止的旧请求。
+
+工具为一次空 Memory 查询、四次 arXiv 查询、一次空 web_search、三次 PDF 阅读。
+共检索到 11 个不同来源，实际下载两篇 PDF：Gradient-Adaptive Spline-Interpolated
+LUT Methods（5215358 字节）及 Free-Knots KAN（2442172 字节）。第一次样条 LUT
+节选不足后，Agent 自主从第 4 页起补读缓存文件；不是再次网络下载。
+模型多次连写两个 JSON、附带解释或多余括号，原始输出完整保留在 trace。
+
+发现协议修复仅回传错误位置，没有回传尚未解析的长方案，导致重新生成风险。
+新实现将完整可见原稿标为不可信数据，与旧候选、未解决审查意见一起保留；
+仍只执行模型重新输出且严格校验通过的单个动作，不由宿主猜测/补齐 JSON。
+超过输入预算明确失败，不静默截掉原稿。16 项相关检查和 strict mypy 通过。
+请求已使用官方文档的 response_format=json_object；仍保留本地严格校验，
+不能把该参数当作实测格式成功的保证。接口参考：
+https://docs.bigmodel.cn/cn/guide/capabilities/struct-output 。
+
+审计脚本另修复固定读取 v1 的问题：按 summary 记录的版本读取并验证路径；
+记录的 v2 缺失时不回退 v1。9 项相关检查通过，实际旧 run 的 v2 已正确审计。
+其独立方法审查拒绝仍保留，不因结构/材料审计通过而升级结论。
+
+下一变体 `idea_2d_lut_public_urls_real.yaml` 使用同一方法目标与同一预算，
+将本轮实际发现的两篇公开论文链接作为起点；Agent 仍须通过工具核对、读取、
+比较并生成方案。它是单独的 URL 调研评测，不冒充无预置线索的文献发现测试，
+不更改或重置本轮失败的原始状态和预算。
+
+### 当前实际阻塞：智谱账户错误 1113（11:16 UTC）
+
+URL 变体 run `idea_lut_20260907T111009_db0f44`（clean source `f190ebe`，
+GitHub `dda5f2a`）的首个请求两次返回 HTTP 429。旧诊断仅记录 HTTP 状态，
+无法区分短期限流和账户问题。已增加限长业务错误码与 Retry-After 的提取，
+不保存错误正文、请求头或凭证；账户/套餐/额度错误停止重试。
+Retry-After 超过当前请求的退避预算时明确延后，不提前重试或暗中延长总超时。
+30 项 provider/超时相关检查通过，含真实 SDK 连接拒绝。
+
+约 5 分钟后，用 clean source `f1c6da8` 对同一 invocation 做一次受控续跑，
+收到真实 `RateLimitError:status=429:code=1113`。智谱官方将 1113 定义为账户欠费：
+https://docs.bigmodel.cn/cn/api/api-code 。新分类器本次只尝试一次便停止，
+没有再重试该账户错误、换 Key/模型或绕过服务限制。
+累计 2 次模型请求、0 次模型响应、3 次 SDK 尝试、0 次工具，实际运行 40.20 秒。
+用量未知，不能将未收到的 token 统计写成免费调用。原输入、计数、事件前缀及
+续跑前 checkpoint 的哈希全部通过审计。最后一个 SDK 错误也会进入 CLI 和派生审计报告。
+
+**当前仍未达到 Idea Agent 的最终可用验收。** 最近一次完整研究测试停在格式校验，
+新的带原稿修复尚待实际模型验证，当前真实续测被账户错误 1113 阻断。
+工程修复、原始失败证据与可恢复 checkpoint 均保留；恢复账户额度后可在同一
+URL 变体的 checkpoint 上继续，旧失败 run 不改成通过。

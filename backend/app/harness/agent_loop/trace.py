@@ -102,6 +102,11 @@ def audit_trace(root: Path) -> dict[str, Any]:
     mismatches = {key: {"events": value, "facts": facts["counts"].get(key, 0)}
                   for key, value in actual.items() if value != facts["counts"].get(key, 0)}
     stale = facts["event_seq"] != len(rows)
+    last_attempt = next((r for r in reversed(rows)
+                         if r["kind"] in {"sdk_attempt_failed", "sdk_attempt_succeeded"}), None)
+    provider_error = ({"error": last_attempt.get("error"), **last_attempt.get("details", {})}
+                      if last_attempt and last_attempt["kind"] == "sdk_attempt_failed" else None)
     return {"trace_available": True, "consistent": seq_ok and not mismatches and not stale,
             "event_sequence_continuous": seq_ok, "summary_snapshot_stale": stale,
-            "count_mismatches": mismatches, "event_count": len(rows), "facts": facts}
+            "count_mismatches": mismatches, "event_count": len(rows), "facts": facts,
+            "provider_error": provider_error}
