@@ -79,9 +79,9 @@ mars/
 
 8. **每次 run 完整沉淀**:写入 `runs/<timestamp>_<task>/`,子目录 `input/ context/ idea/ experiment/ coding/ execution/ writing/ hitl/ events/`。版本化:`*.v1.md / *.v2.md / *.approved.md`。
 
-9. **V0 必须在 mock 模式下能跑通完整 demo**:无真实 LLM API key 时,自动降级到 `mock_provider`(返回结构化的占位响应);无 GPU 时,Execution Agent 走 `mock_simulation`(基于 `data_gen.py` 合成数据 + 模拟 loss 曲线)。Demo 在**零外部依赖**下必须能完成 ACCEPTANCE.md §2 的 11 步主脚本。
+9. **仅允许真实执行（用户 2026-09-07 要求优先）**：禁止 Mock provider、虚构工具响应、模拟 GPU/loss/实验成功、固定 Agent 答案，以及缺 Key/服务时返回成功样例。缺依赖必须明确失败。测试不得用模型、工具、服务的替身或 monkeypatch 伪造执行成功；可测试纯函数、schema、真实临时文件和真实环境配置。历史来源标记可保留用于拒绝污染，不可用于开启模拟路径。
 
-10. **End-to-end first 开发顺序**:严格按 `ACCEPTANCE.md §11` 的 7 个 Phase 实现。**核心原则**:任何 Phase 完成后,系统必须仍能跑通端到端 demo(从 mock pipeline 起步,逐步把 mock 替换成真实)。**禁止**先横向把 KB / LLM / 前端 / Execution 各自独立做完,最后才尝试集成——这是 V0 失败的最常见模式。新模块必须先接入 e2e 链路,再补充完整功能。
+10. **真实闭环与及时交付**：先验证 BaseAgent → IdeaAgent 的真实工具/Observation/模型/验收闭环。schema、材料、科学审查、真实项目仿真是独立验收层，不可相互冒充。默认原生 ReAct，可选 Reflection；执行接口保持可替换。每个通过检查的阶段及时提交并同步 GitHub；未推送不能称已交付。禁止将源码只留在临时工作区。
 
 ## 风格规范
 
