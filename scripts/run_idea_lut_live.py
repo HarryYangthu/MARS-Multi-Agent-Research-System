@@ -32,6 +32,27 @@ from scripts.idea_live_resume import exclusive_run, load_resume, record_resumpti
 from scripts.watch_agent_trace import monitor
 
 
+PUBLIC_RESEARCH_TOOLS = (
+    "knowledge.kb_query", "search.arxiv_search", "search.web_search", "search.fetch_sources",
+)
+
+
+def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
+    """Method-only evaluation never imports project rules, linked repos or uploads.
+
+    The supplied question remains caller-owned input. The CLI selects a fresh KB
+    per run; only its actual public-source retrievals can populate that memory.
+    Old runs with a different data scope cannot silently acquire new inputs.
+    """
+    if scenario.get("data_scope") != "public_research" or scenario.get("scope") != "method_proposal":
+        raise ValueError("this CLI requires a public_research method_proposal scenario; "
+                         "legacy inputs need a new evaluation, not a changed resume")
+    return RunRequest(project=scenario["project"], user_request=scenario["question"],
+                      extra={"run_id": root.name, "run_root": str(root), "scope": scenario["scope"],
+                             "idea_requirements": scenario["requirements"],
+                             "context_sources": {"project_rules": False, "code_repositories": False}})
+
+
 def git_value(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True).strip()
 
@@ -67,6 +88,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         scenario = yaml.safe_load(args.scenario.read_text())
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be an object")
+    request = evaluation_request(scenario, root)
     if args.prompt_key:
         key = getpass.getpass("Zhipu API key (hidden, not saved): ")
         if not key:
@@ -98,11 +120,9 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
                      max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
                      thinking_enabled=bool(model.get("thinking", True)), reasoning_effort=model.get("reasoning_effort"),
                      request_timeout_seconds=float(model["timeout_seconds"]), max_retries=int(model["max_retries"]),
-                     debate_enabled=False, raw={**original.raw, "loop": asdict(policy)})
+                     debate_enabled=False, tools=PUBLIC_RESEARCH_TOOLS,
+                     raw={**original.raw, "loop": asdict(policy)})
     agent = IdeaAgent(agent_config=config)
-    request = RunRequest(project=scenario["project"], user_request=scenario["question"],
-                         extra={"run_id": run_id, "run_root": str(root), "scope": scenario["scope"],
-                                "idea_requirements": scenario["requirements"]})
     if checkpoint:
         request.extra["resume_invocation"] = checkpoint.parent.name
     if review:
@@ -121,7 +141,10 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         initial = {"run_id": run_id, **source,
                "scenario": scenario, "loop_policy": asdict(policy),
                "messages": [asdict(m) for m in messages],
-               "scope": scenario["scope"], "credential_persisted": False}
+               "scope": scenario["scope"], "credential_persisted": False,
+               "data_scope": {"profile": "public_research", "tools": list(config.tools),
+                              "context_sources": context.metadata["context_sources"],
+                              "memory": "isolated_run_directory", "upstream_artifacts": []}}
         atomic_json(root / "input" / "request.json", initial)
     summary: dict[str, Any] = {"run_id": run_id, "run_root": str(root), "status": "prepared",
                                "source_commit": initial["source_commit"], "source_dirty": initial["source_dirty"],

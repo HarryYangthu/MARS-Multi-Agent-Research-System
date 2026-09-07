@@ -235,3 +235,35 @@ GitHub PR #5 的首个 CI 在创建任何 job 之前失败。GitHub 原始 annot
 实际安装依赖的 Python 3.11 strict mypy 检查 403 文件通过。完整测试启用了真实 Chroma 后发现旧正向样例缺来源回执；已改用真实本地文件回执，并修复多 KB 实例错误依赖全局 KB 路径的问题。每个 File/Chroma backend 现在只信任本实例根目录下的回执，测试明确拒绝跨库复制的回执；22 个相关检查通过。
 
 Windows 原测试覆盖了伪 Docker 返回，已移除替身。保留实际临时文件、配置/端口/路径/校验和与纯 readiness DTO 校验（这些不冒充容器或 API 执行）。实际 CI 进一步发现 Windows compose/env 仍默认 auto/mock、Dockerfile 引用已不存在的 stub；已改为 never/local_command，未接入研究仓库时使用缺失的明确路径并阻塞执行，删除 stub COPY。Compose config 新版本省略 false 字段，测试同时保留源 YAML 约束并按 false 缺省读取输出，未放宽挂载保护。
+
+### main 已交付与外部中断（2026-09-07）
+
+核心修复 PR #5 的四个真实 GitHub CI job 全部通过，已合入 main `162a304`。
+Python 3.11 完整回归实际 910 项：902 通过、8 跳过、无失败；包含真实 Chroma。
+进度显示 PR #6 同样通过四个 CI job，合入 main `6c5cad2`。
+CLI 每 30 秒显示实际请求、工具、修订计数与最后 trace 更新时间；
+`scripts/watch_agent_trace.py RUN_ROOT --once` 可以只读查看已有 run。
+磁盘状态不是进程存活证明，待处理请求的用量也不算完整。
+
+新 run `idea_lut_20260907T102414_f65c68` 在第 12 个模型请求被宿主自动审批中断：
+审批认为外发上下文可能包含未授权的私有仓库或 Memory 内容。不得换传输或修改原始
+checkpoint 绕过；原 summary 仍为 prepared，trace 的最后状态 running 也不是已完成。
+实际已记录 11 次响应、6 次工具/Observation、3 次协议修复、1 次拒绝的 Reflection，
+147462 已报告 tokens；被中断请求的最终用量未知。
+
+实际操作：一次 literature Memory 查询为空；四次 arXiv 检索（两次为空，另两次各 10 条）；
+一次批量下载两篇 PDF：Free-Knots KAN（2442172 字节）与 MP-DPD（1374338 字节）。
+两篇均实际返回第 1–2 页及截断的第 3 页，不能称读完全文或完整前四页。
+独立数值检查证实候选 33×33 复数 LUT 加 13×13 复数修正表的 2516/2178=1.1552
+实标量预算、零修正保持基线、边界连续及存在新增函数。符号例的 128×128 网格拟合
+RMSE 从 0.058285 降至 0.044173；这是审查者检查，不是 Agent 实验，也不是 PIMC 效果。
+候选的消融判定、索引与阅读表述仍需修订，未记录最终验收通过。
+
+核对实际数据来源后，GitHub 仓库为公开仓库，附带的路径来自公开 repo_link 配置；
+工具未读取生产代码，Memory 查询没有历史命中。即便如此，方法评测携带这份配置
+没有必要。现增加严格布尔型 context_sources，普通子 Agent 仍保留项目上下文；
+本 CLI 使用 public_research 范围，关闭项目规则和代码仓注入，只开放 kb_query、
+arxiv_search、web_search、fetch_sources，并使用每轮独立的 Memory 与检索缓存。
+不读取上传文件，不静默更改旧 run 的输入/工具指纹；旧范围须新建评测。
+新范围的准备检查没有发送请求；26 项相关真实上下文/文件/拒绝请求检查通过，
+涉及 271 个源文件的 strict mypy 通过。实际新的模型结果另行记录。

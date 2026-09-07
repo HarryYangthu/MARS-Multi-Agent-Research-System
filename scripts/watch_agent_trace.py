@@ -19,7 +19,9 @@ def progress_snapshot(run_root: Path) -> list[dict[str, Any]]:
             snapshots.append({
                 "agent": path.parent.parent.name, "invocation": path.parent.name,
                 "status": facts["status"], "waiting_for": facts.get("pending"),
-                "counts": facts["counts"], "usage_complete": facts["usage_complete"],
+                "counts": facts["counts"],
+                "usage_complete": bool(facts["usage_complete"]) and facts.get("pending") != "model",
+                "state_source": "last_persisted_trace", "process_liveness": "unknown",
                 "seconds_since_trace_update": round(max(0.0, time.time() - path.stat().st_mtime), 1),
             })
         except (OSError, ValueError, KeyError, TypeError) as exc:

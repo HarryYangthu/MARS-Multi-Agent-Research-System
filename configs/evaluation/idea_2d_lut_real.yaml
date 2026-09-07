@@ -1,5 +1,6 @@
 project: pimc
 scope: method_proposal
+data_scope: public_research
 question: |
   为 PIMC 非线性层提出一个改善 2D LUT 非线性表达能力、且参数量不大幅膨胀的可实现方案。
   自主查询真实 Memory 和允许网站上的文献；根据实际返回内容选择至少两篇相关论文，
