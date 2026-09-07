@@ -79,6 +79,15 @@ class LoopTrace:
         if self.mode == "full":
             atomic_json(self.root / "checkpoint.json", state)
 
+    def record_attempt(self, state: dict[str, Any], kind: str, data: dict[str, Any]) -> None:
+        if kind == "sdk_attempt_started":
+            state["counts"]["sdk_attempts"] += 1
+        elif kind == "sdk_attempt_failed":
+            # A later successful retry does not reveal the failed attempt's usage.
+            state["usage_complete"] = False
+        self.emit(kind, {"request": state["counts"]["model_requests"], **data})
+        self.snapshot(state)
+
 
 def audit_trace(root: Path) -> dict[str, Any]:
     facts = json.loads((root / "facts.json").read_text())

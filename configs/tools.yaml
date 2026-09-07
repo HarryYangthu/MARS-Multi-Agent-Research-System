@@ -26,10 +26,13 @@ tools:
     network: true
     input_schema:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      oneOf:
+        - required: [query]
+        - required: [q]
       properties:
-        q: {type: string}
-        query: {type: string}
+        q: {type: string, minLength: 1}
+        query: {type: string, minLength: 1}
         top_k: {type: integer, minimum: 1, maximum: 20}
         date_from: {type: string}
         sort_by:
@@ -52,10 +55,13 @@ tools:
     network: true
     input_schema:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      oneOf:
+        - required: [query]
+        - required: [q]
       properties:
-        q: {type: string}
-        query: {type: string}
+        q: {type: string, minLength: 1}
+        query: {type: string, minLength: 1}
         domains:
           type: array
           items: {type: string}
@@ -67,7 +73,7 @@ tools:
 
   search.fetch_sources:
     enabled: true
-    description: Download selected paper/blog sources and write source summaries into the run research workspace.
+    description: Archive selected sources and read PDF page windows. Default max_sources=1; set explicitly for a batch. Reuse cached PDFs to read more pages.
     mutation_level: read
     allowed_agents: [idea]
     timeout_seconds: 125
@@ -75,7 +81,7 @@ tools:
     input_schema:
       type: object
       required: [sources]
-      additionalProperties: true
+      additionalProperties: false
       properties:
         start_page: {type: integer, minimum: 1}
         max_pages: {type: integer, minimum: 1, maximum: 10}

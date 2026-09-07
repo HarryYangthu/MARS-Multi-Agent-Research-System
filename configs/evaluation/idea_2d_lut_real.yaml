@@ -15,7 +15,7 @@ model:
   temperature: 0.3
   thinking: true
   reasoning_effort: low
-  timeout_seconds: 180
+  timeout_seconds: 300
   max_retries: 1
 loop:
   mode: reflection

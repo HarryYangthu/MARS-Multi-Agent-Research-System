@@ -1,8 +1,8 @@
 """LLM provider abstraction.
 
 Every provider implements ``complete()`` (one-shot) and ``stream()`` (delta
-iterator). The same interface is used by real APIs, by ``mock_provider``,
-and by ``local_vllm_provider`` (OpenAI-compatible).
+iterator). The same interface is used by real APIs and by local vLLM
+(OpenAI-compatible). Missing providers must fail explicitly.
 """
 from __future__ import annotations
 

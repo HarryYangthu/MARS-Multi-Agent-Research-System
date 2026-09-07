@@ -89,10 +89,7 @@ class NativeAgentLoop:
         cfg.json_mode = True
 
         def on_attempt(kind: str, data: dict[str, Any]) -> None:
-            if kind == "sdk_attempt_started":
-                counts["sdk_attempts"] += 1
-            trace.emit(kind, {"request": counts["model_requests"], **data})
-            trace.snapshot(state)
+            trace.record_attempt(state, kind, data)
 
         def usage(payload: Any) -> None:
             if not isinstance(payload, dict):

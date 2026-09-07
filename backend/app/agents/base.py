@@ -156,7 +156,8 @@ class BaseAgent(ABC):
         schema = json.loads(schema_path.read_text())
         messages = [Message(role="system", content=context.system),
                     Message(role="system", content=context.project),
-                    Message(role="system", content="The final document must start with YAML frontmatter. JSON Schema:\n"
+                    Message(role="system", content="Return final.metadata as a native JSON object matching this schema, "
+                            "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
                             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))),
                     Message(role="user", content=context.task)]
         for label, content in context.upstream.items():

@@ -58,3 +58,20 @@ Do not merge main until relevant regressions and live validation are complete.
 - Review also found artificial ripple applied to the legacy CPU loss curve in
   `pim_cancellation.py`. Removal and numerical regression are still pending;
   the new numerical test uses a full batch so it does not exercise that ripple.
+
+## Resumed live evaluation fixes
+
+- SDK attempt failure now leaves usage incomplete even when a subsequent retry
+  succeeds. The durable ledger records both attempts; totals remain a lower bound.
+- BaseAgent and IdeaAgent now agree on JSON metadata plus Markdown final output.
+- Search schemas reject unknown/ambiguous query arguments before network access;
+  PDF tool descriptions expose the one-source default and cached page-window reads.
+- Research guidance asks the agent to draft after satisfying evidence requirements,
+  and to justify further searches with a concrete missing definition or comparison.
+- Zhipu explicitly honors disabled thinking for supported models and rejects it
+  for GLM-5.3, whose official API requires thinking. Effort remains low in this
+  test; per-request timeout is now 300 seconds for long proposal generations.
+  Reference: https://docs.bigmodel.cn/cn/guide/capabilities/thinking (2026-09-07).
+- 53 loop/parser/ledger/configuration contract checks passed; two changed
+  provider/trace modules passed mypy in the Python 3.12 environment. These are
+  preparation checks, not a successful live-agent evaluation.

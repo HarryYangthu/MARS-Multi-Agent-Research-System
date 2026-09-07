@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import getpass
 import json
+import math
 import os
 import subprocess
 import sys
@@ -32,6 +33,8 @@ def git_value(*args: str) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
+    if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
+        raise ValueError("max-seconds must be positive and finite")
     scenario = yaml.safe_load(args.scenario.read_text())
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be an object")

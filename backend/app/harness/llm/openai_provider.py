@@ -95,7 +95,15 @@ class _OpenAICompatProvider(LLMProvider):
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
 
-        if thinking_enabled:
+        if self.name == "zhipu":
+            forced = config.model.lower().startswith("glm-5.3")
+            if forced and config.thinking_enabled is False:
+                raise ValueError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
+            if forced and reasoning_effort not in {None, "low", "high", "max"}:
+                raise ValueError("GLM-5.3 reasoning_effort must be low, high or max")
+            if forced or config.thinking_enabled is not None:
+                kwargs["extra_body"] = {"thinking": {"type": "enabled" if forced or thinking_enabled else "disabled"}}
+        elif thinking_enabled:
             # DeepSeek exposes thinking mode as an OpenAI-compatible extension.
             # Keep it in extra_body so other compatible endpoints are unchanged
             # unless their own config explicitly enables it.
