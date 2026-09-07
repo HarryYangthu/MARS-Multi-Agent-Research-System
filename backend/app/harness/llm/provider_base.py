@@ -12,16 +12,41 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-Role = Literal["system", "user", "assistant"]
+Role = Literal["system", "user", "assistant", "tool"]
 ReasoningEffort = Literal["low", "medium", "high", "max"]
 MAX_LLM_RETRIES = 3
 LLM_CALL_DEADLINE_GRACE_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: str
+
+    def to_wire(self) -> dict[str, Any]:
+        return {"id": self.id, "type": "function", "function": {
+            "name": self.name, "arguments": self.arguments}}
+
+
+@dataclass(frozen=True)
 class Message:
     role: Role
     content: str
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call_id: str | None = None
+
+    def to_wire(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            if self.role != "assistant":
+                raise ValueError("tool calls require assistant role")
+            result["tool_calls"] = [call.to_wire() for call in self.tool_calls]
+        if self.role == "tool":
+            if not self.tool_call_id:
+                raise ValueError("tool result requires call id")
+            result["tool_call_id"] = self.tool_call_id
+        return result
 
 
 @dataclass
@@ -38,6 +63,7 @@ class LLMConfig:
     max_retries: int = 3
     retry_base_delay_seconds: float = 1.0
     json_mode: bool = False
+    tools: tuple[dict[str, Any], ...] = ()
     attempt_observer: Callable[[str, dict[str, Any]], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -49,6 +75,7 @@ class Completion:
     model: str
     is_mock: bool = False
     debate_role: str | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
     raw: dict[str, Any] = field(default_factory=dict)
 
 

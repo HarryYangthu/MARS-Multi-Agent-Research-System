@@ -24,8 +24,8 @@ def test_idea_config_has_debate_participants() -> None:
     assert cfg.debate_enabled is False
     assert len(cfg.debate_participants) >= 2
     assert cfg.output_schema == "proposal.v1"
-    assert cfg.model_name == "deepseek-v4-pro"
-    assert cfg.thinking_enabled is True
+    assert cfg.model_name == ("deepseek-v4-flash" if cfg.name == "idea" else "deepseek-v4-pro")
+    assert cfg.thinking_enabled is (cfg.name != "idea")
     assert cfg.reasoning_effort == "high"
     assert cfg.max_tokens == 16_384
     assert cfg.top_p == 1.0
@@ -38,8 +38,8 @@ def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
         if not cfg.enabled:
             continue
         assert cfg.model_provider == "deepseek"
-        assert cfg.model_name == "deepseek-v4-pro"
-        assert cfg.thinking_enabled is True
+        assert cfg.model_name == ("deepseek-v4-flash" if cfg.name == "idea" else "deepseek-v4-pro")
+        assert cfg.thinking_enabled is (cfg.name != "idea")
         assert cfg.reasoning_effort == "high"
         assert cfg.max_tokens >= 16_384
         if cfg.name in {"coding", "writing"}:
@@ -54,7 +54,7 @@ def test_local_provider_selection_preserves_agent_configuration() -> None:
     provider, llm_cfg = select_provider(cfg)
     assert provider.name == "local_vllm"
     assert llm_cfg.response_schema == "proposal.v1"
-    assert llm_cfg.thinking_enabled is True
+    assert llm_cfg.thinking_enabled == cfg.thinking_enabled
     assert llm_cfg.reasoning_effort == "high"
     assert llm_cfg.max_tokens == 16_384
     assert llm_cfg.top_p == 1.0

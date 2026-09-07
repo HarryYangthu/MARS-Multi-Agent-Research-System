@@ -37,7 +37,7 @@ def _agent_config(post_training: dict[str, object]) -> AgentConfig:
 def test_disabled_post_training_still_requires_provider_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
     import app.settings as settings_mod
 
     settings_mod._settings = None

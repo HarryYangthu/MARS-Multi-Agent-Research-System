@@ -48,7 +48,7 @@ idea:
     base_url: https://api.deepseek.com/v1
     base_url_env: DEEPSEEK_BASE_URL
     thinking:
-      enabled: true
+      enabled: false
     reasoning_effort: high
     request_timeout_seconds: 120
     retry:
@@ -74,6 +74,7 @@ idea:
     source_download_limit: 1
     web_search: true
   loop:
+    protocol: native_tools
     mode: react
     trace: full
     max_model_calls: 36
