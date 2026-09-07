@@ -131,7 +131,9 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
     errors = [error.message for error in validation.errors] + delivery_errors(validation.metadata, str(request.extra.get("scope", "method_proposal")))
     if errors:
         raise ValueError("cannot publish an invalid Idea delivery: " + "; ".join(errors))
-    root = Path(str(request.extra["run_root"])) / "idea" / "deliveries" / invocation
+    # A resumed invocation may produce another accepted revision. Keep each
+    # export immutable so publishing it neither fails nor replaces earlier evidence.
+    root = Path(str(request.extra["run_root"])) / "idea" / "deliveries" / invocation / uuid.uuid4().hex
     root.mkdir(parents=True, exist_ok=False)
     (root / "proposal.md").write_text(artifact.text, encoding="utf-8")
     atomic_json(root / "proposal.json", validation.metadata)

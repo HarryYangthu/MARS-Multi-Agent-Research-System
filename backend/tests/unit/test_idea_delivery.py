@@ -7,9 +7,10 @@ from typing import Any
 
 import pytest
 
-from app.agents.base import RunRequest
+from app.agents.base import Artifact, RunRequest
 from app.agents.idea.agent import IdeaAgent
-from app.agents.idea.delivery import delivery_errors, progress_message, progress_sink, resolve_pointer
+from app.agents.idea.delivery import delivery_errors, progress_message, progress_sink, resolve_pointer, write_delivery
+from app.harness.schema.frontmatter_parser import dumps
 from app.harness.schema.validator import validate_metadata
 
 
@@ -92,3 +93,48 @@ def test_candidate_progress_never_claims_acceptance() -> None:
 
 def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
     assert progress_message({"kind": "action", "tool": "search.arxiv_search", "reason": "Search more papers"}) == "正在检索相关论文。"
+
+
+def test_repeated_delivery_preserves_exact_prior_artifact(tmp_path: Path) -> None:
+    metadata = authored_metadata()
+    original = dumps(metadata, "Human-authored serialization input.")
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path), "scope": "method_proposal"})
+    first = write_delivery(Artifact(original, "proposal.v1", metadata, ""), request,
+                           invocation="same-invocation", reviewed=False)
+    metadata["human_summary"] = "比较两个修订后的方法，确认哪个值得进入后续实验。"
+    revised = dumps(metadata, "Another authored serialization input.")
+    second = write_delivery(Artifact(revised, "proposal.v1", metadata, ""), request,
+                            invocation="same-invocation", reviewed=False)
+    assert first != second
+    assert (first / "proposal.md").read_text() == original
+    assert (second / "proposal.md").read_text() == revised
+    assert json.loads((second / "proposal.json").read_text())["human_summary"] == metadata["human_summary"]
+    acceptance = json.loads((second / "acceptance.json").read_text())
+    assert not acceptance["simulation_executed"]
+    assert not acceptance["scientific_validated"]
+
+
+def test_submission_schema_requires_full_method_without_changing_legacy_parser() -> None:
+    request = RunRequest("pimc", "task", extra={"idea_requirements": {"require_parameter_budget": True}})
+    schema = IdeaAgent().submission_schema(request)
+    assert schema is not None
+    assert {"human_summary", "handoff", "method_spec", "parameter_budget", "ablation_plan"} <= set(schema["required"])
+    assert schema["properties"]["alternatives"]["minItems"] == 2
+    legacy = {"schema": "proposal.v1", "project": "pimc", "agent": "idea", "research_question": "Authored input?",
+              "hypothesis": "Hypothesis input.", "novelty": "Novelty unknown."}
+    assert validate_metadata(legacy).valid
+
+
+@pytest.mark.asyncio
+async def test_host_checks_submission_schema_even_when_provider_ignores_it() -> None:
+    metadata = authored_metadata()
+    del metadata["method_spec"]
+    errors = await IdeaAgent().validate_candidate(RunRequest("pimc", "task"), dumps(metadata, "Parser input."), [])
+    assert any("'method_spec' is a required property" in error for error in errors)
+
+
+def test_artifact_conversion_preserves_exact_candidate_digest() -> None:
+    from app.harness.llm.provider_base import Completion
+    text = dumps(authored_metadata(), "Parser input.") + "\n\n"
+    artifact = IdeaAgent()._artifact_from_completion(Completion(text, "parser", "parser"))
+    assert artifact.text == text

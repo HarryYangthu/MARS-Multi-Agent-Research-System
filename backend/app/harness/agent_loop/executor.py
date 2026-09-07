@@ -49,6 +49,7 @@ class LoopInput:
     external_review: ExternalReview | None = None
     progress_sink: ProgressSink | None = None
     review_messages: list[Message] | None = None
+    final_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -77,7 +78,7 @@ class NativeAgentLoop:
         native = p.protocol == "native_tools"
         if native and request.config.thinking_enabled is not False:
             raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
-        wire_tools = native_specs(specs) if native else ()
+        wire_tools = native_specs(specs, request.final_schema) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
         instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
@@ -86,6 +87,8 @@ class NativeAgentLoop:
                               "project": request.tool_context.project, "tools": specs})
         if request.review_messages is not None:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
+        if request.final_schema is not None:
+            fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
         state: dict[str, Any] = {
             "fingerprint": fingerprint, "status": "running", "pending": None,
@@ -169,7 +172,9 @@ class NativeAgentLoop:
             phase = state["next_phase"]
             counts["protocol_repairs"] += 1
             state["phase_efforts"][phase] = plan["reasoning_effort"]
-            state["feedback"] = (plan["feedback"].replace("JSON response", "Markdown document beginning with YAML frontmatter, without preamble or code fences")
+            final_description = ("mars_submit_document call with complete metadata and body"
+                                 if request.final_schema is not None else "Markdown document beginning with YAML frontmatter, without preamble or code fences")
+            state["feedback"] = (plan["feedback"].replace("JSON response", final_description)
                                  if native and state["next_phase"] != "reflect" else plan["feedback"])
             state["pending"] = None
             state["status"] = "running"
@@ -251,7 +256,7 @@ class NativeAgentLoop:
                 review_conflict = False
                 try:
                     decision = (parse_review(completion.text) if reviewing else
-                                native_decision(completion, request.tools) if native else parse_action(completion.text))
+                                native_decision(completion, request.tools, structured_final=request.final_schema is not None) if native else parse_action(completion.text))
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
@@ -266,7 +271,9 @@ class NativeAgentLoop:
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
                     if native:
-                        state["feedback"] = f"Protocol error: {exc}. Use valid native tool calls or submit the complete Markdown candidate. No rejected action was executed."
+                        final_instruction = ("call mars_submit_document with complete metadata and body"
+                                             if request.final_schema is not None else "submit the complete Markdown candidate")
+                        state["feedback"] = f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. No rejected action was executed."
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
@@ -295,6 +302,10 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    if "submission_id" in decision:
+                        trace.emit("document_submission", {"call_id": decision["submission_id"],
+                                                           "candidate_sha256": digest(state["candidate"]),
+                                                           "serialization_only": True})
                     await progress("candidate", text=state["candidate"])
                     errors = await request.validate(state["candidate"], state["history"])
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:

@@ -34,6 +34,8 @@ The Idea stage receives a research question and optional caller-supplied context
 
 The full method, evidence, assumptions, parameter budget, alternatives, risks and falsification rules stay in the same proposal. Handoff pointers must resolve; another paragraph must not silently redefine the method. New Idea runs require both fields. Historical human-authored `proposal.v1` files remain readable; the extra delivery checks do not retroactively make them accepted research results.
 
+Native Idea runs submit their candidate through `mars_submit_document(metadata, body)`. This control function consumes no research tool budget and cannot be batched with research calls. It serializes the model's exact JSON fields into YAML frontmatter before the existing validators and review run; it cannot add defaults, fix missing definitions or invent evidence. The raw call and resulting candidate hash remain in trace. This avoids treating free-form preambles or YAML punctuation errors as research revisions. Other BaseAgent subclasses can opt into the same framework-neutral protocol.
+
 ## Progress
 
 Idea writes concise messages for research actions, candidate generation, validation, review and stopping to `idea/progress.jsonl`. Bridge persists them in `agent_events` and publishes `agent.progress` on the existing `agent_state` channel. Progress carries no state-transition command; it cannot approve a node. The workbench EventLog displays the human message. Native visible model explanations are used when concise and Chinese; otherwise a factual Chinese action label is emitted. This label describes actual activity and is not a fabricated model rationale.
@@ -42,7 +44,7 @@ Idea writes concise messages for research actions, candidate generation, validat
 
 The generic ReAct action loop is retained. Optional Reflection now uses separate reviewer instructions with the task, actual source context, candidate and real observations. This is a separate model call using the configured provider, not an independent expert guarantee.
 
-Successful runs write `idea/deliveries/<invocation>/proposal.md`, `proposal.json`, `summary.txt`, and `acceptance.json`. The JSON metadata and Markdown represent the same model-written proposal. The original trace and candidate digest remain authoritative. `scientific_validated` and `simulation_executed` stay false until a real downstream process supplies the corresponding evidence. Method-only proposals explicitly require real baseline and data before project execution.
+Successful runs write `proposal.md`, `proposal.json`, `summary.txt`, and `acceptance.json` in a fresh `idea/deliveries/<invocation>/<export-id>/` directory. Resuming an invocation preserves earlier exports. The JSON metadata and Markdown represent the same model-written proposal. The original trace and candidate digest remain authoritative. `scientific_validated` and `simulation_executed` stay false until a real downstream process supplies the corresponding evidence. Method-only proposals explicitly require real baseline and data before project execution.
 
 Run the public research evaluation with:
 

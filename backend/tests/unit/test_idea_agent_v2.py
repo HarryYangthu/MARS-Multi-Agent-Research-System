@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,7 +31,7 @@ async def test_idea_context_loads_actual_project_rules_and_evaluation_scope() ->
     assert '"max_parameter_ratio": 1.2' in context.task
     messages = agent._messages_for_context(request, context, purpose="native-context-contract")
     assert "final.metadata" not in "\n".join(m.content for m in messages)
-    assert "YAML frontmatter" in "\n".join(m.content for m in messages)
+    assert "mars_submit_document" in "\n".join(m.content for m in messages)
     assert "Memory" in context.system
 
 
@@ -74,7 +75,7 @@ def test_untrusted_authored_metadata_cannot_replace_missing_evidence(metadata: d
 
 def test_final_serialization_does_not_invent_downstream_fields() -> None:
     # A human-authored minimal document is valid schema input, not an agent answer.
-    metadata = {"schema": "proposal.v1", "project": "pimc", "agent": "idea",
+    metadata: dict[str, Any] = {"schema": "proposal.v1", "project": "pimc", "agent": "idea",
                 "research_question": "How should a LUT be compared?",
                 "hypothesis": "The proposed change requires an experiment.",
                 "novelty": "Novelty has not been established."}
@@ -102,11 +103,20 @@ def test_parameter_ledger_checks_exact_arithmetic(candidate_count: int) -> None:
 async def test_project_scope_requires_real_baseline_evidence(tmp_path: Path) -> None:
     # A manually authored schema-valid document cannot imply code was inspected.
     agent = IdeaAgent()
-    metadata = {"schema": "proposal.v1", "project": "pimc", "agent": "idea",
+    metadata: dict[str, Any] = {"schema": "proposal.v1", "project": "pimc", "agent": "idea",
                 "research_question": "How should this baseline be extended?",
                 "hypothesis": "An extension still requires code evidence.",
                 "novelty": "Novelty is unestablished.", "testable_predictions": ["Measure after integration"],
                 "risk_register": ["Missing baseline code"]}
+    metadata.update({"human_summary": "比较基线和候选方法，实际实验仍需提供代码。",
+        "related_literature": [], "method_spec": {"candidate": {"definition": "Authored contract input"}},
+        "decision_rule": {"definition": "Authored comparison input"},
+        "handoff": {"version": "idea.handoff.v1", "target_agent": "experiment", "scope": "project_proposal",
+                    "next_step": "Prepare a project experiment after supplying baseline code.",
+                    "changes": [{"target": "component", "operation": "modify", "spec_ref": "/method_spec/candidate", "preserve": []}],
+                    "verification_requirements": [{"id": "V1", "question": "Does it improve?", "comparison": "baseline vs candidate",
+                                                   "metric": "error", "decision_rule_ref": "/decision_rule"}],
+                    "required_context": []}})
     text = parse_action(json.dumps({"final": {"metadata": metadata, "body": "# Manually supplied proposal"}}))["final"]
     errors = await agent.validate_candidate(
         RunRequest(project="pimc", user_request="Project-specific proposal",

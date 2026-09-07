@@ -9,6 +9,7 @@ from typing import Any
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
 from app.agents.idea.delivery import delivery_errors, progress_sink, write_delivery
+from app.agents.idea.acceptance import archive_baseline_input
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.provider_base import Message
 from app.harness.agent_loop.trace import atomic_json, digest
@@ -20,6 +21,7 @@ from app.storage.run_store import RunHandle
 class IdeaAgent(BaseAgent):
     name = "idea"
     output_schema = "proposal.v1"
+    native_structured_delivery = True
     agent_brief = (
         "将研究问题转化为有证据、可证伪、可实现的方案。自主决定检索词、来源、下载与页窗口，"
         "每次工具行动说明理由。优先查真实 Memory，再查用户指定或允许网站的论文。"
@@ -31,6 +33,26 @@ class IdeaAgent(BaseAgent):
         "最终输出遵循宿主指定的协议，方案必须包含完整元数据和中文正文。"
         "不要填补虚构 baseline、投票或实验结果。"
     )
+
+    def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
+        schema = super().submission_schema(request)
+        if schema is None:
+            return None
+        # New submissions require the full delivery contract, while historical
+        # proposal.v1 documents retain their original compatibility contract.
+        schema["required"] += ["human_summary", "handoff", "method_spec", "decision_rule",
+                               "related_literature", "testable_predictions", "risk_register"]
+        for field in ("method_spec", "decision_rule"):
+            schema["properties"][field] = {"type": "object", "minProperties": 1,
+                "description": "Canonical complete structured definition; never put this only in body."}
+        if request.extra.get("idea_requirements", {}).get("require_parameter_budget"):
+            schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
+            for field in ("parameter_budget", "signal_contract"):
+                schema["properties"][field] = {"type": "object", "minProperties": 1}
+            for field, minimum in (("alternatives", 2), ("ablation_plan", 3)):
+                schema["properties"][field] = {"type": "array", "minItems": minimum,
+                                                "items": {"type": "object"}}
+        return schema
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         context = await super().build_context(request)
@@ -103,6 +125,11 @@ class IdeaAgent(BaseAgent):
             return errors
         requirements = request.extra.get("idea_requirements", {})
         metadata = parse(text).metadata
+        candidate_sha = digest(text)
+        input_receipt = archive_baseline_input(
+            run_root=Path(str(request.extra["run_root"])), project=request.project,
+            content=request.upstream_artifacts.get("baseline_code", ""), candidate_sha256=candidate_sha,
+        )
         errors.extend(delivery_errors(metadata, str(request.extra.get("scope", "method_proposal"))))
         errors.extend(material_errors(
             metadata, observations,
@@ -112,12 +139,14 @@ class IdeaAgent(BaseAgent):
             max_ratio=float(requirements.get("max_parameter_ratio", 1.2)),
         ))
         if request.extra.get("scope", "method_proposal") == "project_proposal":
-            if not request.upstream_artifacts.get("baseline_code", "").strip() and not any(o.get("ok") and o.get("tool") == "code.repo_reader" for o in observations):
+            if input_receipt is None and not any(o.get("ok") and o.get("tool") == "code.repo_reader" for o in observations):
                 errors.append("/scope: project proposal requires actual baseline code evidence")
         root = Path(str(request.extra["run_root"])) / "idea" / "validation"
         atomic_json(root / (uuid.uuid4().hex + ".json"), {
             "schema_valid": True, "material_ready": not errors, "errors": errors,
-            "candidate_sha256": digest(text), "requirements": requirements,
+            "candidate_sha256": candidate_sha, "requirements": requirements,
+            "delivery_contract_version": "idea.handoff.v1",
+            "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,
             "note": "Host structural/evidence/arithmetic checks are not independent scientific review.",
