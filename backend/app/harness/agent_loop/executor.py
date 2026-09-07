@@ -78,7 +78,7 @@ class NativeAgentLoop:
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
         instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
-        fingerprint = digest({"messages": [asdict(x) for x in pinned], "policy": asdict(p),
+        fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
@@ -205,7 +205,7 @@ class NativeAgentLoop:
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "max_tokens": call_config.max_tokens},
-                           visible=[asdict(m) for m in messages])
+                           visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)
                 try:
                     completion = await asyncio.wait_for(

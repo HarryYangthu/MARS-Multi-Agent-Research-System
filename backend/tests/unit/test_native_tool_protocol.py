@@ -41,3 +41,9 @@ def test_compaction_keeps_complete_call_result_pairs() -> None:
         if m.tool_calls:
             assert messages[i+1].tool_call_id == m.tool_calls[0].id
     assert manifest['estimated_upper_bound_tokens'] <= 4000
+
+
+def test_context_digest_matches_wire_messages() -> None:
+    from app.harness.agent_loop.trace import digest
+    messages, manifest = pack_context([Message('system','task')], [], '', '', budget=4000, observation_chars=512)
+    assert manifest['visible_sha256'] == digest([m.to_wire() for m in messages])

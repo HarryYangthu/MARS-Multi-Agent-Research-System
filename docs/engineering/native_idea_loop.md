@@ -25,6 +25,8 @@ The test uses actual DeepSeek requests and reads real synthetic arithmetic files
 
 First test configuration used the Idea context without authorizing its verification-only tool, so both modes exhausted their budgets. After correcting the harness test context, real ReAct passed in 4 model calls / 2 file reads / 1 protocol repair; Reflection passed in 5 model calls / 2 reads / 1 protocol repair / 1 review. Both repairs rejected multiple calls; they did not repair long-document JSON. These exploratory runs preceded the stage commit; the script now records source commit and tracked changes for subsequent runs.
 
+The clean-commit repeat at local commit `1ca5b5c6e4142e78c29c6d494f9eb5e7c0053a1b` produced the same counts and passed both modes. Its complete public arithmetic traces are archived in `docs/evaluation/native_loop_20260907/`. The matching GitHub source commit is `989adc573020c82c7ce694fa07e85f1cd6c2ec61`. A subsequent trace serialization fix makes context fingerprints use the same wire-message representation as model-request logs; the archived original events remain unchanged.
+
 ## Migration plan and remaining acceptance
 
 The existing AgentLoopExecutor interface remains usable through BaseAgent injection. Native protocol parsing and message packing are framework-neutral reusable functions. The executor still owns the state machine; further extraction of typed state and independently callable transitions is necessary before a genuine LangGraph adapter. No one-click migration is claimed.
