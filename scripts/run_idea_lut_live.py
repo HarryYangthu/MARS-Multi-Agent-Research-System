@@ -27,7 +27,7 @@ from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.agent_loop.review import ExternalReview
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.validator import validate_document
-from app.settings import reset_settings_cache
+from app.settings import reset_settings_cache, env_or_local
 from scripts.idea_live_resume import exclusive_run, load_resume, record_resumption, resume_scenario
 from scripts.watch_agent_trace import monitor
 
@@ -89,13 +89,22 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be an object")
     request = evaluation_request(scenario, root)
+    model = scenario["model"]
+    provider_name = str(model.get("provider", "zhipu"))
+    if provider_name not in {"deepseek", "zhipu"}:
+        raise ValueError("evaluation provider must be deepseek or zhipu")
+    key_env = "DEEPSEEK_API_KEY" if provider_name == "deepseek" else "ZHIPU_API_KEY"
+    base_url = "https://api.deepseek.com/v1" if provider_name == "deepseek" else "https://open.bigmodel.cn/api/paas/v4"
+    selected_tools = tuple(scenario.get("tools", PUBLIC_RESEARCH_TOOLS))
+    if not selected_tools or set(selected_tools) - set(PUBLIC_RESEARCH_TOOLS):
+        raise ValueError("evaluation tools must be a nonempty subset of public research tools")
     if args.prompt_key:
-        key = getpass.getpass("Zhipu API key (hidden, not saved): ")
+        key = getpass.getpass(f"{provider_name} API key (hidden, not saved): ")
         if not key:
             raise ValueError("empty API key")
-        os.environ["ZHIPU_API_KEY"] = key
-    if not args.prepare_only and not os.environ.get("ZHIPU_API_KEY"):
-        raise RuntimeError("ZHIPU_API_KEY is missing; no request made")
+        os.environ[key_env] = key
+    if not args.prepare_only and not env_or_local(key_env):
+        raise RuntimeError(f"{key_env} is missing; no request made")
     runtime_changes = git_value("diff", "HEAD", "--name-only", "--", "backend/app", "configs", "scripts/run_idea_lut_live.py")
     if runtime_changes and not args.prepare_only:
         raise RuntimeError("commit runtime/config changes before a live evaluation so the source is reproducible")
@@ -115,12 +124,12 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
         loop_raw["mode"] = args.mode
     policy = AgentLoopPolicy.from_mapping(loop_raw)
     original = get_agent_config("idea")
-    config = replace(original, model_provider="zhipu", model_name=str(model["name"]),
-                     api_key_env="ZHIPU_API_KEY", base_url="https://open.bigmodel.cn/api/paas/v4", base_url_env="",
+    config = replace(original, model_provider=provider_name, model_name=str(model["name"]),
+                     api_key_env=key_env, base_url=base_url, base_url_env="",
                      max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
                      thinking_enabled=bool(model.get("thinking", True)), reasoning_effort=model.get("reasoning_effort"),
                      request_timeout_seconds=float(model["timeout_seconds"]), max_retries=int(model["max_retries"]),
-                     debate_enabled=False, tools=PUBLIC_RESEARCH_TOOLS,
+                     debate_enabled=False, tools=selected_tools,
                      raw={**original.raw, "loop": asdict(policy)})
     agent = IdeaAgent(agent_config=config)
     if checkpoint:
