@@ -265,7 +265,7 @@ def test_compose_resolves_container_paths_without_a_docker_daemon(
     assert "DEEPSEEK_API_KEY" not in environment
     assert environment["MARS_EXECUTION_DEVICE"] == "cpu"
     assert environment["MARS_RUNTIME_MODE"] == ("production" if production else "development")
-    assert environment["MARS_MOCK_MODE"] == ("never" if production else "auto")
+    assert environment["MARS_MOCK_MODE"] == "never"
     repo_links = [
         mount for mount in backend["volumes"]
         if mount["target"] == "/app/projects/pimc/repo_link.yaml"

@@ -144,3 +144,27 @@ the ordering of its JSON string in the prompt. No API request occurred. Resume
 now recovers that order from the preserved original prompt, requires identical
 requirement values, and still checks exact messages plus the native fingerprint.
 This restores serialization identity without weakening configuration checks.
+
+## Further removal of legacy test substitutes
+
+The old deep-discovery test backend, fixed Idea selection agent, fabricated
+Writing debate and fixed remote worker PIDs/GPU metrics were replaced individually:
+
+- Discovery pool tests use explicitly human-authored typed records for duplicate
+  exclusion, blocked-candidate ranking, bounded configuration, input identity,
+  idempotent snapshots and conflicting selection rejection. Actual SDK refusal
+  confirms that failed generation cannot record a completed generation stage.
+- Idea selection tests exercise the real coordinator and filesystem with an
+  explicit human selection; absent registration/checkpoint fails explicitly.
+- Writing tests cover bounded public previews and actual existing references.
+- Remote runner tests start the real worker and workload processes. The workload
+  computes SHA-256 from its actual input file; cancellation targets its actual
+  process group, and a missing program produces a real failure. No GPU is used.
+- Readiness tests inspect actual configuration/prerequisites. Deployment checks
+  now require the only supported mode, `never`, in development and production.
+
+These 25 focused checks passed; deployment checks passed 10 with 2 explicit
+skips because Docker Compose is unavailable. Their coverage does not replace
+unperformed full Co-Scientist generation or multi-agent scientific validation.
+The remaining legacy Discovery Service/API and pipeline tests still need migration;
+this checkpoint does not claim the entire repository's regression suite passes.
