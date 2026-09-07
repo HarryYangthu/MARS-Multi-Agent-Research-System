@@ -60,4 +60,49 @@ All three submitted candidates passed host validation immediately, including the
 
 Inspection of the actual phase configuration revealed that `reflection_reasoning_effort=high` inherited `thinking_enabled=false` from the native action model. The new independent `reflection_thinking_enabled` policy enables reasoning for the tool-free reviewer while retaining non-thinking native action calls. Both settings are recorded per request. This is a configuration fix being tested, not a claim that stronger self-review proves scientific correctness. The author is also told not to guess undefined domain acronyms, signal meanings or hardware.
 
-Further fresh-run results will be appended after execution. All failures remain preserved in the evidence package.
+## Seventh research run: a false acceptance, then a rejected assisted continuation
+
+Run `idea_lut_20260907T175204_639c98`, invocation `b955a44840f34d45832fdf8918001255`, started on clean `3fbfa8e9a3648409e690cc6c55b4869a29a8b6b7`. Its initial attempt took 657.0 seconds, with 13 model requests, 12 tool dispatches and 313,879 API-reported tokens. The tool-free reviewer actually used thinking mode. One high-effort response had an extra JSON field and another was truncated; recovery with low effort produced an accepting review.
+
+That acceptance was **wrong**. Independent checks found three material defects: a normalized-softplus gap formula did not guarantee its claimed minimum spacing; the declared training objective used held-out data; and a proposed `K=8` setting exceeded the parameter-ratio limit. The initial immutable export remains in the evidence archive but is not the final accepted result. Model acceptance is not a scientific correctness gate.
+
+A candidate-digest-bound external review resumed the same invocation on clean `4ab13591e06c66911f69acd7f33b9704681c2dc1`, preserving counters, prior exports and the source journal. The model corrected those three defects. Its subsequent revisions and reviews still exposed reproducibility gaps: five training seeds had no stated source of randomness, and the baseline regularized objective was ambiguous. The parent invocation finally ended **`reflection_rejected`**, recorded as `failed`, with 17 model requests/responses, 12 actual tools, three protocol repairs, two validation repairs and three completed reviews. Cumulative active-attempt time was 939.5 seconds and usage was 441,522 tokens, complete. This failed parent must not be reported as a successful autonomous run.
+
+The 12 tools were two memory queries, six arXiv searches and four source-fetch calls. There were nine distinct search results, two network PDF downloads, five excerpt windows and three cache reuses. The evaluation supplied two public URL hints, so this is not evidence of unseeded discovery. Actual downloads were:
+
+| Paper | Why it was fetched | Recorded reading |
+|---|---|---|
+| Gradient-Adaptive Spline-Interpolated LUT Methods for Low-Complexity Digital Predistortion, arXiv `1907.02350v4` | LUT interpolation, region coordinates, control points and low-complexity adaptation | Pages 1–3, 4–7, then 1–3 again; pages 3 and 7 were partial |
+| Free-Knots Kolmogorov-Arnold Network: On the Analysis of Spline Knots and Advancing Stability, arXiv `2501.09283v1` | Movable spline knots and their stability constraints | Pages 1–4 and 4–7; the first page-4 excerpt and page 7 were partial |
+
+These receipts show excerpt reading, not full-paper reading or proof that the proposal follows correctly from either paper. Source PDFs and their recorded SHA-256 hashes were rechecked before final delivery.
+
+## Final focused revision: deliverable with explicit external assistance
+
+`idea_delivery_revision_20260907_01` ran on clean `7ef66746caae3401be743b5a2d4e50ae55024173`, source tree `e53775c2e0b4ccca9512c465df2438333e6d72b6`. It reused the parent's actual paper excerpts and candidate, with an exact-digest-bound review containing the final two recorded reviewer issues. Codex selected this bounded revision and provided the earlier independent feedback. No host-written solution or invented tool observation was supplied.
+
+This is a separate, explicitly labeled revision, **not a new autonomous research run or a reset of the parent's exhausted review budget**. It needed one real DeepSeek V4 Flash request/response, zero new tools, zero protocol or validation repairs, and zero internal model reviews. Usage was 29,257 prompt tokens plus 5,993 completion tokens: 35,250 total, complete. The parent plus this revision used 18 model requests and 476,772 reported tokens; earlier failed runs are additional costs.
+
+The model made the initialization randomness executable: each seed generates a control-point perturbation, shared between the baseline and candidate for that seed. Both now explicitly optimize `NMSE_train + lambda * R`, with `lambda=1e-3`. The final candidate preserves separate training/held-out data, the corrected positive-gap construction, and the two within-budget sizes. Independent bounded checks found no remaining blocker in those reviewed definitions; they are not a complete scientific proof.
+
+| Acceptance layer | Final focused revision |
+|---|---|
+| Proposal Schema | Passed |
+| Retrieved-material provenance and parameter arithmetic | Passed |
+| Human summary, resolvable handoff references, required-context contract | Passed |
+| Exact Markdown/JSON/summary/acceptance bundle | Passed |
+| Trace consistency and source/candidate binding | Passed |
+| Internal model review | Not run on this final revision; `model_review_passed=false` |
+| External assistance | Present; `external_assistance=true` |
+| Real project simulation / scientific performance validation | Not performed |
+| Purely autonomous stable success | Not demonstrated |
+
+The final proposal keeps the number of 2D LUT control points fixed and learns the per-axis grid locations. For `K=12`, the declared real-scalar parameter count is 144 to 166 (1.15278x); for `K=16`, 256 to 286 (1.11719x). The 1.2x ceiling is a test assumption, not a confirmed user requirement. Performance improvement remains a falsifiable hypothesis.
+
+The exact model-written deliverable is preserved as [Markdown with YAML metadata](idea_delivery_proposal_20260907.md) and [JSON metadata](idea_delivery_proposal_20260907.json). Its application canonical digest is `c9e44355fa7e67729c076eaee9020b8995459fd7f3de4f0d38d65a5e7f56f807`; the raw Markdown SHA-256 is `e916d93edcbfa11c93e61d09be6f37cb4e88432954ea30b221c64e0047561602`. The evidence archive contains the exact export, acceptance receipt, source journal, all real traces and failures. Earlier accepted exports remain historical and must not replace this revision.
+
+## Engineering checks and remaining boundary
+
+The backend and synthetic-regression test suite passed, with eight environment-dependent skips; no mocked model/tool execution was used. Strict typing, four import-direction contracts and frontend type checking passed. GitHub Core compatibility CI passed at source-equivalent head `c3835dabeaea1873ae30f3d4fe0b8d0d9d738b9e`, run `34150774907`, including the frontend production build. Browser interaction and GPU execution were not tested.
+
+The implemented boundary is a research task/context in, visible progress plus a schema-valid, evidence-bound handoff out. This test establishes a reviewed **method-level** example. It does not establish robust autonomous reviewer quality or success on real PIMC data. Before project execution, the handoff requests the real baseline revision/module, the meanings and shapes of the two LUT inputs/output, data and normalization, and the exact performance metric/threshold. Failures and missing context remain visible instead of being converted into successful simulation claims.

@@ -60,3 +60,12 @@ python scripts/run_idea_lut_live.py --scenario configs/evaluation/idea_delivery_
 This scenario uses real DeepSeek calls, fresh memory, public paper retrieval, a human summary, typed handoff and isolated reviewer context. It has two public URL hints, so it is not an unseeded paper-discovery benchmark. The API key is read from environment or ignored local configuration and is never part of the proposal or source commit. No mock execution is permitted.
 
 If an evaluation process vanishes while a model request is pending, use the original run with `--resume-run <run> --recover-abandoned`. The CLI must acquire its exclusive process lock, verify the full trace and preserve the original input, invocation and cumulative budgets. It archives the pre-resume state and leaves usage incomplete for the lost response. An unknown tool/batch outcome or an exhausted run cannot use this recovery path. Do not manually relabel checkpoints or clear counters.
+
+An explicitly assisted revision of a finished run can reuse its real evidence with:
+
+```bash
+PYTHONPATH=.:backend:posttrain/src:projects/synthetic_regression/src \
+python scripts/repair_idea_candidate_live.py <prior-run> <new-revision-directory> <bound-review.json>
+```
+
+The review must match the current prior candidate digest; the prior trace must be consistent with no pending operation, and source must be committed. This separate, bounded ReAct task has no research tools and at most four model calls. It preserves the original failed run and records `external_assistance=true`, `new_research_performed=false` and `model_review_passed=false`. A successful revision can export an exact validated handoff, but cannot be counted as autonomous end-to-end success. The [real evaluation report](evaluation/idea_delivery_20260907.md) includes both false model acceptance and externally assisted recovery.
