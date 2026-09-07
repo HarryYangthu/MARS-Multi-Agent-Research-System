@@ -28,7 +28,9 @@ async def test_idea_context_loads_actual_project_rules_and_evaluation_scope() ->
     assert (repo_root() / "projects/pimc/AGENTS.md").read_text() in context.project
     assert "No real project repository" in context.task
     assert '"max_parameter_ratio": 1.2' in context.task
-    assert "final.metadata" in context.system
+    messages = agent._messages_for_context(request, context, purpose="native-context-contract")
+    assert "final.metadata" not in "\n".join(m.content for m in messages)
+    assert "YAML frontmatter" in "\n".join(m.content for m in messages)
     assert "Memory" in context.system
 
 
