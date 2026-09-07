@@ -6,7 +6,9 @@ import hashlib
 import itertools
 import json
 import math
+import random
 import sys
+import time
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -81,8 +83,12 @@ def evaluate_candidate(
     seed: int,
     candidate_id: str | None = None,
     fidelity: str = "F0",
-    mode: str = "mock",
+    mode: str = "synthetic",
 ) -> dict[str, object]:
+    if mode != "synthetic":
+        raise ContractError("only real synthetic fitting is supported; mock/config-only evaluation is removed")
+    if fidelity not in {"F0", "F1"}:
+        raise ContractError("synthetic fidelity must be F0 or F1")
     dataset_bytes = _resource_bytes("dataset.json")
     dataset = _mapping(json.loads(dataset_bytes), "dataset")
     x_values = _number_list(dataset.get("x"), "dataset.x")
@@ -94,25 +100,35 @@ def evaluate_candidate(
     regularization = _number(hyperparameters.get("regularization"), "regularization")
     if degree < 1 or degree > 5 or regularization < 0.0:
         raise ContractError("candidate hyperparameters are outside the packaged search space")
-    coefficients = _coefficients(
-        degree=degree,
-        regularization=regularization,
-        seed=seed,
-        fingerprint=candidate.fingerprint,
-    )
-    predictions = [
-        sum(coefficient * (x_value**power) for power, coefficient in enumerate(coefficients))
-        for x_value in x_values
-    ]
+    indices = list(range(len(x_values)))
+    random.Random(seed).shuffle(indices)
+    if len(indices) < 11:
+        raise ContractError("packaged fit requires at least eleven distinct samples")
+    train_indices = indices[:6 if fidelity == "F0" else 8]
+    validation_indices = indices[-3:]
+    train_x = [x_values[i] for i in train_indices]
+    train_y = [y_values[i] for i in train_indices]
+    mean = sum(train_x) / len(train_x)
+    scale = max(abs(x - mean) for x in train_x)
+    if scale == 0:
+        raise ContractError("training inputs are rank deficient")
+    design = [[((x - mean) / scale)**p for p in range(degree + 1)] for x in train_x]
+    validation_design = [[((x_values[i] - mean) / scale)**p for p in range(degree + 1)]
+                         for i in validation_indices]
+    coefficients = fit_ridge(design, train_y, regularization)
+    predictions = [sum(c * x for c, x in zip(coefficients, row, strict=True)) for row in validation_design]
+    targets = [y_values[i] for i in validation_indices]
     mse = sum(
         (prediction - target) ** 2
-        for prediction, target in zip(predictions, y_values, strict=True)
-    ) / len(y_values)
+        for prediction, target in zip(predictions, targets, strict=True)
+    ) / len(targets)
+    # This is an explicitly defined coefficient-norm proxy, not a statistical or
+    # physical stability guarantee. Its value comes from the fitted coefficients.
+    coefficient_norm = math.sqrt(sum(c*c for c in coefficients))
     raw_values = {
         "validation_mse": mse,
         "model_terms": float(degree + 1),
-        "stability_score": 1.0
-        / (1.0 + degree * regularization * 10.0 + max(0, degree - 2) * 0.05),
+        "stability_score": 1.0 / (1.0 + coefficient_norm),
     }
     metrics = _metric_definitions()
     dataset_hash = content_hash(dataset_bytes)
@@ -124,6 +140,10 @@ def evaluate_candidate(
         "dataset_hash": dataset_hash,
         "evaluator_hash": evaluator_hash,
         "candidate_hash": candidate.fingerprint,
+        "training_indices": train_indices,
+        "validation_indices": validation_indices,
+        "fit": "ridge_qr_normalized_inputs_all_coefficients_penalized",
+        "stability_score_definition": "1/(1+L2 fitted coefficient norm); proxy only",
     }
     raw_metrics: dict[str, object] = {}
     canonical_metrics: dict[str, object] = {}
@@ -153,6 +173,7 @@ def evaluate_candidate(
 
 
 def handle_request(payload: Mapping[str, object]) -> dict[str, object]:
+    started = time.monotonic()
     request_id = _required_string(payload, "request_id")
     if payload.get("protocol", "adapter.v1") != "adapter.v1":
         return _response(
@@ -170,6 +191,14 @@ def handle_request(payload: Mapping[str, object]) -> dict[str, object]:
         )
     action = payload.get("action")
     if action == "readiness":
+        try:
+            candidate_configs()
+            _metric_definitions()
+            dataset = _resource_json("dataset.json")
+            if len(_number_list(dataset.get("x"), "dataset.x")) != len(_number_list(dataset.get("y"), "dataset.y")):
+                raise ContractError("dataset x/y length mismatch")
+        except (ContractError, OSError, ValueError) as exc:
+            return _response(request_id, status="blocked", error_code="resources_unavailable", error=str(exc))
         return _response(
             request_id,
             status="ready",
@@ -202,7 +231,7 @@ def handle_request(payload: Mapping[str, object]) -> dict[str, object]:
             raise ContractError(f"unsupported action: {action!r}")
         seed = _integer(project_inputs.get("seed", payload.get("seed", 0)), "seed")
         fidelity = str(project_inputs.get("fidelity", payload.get("fidelity", "F0")))
-        mode = str(project_inputs.get("mode", "mock"))
+        mode = str(project_inputs.get("mode", "synthetic"))
         envelope = evaluate_candidate(
             candidate,
             seed=seed,
@@ -218,8 +247,8 @@ def handle_request(payload: Mapping[str, object]) -> dict[str, object]:
                 "candidate_fingerprint": candidate.fingerprint,
                 "dataset_hash": cast(str, _mapping(envelope["provenance"], "provenance")["dataset_hash"]),
             },
-            resource_usage={"wall_seconds": 0.0, "gpu_seconds": 0.0},
-            findings=("Deterministic synthetic regression evaluation completed.",),
+            resource_usage={"wall_seconds": time.monotonic() - started, "gpu_seconds": 0.0},
+            findings=("Actual CPU ridge fit and held-out synthetic evaluation completed; no production validation.",),
         )
     except ContractError as exc:
         return _response(
@@ -326,12 +355,8 @@ def _project_inputs(config: Mapping[str, object]) -> dict[str, object]:
     for key in ("mode", "candidate_count", "seed", "fidelity"):
         if key in config:
             values[key] = config[key]
-    if "mode" in values and values["mode"] not in {
-        "config-only",
-        "mock",
-        "synthetic",
-    }:
-        raise ContractError("synthetic mode must be config-only, mock, or synthetic")
+    if "mode" in values and values["mode"] != "synthetic":
+        raise ContractError("synthetic mode must be synthetic; mock/config-only execution is removed")
     if "candidate_count" in values:
         count = _integer(values["candidate_count"], "candidate_count")
         if count < 1 or count > len(candidate_configs()):
@@ -343,20 +368,47 @@ def _project_inputs(config: Mapping[str, object]) -> dict[str, object]:
     return values
 
 
-def _coefficients(
-    *, degree: int, regularization: float, seed: int, fingerprint: str
-) -> tuple[float, ...]:
-    target = (0.5, -0.75, 1.5)
-    shrink = 1.0 / (1.0 + regularization * 8.0)
-    values: list[float] = []
-    for power in range(degree + 1):
-        if power < len(target):
-            values.append(target[power] * shrink)
-            continue
-        digest = hashlib.sha256(f"{fingerprint}:{seed}:{power}".encode("utf-8")).digest()
-        unit = int.from_bytes(digest[:4], "big") / (2**32 - 1)
-        values.append((unit - 0.5) * 0.02 / power)
-    return tuple(values)
+def fit_ridge(design: list[list[float]], targets: list[float], regularization: float) -> tuple[float, ...]:
+    """Solve the actual augmented least-squares problem using reorthogonalized QR.
+
+    The tiny public fixture remains standard-library-only. No target coefficients,
+    fabricated optimizer progress or seed-dependent metric perturbations are used.
+    """
+    if not design or len(design) != len(targets) or not design[0] or regularization < 0:
+        raise ContractError("invalid regression dimensions or regularization")
+    width = len(design[0])
+    if any(len(row) != width for row in design):
+        raise ContractError("ragged design matrix")
+    if not all(math.isfinite(x) for row in design for x in row) or not all(math.isfinite(y) for y in targets):
+        raise ContractError("regression inputs must be finite")
+    if not math.isfinite(regularization):
+        raise ContractError("regularization must be finite")
+    rows = [list(row) for row in design]
+    values = list(targets)
+    if regularization:
+        root = math.sqrt(regularization)
+        rows.extend([[root if i == j else 0.0 for j in range(width)] for i in range(width)])
+        values.extend([0.0] * width)
+    q: list[list[float]] = []
+    r = [[0.0] * width for _ in range(width)]
+    for j in range(width):
+        column = [row[j] for row in rows]
+        original_norm = math.sqrt(sum(x*x for x in column))
+        for _ in range(2):
+            for i in range(j):
+                projection = sum(a*b for a, b in zip(q[i], column, strict=True))
+                r[i][j] += projection
+                column = [a - projection*b for a, b in zip(column, q[i], strict=True)]
+        norm = math.sqrt(sum(x*x for x in column))
+        if norm <= 1e-12 * max(original_norm, 1.0):
+            raise ContractError("rank-deficient regression design")
+        r[j][j] = norm
+        q.append([x / norm for x in column])
+    rhs = [sum(a*b for a, b in zip(column, values, strict=True)) for column in q]
+    solution = [0.0] * width
+    for i in reversed(range(width)):
+        solution[i] = (rhs[i] - sum(r[i][j] * solution[j] for j in range(i+1, width))) / r[i][i]
+    return tuple(solution)
 
 
 def _metric_definitions() -> dict[str, dict[str, str]]:

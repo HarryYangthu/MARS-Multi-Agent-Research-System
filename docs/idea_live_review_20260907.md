@@ -168,3 +168,34 @@ skips because Docker Compose is unavailable. Their coverage does not replace
 unperformed full Co-Scientist generation or multi-agent scientific validation.
 The remaining legacy Discovery Service/API and pipeline tests still need migration;
 this checkpoint does not claim the entire repository's regression suite passes.
+
+## Streamed output-budget failure and automatic recovery
+
+The first resumption used clean source `e86e044` (GitHub `5823691`). The next
+request completed, and the agent correctly identified that its previous PDF
+excerpt omitted the Free-Knots method, then read a new cached window beginning
+on page 4. The following request ended with `finish_reason=length`: reported
+completion tokens were 16,384, including 16,354 reasoning tokens, with no usable
+visible final answer. Streaming removed the earlier complete-response wait for
+this request, but did not solve reasoning consuming the output budget.
+
+The native loop now treats output truncation as a bounded protocol repair.
+It lowers that phase's configured reasoning effort to low when applicable,
+requests concise complete output, and preserves observations, candidate,
+unresolved review issues and cumulative request limits. Every adjustment is
+recorded as `completion_recovery`; effective effort and max tokens are recorded
+per request. A legacy interrupted checkpoint can recover from its recorded
+public truncation error without editing its original evidence or fingerprint.
+Other provider errors continue to fail explicitly after bounded transport retries.
+65 focused loop/recovery contracts passed; live recovery must still be verified.
+
+Another legacy runtime path was found in the public synthetic adapter: preset
+target coefficients, seeded coefficient jitter, a fabricated stability formula,
+zero elapsed usage, and a selectable mock mode. These are removed. It now fits
+actual data with standard-library QR ridge regression, reports disjoint holdout
+MSE and measured elapsed time, and records training/holdout indices. The legacy
+stability metric is explicitly a fitted coefficient-norm proxy. F0/F1 use six/eight
+training points with the same holdout, and mock/config-only evaluation is rejected.
+Seven adapter tests and the real twenty-candidate subprocess smoke passed.
+The smoke also now uses the registered adapter, preserving its source-layout
+environment instead of reconstructing an adapter without its import path.

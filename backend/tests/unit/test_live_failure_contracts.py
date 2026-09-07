@@ -16,6 +16,18 @@ from app.storage.run_store import RunStore
 from app.harness.llm.openai_provider import OpenAIProvider, ZhipuProvider
 from app.harness.llm.provider_base import LLMConfig, Message
 from app.harness.tools.config import tool_config
+from app.harness.agent_loop.executor import truncation_recovery
+
+
+@pytest.mark.parametrize("phase_effort", [None, "low", "high", "max"])
+def test_output_truncation_has_bounded_visible_error_repair(phase_effort: str | None) -> None:
+    error = {"code": "output_truncated", "empty_final": True, "finish_reason": "length"}
+    plan = truncation_recovery(error, repairs=0, limit=2, effort=phase_effort)
+    assert plan is not None
+    assert plan["reasoning_effort"] == ("low" if phase_effort in {"high", "max"} else phase_effort)
+    assert "observations remain valid" in plan["feedback"]
+    assert truncation_recovery(error, repairs=2, limit=2, effort=phase_effort) is None
+    assert truncation_recovery({"code": "authentication"}, repairs=0, limit=2, effort=phase_effort) is None
 
 
 def test_failed_attempt_keeps_usage_incomplete_after_success(tmp_path: Path) -> None:

@@ -18,6 +18,18 @@ from app.harness.tools.registry import ToolContext, ToolRegistry
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
 
 
+def truncation_recovery(reason: object, *, repairs: int, limit: int, effort: str | None) -> dict[str, Any] | None:
+    """Plan a bounded repair from public error metadata, never from partial output."""
+    if not isinstance(reason, dict) or reason.get("code") != "output_truncated" or repairs >= limit:
+        return None
+    selected = "low" if effort in {"medium", "high", "max"} else effort
+    return {"previous_effort": effort, "reasoning_effort": selected,
+            "feedback": "The last response hit the output token limit and was rejected. "
+                        "Reasoning may consume this same limit. Produce a concise complete JSON response; "
+                        "retain required equations, parameter accounting and evidence, remove repetition. "
+                        "Existing observations remain valid; do not repeat research without a specific evidence gap."}
+
+
 @dataclass
 class LoopInput:
     messages: list[Message]
@@ -85,6 +97,11 @@ class NativeAgentLoop:
             state["pending"] = None
         state.setdefault("review_issues", [])
         state.setdefault("reviewed_candidate_sha", "")
+        state.setdefault("phase_efforts", {})
+        if request.resume and "last_model_error" not in state:
+            prior_events = [json.loads(line) for line in trace.events.read_text().splitlines()]
+            state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
+                                               if row["kind"] == "model_error"), None)
         counts = state["counts"]
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
         trace.snapshot(state)
@@ -106,7 +123,34 @@ class NativeAgentLoop:
                     state["usage_complete"] = False
 
         cfg.attempt_observer = on_attempt
+
+        def phase_config() -> LLMConfig:
+            phase = state["next_phase"]
+            default = p.reflection_reasoning_effort if phase == "reflect" and p.reflection_reasoning_effort else cfg.reasoning_effort
+            return replace(cfg, reasoning_effort=state["phase_efforts"].get(phase, default))
+
+        def recover_completion(reason: object) -> bool:
+            plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
+                                       limit=p.max_protocol_repairs, effort=phase_config().reasoning_effort)
+            if plan is None:
+                return False
+            phase = state["next_phase"]
+            counts["protocol_repairs"] += 1
+            state["phase_efforts"][phase] = plan["reasoning_effort"]
+            state["feedback"] = plan["feedback"]
+            state["pending"] = None
+            state["status"] = "running"
+            state["last_model_error"] = None
+            trace.emit("completion_recovery", {"phase": phase, "code": "output_truncated",
+                                               "previous_effort": plan["previous_effort"],
+                                               "reasoning_effort": plan["reasoning_effort"],
+                                               "remaining_model_calls": p.max_model_calls-counts["model_requests"]})
+            trace.snapshot(state)
+            return True
+
         try:
+            if request.resume:
+                recover_completion(state.get("last_model_error"))
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
                 reviewing = state["next_phase"] == "reflect"
                 extra: list[Message] = []
@@ -130,12 +174,13 @@ class NativeAgentLoop:
                 )
                 counts["model_requests"] += 1
                 state["pending"] = "model"
+                call_config = phase_config()
                 trace.emit("context_packed", manifest)
-                trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"]},
+                trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
+                                             "reasoning_effort": call_config.reasoning_effort,
+                                             "max_tokens": call_config.max_tokens},
                            visible=[asdict(m) for m in messages])
                 trace.snapshot(state)
-                call_config = replace(cfg, reasoning_effort=p.reflection_reasoning_effort) if (
-                    reviewing and p.reflection_reasoning_effort is not None) else cfg
                 try:
                     completion = await asyncio.wait_for(
                         request.provider.complete(messages, call_config), timeout=llm_call_deadline_seconds(call_config))
@@ -148,13 +193,17 @@ class NativeAgentLoop:
                                                       "usage": exc.usage})
                         state["pending"] = None
                     state["status"] = "model_error"
+                    state["last_model_error"] = getattr(exc, "reason", None)
                     trace.emit("model_error", {"error_type": type(exc).__name__, "reason": getattr(exc, "reason", None)})
+                    if recover_completion(state["last_model_error"]):
+                        continue
                     break
                 if completion.is_mock or completion.provider in {"mock", "fake"}:
                     raise RuntimeError("non-real completion rejected")
                 counts["model_responses"] += 1
                 usage(completion.raw.get("usage"))
                 state["pending"] = None
+                state["last_model_error"] = None
                 trace.emit("model_response", {"request": counts["model_requests"], "provider": completion.provider,
                                               "model": completion.model, "usage": completion.raw.get("usage")},
                            visible=completion.text)
