@@ -31,3 +31,32 @@ The failure exposed a generic executor defect: a protocol error or successful to
 The production API also now accepts labeled Idea context and typed requirements. The actual persisted run options are consumed by the Idea-stage Bridge loader; exact caller text is retained. This path is verified with real temporary archives and payload validation, not a live HTTP-to-model integration test.
 
 A fresh evaluation on the repaired executor follows; its result will be recorded separately rather than overwriting this failed trace.
+
+
+## Repaired-loop fresh run
+
+`idea_lut_20260907T184549_2c8d97` ran on clean local `f00547865aea9f7b5aa9fa3c21b08c66d2f7a0f5`, tree `89848fc36087ca4e14673f00760e1bd471f9336c` (remote `71ff7b6083db338dd313a182a521d58ac25028c4`). CI run 34152943257 passed.
+
+It ended `reflection_rejected`, not accepted: 17 model calls, 12 real tools, two protocol repairs (including output-length recovery), two candidate-validation failures, and three completed reviews. Runtime 624.74 seconds; 446,292 reported tokens, complete. The author independently repaired dataset references, symbolic tensor shapes and an over-budget small grid. Subsequent candidates passed host structure/material checks, but no final delivery was published because the last reviewer still required an internal-node tie convention and a normalized grid-movement metric.
+
+The repaired loop demonstrably retained validation errors through a subsequent syntax failure (`validation_issues_visible=true` in the trace), even while older observations were compressed. The original failure and this run remain separate and neither is counted as success.
+
+Review quality still has limitations. The first review incorrectly claimed sorted values have almost-everywhere zero gradient: at distinct inputs their local Jacobian is a permutation matrix, confirmed with finite differences. Independent inspection also found that the hard-nearest-neighbor free-grid ablation does not update node locations through the stated Adam/backpropagation path. The actor and reviewer instructions now explicitly trace loss-to-parameter paths and distinguish hard indices from sorted values. This is an instruction improvement, not a proven mathematical verifier.
+
+## Explicit assisted revision
+
+A reusable headless `scripts/revise_idea_candidate.py` now supports a separate, candidate-digest-bound revision using an audited terminal parent. It preserves the parent unchanged, records external assistance, runs no new research tools, reuses only historical evidence, and validates the complete output with IdeaAgent. Five pure lineage tests passed; total focused tests across this continuation are 219, with strict type checks on changed files.
+
+The first revision preparation (`idea_delivery_revision_20260908_01`) exceeded the pinned context budget before any model call. The script now uses the shared context packer for historical evidence. A second preparation/run uses clean local `08954ec029c975ddc6c9419ea88a4f2657d9b655`, tree `f24f30b7635f55b13cec9c9367634e8a01f9c1ae`, remote `b0ccdfc24508fa8cd24c8306d89cc8fc17218eea`. It includes the two recorded reviewer issues plus the independent ablation trainability issue, so it must not be called unassisted end-to-end success.
+
+
+The second assisted revision was blocked by automatic approval review, which classified transmission of candidate material and historical trace context to DeepSeek as requiring explicit data-export authorization. Local read-only inspection confirmed the parent was `public_research`, project rules/code loading were disabled, and upstream artifacts were empty. Nevertheless the execution session became unavailable after the rejection. Its last checkpoint records one pending model request and SDK attempt, zero responses; completion and usage cannot be established. No success is attributed to this revision, and its parent remains failed. The incomplete checkpoint is preserved unchanged, with a separate interruption note.
+
+### Current acceptance
+
+- Engineering: parameter/protocol/context/feedback changes passed targeted tests and strict type checks; source changes are checkpointed remotely.
+- Autonomous method delivery: **not yet passed** in either fresh run of this continuation. Candidate host checks improved, but the final model review did not accept.
+- Assisted revised delivery: **blocked**, no confirmed output.
+- PIMC simulation, 2 dB performance, GPU usage and stable autonomous quality: **not demonstrated**.
+
+To continue the blocked revision, clarify approval for sending the selected candidate and its historical public-paper tool observations to DeepSeek. Preserve the uncertain pending invocation; do not silently replay it or count it as a completed request.
