@@ -101,3 +101,25 @@ Do not merge main until relevant regressions and live validation are complete.
 - Live run `idea_lut_20260907T082315_8dd75f` completed its loop but was rejected
   in independent implementation review; see `idea_live_review_20260907.md`.
   A subsequent run is testing actual candidate revision after review rejection.
+
+## Provider, deadline and handoff migration
+
+- Replaced four more restored test modules individually: OpenAI-compatible
+  provider parsing, LLM deadlines, Commander runtime configuration, and
+  Commander feedback handoffs. No model/client/tool replacement is installed.
+  SDK envelope tests are pure parsing of explicitly authored input and do not
+  call a provider or represent retrieved model answers.
+- Actual SDK requests to a reserved non-listening local port verify connection
+  failure and bounded retries. Idea, Commander and debate callers terminate
+  without a successful answer or tool result. The provider/deadline/Commander
+  suite has 28 passing cases; handoff/agent/context checks have 25 passing cases.
+  Seven changed source/test files passed targeted mypy.
+- Provider response and streaming-field parsing now have explicit pure
+  boundaries while retaining the actual SDK transport. Commander accepts an
+  explicit AgentConfig, like BaseAgent, without substituting a provider object.
+- Approved upstream documents now reach the shared context packer intact. The
+  bridge's exception fallback that silently cut documents to 3,000 characters
+  is removed. Required upstream references are recorded on the RunRequest.
+- These checks do not establish an end-to-end Commander/debate success or
+  complete the remaining legacy test migration. The active real Idea run uses
+  its separately recorded frozen source commit, not subsequent on-disk edits.

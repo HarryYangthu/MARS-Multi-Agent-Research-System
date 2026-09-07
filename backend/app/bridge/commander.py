@@ -23,8 +23,9 @@ from loguru import logger
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
-from app.harness.llm.model_registry import get_agent_config, select_provider
+from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import (
+    LLMConfig,
     LLMProvider,
     Message,
     llm_call_deadline_seconds,
@@ -56,13 +57,14 @@ class Commander:
         *,
         orchestrator: Orchestrator,
         run_store: RunStore | None = None,
+        agent_config: AgentConfig | None = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.run_store = run_store or orchestrator.run_store
-        self._provider, self._llm_config = self._resolve_provider()
-        self.max_react_steps = self._resolve_max_react_steps()
+        self._provider, self._llm_config = select_provider(agent_config) if agent_config else self._resolve_provider()
+        self.max_react_steps = _react_step_limit(agent_config.raw) if agent_config else self._resolve_max_react_steps()
 
-    def _resolve_provider(self) -> tuple[LLMProvider, Any]:
+    def _resolve_provider(self) -> tuple[LLMProvider, LLMConfig]:
         try:
             cfg = get_agent_config("commander")
         except KeyError:

@@ -80,45 +80,8 @@ async def run_agent_node(
     if user_request_path.exists():
         user_request = user_request_path.read_text(encoding="utf-8")
 
-    # Pick up upstream approved artifacts as handoff.
-    upstream: dict[str, str] = {}
-    selected_data_source = _load_selected_data_source(run)
-    if selected_data_source:
-        upstream["input.selected_data_source"] = selection_summary(selected_data_source)
-    for sub in ("idea", "experiment", "coding", "execution", "diagnosis"):
-        if sub == stage:
-            break
-        d = run.subdir(sub)
-        if not d.exists():
-            continue
-        for p in sorted(d.glob("*.approved.md")):
-            upstream[p.name] = _handoff_summary(
-                text=p.read_text(encoding="utf-8"),
-                source_ref=p.relative_to(run.root).as_posix(),
-            )
-    feedback_context: dict[str, Any] | None = None
-    if attempt > 1 and stage in {"experiment", "coding"}:
-        feedback_context = load_feedback_context_for_agent(
-            run=run,
-            agent=stage,
-            attempt=attempt,
-        )
-        if feedback_context is not None:
-            upstream["commander_feedback"] = str(feedback_context["text"])
-    if stage == "writing":
-        upstream.update(_execution_result_handoffs(run))
-        diagnosis_versions = sorted(run.subdir("diagnosis").glob("diagnosis.v*.md"))
-        if diagnosis_versions:
-            latest_diagnosis = diagnosis_versions[-1]
-            upstream[latest_diagnosis.name] = _handoff_summary(
-                text=latest_diagnosis.read_text(encoding="utf-8"),
-                source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
-            )
+    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason)
     if revision_reason:
-        upstream["human_revision_request"] = (
-            "Human reviewer rejected the current draft and requested a revised "
-            f"version. Feedback: {revision_reason}"
-        )
         run.write_event(
             "agent_events",
             {
@@ -152,6 +115,7 @@ async def run_agent_node(
             "run_root": str(run.root),
             "agent_dir": str(run.subdir(stage)),
             "revision_reason": revision_reason,
+            "required_upstream_refs": list(upstream),
         }
     )
     request = AgentRunRequest(
@@ -430,13 +394,59 @@ def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> No
     target.write_text("\n".join(block.rstrip() for block in blocks) + "\n", encoding="utf-8")
 
 
-def _handoff_summary(*, text: str, source_ref: str) -> str:
-    try:
-        from app.harness.context.engine import summarize_handoff_artifact
+def load_agent_handoff_context(
+    run: RunHandle, node_key: str, *, revision_reason: str = "",
+) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """Load actual approved upstream documents without silently truncating them."""
+    identity = parse_node_key(node_key)
+    stage, attempt = identity.stage, identity.attempt
+    # Pick up upstream approved artifacts as handoff.
+    upstream: dict[str, str] = {}
+    selected_data_source = _load_selected_data_source(run)
+    if selected_data_source:
+        upstream["input.selected_data_source"] = selection_summary(selected_data_source)
+    for sub in ("idea", "experiment", "coding", "execution", "diagnosis"):
+        if sub == stage:
+            break
+        d = run.subdir(sub)
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("*.approved.md")):
+            upstream[p.name] = _handoff_summary(
+                text=p.read_text(encoding="utf-8"),
+                source_ref=p.relative_to(run.root).as_posix(),
+            )
+    feedback_context: dict[str, Any] | None = None
+    if attempt > 1 and stage in {"experiment", "coding"}:
+        feedback_context = load_feedback_context_for_agent(
+            run=run,
+            agent=stage,
+            attempt=attempt,
+        )
+        if feedback_context is not None:
+            upstream["commander_feedback"] = str(feedback_context["text"])
+    if stage == "writing":
+        upstream.update(_execution_result_handoffs(run))
+        diagnosis_versions = sorted(run.subdir("diagnosis").glob("diagnosis.v*.md"))
+        if diagnosis_versions:
+            latest_diagnosis = diagnosis_versions[-1]
+            upstream[latest_diagnosis.name] = _handoff_summary(
+                text=latest_diagnosis.read_text(encoding="utf-8"),
+                source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
+            )
+    if revision_reason:
+        upstream["human_revision_request"] = (
+            "Human reviewer rejected the current draft and requested a revised "
+            f"version. Feedback: {revision_reason}"
+        )
+    return upstream, feedback_context
 
-        return summarize_handoff_artifact(text=text, source_ref=source_ref)
-    except Exception:
-        return text[:3000]
+
+def _handoff_summary(*, text: str, source_ref: str) -> str:
+    # Compression belongs to the loop packer, which records a manifest.
+    # A bridge exception must never silently discard an approved contract.
+    return f"[upstream artifact: {source_ref}]\n{text}"
+
 
 
 def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:

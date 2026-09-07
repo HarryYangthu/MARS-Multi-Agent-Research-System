@@ -157,6 +157,10 @@ class _OpenAICompatProvider(LLMProvider):
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
         )
+        return self._completion_from_response(resp, config)
+
+    def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
+        """Pure SDK-envelope parsing; it performs no model/service execution."""
         if not resp.choices:
             raise RuntimeError(f"{self.name} returned no completion choices")
         response_choice = resp.choices[0]
@@ -167,24 +171,8 @@ class _OpenAICompatProvider(LLMProvider):
         finish_reason = _optional_string(
             getattr(response_choice, "finish_reason", None)
         )
-        if finish_reason == "length":
-            raise LLMCompletionError(
-                code="output_truncated",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=not bool(text.strip()),
-                usage=_usage_payload(getattr(resp, "usage", None)),
-            )
-        if not text.strip():
-            raise LLMCompletionError(
-                code="empty_final_content",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=True,
-                usage=_usage_payload(getattr(resp, "usage", None)),
-            )
+        self._check_final(config, finish_reason, bool(text.strip()),
+                          usage=_usage_payload(getattr(resp, "usage", None)))
         return Completion(
             text=text,
             provider=self.name,
@@ -199,6 +187,22 @@ class _OpenAICompatProvider(LLMProvider):
             },
         )
 
+    def _check_final(self, config: LLMConfig, finish_reason: str | None, visible_content_seen: bool,
+                     *, usage: dict[str, Any] | None = None) -> None:
+        if finish_reason == "length" or not visible_content_seen:
+            raise LLMCompletionError(
+                code="output_truncated" if finish_reason == "length" else "empty_final_content",
+                provider=self.name, model=config.model, finish_reason=finish_reason,
+                empty_final=not visible_content_seen, usage=usage,
+            )
+
+    @staticmethod
+    def _visible_stream_delta(chunk: Any) -> tuple[str, str | None]:
+        if not chunk.choices:
+            return "", None
+        choice = chunk.choices[0]
+        return str(choice.delta.content or ""), _optional_string(getattr(choice, "finish_reason", None))
+
     async def stream(
         self, messages: list[Message], config: LLMConfig
     ) -> AsyncIterator[Delta]:
@@ -211,35 +215,13 @@ class _OpenAICompatProvider(LLMProvider):
         finish_reason: str | None = None
         visible_content_seen = False
         async for chunk in stream:
-            if not chunk.choices:
-                continue
-            response_choice = chunk.choices[0]
-            chunk_finish_reason = _optional_string(
-                getattr(response_choice, "finish_reason", None)
-            )
+            piece, chunk_finish_reason = self._visible_stream_delta(chunk)
             if chunk_finish_reason is not None:
                 finish_reason = chunk_finish_reason
-            delta = response_choice.delta
-            piece = str(delta.content or "")
             if piece:
                 visible_content_seen = visible_content_seen or bool(piece.strip())
                 yield Delta(text=piece)
-        if finish_reason == "length":
-            raise LLMCompletionError(
-                code="output_truncated",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=not visible_content_seen,
-            )
-        if not visible_content_seen:
-            raise LLMCompletionError(
-                code="empty_final_content",
-                provider=self.name,
-                model=config.model,
-                finish_reason=finish_reason,
-                empty_final=True,
-            )
+        self._check_final(config, finish_reason, visible_content_seen)
         yield Delta(text="", finish_reason=finish_reason or "stop")
 
 
