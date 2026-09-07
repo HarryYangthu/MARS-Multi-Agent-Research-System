@@ -183,6 +183,7 @@ class BaseAgent(ABC):
                              debate_role: str | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext, get_registry
         from app.harness.tools.config import tool_config
+        from app.harness.agent_loop.review import ExternalReview
         run_root = Path(str(request.extra.get("run_root") or
                             repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()
         request.extra["run_root"] = str(run_root)
@@ -205,6 +206,8 @@ class BaseAgent(ABC):
                                      extra={"run_root": str(run_root)}),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
+            external_review=(ExternalReview.from_mapping(request.extra["external_review"])
+                             if "external_review" in request.extra else None),
         ))
         context.metadata["loop_status"] = result.status
         if result.status != "passed":

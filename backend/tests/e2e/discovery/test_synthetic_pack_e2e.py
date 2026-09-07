@@ -70,7 +70,7 @@ async def test_public_pack_runs_twenty_candidates_through_core_adapter(
                 seed=100 + index,
                 config={
                     "model_genome": _model_genome(candidate.config),
-                    "mode": "mock",
+                    "mode": "synthetic",
                     "candidate_count": 20,
                     "seed": 100 + index,
                     "fidelity": "F0",
@@ -110,7 +110,7 @@ async def test_public_pack_is_identical_under_v30_and_v31_profiles(
         config={
             "model_genome": _model_genome(candidate.config),
             "project_inputs": {
-                "mode": "mock",
+                "mode": "synthetic",
                 "candidate_count": 20,
                 "seed": 77,
                 "fidelity": "F0",

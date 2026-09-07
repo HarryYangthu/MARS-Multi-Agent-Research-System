@@ -1,86 +1,43 @@
-"""Phase 6 e2e: 6 concurrent mock simulations + WS channel isolation."""
-from __future__ import annotations
-
-import asyncio
-import time
-
+"""Concurrent real CPU PIM fits, observed through their actual event channels."""
+from pathlib import Path
+from typing import Any
 import pytest
-
 from app.execution.batch_runner import BatchConfig, run_batch
 from app.execution.simulation_runner import JobSpec
-from app.harness.runtime.event_bus import InProcessEventBus
+from app.settings import reset_settings_cache
 
 
 @pytest.mark.asyncio
-async def test_six_jobs_run_concurrently() -> None:
-    bus = InProcessEventBus()
-    events_per_channel: dict[str, list[dict]] = {}  # type: ignore[type-arg]
-
-    async def pub(channel: str, payload: dict) -> None:  # type: ignore[type-arg]
-        events_per_channel.setdefault(channel, []).append(payload)
-        await bus.publish(channel, payload)
-
-    specs = [
-        JobSpec(
-            run_id="batch-test",
-            experiment_id=f"exp_{i}",
-            project="pimc",
-            seed=i,
-        )
-        for i in range(6)
-    ]
-
-    started = time.monotonic()
-    outcome = await run_batch(
-        specs,
-        config=BatchConfig(max_concurrency=6, steps=5),
-        bus_publish=pub,
-    )
-    elapsed = time.monotonic() - started
-
-    # 6 results returned, no failures
-    assert len(outcome.results) == 6
-    assert outcome.failures == []
-
-    # Each experiment got its own channel — no cross-talk
-    assert len(events_per_channel) == 6
-    for channel, events in events_per_channel.items():
-        assert any(e.get("event") == "execution.started" for e in events)
-        assert any(e.get("event") == "execution.completed" for e in events)
-        # Channel is per-experiment by construction
-        assert channel.startswith("run.batch-test.experiment.exp_")
-
-    # Concurrency: with sem=6 and 6 jobs, total elapsed should be << 6 * single_job
-    # We can't bound it tightly without knowing CI noise, so just sanity-check.
-    single = (5 * 0.05)  # steps * sleep_per_tick
-    assert elapsed < single * 6, f"jobs were not concurrent (elapsed={elapsed:.2f})"
-
-
-@pytest.mark.asyncio
-async def test_seventh_job_queues_behind_cap() -> None:
-    """With cap=2, the 3rd of 3 jobs starts after one of the first two finishes."""
-    starts: list[float] = []
-
-    async def pub(channel: str, payload: dict) -> None:  # type: ignore[type-arg]
-        if payload.get("event") == "execution.started":
-            starts.append(time.monotonic())
-
-    specs = [
-        JobSpec(
-            run_id="cap-test",
-            experiment_id=f"exp_{i}",
-            project="pimc",
-            seed=i,
-        )
-        for i in range(3)
-    ]
-    await run_batch(
-        specs,
-        config=BatchConfig(max_concurrency=2, steps=10),
-        bus_publish=pub,
-    )
-    starts.sort()
-    # The third job starts after at least the first finishes — so its start
-    # time should be later than starts[0].
-    assert len(starts) == 3
-    assert starts[2] > starts[0]
+@pytest.mark.parametrize("cap,count", [(6, 6), (2, 3)])
+async def test_real_cpu_jobs_obey_cap_and_isolate_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                      cap: int, count: int) -> None:
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "pim_cpu")
+    reset_settings_cache()
+    active: set[str] = set()
+    peak = 0
+    events: dict[str, list[dict[str, Any]]] = {}
+    async def observe(channel: str, payload: dict[str, Any]) -> None:
+        nonlocal peak
+        events.setdefault(channel, []).append(payload)
+        if payload["event"] == "execution.started":
+            active.add(channel)
+            peak = max(peak, len(active))
+        elif payload["event"] in {"execution.completed", "execution.failed"}:
+            active.remove(channel)
+    specs = [JobSpec(run_id="real-batch", experiment_id=f"fit_{i}", project="pimc", seed=i,
+                     run_root=tmp_path / str(i), plot_every_steps=60) for i in range(count)]
+    try:
+        outcome = await run_batch(specs, config=BatchConfig(max_concurrency=cap, steps=60), bus_publish=observe)
+    finally:
+        reset_settings_cache()
+    assert not outcome.failures
+    assert len(outcome.results) == count
+    assert 1 < peak <= cap and not active
+    assert len(events) == count
+    for result in outcome.results:
+        assert result.status == "completed" and not result.is_mock
+        assert result.duration_seconds > 0 and result.metrics["loss"] >= 0
+        channel = f"run.real-batch.experiment.{result.experiment_id}"
+        assert all(row["experiment_id"] == result.experiment_id for row in events[channel])
+        assert sum(row["event"] == "execution.started" for row in events[channel]) == 1
+        assert sum(row["event"] == "execution.completed" for row in events[channel]) == 1

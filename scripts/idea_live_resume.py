@@ -14,6 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 from app.harness.agent_loop.trace import atomic_json, audit_trace
+from app.harness.agent_loop.policy import AgentLoopPolicy
+from app.harness.agent_loop.review import ExternalReview, review_revision
+from dataclasses import asdict
 
 
 def sha256_file(path: Path) -> str:
@@ -55,7 +58,7 @@ def exclusive_run(root: Path) -> Iterator[None]:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def load_resume(root: Path) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
+def load_resume(root: Path, *, review: ExternalReview | None = None) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
     initial = json.loads((root / "input/request.json").read_text())
     previous = json.loads((root / "summary.json").read_text())
     checkpoints = list((root / "agent_traces/idea").glob("*/checkpoint.json"))
@@ -63,7 +66,7 @@ def load_resume(root: Path) -> tuple[dict[str, Any], dict[str, Any], Path, dict[
         raise ValueError("resume requires exactly one Idea invocation checkpoint")
     checkpoint = checkpoints[0]
     state = json.loads(checkpoint.read_text())
-    if state["status"] not in {"model_error", "interrupted"}:
+    if state["status"] not in ({"model_error", "interrupted", "passed"} if review else {"model_error", "interrupted"}):
         raise ValueError("only interrupted or model-error runs can resume; budgets are never reset")
     if state["pending"] == "tool":
         raise ValueError("unknown tool outcome: reconcile the existing receipt before resuming")
@@ -73,20 +76,32 @@ def load_resume(root: Path) -> tuple[dict[str, Any], dict[str, Any], Path, dict[
         raise ValueError("run identity does not match its directory")
     if state["counts"]["model_requests"] >= initial["loop_policy"]["max_model_calls"]:
         raise ValueError("model request budget already exhausted")
+    if review:
+        review_revision(state, review, AgentLoopPolicy.from_mapping(initial["loop_policy"]))
     return initial, previous, checkpoint, state
 
 
-def record_resumption(root: Path, checkpoint: Path, source: dict[str, Any]) -> Path:
+def record_resumption(root: Path, checkpoint: Path, source: dict[str, Any], *, review: ExternalReview | None = None) -> Path:
     """Freeze the actual pre-resume files before any checkpoint/summary update."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "_" + uuid4().hex[:6]
     journal = root / "input/resumptions" / stamp
     journal.mkdir(parents=True, exist_ok=False)
     files = {"checkpoint.json": checkpoint, "facts.json": checkpoint.parent / "facts.json",
              "summary.json": root / "summary.json"}
+    prior = json.loads((root / "summary.json").read_text())
+    if prior.get("proposal_path"):
+        proposal = Path(prior["proposal_path"]).resolve()
+        if not proposal.is_relative_to(root.resolve()):
+            raise ValueError("prior proposal path escapes the run")
+        if proposal.is_file():
+            files["proposal.md"] = proposal
     hashes = {}
     for name, path in files.items():
         shutil.copyfile(path, journal / name)
         hashes[name] = sha256_file(journal / name)
+    if review:
+        atomic_json(journal / "external_review.json", asdict(review))
+        hashes["external_review.json"] = sha256_file(journal / "external_review.json")
     events = checkpoint.parent / "events.jsonl"
     manifest = {**source, "invocation": checkpoint.parent.name,
                 "input_sha256": sha256_file(root / "input/request.json"),
@@ -113,7 +128,7 @@ def audit_resumptions(root: Path, trace_root: Path) -> tuple[list[dict[str, Any]
         if size > len(events) or hashlib.sha256(events[:size]).hexdigest() != row["prior_events_sha256"]:
             errors.append("pre-resumption events were changed")
         for name, expected in row["prior_files_sha256"].items():
-            if name not in {"checkpoint.json", "facts.json", "summary.json"}:
+            if name not in {"checkpoint.json", "facts.json", "summary.json", "external_review.json", "proposal.md"}:
                 errors.append("invalid journal file name")
             elif not (path.parent / name).is_file() or sha256_file(path.parent / name) != expected:
                 errors.append("pre-resumption snapshot differs from journal hash")

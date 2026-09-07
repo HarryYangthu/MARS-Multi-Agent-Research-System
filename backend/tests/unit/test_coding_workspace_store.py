@@ -13,12 +13,9 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     def fake_repo_root() -> Path:
         return tmp_path
 
-    def fake_kb_memory(limit_per_zone: int = 4) -> tuple[store.CodingMemoryItem, ...]:
-        del limit_per_zone
-        return ()
-
     monkeypatch.setattr(store, "repo_root", fake_repo_root)
-    monkeypatch.setattr(store, "_load_kb_memory_items", fake_kb_memory)
+    from app.harness.kb.stores import reset_for_tests
+    reset_for_tests(tmp_path / "knowledge")
 
     project_dir = tmp_path / "projects" / "pimc"
     project_dir.mkdir(parents=True)

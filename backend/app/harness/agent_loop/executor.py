@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.policy import AgentLoopPolicy
+from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
@@ -43,6 +44,7 @@ class LoopInput:
     validate: Validator
     reflection_rubric: str = "Check evidence, definitions, arithmetic, internal consistency and falsifiability."
     resume: bool = False
+    external_review: ExternalReview | None = None
 
 
 @dataclass
@@ -87,7 +89,11 @@ class NativeAgentLoop:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
             state = json.loads((request.trace_root / "checkpoint.json").read_text())
-            if state["fingerprint"] != fingerprint or state["status"] not in {"running", "interrupted", "model_error"}:
+            allowed_status = {"running", "interrupted", "model_error"}
+            if request.external_review:
+                allowed_status.add("passed")
+                review_revision(state, request.external_review, p)
+            if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
             if state["pending"] == "tool":
                 raise ValueError("tool outcome unknown: reconcile its receipt before resuming; automatic replay forbidden")
@@ -104,6 +110,13 @@ class NativeAgentLoop:
                                                if row["kind"] == "model_error"), None)
         counts = state["counts"]
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
+        if request.external_review:
+            if not request.resume:
+                raise ValueError("external review requires an existing invocation")
+            state.update(review_revision(state, request.external_review, p))
+            trace.emit("external_review", {"reviewer": request.external_review.reviewer,
+                                           "candidate_digest": request.external_review.candidate_digest,
+                                           "budgets_reset": False}, visible=list(request.external_review.issues))
         trace.snapshot(state)
         cfg = request.config
         cfg.json_mode = True

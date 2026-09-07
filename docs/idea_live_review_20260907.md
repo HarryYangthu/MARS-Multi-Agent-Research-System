@@ -199,3 +199,17 @@ training points with the same holdout, and mock/config-only evaluation is reject
 Seven adapter tests and the real twenty-candidate subprocess smoke passed.
 The smoke also now uses the registered adapter, preserving its source-layout
 environment instead of reconstructing an adapter without its import path.
+
+### 实际续跑完成与独立复核（10:04 UTC）
+
+同一 invocation 在不重置预算的第二次续跑中完成：累计 16 次模型请求、15 次模型响应、17 次 SDK 尝试、9 次工具调用/Observation、2 次协议修复、2 次 Reflection（先拒绝、再接受）。累计实际运行 2580.29 秒；本次续跑 637.06 秒。已报告 234270 tokens，但最早的 502 请求用量未知，因此不能声称完整费用。完整 trace 审计一致，schema 与文献材料校验通过；这仅是模型自审通过，不是独立科学验收。
+
+独立复核仍拒绝 v1：精确计算原文 softmax 结点式，float64 的 `[1000,-1000,...,-1000]` 产生 14 个零宽区间；另发现函数类论断、离散正则定义、初始化输入、边界/相位契约与公平对照问题。原始输出和自审事件保留。新实现支持带候选 digest 的外部审查反馈，追加审查记录后原地续修，原预算、文献证据和计数不重置；产物递增版本，前稿和审查文件进入不可变续跑快照。49 项相关实际失败/纯契约/文件审核检查通过；新的外部审查续跑尚待执行。
+
+### 移除仍能空跑通过的主控路径与真实回归测试
+
+发现并移除 Orchestrator 的 no-op runner；未注册 Agent 必须失败。主控执行/修订现在使用显式注入的注册表，避免错误调用全局 Agent。人工审核缺 Agent 或 schema 映射时也失败。隔离区人工检索恢复为直接查询隔离记录，仍禁止向 Agent 上下文注入不可信历史。
+
+Discovery 测试不再返回按候选索引预设的 loss/GPU 消耗或伪造安全准备回执，改用公开 CPU 回归 pack 的真实子进程拟合。已实际覆盖 20 个候选、单位不匹配拒绝筛选、三种子配对、F0→F1、F2 明确不支持而失败、持久化重放不重复计费、人工选择与暂停/停止。旧测试的伪成功 F2/模拟暂态失败恢复/中途强制故障统计晋级不再算作覆盖；底层晋级、预算、快照与安全工作区契约仍需纳入最终完整回归，不能用新检查数量冒充等价覆盖。
+
+旧 Mock 全流水线、固定 MCP/论文指标等遗留测试仍在逐项迁移，尚不能称全仓 Mock 清理结束或全套 CI 通过。真实 CPU PIM 批量并发已执行通过；它不等于用户未接入的生产 PIMC 基线或 2 dB 目标验证。

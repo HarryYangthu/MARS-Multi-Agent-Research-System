@@ -131,16 +131,15 @@ async def search_quarantine(
 ) -> list[SearchHit]:
     if not q.strip():
         return []
-    hits = kb_query(
+    # Human quarantine inspection does not use the Agent context injection path.
+    hits = get_stores().zone(QUARANTINE_ZONE).query(
         query=q,
-        zones=[QUARANTINE_ZONE],
         top_k=top_k,
-        project=project,
-        memory_type=memory_type,
-        include_mock=include_mock,
-        include_superseded=include_superseded,
+        filters=_filters(project=project, memory_type=memory_type),
+        exclude_mock=not include_mock,
+        exclude_superseded=not include_superseded,
     )
-    return [SearchHit(score=h.score, item=_to_item(h.record)) for h in hits]
+    return [SearchHit(score=score, item=_to_item(record)) for score, record in hits]
 
 
 @router.post("/quarantine/{record_id}/review", response_model=KBItem)

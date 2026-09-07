@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.bridge.agent_registry import get_registry
+from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.harness.execution_intent import (
@@ -36,6 +36,7 @@ async def run_agent_node(
     *,
     bus: Any | None = None,
     revision_reason: str = "",
+    registry: AgentRegistry | None = None,
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
@@ -45,7 +46,7 @@ async def run_agent_node(
     stage = identity.stage
     attempt = identity.attempt
 
-    reg = get_registry()
+    reg = registry if registry is not None else get_registry()
     if not reg.has(stage):
         raise RuntimeError(f"no agent registered for {stage!r}; node was not executed")
 

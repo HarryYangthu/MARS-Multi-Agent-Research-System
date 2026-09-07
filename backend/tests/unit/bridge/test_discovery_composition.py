@@ -15,21 +15,13 @@ from app.bridge.discovery_types import (
     DiscoveryRunSpec,
     ParentCandidateSignal,
 )
-from app.bridge.extension_runtime import ExtensionRuntime, build_extension_runtime
-from app.execution.adapters.base import AdapterAction, AdapterRequest, AdapterResponse
-from app.execution.adapters.registry import AdapterRegistry
+from app.bridge.extension_runtime import build_extension_runtime
+from app.execution.adapters.base import AdapterAction, AdapterRequest
 from app.harness.discovery.models import (
     ObjectiveDirection,
     ObjectiveSpec,
     ResearchTaskContract,
 )
-
-
-class _ReadyAdapter:
-    name = "demo:evaluator"
-
-    async def invoke(self, request: AdapterRequest) -> AdapterResponse:
-        return AdapterResponse(request_id=request.request_id, status="ready")
 
 
 def _pack_root(root: Path) -> Path:
@@ -182,15 +174,7 @@ async def test_pack_candidate_generation_is_seeded_and_audited(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_router_resolves_one_trusted_adapter_and_fails_closed(tmp_path: Path) -> None:
     pack = _pack_root(tmp_path / "packs")
-    base = build_extension_runtime(distribution="v30-core", pack_roots=(pack,))
-    adapters = AdapterRegistry()
-    adapters.register("demo:evaluator", _ReadyAdapter())
-    runtime = ExtensionRuntime(
-        profile=base.profile,
-        project_packs=base.project_packs,
-        adapters=adapters,
-        adapter_bindings={("demo", "evaluator"): "demo:evaluator"},
-    )
+    runtime = build_extension_runtime(distribution="v30-core", pack_roots=(pack,))
     router = ProjectPackRoutingAdapter(runtime)
 
     ready = await router.invoke(
@@ -208,7 +192,9 @@ async def test_router_resolves_one_trusted_adapter_and_fails_closed(tmp_path: Pa
         )
     )
 
-    assert ready.status == "ready"
+    # The configured Python process really exits without an adapter response.
+    assert ready.status == "failed"
+    assert ready.error_code
     assert missing.status == "blocked"
     assert missing.error_code == "project_adapter_unavailable"
 

@@ -55,7 +55,7 @@ def _spec() -> DiscoveryRunSpec:
         auto_approve=True,
         idea_mode="auto",
         project_inputs={
-            "mode": "mock",
+            "mode": "synthetic",
             "candidate_count": 20,
             "seed": 41,
             "fidelity": "F0",

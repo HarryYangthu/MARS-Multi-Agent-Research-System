@@ -23,6 +23,7 @@ from app.agents.base import RunRequest
 from app.agents.idea.agent import IdeaAgent
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
+from app.harness.agent_loop.review import ExternalReview
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.validator import validate_document
 from app.settings import reset_settings_cache
@@ -36,6 +37,8 @@ def git_value(*args: str) -> str:
 async def run(args: argparse.Namespace) -> int:
     if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
         raise ValueError("max-seconds must be positive and finite")
+    if args.review_file and not args.resume_run:
+        raise ValueError("review-file requires resume-run")
     if args.resume_run:
         if args.prepare_only:
             raise ValueError("prepare-only cannot be combined with resume-run")
@@ -49,11 +52,12 @@ async def run(args: argparse.Namespace) -> int:
 
 
 async def _run(args: argparse.Namespace, root: Path) -> int:
+    review = ExternalReview.from_mapping(json.loads(args.review_file.read_text())) if args.review_file else None
     prior_summary: dict[str, Any] = {}
     checkpoint: Path | None = None
     initial: dict[str, Any] = {}
     if args.resume_run:
-        initial, prior_summary, checkpoint, _ = load_resume(root)
+        initial, prior_summary, checkpoint, _ = load_resume(root, review=review)
         scenario = resume_scenario(initial)
         if args.mode and args.mode != initial["loop_policy"]["mode"]:
             raise ValueError("resume cannot change the original loop mode")
@@ -99,6 +103,8 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
                                 "idea_requirements": scenario["requirements"]})
     if checkpoint:
         request.extra["resume_invocation"] = checkpoint.parent.name
+    if review:
+        request.extra["external_review"] = asdict(review)
     context = await agent.build_context(request)
     messages = agent._messages_for_context(request, context, purpose="live_preflight")
     source = {"source_commit": git_value("rev-parse", "HEAD"),
@@ -108,7 +114,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
     if checkpoint:
         if [asdict(m) for m in messages] != initial["messages"]:
             raise ValueError("resume prompt/context differs from the original input; start a new evaluation")
-        journal = record_resumption(root, checkpoint, source)
+        journal = record_resumption(root, checkpoint, source, review=review)
     else:
         initial = {"run_id": run_id, **source,
                "scenario": scenario, "loop_policy": asdict(policy),
@@ -131,6 +137,10 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
     try:
         artifact = await asyncio.wait_for(agent.run_loop(request, context), timeout=args.max_seconds)
         target = root / "idea" / "idea_proposal.v1.md"
+        version = 1
+        while target.exists():
+            version += 1
+            target = root / "idea" / f"idea_proposal.v{version}.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(artifact.text, encoding="utf-8")
         summary.update(status="passed_method_proposal",
@@ -171,6 +181,8 @@ def main() -> int:
     parser.add_argument("--runs-root", type=Path, default=Path("runs/real_idea_evaluation"))
     parser.add_argument("--resume-run", type=Path,
                         help="resume an interrupted/model-error run with original inputs and cumulative budgets")
+    parser.add_argument("--review-file", type=Path,
+                        help="apply explicit candidate-bound reviewer issues without resetting invocation budgets")
     parser.add_argument("--mode", choices=["react", "reflection"])
     parser.add_argument("--prompt-key", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")

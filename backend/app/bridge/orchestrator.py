@@ -310,6 +310,7 @@ class Orchestrator:
                         node_key,
                         bus=session.bus,
                         revision_reason=revision_reason,
+                        registry=self.registry,
                     )
                 else:
                     await runner(session.run, node_key)
@@ -344,8 +345,8 @@ class Orchestrator:
         stage = parse_node_key(node_key).stage
         agent = self.registry.get(stage) if self.registry.has(stage) else None
         if agent is None:
-            # No registered agent → nothing to review; auto-approve.
-            await self._transition(session, node_key, NodeState.APPROVED)
+            logger.error("cannot approve {}: agent is not registered", node_key)
+            await self._transition(session, node_key, NodeState.FAILED)
             return
 
         store = ArtifactStore(session.run)
@@ -360,7 +361,8 @@ class Orchestrator:
                 agent_dir = dir_name
                 break
         if not (stem and agent_dir):
-            await self._transition(session, node_key, NodeState.APPROVED)
+            logger.error("cannot approve {}: no artifact schema mapping", node_key)
+            await self._transition(session, node_key, NodeState.FAILED)
             return
 
         latest = store.latest(agent_dir=agent_dir, stem=stem)
@@ -654,22 +656,12 @@ class Orchestrator:
         return True
 
     def _default_runner(self, node_key: str) -> NodeRunner:
-        # If an agent is registered, run it via agent_runner; otherwise
-        # fall back to a no-op stub so Phase 2 / smoke tests still pass.
         from app.bridge.agent_runner import run_agent_node
 
-        identity = parse_node_key(node_key)
-        if self.registry.has(identity.stage):
-            bus = self.bus
+        async def _real(run: RunHandle, key: str) -> None:
+            await run_agent_node(run, key, bus=self.bus, registry=self.registry)
 
-            async def _real(run: RunHandle, key: str) -> None:
-                await run_agent_node(run, key, bus=bus)
-
-            return _real
-
-        async def _stub(run: RunHandle, _key: str) -> None:
-            await asyncio.sleep(0)
-        return _stub
+        return _real
 
     async def _after_execution(self, session: RunSession, node_key: str) -> None:
         """Let the Commander/Bridge evaluate metrics after execution.
