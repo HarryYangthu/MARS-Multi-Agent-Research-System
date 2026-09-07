@@ -54,3 +54,5 @@ python scripts/run_idea_lut_live.py --scenario configs/evaluation/idea_delivery_
 ```
 
 This scenario uses real DeepSeek calls, fresh memory, public paper retrieval, a human summary, typed handoff and isolated reviewer context. It has two public URL hints, so it is not an unseeded paper-discovery benchmark. The API key is read from environment or ignored local configuration and is never part of the proposal or source commit. No mock execution is permitted.
+
+If an evaluation process vanishes while a model request is pending, use the original run with `--resume-run <run> --recover-abandoned`. The CLI must acquire its exclusive process lock, verify the full trace and preserve the original input, invocation and cumulative budgets. It archives the pre-resume state and leaves usage incomplete for the lost response. An unknown tool/batch outcome or an exhausted run cannot use this recovery path. Do not manually relabel checkpoints or clear counters.

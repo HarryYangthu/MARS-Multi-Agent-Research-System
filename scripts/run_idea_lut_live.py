@@ -28,7 +28,7 @@ from app.harness.agent_loop.review import ExternalReview
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.validator import validate_document
 from app.settings import reset_settings_cache, env_or_local
-from scripts.idea_live_resume import exclusive_run, load_resume, record_resumption, resume_scenario
+from scripts.idea_live_resume import exclusive_run, load_resume, messages_match_snapshot, record_resumption, resume_scenario
 from scripts.watch_agent_trace import monitor
 
 
@@ -62,6 +62,8 @@ async def run(args: argparse.Namespace) -> int:
         raise ValueError("max-seconds must be positive and finite")
     if args.review_file and not args.resume_run:
         raise ValueError("review-file requires resume-run")
+    if args.recover_abandoned and not args.resume_run:
+        raise ValueError("recover-abandoned requires resume-run and an exclusive run lock")
     if args.resume_run:
         if args.prepare_only:
             raise ValueError("prepare-only cannot be combined with resume-run")
@@ -80,7 +82,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
     checkpoint: Path | None = None
     initial: dict[str, Any] = {}
     if args.resume_run:
-        initial, prior_summary, checkpoint, _ = load_resume(root, review=review)
+        initial, prior_summary, checkpoint, _ = load_resume(root, review=review, recover_abandoned=args.recover_abandoned)
         scenario = resume_scenario(initial)
         if args.mode and args.mode != initial["loop_policy"]["mode"]:
             raise ValueError("resume cannot change the original loop mode")
@@ -143,7 +145,7 @@ async def _run(args: argparse.Namespace, root: Path) -> int:
                "source_dirty": bool(git_value("status", "--porcelain"))}
     journal: Path | None = None
     if checkpoint:
-        if [asdict(m) for m in messages] != initial["messages"]:
+        if not messages_match_snapshot(messages, initial["messages"]):
             raise ValueError("resume prompt/context differs from the original input; start a new evaluation")
         journal = record_resumption(root, checkpoint, source, review=review)
     else:
@@ -225,6 +227,8 @@ def main() -> int:
                         help="resume an interrupted/model-error run with original inputs and cumulative budgets")
     parser.add_argument("--review-file", type=Path,
                         help="apply explicit candidate-bound reviewer issues without resetting invocation budgets")
+    parser.add_argument("--recover-abandoned", action="store_true",
+                        help="under the exclusive run lock, recover a process that vanished while awaiting a model; usage stays incomplete")
     parser.add_argument("--mode", choices=["react", "reflection"])
     parser.add_argument("--prompt-key", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")

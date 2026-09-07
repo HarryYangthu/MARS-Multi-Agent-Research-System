@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from app.harness.agent_loop.trace import atomic_json, audit_trace
+from app.harness.agent_loop.trace import atomic_json, audit_trace, canonical
+from app.harness.llm.provider_base import Message
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from dataclasses import asdict
@@ -21,6 +22,11 @@ from dataclasses import asdict
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def messages_match_snapshot(messages: list[Message], saved: object) -> bool:
+    """Compare serialized values, including tuple-to-JSON-array round trips."""
+    return canonical([asdict(message) for message in messages]) == canonical(saved)
 
 
 def resume_scenario(initial: dict[str, Any]) -> dict[str, Any]:
@@ -58,7 +64,20 @@ def exclusive_run(root: Path) -> Iterator[None]:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def load_resume(root: Path, *, review: ExternalReview | None = None) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
+def check_resume_state(state: dict[str, Any], *, has_review: bool, recover_abandoned: bool) -> None:
+    """Inspect saved state without relabeling it or clearing any budget counter."""
+    allowed = {"model_error", "interrupted"} | ({"passed"} if has_review else set())
+    if recover_abandoned and state["status"] == "running" and state["pending"] == "model":
+        allowed.add("running")
+    if state["status"] not in allowed:
+        raise ValueError("only interrupted or model-error runs can resume; an abandoned running model request requires explicit recovery; budgets are never reset")
+    if state["pending"] == "tool" or state.get("pending_batch"):
+        raise ValueError("unknown tool or batch outcome: reconcile the existing receipts before resuming")
+
+
+def load_resume(root: Path, *, review: ExternalReview | None = None,
+                recover_abandoned: bool = False) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
+    """Read resumable state; the executing CLI must hold exclusive_run throughout."""
     initial = json.loads((root / "input/request.json").read_text())
     previous = json.loads((root / "summary.json").read_text())
     checkpoints = list((root / "agent_traces/idea").glob("*/checkpoint.json"))
@@ -66,10 +85,7 @@ def load_resume(root: Path, *, review: ExternalReview | None = None) -> tuple[di
         raise ValueError("resume requires exactly one Idea invocation checkpoint")
     checkpoint = checkpoints[0]
     state = json.loads(checkpoint.read_text())
-    if state["status"] not in ({"model_error", "interrupted", "passed"} if review else {"model_error", "interrupted"}):
-        raise ValueError("only interrupted or model-error runs can resume; budgets are never reset")
-    if state["pending"] == "tool":
-        raise ValueError("unknown tool outcome: reconcile the existing receipt before resuming")
+    check_resume_state(state, has_review=review is not None, recover_abandoned=recover_abandoned)
     if initial["loop_policy"]["trace"] != "full" or not audit_trace(checkpoint.parent)["consistent"]:
         raise ValueError("resume requires a complete, consistent full trace")
     if initial["run_id"] != root.name or previous["run_id"] != root.name:
