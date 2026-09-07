@@ -1,0 +1,46 @@
+{
+  "count": 2,
+  "items": [
+    {
+      "clusters": {
+        "cluster_cacfdc9c30993432": [
+          "hyp_b7e105015e972fde"
+        ],
+        "cluster_d174370c62cc5a35": [
+          "hyp_e6c9b98ae6477d25"
+        ],
+        "cluster_fef0fbb78f1c9da9": [
+          "hyp_f0acf1870dd77694"
+        ]
+      },
+      "edges": [],
+      "round_index": 0,
+      "schema_id": "proximity_graph.v1"
+    },
+    {
+      "clusters": {
+        "cluster_311d9918080e6139": [
+          "hyp_f0acf1870dd77694"
+        ],
+        "cluster_7bfe70c84cbb7eff": [
+          "hyp_e6c9b98ae6477d25"
+        ],
+        "cluster_d7047008a5858813": [
+          "hyp_79a0042d0098c42e",
+          "hyp_b7e105015e972fde"
+        ]
+      },
+      "edges": [
+        {
+          "exact_duplicate": false,
+          "left_id": "hyp_b7e105015e972fde",
+          "right_id": "hyp_79a0042d0098c42e",
+          "similarity": 0.802469
+        }
+      ],
+      "round_index": 1,
+      "schema_id": "proximity_graph.v1"
+    }
+  ],
+  "schema_id": "proximity_graphs.v1"
+}

@@ -219,6 +219,9 @@ class CoScientistWorkflow:
             hypotheses=state.hypotheses,
             round_index=round_index,
             child_count=self.config.children_per_round,
+            reflections=state.reflections,
+            previous_meta_review=next((review for review in reversed(state.meta_reviews)
+                                       if review.round_index == round_index - 1), None),
         )
         return self._complete(
             state.model_copy(update={"hypotheses": (*state.hypotheses, *children)}),

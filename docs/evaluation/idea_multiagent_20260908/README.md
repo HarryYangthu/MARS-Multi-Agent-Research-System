@@ -64,3 +64,22 @@
 这些内容是未通过解析的生成原文，不能冒充系统已经接受的 `HypothesisRecord`。完整输出：[generation_raw.json](roles_attempt_01/generation_raw.json)。实际失败及消耗：[summary.json](roles_attempt_01/summary.json)。每次模型 request/response/record 均保存在 `roles_attempt_01/role_calls/`。
 
 下一次只修复角色协议与输入一致性后重新运行，不人工补齐这次的候选，也不把重测成功倒算到第一次。
+
+### 第二次：完整字段契约后的真实运行
+
+源提交 `01f5c3b`（GitHub 同树提交 `19c31e790dc831463dbb62617fc96eb123de2815`），运行 `idea_roles_20260907T192749_4e44aa`。五类角色共 8 次真实请求/响应，158.78 秒，26,399 tokens，0 次研究工具执行。工作流到达 `waiting_selection`，3 个初始候选及 1 个演化候选均保留。这是 **completed_component**，不是端到端交付或科学验收成功。
+
+| 候选 | 声明参数 | 角色判断 | 外部审阅 |
+|---|---:|---|---|
+| 初始 H1：14×14 可学习非均匀网格 | 196 + 28 = 224 | 未阻断，最终排名第一 | 主账本成立，但文中错误排除了 15×15 方案：225 + 30 = 255，原文却算成 257；网格有序、覆盖边界和初始化仍未具体定义 |
+| 初始 H2：15×15 网格 + 各向异性核 | 225 + 2 = 227 | 被审查阻断 | 核函数没有定义，正文控制点数量自相矛盾 |
+| 初始 H3：15×15 网格 + 单调坐标变换 | 225 + 16 = 241 | 未阻断 | 参数化和单调性保证未定义；与 H1 的区别有限，但审查声称两者无条件数学等价也过强 |
+| 演化 H4：强化 H1 | 224 | 未阻断，排名低于 H1 | 补充比较描述，但仍只说需要排序正则或约束，没有给出具体实现 |
+
+新发现的代码断点：第一次 meta-review 要求补充单调性、保证参数账本一致、探索不同机制，但旧 `EvolutionRequest` 只传父候选，未传它的审查记录及复盘建议。不能把角色调用全部成功当作“审查—修订”闭环已经有效。
+
+外部数学复核也说明模型审查有局限：设一维固定 LUT 的结点为 `(0, 0.5, 1)`、值为 `(0, 1, 0)`；单调分段线性变换通过 `(0,0)`、`(0.25,0.2)`、`(1,1)`。变换后读取在 `x=0.25` 得到 `0.4`，仅在逆变换 LUT 结点上作线性插值却得到 `0.470588…`。变换自身的折点不能一般性省略，所以需要附加条件才能断言两种表示等价。这是外部局部反例，没有回填给模型作为答案。
+
+完整候选：[hypotheses.v1.json](roles_attempt_02/idea/discovery/hypotheses.v1.json)。角色审查：[reflections.v1.json](roles_attempt_02/idea/discovery/reflections.v1.json)。实际结果：[summary.json](roles_attempt_02/summary.json)。逐次原始输入输出：[full_trace.zip](roles_attempt_02/full_trace.zip)，每个文件的散列见 [trace_manifest.json](roles_attempt_02/trace_manifest.json)。
+
+旧记录的 `created_at` 来自稳定值函数，并非真实调用时间；实际时间以 `role_calls/*/record.json` 和 summary 为准。角色互相隔离上下文，但仍是单次模型调用，没有各自的工具循环，工作流也仍为固定串行。下一次只补反馈传递后运行同一场景，验证意见实际进入演化输入，不将多次运行当作公平性能对照。

@@ -169,16 +169,11 @@ class LLMRoleBackend:
             "evolution",
             {
                 **_task_input(context),
-                "requests": [
-                    {
-                        "round_index": item.round_index,
-                        "operator": item.operator,
-                        "parents": [
-                            parent.model_dump(mode="json") for parent in item.parents
-                        ],
-                    }
-                    for item in requests
-                ],
+                "requests": [_evolution_request_input(item) for item in requests],
+                "feedback_policy": "Parent reflections and prior-round guidance are model assessments to check against "
+                    "the task and evidence, not established facts or compulsory conclusions.",
+                "scheduling_limits": "Blocked candidates are excluded from parent selection and have no repair path. "
+                    "The fixed operator cycle is unchanged; one child per round still uses strengthen.",
                 "output_requirement": "Exactly one child per input request, in the same order; children[i] answers requests[i].",
             },
         )
@@ -233,6 +228,14 @@ class LLMRoleBackend:
 def _task_input(context: DiscoveryContext) -> dict[str, Any]:
     return {"task": context.research_question, "project": context.project,
             "evidence_refs": context.evidence_refs, "constraints": context.constraints}
+
+
+def _evolution_request_input(request: EvolutionRequest) -> dict[str, Any]:
+    return {"round_index": request.round_index, "operator": request.operator,
+            "parents": [parent.model_dump(mode="json") for parent in request.parents],
+            "parent_reflections": [review.model_dump(mode="json") for review in request.parent_reflections],
+            "previous_meta_review_id": request.previous_meta_review_id,
+            "next_round_guidance": list(request.next_round_guidance)}
 
 
 def _role_prompt(payload: Mapping[str, Any], *, schema: dict[str, Any]) -> str:

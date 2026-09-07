@@ -1,0 +1,23 @@
+{
+  "completed_stages": [
+    "generation",
+    "round_0.reflection",
+    "round_0.proximity",
+    "round_0.ranking",
+    "round_0.meta_review",
+    "round_1.evolution",
+    "round_1.reflection",
+    "round_1.proximity",
+    "round_1.ranking",
+    "round_1.meta_review",
+    "finalize"
+  ],
+  "hypothesis_count": 4,
+  "input_hash": "1074aba6dcdd2d403f4623865b7ade28ef891f0abb65c19cff45dd8e2ac3302c",
+  "match_count": 3,
+  "meta_review_count": 2,
+  "reflection_count": 4,
+  "run_id": "idea_roles_20260907T192749_4e44aa",
+  "schema_id": "idea_discovery_checkpoint.v1",
+  "status": "waiting_selection"
+}
