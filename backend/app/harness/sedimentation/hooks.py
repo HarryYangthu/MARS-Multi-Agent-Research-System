@@ -122,6 +122,7 @@ def sediment_approved_artifact(
         eval_status=eval_status,
         salience=salience,
         target_zone_override=target_zone_override,
+        artifact_path=artifact_ref.path,
     )
     evaluation_written = _sediment_evaluation_reports(
         run=run,
@@ -169,8 +170,10 @@ def _run_extractor_gated(
     eval_status: EvalStatus,
     salience: float,
     target_zone_override: str,
+    artifact_path: Path,
 ) -> int:
     from app.harness.kb.memory_writer import write_to_zone
+    from app.harness.kb.provenance import record_artifact
     from app.harness.sedimentation.extractors import REGISTRY
 
     extractor = REGISTRY.get(agent)
@@ -188,6 +191,8 @@ def _run_extractor_gated(
             schema=schema,
             extra={
                 **extra,
+                **record_artifact(path=artifact_path, run_id=run_id, project=project,
+                                  extracted_text=body),
                 "source_path": source_path,
                 "is_mock": is_mock,
                 "approved": True,
@@ -237,6 +242,7 @@ def _sediment_evaluation_reports(
     target_zone_override: str,
 ) -> int:
     from app.harness.kb.memory_writer import write_to_zone
+    from app.harness.kb.provenance import record_artifact
 
     written = 0
     ttl_days = int(lifecycle_config().get("default_ttl_days", 180) or 180)
@@ -255,6 +261,8 @@ def _sediment_evaluation_reports(
             run_id=run.run_id,
             schema="evaluation_report.v1",
             extra={
+                **record_artifact(path=run.root / scorecard_path, run_id=run.run_id,
+                                  project=run.project),
                 "kind": "evaluation_report",
                 "source_path": scorecard_path,
                 "target_artifact": target_artifact,

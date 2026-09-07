@@ -33,29 +33,34 @@ async def test_dispatch_records_tool_call(tmp_path: Path) -> None:
     run_root = tmp_path / "runs" / "r1"
     (run_root / "events").mkdir(parents=True)
 
-    async def fake_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        return ToolResult(ok=True, output={"echo": args["x"]})
-
-    reg.register("test.echo", fake_tool)
+    (tmp_path / "actual.py").write_text("VALUE = 7\n")
     result = await reg.dispatch(
-        "test.echo",
-        {"x": 1},
+        "code.repo_reader",
+        {"path": "actual.py"},
         ToolContext(
             run_id="r1",
-            project="pimc",
+            project="local-contract",
             agent="bridge",
-            extra={"run_root": str(run_root)},
+            extra={"run_root": str(run_root), "project_repo_root": str(tmp_path)},
         ),
     )
 
     assert result.ok is True
     audit = run_root / "events" / "tool_calls.jsonl"
     assert audit.exists()
-    assert '"tool": "test.echo"' in audit.read_text(encoding="utf-8")
+    assert '"tool": "code.repo_reader"' in audit.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
-async def test_disabled_tool_returns_standard_status(tmp_path: Path) -> None:
+async def test_disabled_tool_returns_standard_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.harness.tools import config as tool_configuration
+    from app.settings import repo_root
+    import yaml
+    configuration = yaml.safe_load((repo_root() / "configs/tools.yaml").read_text())
+    configuration["tools"]["search.web_search"]["enabled"] = False
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs/tools.yaml").write_text(yaml.safe_dump(configuration))
+    monkeypatch.setattr(tool_configuration, "repo_root", lambda: tmp_path)
     reg = reset_for_tests()
     run_root = tmp_path / "runs" / "r1"
     (run_root / "events").mkdir(parents=True)
@@ -370,12 +375,9 @@ async def test_tool_audit_redacts_default_and_spec_keys(tmp_path: Path) -> None:
     run_root = tmp_path / "runs" / "r1"
     (run_root / "events").mkdir(parents=True)
 
-    async def fake_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        return ToolResult(ok=True, output={"received": True})
-
     reg.register(
         "test.redact",
-        fake_tool,
+        code_tools.repo_reader_tool,
         spec=ToolSpec(
             name="test.redact",
             namespace="test",
@@ -398,7 +400,7 @@ async def test_tool_audit_redacts_default_and_spec_keys(tmp_path: Path) -> None:
         ),
     )
 
-    assert result.ok is True
+    assert result.ok is False  # Real reader rejects missing path; audit still redacts.
     audit = (run_root / "events" / "tool_calls.jsonl").read_text(encoding="utf-8")
     events = (run_root / "events" / "tool_events.jsonl").read_text(encoding="utf-8")
     combined = audit + events
@@ -457,7 +459,7 @@ def test_tool_catalogue_has_v2_specs_and_config_entries() -> None:
         assert spec.policy.allowed_agents
 
     assert configs["search.arxiv_search"].enabled is True
-    assert configs["search.web_search"].enabled is False
+    assert configs["search.web_search"].enabled is True
     assert catalogue["search.arxiv_search"].policy.network is True
     assert catalogue["search.web_search"].policy.network is True
     assert catalogue["run.status"].bridge_only is True
@@ -482,16 +484,9 @@ async def test_agent_permission_blocks_before_tool_runs(tmp_path: Path) -> None:
     reg = reset_for_tests()
     run_root = tmp_path / "runs" / "r1"
     (run_root / "events").mkdir(parents=True)
-    called = False
-
-    async def fake_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        nonlocal called
-        called = True
-        return ToolResult(ok=True, output={"should": "not run"})
-
     reg.register(
         "test.idea_only",
-        fake_tool,
+        code_tools.write_file_tool,
         spec=ToolSpec(
             name="test.idea_only",
             namespace="test",
@@ -501,7 +496,7 @@ async def test_agent_permission_blocks_before_tool_runs(tmp_path: Path) -> None:
     )
     result = await reg.dispatch(
         "test.idea_only",
-        {},
+        {"path": "protected.py", "content": "not authorized"},
         ToolContext(
             run_id="r1",
             project="pimc",
@@ -510,7 +505,7 @@ async def test_agent_permission_blocks_before_tool_runs(tmp_path: Path) -> None:
         ),
     )
 
-    assert called is False
+    assert not (tmp_path / "protected.py").exists()
     assert result.ok is False
     assert result.status == "not_allowed"
     audit = (run_root / "events" / "tool_calls.jsonl").read_text(encoding="utf-8")

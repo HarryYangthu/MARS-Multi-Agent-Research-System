@@ -49,6 +49,16 @@ from app.storage.discovery_common import atomic_write_json
 from app.storage.run_store import RunHandle, RunStore
 
 
+@pytest.fixture(autouse=True)
+def actual_code_path_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.harness.tools import code as code_tools
+    root = tmp_path / "configuration"
+    folder = root / "projects/pimc"
+    folder.mkdir(parents=True)
+    (folder / "repo_link.yaml").write_text("allowed_paths: [pkg/]\nread_only: false\n")
+    monkeypatch.setattr(code_tools, "repo_root", lambda: root)
+
+
 @pytest.mark.asyncio
 async def test_resolver_recovers_from_receipt_and_ignores_request_config_paths(
     tmp_path: Path,
@@ -401,7 +411,7 @@ async def _persisted_case(tmp_path: Path) -> _PersistedCase:
         candidate=candidate,
         code_spec=spec,
         bundle=bundle,
-        tool_registry=_allowing_registry(),
+        tool_registry=_patch_registry(),
     )
     assert prepared.receipt is not None
     return _PersistedCase(
@@ -433,11 +443,8 @@ def _request(
     )
 
 
-def _allowing_registry() -> ToolRegistry:
+def _patch_registry() -> ToolRegistry:
+    from app.harness.tools.code import patch_generator_tool
     registry = ToolRegistry()
-
-    async def allow_tool(_args: dict[str, object], _context: ToolContext) -> ToolResult:
-        return ToolResult(ok=True, output={"diff": "", "files": []})
-
-    registry.register("code.patch_generator", allow_tool)
+    registry.register("code.patch_generator", patch_generator_tool)
     return registry

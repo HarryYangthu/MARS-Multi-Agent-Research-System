@@ -690,7 +690,7 @@ def test_create_run_blocked_when_production_not_ready(
     ):
         monkeypatch.setenv(env, "")
     monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
-    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "mock")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "remote_gpu")
     import app.settings as settings_mod
 
     settings_mod._settings = None

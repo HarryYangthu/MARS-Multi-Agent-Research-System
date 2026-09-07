@@ -21,10 +21,10 @@ dimensions:
     label: Resource Trace
     weight: 0.18
     signals:
-      - Duration, GPU use, or mock marker is recorded.
-  - id: mock_real_parity
-    label: Mock/Real Parity
+      - Actual duration or resource use is recorded.
+  - id: execution_origin
+    label: Execution Origin
     weight: 0.16
     signals:
-      - Mock status is explicit when applicable.
+      - Execution origin is explicit; legacy simulated claims are rejected.
 

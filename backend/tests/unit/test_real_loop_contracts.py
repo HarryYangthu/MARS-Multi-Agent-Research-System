@@ -113,7 +113,7 @@ def test_real_disk_atomic_write_and_event_sequence(tmp_path: Path) -> None:
 @pytest.mark.parametrize("mode", ["always", "auto"])
 def test_old_simulation_configuration_is_rejected(mode: str) -> None:
     with pytest.raises(ValueError):
-        Settings(_env_file=None, mars_mock_mode=mode)
+        Settings.model_validate({"mars_mock_mode": mode})
 
 
 def test_policy_and_source_identity() -> None:

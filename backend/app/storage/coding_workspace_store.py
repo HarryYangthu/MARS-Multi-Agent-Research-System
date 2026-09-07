@@ -126,7 +126,7 @@ DEFAULT_CODING_MEMORY: tuple[Mapping[str, object], ...] = (
     {
         "id": "simulation_contract",
         "label": "Simulation contract",
-        "text": "Prefer small, testable patches that keep mock simulation and schema-valid artifacts working.",
+        "text": "Prefer small, testable patches with real execution evidence and schema-valid artifacts.",
         "enabled": True,
         "source": "default",
     },

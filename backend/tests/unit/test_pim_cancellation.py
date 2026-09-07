@@ -6,11 +6,11 @@ from pathlib import Path
 from app.execution.pim_cancellation import plot_loss_curve, run_pim_cancellation
 
 
-def test_real_pim_loss_curve_is_gradual_and_has_local_variation() -> None:
+def test_real_pim_loss_curve_reports_monotone_measured_objective() -> None:
     _data, result = run_pim_cancellation(
         n_points=8192,
         steps=80,
-        ablation_config={"expert_count": 8},
+        ablation_config={"order": 7, "memory": 8},
         seed=7,
     )
 
@@ -21,7 +21,9 @@ def test_real_pim_loss_curve_is_gradual_and_has_local_variation() -> None:
         next_value - current
         for current, next_value in zip(result.loss_curve, result.loss_curve[1:], strict=False)
     ]
-    assert any(delta > 0 for delta in deltas)
+    assert all(delta <= 1e-12 for delta in deltas)
+    assert result.final_loss <= result.loss_curve[-1] + 1e-6
+    assert result.n_basis == 32
 
 
 def test_real_pim_reports_each_training_step() -> None:
@@ -33,7 +35,7 @@ def test_real_pim_reports_each_training_step() -> None:
     _data, result = run_pim_cancellation(
         n_points=2048,
         steps=8,
-        ablation_config={"expert_count": 4},
+        ablation_config={"order": 3, "memory": 4},
         seed=11,
         on_step=on_step,
     )

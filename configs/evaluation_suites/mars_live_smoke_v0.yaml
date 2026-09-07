@@ -15,7 +15,7 @@ tasks:
     trials: 1
     input:
       user_request: >
-        Run the mock/static PIMC execution path and produce a schema-valid
+        Run the configured real PIMC execution path; fail explicitly if baseline, data or runtime is unavailable. Produce a schema-valid
         run log, metrics, curves, and tool audit.
 
 expected_outcome:

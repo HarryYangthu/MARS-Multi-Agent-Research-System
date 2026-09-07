@@ -72,6 +72,13 @@ class IdeaAgent(BaseAgent):
             "(at most 600 Chinese characters) explaining the selection and remaining experimental prerequisites. "
             "A method comparison is not an executed debate: omit debate_summary or set rounds=0. "
             "Describe only Memory tools actually invoked and PDF excerpts actually returned, including truncation."
+            " Numerical contracts must hold for extreme finite logits, including floating-point softmax underflow; "
+            "an additive minimum interval may be necessary. Distinguish number of nodes from number of cells. "
+            "Do not call two representable function sets identical and then exhibit a function in only one. "
+            "Use a single decision_rule reference in ablation rejection_criteria; put stability diagnostics "
+            "in a separate field without silently changing statistical acceptance. Specify angular conversion "
+            "and handling of zero predicted as well as zero reference magnitude. If clipping one coordinate, "
+            "interpolate along the remaining coordinate on the boundary edge."
         )
         if request.extra.get("scope", "method_proposal") == "method_proposal":
             context.task += (
@@ -143,6 +150,8 @@ class IdeaAgent(BaseAgent):
             "Acceptance/rejection/inconclusive cases must be exhaustive and mutually exclusive, with one "
             "statistical definition across the proposal. Independent cell coefficients do not guarantee C0. "
             "Reject vague algorithms, missing trainables, contradictory equations and hidden optional parameters. "
+            "Check every occurrence, especially theoretical_basis and ablation rejection_criteria, against "
+            "the canonical method/decision definition; a correction in an addendum does not remove a contradiction. "
             "A sound, fully specified falsifiable method proposal may pass without measured performance; "
             "lack of actual baseline/data must remain an explicit downstream prerequisite."
         )

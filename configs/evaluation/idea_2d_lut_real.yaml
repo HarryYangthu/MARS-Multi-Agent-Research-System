@@ -14,7 +14,7 @@ model:
   max_tokens: 16384
   temperature: 0.1
   thinking: true
-  reasoning_effort: high
+  reasoning_effort: low
   timeout_seconds: 300
   max_retries: 1
 loop:
@@ -25,7 +25,7 @@ loop:
   max_tool_steps: 18
   max_protocol_repairs: 4
   max_validation_repairs: 6
-  max_reflections: 3
+  max_reflections: 4
   # Conservative UTF-8-byte token upper bound, not measured tokenizer usage.
   input_token_budget: 64000
   observation_chars: 6000

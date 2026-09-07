@@ -21,7 +21,7 @@ def test_provider_catalogue_never_advertises_mock() -> None:
 @pytest.mark.parametrize("mode", ["auto", "always"])
 def test_legacy_fallback_modes_fail_configuration(mode: str) -> None:
     with pytest.raises(ValueError):
-        Settings(_env_file=None, mars_mock_mode=mode)
+        Settings.model_validate({"mars_mock_mode": mode})
 
 
 def test_requesting_mock_cannot_return_generated_sample() -> None:

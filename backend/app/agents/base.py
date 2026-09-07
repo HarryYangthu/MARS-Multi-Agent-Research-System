@@ -6,7 +6,7 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +95,7 @@ class BaseAgent(ABC):
         return AgentLoopPolicy.from_mapping(raw)
 
     async def build_context(self, request: RunRequest) -> ContextPack:
+        from app.storage.agent_context_store import load_agent_code_repositories
         required = request.extra.get("required_upstream_refs", [])
         if not isinstance(required, list) or any(x not in request.upstream_artifacts for x in required):
             raise ValueError("required_upstream_refs must name supplied upstream artifacts")
@@ -103,11 +104,17 @@ class BaseAgent(ABC):
             raise ValueError("invalid project path")
         rules_path = project_path / "AGENTS.md"
         rules = rules_path.read_text() if rules_path.is_file() else "No project-specific rules supplied."
+        repositories = load_agent_code_repositories(self.name, project=request.project)
+        upstream = dict(request.upstream_artifacts)
+        metadata: dict[str, Any] = {"required_upstream_refs": required}
+        if repositories:
+            upstream[f"{self.name}_code_repositories"] = json.dumps(
+                [asdict(repository) for repository in repositories], ensure_ascii=False)
+            metadata[f"{self.name}_code_repository_count"] = len(repositories)
         return ContextPack(
             system=f"MARS {self.name} agent. {self.agent_brief}",
             project=f"Project: {request.project}.\nProject constraints:\n{rules}",
-            task=request.user_request, upstream=dict(request.upstream_artifacts),
-            metadata={"required_upstream_refs": required},
+            task=request.user_request, upstream=upstream, metadata=metadata,
         )
 
     async def validate_output(self, artifact: Artifact) -> ValidationResult:

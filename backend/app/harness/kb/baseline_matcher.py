@@ -40,11 +40,18 @@ def find_match(
     s = stores or get_stores()
     project = str(plan.get("project", "") or "")
     zone = s.zone("run_archive")
-    records = zone.all(exclude_mock=True, exclude_superseded=True)
+    records = zone.all(filters={"project": project} if project else None,
+                       exclude_mock=True, exclude_superseded=True)
     if not records:
         return BaselineMatch(matched_run_id=None, match_score=0.0, record=None)
 
     sig = _plan_signature(plan)
+    # Bag-of-words embeddings can collapse distinct numeric configurations.
+    # Prefer a byte-identical canonical plan before approximate retrieval.
+    for record in records:
+        if record.text == sig:
+            return BaselineMatch(matched_run_id=record.metadata.get("run_id"),
+                                 match_score=1.0, record=record)
     q_vec = embed(sig)
     best_score = -1.0
     best_rec: KBRecord | None = None

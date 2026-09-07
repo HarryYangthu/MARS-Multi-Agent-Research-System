@@ -246,14 +246,6 @@ def _check_gates() -> ReadinessCheck:
 def _check_execution_backend(project: str) -> ReadinessCheck:
     settings = get_settings()
     backend = settings.mars_execution_backend
-    if settings.is_production and backend == "mock":
-        return ReadinessCheck(
-            name="execution_backend",
-            ready=False,
-            severity="blocker",
-            message="production mode cannot use mock execution backend",
-            details={"backend": backend},
-        )
     if backend == "pim_cpu":
         exists = (repo_root() / "backend" / "app" / "execution" / "pim_cancellation.py").exists()
         return ReadinessCheck(
@@ -319,7 +311,7 @@ def _check_execution_backend(project: str) -> ReadinessCheck:
             message=message,
             details={"backend": backend, **details},
         )
-    ready = backend in {"mock", "local_command", "docker_command"}
+    ready = backend in {"local_command", "docker_command"}
     return ReadinessCheck(
         name="execution_backend",
         ready=ready,

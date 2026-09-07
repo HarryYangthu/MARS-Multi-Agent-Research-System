@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.local_memory import authored_note
+
 from pathlib import Path
 
 import pytest
@@ -185,8 +187,8 @@ def test_selector_filters_mock_and_superseded_records(tmp_path: Path) -> None:
     eval_status = EvalStatus(passed=True, decision="pass")
     good = ingest_memory(
         zone="methodology",
-        text="stable router methodology with verified RES comparison",
-        metadata={"project": "pimc", "kind": "methodology"},
+        text="human methodology note: compare router RES",
+        metadata={"project": "pimc", "kind": "methodology", **authored_note(tmp_path, "human methodology note: compare router RES")},
         memory_type="procedural",
         confidence=0.9,
         eval_status=eval_status,

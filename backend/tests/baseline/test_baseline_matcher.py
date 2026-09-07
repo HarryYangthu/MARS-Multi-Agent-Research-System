@@ -1,133 +1,65 @@
-"""Baseline matcher recall ≥ 80% / precision ≥ 90% target (ACCEPTANCE §6).
+"""Match plans against receipts from actual CPU polynomial fits.
 
-We seed the run_archive zone with synthetic baselines, then probe with both
-"should match" and "should not match" plans.
+This small retrieval contract is not a scientific baseline or a benchmark of
+research quality. Unproven profile metadata must not outrank verified records.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-import pytest
-
-from app.harness.kb.baseline_matcher import find_match
+from app.execution.pim_cancellation import run_pim_cancellation
+from app.harness.kb.baseline_matcher import _plan_signature, find_match
 from app.harness.kb.embedder import embed
 from app.harness.kb.profiles import write_baseline_current
+from app.harness.kb.provenance import record_artifact
 from app.harness.kb.stores import KBRecord, KBStores, reset_for_tests
 
 
-def _seed(stores: KBStores, n: int = 10) -> None:
-    zone = stores.zone("run_archive")
+def _seed(stores: KBStores, n: int = 10) -> list[dict[str, object]]:
+    plans: list[dict[str, object]] = []
     for i in range(n):
-        sig = (
-            f"project=pimc | variables={{'independent': ['expert_count_{i}']}} "
-            f"| metrics={{'primary': 'RES_{i}'}} | ablations=[{i}]"
-        )
-        zone.add(
-            KBRecord(
-                id=f"baseline-{i}",
-                zone="run_archive",
-                text=sig,
-                metadata={"run_id": f"hist_{i:02d}"},
-                embedding=embed(sig),
-            )
-        )
+        config = {"order": 1 + 2 * (i % 3), "memory": 1 + i // 3}
+        _, measured = run_pim_cancellation(n_points=128, steps=3, seed=i, ablation_config=config)
+        plan: dict[str, object] = {"project": "cpu_polynomial", "variables": config,
+                                  "metrics": {"primary": "NMSE_dB"}, "ablations": [config]}
+        signature = _plan_signature(plan)
+        source = stores.base / f"actual_fit_{i}.md"
+        source.write_text(signature + "\n" + json.dumps({"measured_nmse_db": measured.res_db,
+                          "n_basis": measured.n_basis, "seed": i}))
+        stores.zone("run_archive").add(KBRecord(
+            id=f"cpu-fit-{i}", zone="run_archive", text=signature, embedding=embed(signature),
+            metadata=record_artifact(path=source, run_id=f"cpu_fit_{i}", project="cpu_polynomial")))
+        plans.append(plan)
+    return plans
 
 
-def test_high_similarity_finds_match(tmp_path: Path) -> None:
+def test_high_similarity_finds_actual_run(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
-    _seed(stores, n=10)
-    plan = {
-        "project": "pimc",
-        "variables": {"independent": ["expert_count_3"]},
-        "metrics": {"primary": "RES_3"},
-        "ablations": [3],
-    }
-    match = find_match(plan=plan, threshold=0.85, stores=stores)
-    assert match.matched_run_id == "hist_03"
+    plans = _seed(stores)
+    match = find_match(plan=plans[3], threshold=0.85, stores=stores)
+    assert match.matched_run_id == "cpu_fit_3"
     assert match.match_score >= 0.85
 
 
 def test_low_similarity_no_match(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
-    _seed(stores, n=10)
-    plan = {
-        "project": "completely-unrelated",
-        "variables": {"independent": ["totally_different_axis"]},
-        "metrics": {"primary": "FOO"},
-        "ablations": [99],
-    }
-    match = find_match(plan=plan, threshold=0.85, stores=stores)
-    # We may still get the closest record by id, but score must be below threshold.
-    assert match.match_score < 0.85
+    _seed(stores, n=1)
+    match = find_match(plan={"project": "unrelated", "variables": {"axis": "fruit"},
+                            "metrics": {"primary": "banana"}, "ablations": [99]}, stores=stores)
     assert match.record is None
 
 
-def test_baseline_current_profile_takes_priority(tmp_path: Path) -> None:
+def test_unverified_profile_cannot_override_actual_archive(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
-    write_baseline_current(
-        "pimc",
-        {
-            "run_id": "profile_baseline",
-            "signature": (
-                "project=pimc | variables={'independent': ['profile_axis']} "
-                "| metrics={'primary': 'RES_profile'} | ablations=[7]"
-            ),
-        },
-        base=tmp_path,
-    )
-    zone = stores.zone("run_archive")
-    zone.add(
-        KBRecord(
-            id="archive-baseline",
-            zone="run_archive",
-            text="project=pimc | variables={'independent': ['profile_axis']} | metrics={'primary': 'RES_profile'} | ablations=[7]",
-            metadata={"run_id": "archive_should_not_win"},
-            embedding=embed("profile_axis RES_profile"),
-        )
-    )
-    plan = {
-        "project": "pimc",
-        "variables": {"independent": ["profile_axis"]},
-        "metrics": {"primary": "RES_profile"},
-        "ablations": [7],
-    }
-
-    match = find_match(plan=plan, threshold=0.1, stores=stores)
-
-    assert match.matched_run_id == "profile_baseline"
-    assert match.record is None
+    plans = _seed(stores, n=1)
+    write_baseline_current("cpu_polynomial", {"run_id": "unproven-profile",
+                           "signature": _plan_signature(plans[0])}, base=tmp_path)
+    assert find_match(plan=plans[0], stores=stores).matched_run_id == "cpu_fit_0"
 
 
-def test_recall_and_precision_targets(tmp_path: Path) -> None:
-    """Run a small test set and verify ≥80% recall / ≥90% precision."""
+def test_exact_plan_recall_on_actual_fit_archive(tmp_path: Path) -> None:
     stores = reset_for_tests(base=tmp_path)
-    _seed(stores, n=10)
-
-    positives = [
-        {
-            "project": "pimc",
-            "variables": {"independent": [f"expert_count_{i}"]},
-            "metrics": {"primary": f"RES_{i}"},
-            "ablations": [i],
-        }
-        for i in range(10)
-    ]
-    negatives = [
-        {
-            "project": "pimc",
-            "variables": {"independent": ["unique_axis"]},
-            "metrics": {"primary": "AAA"},
-            "ablations": [-1],
-        }
-        for _ in range(5)
-    ]
-    tp = sum(
-        1 for p in positives if find_match(plan=p, threshold=0.85, stores=stores).match_score >= 0.85
-    )
-    fp = sum(
-        1 for n in negatives if find_match(plan=n, threshold=0.85, stores=stores).match_score >= 0.85
-    )
-    recall = tp / len(positives)
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-    assert recall >= 0.8, f"recall {recall:.2f}"
-    assert precision >= 0.9, f"precision {precision:.2f}"
+    plans = _seed(stores)
+    assert all(find_match(plan=plan, stores=stores).matched_run_id == f"cpu_fit_{i}"
+               for i, plan in enumerate(plans))

@@ -1,80 +1,35 @@
-from __future__ import annotations
-
+"""Actual unavailable/exiting MCP processes must not fabricate tool results."""
 from pathlib import Path
+import shlex
 import sys
-
 from fastapi.testclient import TestClient
 import pytest
-
-from app.harness.tools.mcp_adapters import adapter_status, call_mcp_tool, list_mcp_tools
+from app.harness.tools.mcp_adapters import MCPTransportError, adapter_status, call_mcp_tool, list_mcp_tools
 from app.main import app
 
 
-def _fake_mcp_server(tmp_path: Path) -> Path:
-    server = tmp_path / "fake_mcp_server.py"
-    server.write_text(
-        """
-import json
-import sys
-
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if "id" not in msg:
-        continue
-    if method == "initialize":
-        result = {
-            "protocolVersion": msg["params"]["protocolVersion"],
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "fake", "version": "1"},
-        }
-    elif method == "tools/list":
-        result = {"tools": [{"name": "status", "description": "status tool"}]}
-    elif method == "tools/call":
-        result = {"content": [{"type": "text", "text": msg["params"]["name"]}]}
-    else:
-        result = {}
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\\n")
-    sys.stdout.flush()
-""".strip(),
-        encoding="utf-8",
-    )
-    return server
+@pytest.mark.asyncio
+async def test_missing_mcp_executable_fails_before_any_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARS_MCP_GIT_COMMAND", str(tmp_path / "absent-mcp"))
+    status = adapter_status("git")
+    assert status.configured and not status.available
+    with pytest.raises(MCPTransportError):
+        await list_mcp_tools("git")
+    with pytest.raises(MCPTransportError):
+        await call_mcp_tool("git", tool_name="git_status", arguments={})
 
 
 @pytest.mark.asyncio
-async def test_stdio_mcp_transport_lists_and_calls_tools(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    server = _fake_mcp_server(tmp_path)
-    monkeypatch.setenv("MARS_MCP_GIT_COMMAND", f"{sys.executable} {server}")
-
-    status = adapter_status("git")
-    listed = await list_mcp_tools("git")
-    called = await call_mcp_tool("git", tool_name="status", arguments={})
-
-    assert status.configured is True
-    assert status.available is True
-    assert listed["tools"] == [{"name": "status", "description": "status tool"}]
-    assert called["content"] == [{"type": "text", "text": "status"}]
+async def test_actual_non_protocol_process_cannot_initialize(monkeypatch: pytest.MonkeyPatch) -> None:
+    command = shlex.join([sys.executable, "-c", "raise SystemExit(3)"])
+    monkeypatch.setenv("MARS_MCP_GIT_COMMAND", command)
+    with pytest.raises(MCPTransportError):
+        await list_mcp_tools("git", timeout_seconds=2)
 
 
-def test_mcp_adapter_api_lists_and_calls_tools(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    server = _fake_mcp_server(tmp_path)
-    monkeypatch.setenv("MARS_MCP_GIT_COMMAND", f"{sys.executable} {server}")
+def test_mcp_api_returns_failure_for_missing_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARS_MCP_GIT_COMMAND", str(tmp_path / "absent-mcp"))
     client = TestClient(app)
-
     listed = client.get("/api/tools/adapters/git/tools")
-    called = client.post(
-        "/api/tools/adapters/git/call",
-        json={"tool_name": "status", "arguments": {}},
-    )
-
-    assert listed.status_code == 200
-    assert listed.json()["result"]["tools"] == [{"name": "status", "description": "status tool"}]
-    assert called.status_code == 200
-    assert called.json()["result"]["content"] == [{"type": "text", "text": "status"}]
+    called = client.post("/api/tools/adapters/git/call", json={"tool_name": "git_status", "arguments": {}})
+    assert listed.status_code >= 400 and called.status_code >= 400
