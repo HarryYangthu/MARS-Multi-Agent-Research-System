@@ -1,0 +1,59 @@
+{
+  "candidate_sha256": "6df6580d3df9570e0c6853bd3b7f2f3b83f6478a1cd96dd6853add255a17d5ac",
+  "inspection": "external_bounded_numerical_checks",
+  "scientific_validated": false,
+  "simulation_executed": false,
+  "parameter_cases": [
+    {
+      "case": "G10",
+      "baseline": 100,
+      "candidate": 118,
+      "ratio": 1.18,
+      "matches_declared": true,
+      "within_test_limit": true
+    },
+    {
+      "case": "G16",
+      "baseline": 256,
+      "candidate": 286,
+      "ratio": 1.1171875,
+      "matches_declared": true,
+      "within_test_limit": true
+    },
+    {
+      "case": "G32",
+      "baseline": 1024,
+      "candidate": 1086,
+      "ratio": 1.060546875,
+      "matches_declared": true,
+      "within_test_limit": true
+    }
+  ],
+  "internal_boundary": {
+    "coordinate": -0.5,
+    "matching_cells": [
+      0,
+      1
+    ],
+    "issue": "closed intervals do not specify a unique cell at internal nodes"
+  },
+  "movement_metric": {
+    "raw_spacing_scale": 2,
+    "normalized_gap_max_change": 0.0,
+    "raw_deviation_metric": 1.0,
+    "issue": "raw-gap deviation can change while the physical grid is unchanged"
+  },
+  "hard_nearest_neighbor": {
+    "coordinate": 0.1,
+    "epsilon": 1e-06,
+    "interior_node_finite_differences": [
+      0.0,
+      0.0
+    ],
+    "issue": "A2 needs an actual optimization path for node locations"
+  },
+  "floating_point_spacing": {
+    "softplus_negative_1000_float64": 0.0,
+    "issue": "positive real-arithmetic spacing needs a numerical safeguard in an implementation"
+  }
+}
