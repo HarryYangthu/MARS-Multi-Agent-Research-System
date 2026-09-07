@@ -8,7 +8,7 @@ from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
-from app.harness.agent_loop.trace import atomic_json
+from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.schema.frontmatter_parser import parse
 from app.storage.artifact_store import ArtifactRef
 from app.storage.run_store import RunHandle
@@ -41,7 +41,10 @@ class IdeaAgent(BaseAgent):
             "selection/rejection reasons); ablation_plan (>=3 comparisons, changed factor, held-fixed budget, "
             "metrics and rejection criteria). parameter_budget must contain unit: real_scalar, variables: numeric map, "
             "baseline_formula and candidate_formula: arithmetic strings, baseline_parameters and candidate_parameters: integers, "
-            "baseline_components and candidate_components: lists of {name,formula}. Count every trainable scalar; "
+            "baseline_components and candidate_components: lists of {name,formula,dtype,shape}. "
+            "dtype must be real or complex; shape is a list of positive integer dimensions or arithmetic strings "
+            "using variables (empty [] for one scalar). Formula counts real scalars and must match shape times "
+            "the dtype multiplier (1 for real, 2 for complex). Count every trainable scalar; "
             "complex coefficient=2 real scalars, real knots count once, and normalization/gates are not free. "
             "Formulas only allow variable names, numbers, +,-,*,/,integer powers. "
             "Explain expressivity without assuming smoother functions contain all piecewise-linear functions. "
@@ -52,7 +55,21 @@ class IdeaAgent(BaseAgent):
             "values and continuity across shared cell boundaries using the declared axis/index convention. "
             "C0 continuity does not imply complex phase equivariance or preserve a PIMC phase contract. "
             "Compare at least two distinct methods feasible under the budget; check every proposed grid size. "
+            "Each alternative must include feasible (boolean), parameters (integer real-scalar count), "
+            "and components (the same {name,formula,dtype,shape} format using parameter_budget.variables). "
+            "Include at least two alternatives with feasible=true; the selected method may be one. "
             "Distinguish acceptance, rejection and inconclusive thresholds consistently. "
+            "Put the primary comparison in one decision_rule object: define signed improvement, resampling "
+            "unit, confidence interval, and exhaustive mutually exclusive accept/reject/inconclusive rules. "
+            "Ablations refer to that rule rather than paraphrasing it with reversed inequalities or new thresholds. "
+            "Use one output dtype and one parameter ledger throughout the proposal; do not switch between "
+            "real-output and complex-output budgets. Every alternative must use that same baseline unit. "
+            "State a single reproducible initialization procedure, including its sample locations, solver, "
+            "and what happens if approximation error is unacceptable. Linear coefficients alone imply neither "
+            "well-conditioning nor monotonic optimizer loss. A fit into a non-nested function space cannot "
+            "guarantee no-worse initialization. Any complex-valued regularizer must be real and nonnegative. "
+            "Do not repeat the full method in body: put definitions once in metadata and use a short body "
+            "(at most 600 Chinese characters) explaining the selection and remaining experimental prerequisites. "
             "A method comparison is not an executed debate: omit debate_summary or set rounds=0. "
             "Describe only Memory tools actually invoked and PDF excerpts actually returned, including truncation."
         )
@@ -98,6 +115,8 @@ class IdeaAgent(BaseAgent):
         root = Path(str(request.extra["run_root"])) / "idea" / "validation"
         atomic_json(root / (uuid.uuid4().hex + ".json"), {
             "schema_valid": True, "material_ready": not errors, "errors": errors,
+            "candidate_sha256": digest(text), "requirements": requirements,
+            "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,
             "note": "Host structural/evidence/arithmetic checks are not independent scientific review.",
         })
@@ -118,6 +137,11 @@ class IdeaAgent(BaseAgent):
             "are material defects. Continuity is not phase equivariance. Check all grid-size budgets, consistent "
             "success/rejection thresholds, distinct feasible alternatives, and reported Memory/debate/PDF actions "
             "against the actual observations. Do not defer missing definitions to downstream agents. "
+            "Recompute dtype/shape counts, including real knots with complex coefficients; compare against "
+            "the same real-scalar baseline everywhere. Check each stated initialization or optimizer guarantee "
+            "rather than inferring it from linearity. Verify regularizers return nonnegative real numbers. "
+            "Acceptance/rejection/inconclusive cases must be exhaustive and mutually exclusive, with one "
+            "statistical definition across the proposal. Independent cell coefficients do not guarantee C0. "
             "Reject vague algorithms, missing trainables, contradictory equations and hidden optional parameters. "
             "A sound, fully specified falsifiable method proposal may pass without measured performance; "
             "lack of actual baseline/data must remain an explicit downstream prerequisite."

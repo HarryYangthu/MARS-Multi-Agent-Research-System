@@ -110,13 +110,17 @@ class NativeAgentLoop:
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
                 reviewing = state["next_phase"] == "reflect"
                 extra: list[Message] = []
+                if state["review_issues"]:
+                    extra.append(Message(role="user", content=(
+                        "[unresolved review issues pinned through protocol/schema repairs]\n"
+                        + canonical(state["review_issues"]))))
                 if reviewing:
-                    extra = [Message(role="system", content=(
+                    extra.append(Message(role="system", content=(
                         "You are reviewing the current candidate, not generating tool actions. "
                         'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
                         "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
                         + request.reflection_rubric + "\nVerify the revised candidate resolves every prior issue:\n"
-                        + canonical(state["review_issues"]))) ]
+                        + canonical(state["review_issues"]))))
                 feedback = state["feedback"]
                 if counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."

@@ -12,9 +12,9 @@ model:
   provider: zhipu
   name: glm-5.3
   max_tokens: 16384
-  temperature: 0.3
+  temperature: 0.1
   thinking: true
-  reasoning_effort: low
+  reasoning_effort: high
   timeout_seconds: 300
   max_retries: 1
 loop:

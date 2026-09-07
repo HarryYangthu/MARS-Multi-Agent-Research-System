@@ -89,10 +89,10 @@ def test_parameter_ledger_checks_exact_arithmetic(candidate_count: int) -> None:
     metadata = {"unit": "real_scalar", "variables": {"K": 16},
                 "baseline_formula": "K*K", "candidate_formula": "K*K+2*(K-2)+1",
                 "baseline_parameters": 256, "candidate_parameters": candidate_count,
-                "baseline_components": [{"name": "values", "formula": "K*K"}],
-                "candidate_components": [{"name": "values", "formula": "K*K"},
-                                         {"name": "axis parameters", "formula": "2*(K-2)"},
-                                         {"name": "coefficient", "formula": "1"}]}
+                "baseline_components": [{"name": "values", "formula": "K*K", "dtype": "real", "shape": ["K", "K"]}],
+                "candidate_components": [{"name": "values", "formula": "K*K", "dtype": "real", "shape": ["K", "K"]},
+                                         {"name": "axis parameters", "formula": "2*(K-2)", "dtype": "real", "shape": [2, "K-2"]},
+                                         {"name": "coefficient", "formula": "1", "dtype": "real", "shape": []}]}
     assert bool(parameter_errors(metadata, max_ratio=1.2)) == (candidate_count != 285)
 
 

@@ -123,7 +123,7 @@ def render_report(report: dict[str, Any]) -> str:
     counts = report["counts"]
     lines = ["# Idea Agent 真实运行审计", "", f"运行：`{report['run_id']}`", "",
              f"源码：`{report['source_commit']}`；文件树：`{report['source_tree']}`", "",
-             f"可复核的方法方案验收：**{report['audit_passed']}**。记录状态：{report['recorded_status']}。", "",
+             f"结构与材料审计通过：**{report['audit_passed']}**。记录状态：{report['recorded_status']}。", "",
              f"Schema：{report['schema_valid']}；材料：{report['material_valid']}；"
              f"Reflection 接受：{report['reflection_accepted']}；trace 一致：{report['trace_consistent']}。", "",
              f"模型请求 {counts['model_requests']} 次，返回 {counts['model_responses']} 次；"

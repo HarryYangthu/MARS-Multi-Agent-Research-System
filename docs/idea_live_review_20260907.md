@@ -1,5 +1,44 @@
 # Real Idea evaluation: a completed loop is not sufficient
 
+## Follow-up run: actual revisions still failed implementation review
+
+Run `idea_lut_20260907T083733_656792` used source `0977032`, published as
+`f2f2166` with an identical tree. It stopped honestly at `reflection_rejected`:
+1,315.98 seconds, 15 model requests/responses/SDK attempts, 6 real tool calls,
+2 protocol repairs, 1 schema/material repair and 3 rejecting Reflection rounds.
+Reported usage was 190,841 input + 62,487 output = 253,328 tokens, complete.
+Two PDFs were downloaded: PolyLUT and Free-Knots KAN. No final successful
+artifact or experiment was reported.
+
+Reflection did drive actual revisions of the cubic-spline ablation: first the
+control count, then the explicit knot vector, then a remaining support-index
+contradiction. However, independent inspection found additional missed issues:
+
+- The selected output is complex, but the main real-scalar ledger says 289/324
+  instead of 578/648. Its free-knot alternative adds 30 real coordinates to
+  324 and is rejected; the consistent complex calculation is (648+30)/578,
+  about 1.173, within this evaluation's 1.2 ratio.
+- The initialization offers two competing procedures and promises a no-worse
+  start in a non-nested function space without proof. Linearity in coefficients
+  does not by itself establish conditioning or optimization stability.
+- Squared complex differences need magnitude squares for a nonnegative real
+  regularizer. Independent cell polynomials do not ensure C0 continuity.
+- Decision thresholds leave uncovered cases, and one equal-budget comparison
+  reverses the inequality used to reject the hypothesis.
+
+Changes prepared from these failures: independently count typed parameter
+tensor shapes; require two budget-feasible, typed alternative ledgers; keep
+review issues pinned through format/schema repair; preserve an action receipt
+index during context compression; request one statistical decision rule and
+remove duplicate long method text. The next evaluation uses high effort for
+both drafting and Reflection. These changes do not retroactively pass this run.
+
+The native acceptance report now uses the actual invocation, candidate hash,
+validation receipt, evidence and trace. It no longer requires an obsolete fixed
+research recipe or GUI events for a headless evaluation.
+
+## Earlier completed loop
+
 Run `idea_lut_20260907T082315_8dd75f` used committed source `c7de8d9`,
 published as GitHub checkpoint `a095ff6` (identical source tree). It used the
 real Zhipu API and actual arXiv/PDF tools. No model, tool or service doubles ran.

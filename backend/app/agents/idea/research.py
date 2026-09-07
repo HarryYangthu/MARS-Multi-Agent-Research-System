@@ -69,6 +69,30 @@ def evaluate_formula(formula: str, variables: dict[str, Any]) -> float:
         raise ValueError("invalid arithmetic") from exc
 
 
+def count_component(component: dict[str, Any], variables: dict[str, Any]) -> float:
+    """Independently count an explicitly typed parameter tensor in real scalars."""
+    dtype = component.get("dtype")
+    if dtype not in ("real", "complex"):
+        raise ValueError("component dtype must be real or complex")
+    shape = component.get("shape")
+    if not isinstance(shape, list) or len(shape) > 8:
+        raise ValueError("component shape must be a list of up to 8 dimensions; [] denotes a scalar")
+    count = 2.0 if dtype == "complex" else 1.0
+    for dimension in shape:
+        if type(dimension) is int and 0 < dimension <= 1e12:
+            size = float(dimension)
+        elif isinstance(dimension, str):
+            size = evaluate_formula(dimension, variables)
+        else:
+            raise ValueError("shape dimensions must be positive integer values or arithmetic strings")
+        if size <= 0 or not size.is_integer():
+            raise ValueError("shape dimensions must evaluate to positive integers")
+        count *= size
+        if count > 1e12:
+            raise ValueError("component size outside bound")
+    return count
+
+
 def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
     if not isinstance(raw, dict):
         return ["/parameter_budget: required structured object"]
@@ -78,7 +102,7 @@ def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
     variables = raw.get("variables")
     if not isinstance(variables, dict) or not variables:
         return errors + ["/parameter_budget/variables: nonempty numeric variable map required"]
-    if any(type(v) not in {int, float} or not math.isfinite(v) for v in variables.values()):
+    if any(type(v) not in {int, float} or abs(v) > 1e12 or not math.isfinite(v) for v in variables.values()):
         return errors + ["/parameter_budget/variables: only finite numeric values allowed"]
     totals: dict[str, float] = {}
     for label in ("baseline", "candidate"):
@@ -104,6 +128,10 @@ def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
                 n = evaluate_formula(component["formula"], variables)
                 if n < 0 or not n.is_integer():
                     raise ValueError("component count must be a nonnegative integer")
+                shape_count = count_component(component, variables)
+                if n != shape_count:
+                    raise ValueError(f"component {component['name']!r}: formula gives {n} real scalars, "
+                                     f"but dtype/shape gives {shape_count}")
                 component_total += n
             if component_total != computed:
                 raise ValueError(f"components sum {component_total} != total {computed}")
@@ -192,6 +220,35 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
         alternatives = metadata.get("alternatives", [])
         if not isinstance(alternatives, list) or len(alternatives) < 2:
             errors.append("/alternatives: compare at least two feasible methods; justify selection")
+        else:
+            feasible_count = 0
+            budget = metadata.get("parameter_budget", {})
+            variables = budget.get("variables", {}) if isinstance(budget, dict) else {}
+            if not isinstance(variables, dict):
+                variables = {}
+            baseline_count = budget.get("baseline_parameters", 0) if isinstance(budget, dict) else 0
+            for i, option in enumerate(alternatives):
+                try:
+                    if not isinstance(option, dict) or type(option.get("feasible")) is not bool:
+                        raise ValueError("feasible boolean required")
+                    groups = option.get("components")
+                    if not isinstance(groups, list) or not groups or not all(isinstance(g, dict) for g in groups):
+                        raise ValueError("typed trainable components required")
+                    computed = sum(count_component(g, variables) for g in groups)
+                    if any(evaluate_formula(g["formula"], variables) != count_component(g, variables) for g in groups):
+                        raise ValueError("component formula does not match dtype/shape count")
+                    if type(option.get("parameters")) is not int or option["parameters"] != computed:
+                        raise ValueError(f"parameters must equal typed component sum {computed}")
+                    if option["feasible"]:
+                        if type(baseline_count) is not int or baseline_count <= 0 or computed > max_ratio * baseline_count + 1e-12:
+                            raise ValueError("feasible alternative exceeds the same real-scalar baseline budget")
+                        feasible_count += 1
+                except (ValueError, TypeError, KeyError, SyntaxError) as exc:
+                    errors.append(f"/alternatives/{i}: {exc}")
+            if feasible_count < 2:
+                errors.append("/alternatives: at least two typed, within-budget feasible methods required")
+        if not isinstance(metadata.get("decision_rule"), dict) or not metadata["decision_rule"]:
+            errors.append("/decision_rule: define one signed metric comparison and exhaustive statistical decision rule")
         ablations = metadata.get("ablation_plan", [])
         if not isinstance(ablations, list) or len(ablations) < 3:
             errors.append("/ablation_plan: at least three fair comparisons with rejection criteria required")

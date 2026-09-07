@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from jsonschema import ValidationError, validate
@@ -77,3 +78,35 @@ def test_patch_export_copies_only_the_actual_proposed_diff(tmp_path: Path) -> No
     _write_patch_diff(run=run, version="v2", artifact_text="```diff\n" + diff + "```\n")
     assert (run.subdir("coding") / "patch.v2.diff").read_text() == diff
     assert not (tmp_path / "example.py").exists()
+
+
+def test_complex_tensor_ledger_cannot_report_only_its_element_count() -> None:
+    from app.agents.idea.research import parameter_errors
+    # Authored arithmetic inputs reproduce the live count-unit failure; no agent output is supplied.
+    raw: dict[str, Any] = {"unit": "real_scalar", "variables": {"N": 17, "C": 18},
+           "baseline_formula": "N*N", "baseline_parameters": 289,
+           "candidate_formula": "C*C", "candidate_parameters": 324,
+           "baseline_components": [{"name": "controls", "formula": "N*N", "dtype": "complex", "shape": ["N", "N"]}],
+           "candidate_components": [{"name": "controls", "formula": "C*C", "dtype": "complex", "shape": ["C", "C"]}]}
+    assert len(parameter_errors(raw, max_ratio=1.2)) == 2
+    for label, dim in (("baseline", "N"), ("candidate", "C")):
+        raw[label + "_formula"] = f"2*{dim}*{dim}"
+        raw[label + "_components"][0]["formula"] = f"2*{dim}*{dim}"
+        raw[label + "_parameters"] *= 2
+    assert parameter_errors(raw, max_ratio=1.2) == []
+
+
+@pytest.mark.parametrize("shape", [[0], [-1], [True], [1.5], [10**1000], ["1/0"], ["unknown"], [2]*9])
+def test_invalid_parameter_shapes_fail_closed(shape: list[object]) -> None:
+    from app.agents.idea.research import count_component
+    with pytest.raises(ValueError):
+        count_component({"dtype": "complex", "shape": shape}, {})
+
+
+def test_real_knot_coordinates_do_not_double_with_complex_output() -> None:
+    from app.agents.idea.research import count_component
+    values = {"N": 18, "K": 15}
+    complex_controls = count_component({"dtype": "complex", "shape": ["N", "N"]}, values)
+    real_knots = count_component({"dtype": "real", "shape": [2, "K"]}, values)
+    assert complex_controls == 648 and real_knots == 30
+    assert (complex_controls + real_knots) / (2 * 17 * 17) < 1.2

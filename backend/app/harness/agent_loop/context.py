@@ -31,6 +31,12 @@ def pack_context(
     candidate: str, *, budget: int, observation_chars: int,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
+    if history:
+        # The full observations may be compressed/omitted, but the agent must
+        # still know which actions really happened and where their receipts live.
+        ledger = [{k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}
+                  for item in history]
+        required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
     if candidate:
         required.append(Message(role="assistant", content=canonical({"candidate": candidate})))
     if feedback:

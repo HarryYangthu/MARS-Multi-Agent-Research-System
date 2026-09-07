@@ -52,9 +52,9 @@ def test_parameter_arithmetic_and_component_conservation() -> None:
         "unit": "real_scalar", "variables": {"N": 16, "M": 16, "r": 2},
         "baseline_formula": "2*N*M", "candidate_formula": "2*N*M+2*r*(N+M)",
         "baseline_parameters": 512, "candidate_parameters": 640,
-        "baseline_components": [{"name": "complex coefficients", "formula": "2*N*M"}],
-        "candidate_components": [{"name": "coefficients", "formula": "2*N*M"},
-                                 {"name": "factors", "formula": "2*r*(N+M)"}],
+        "baseline_components": [{"name": "complex coefficients", "formula": "2*N*M", "dtype": "complex", "shape": ["N", "M"]}],
+        "candidate_components": [{"name": "coefficients", "formula": "2*N*M", "dtype": "complex", "shape": ["N", "M"]},
+                                 {"name": "factors", "formula": "2*r*(N+M)", "dtype": "complex", "shape": ["r", "N+M"]}],
     }
     assert not parameter_errors(raw, max_ratio=1.25)
     assert parameter_errors(raw, max_ratio=1.2)
@@ -69,6 +69,20 @@ def test_structural_compaction_preserves_valid_json_and_error() -> None:
     assert packed["long_text"]["truncated"]
     assert packed["error"] == data["error"]
     assert packed["url"] == data["url"]
+
+
+def test_compression_keeps_all_action_receipts_when_source_text_is_omitted() -> None:
+    # Authored packer inputs test compression only; no tool execution is replaced.
+    history = [{"tool": "knowledge.kb_query", "ok": True, "reason": "check prior work",
+                "raw_ref": "/run/tools/0001.json", "output": {"text": "x" * 9000}},
+               {"tool": "search.fetch_sources", "ok": False, "reason": "read selected method",
+                "raw_ref": "/run/tools/0002.json", "error": "timeout"}]
+    messages, manifest = pack_context([Message("system", "rules")], history, "", "",
+                                      budget=1600, observation_chars=6000)
+    receipt_index = next(m.content for m in messages if "action receipt index" in m.content)
+    assert "knowledge.kb_query" in receipt_index and "search.fetch_sources" in receipt_index
+    assert "timeout" in receipt_index and "/run/tools/0001.json" in receipt_index
+    assert manifest["compressed_history"]
 
 
 def test_context_never_silently_truncates_pinned_task() -> None:
