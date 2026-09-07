@@ -102,6 +102,8 @@ class NativeAgentLoop:
                 review_revision(state, request.external_review, p)
             if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
+            if state.get("pending_batch"):
+                raise ValueError("incomplete batch: reconcile tool receipts before resuming; automatic replay forbidden")
             if state["pending"] == "tool":
                 raise ValueError("tool outcome unknown: reconcile its receipt before resuming; automatic replay forbidden")
             if state["pending"] == "model":
@@ -252,7 +254,7 @@ class NativeAgentLoop:
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
                     if native:
-                        state["feedback"] = f"Protocol error: {exc}. Use one valid native tool call or submit the complete Markdown candidate. No rejected action was executed."
+                        state["feedback"] = f"Protocol error: {exc}. Use valid native tool calls or submit the complete Markdown candidate. No rejected action was executed."
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
@@ -297,41 +299,57 @@ class NativeAgentLoop:
                         state["status"] = "passed"
                         break
                 else:
-                    counts["action_rounds"] += 1
-                    tool = decision["tool"]
-                    identity = digest({"tool": tool, "args": decision["args"]})
-                    if tool not in request.tools:
-                        state["feedback"] = f"Tool {tool} is not available for this agent."
-                    elif counts["tool_dispatches"] >= p.max_tool_steps:
-                        state["feedback"] = "Tool budget exhausted."
-                    elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
-                        state["feedback"] = "Duplicate successful/permanent-failed action rejected; use its prior Observation."
-                    else:
-                        prior = state["seen"].get(identity)
-                        state["pending"] = "tool"
-                        counts["tool_dispatches"] += 1
-                        trace.emit("tool_dispatch", {"step": counts["tool_dispatches"], "tool": tool}, visible=decision)
-                        trace.snapshot(state)
-                        result = await request.registry.dispatch(tool, decision["args"], request.tool_context)
-                        observation = {**decision, "ok": result.ok, "output": result.output, "error": result.error,
-                                       "status": result.status, "blocked_by_gate": result.blocked_by_gate}
-                        if p.trace == "full":
-                            raw = request.trace_root / "tools" / f"{counts['tool_dispatches']:04d}.json"
-                            atomic_json(raw, observation)
-                            observation["raw_ref"] = str(raw)
-                        state["history"].append(observation)
-                        counts["observations"] += 1
-                        state["pending"] = None
-                        retryable = (not result.ok and not result.blocked_by_gate and not result.requires_approval
-                                     and any(word in (result.error or "").lower() for word in
-                                             ("timeout", "timed out", "429", "502", "503", "504", "connection")))
-                        state["seen"][identity] = {"retry_allowed": retryable and prior is None}
-                        state["feedback"] = ""
-                        trace.emit("observation", {"step": counts["tool_dispatches"], "tool": tool, "ok": result.ok},
-                                   visible=observation)
-                        if result.requires_approval or result.blocked_by_gate:
-                            state["status"] = "blocked"
-                            break
+                    actions = decision.get("batch", [decision])
+                    identities = [digest({"tool": a["tool"], "args": a["args"]}) for a in actions]
+                    if len(actions) > 1:
+                        if (len(actions) > p.max_tool_steps - counts["tool_dispatches"] or
+                            len(identities) != len(set(identities)) or
+                            any(i in state["seen"] and not state["seen"][i]["retry_allowed"] for i in identities)):
+                            state["feedback"] = "Batch not executed: exceeds remaining tool budget or repeats completed/permanent-failed actions. Submit only needed actions within budget."
+                            trace.snapshot(state)
+                            continue
+                        for action in actions:
+                            action.update(native_batch_id=counts["model_requests"], native_batch_size=len(actions))
+                        state["pending_batch"] = True
+                    for decision in actions:
+                        counts["action_rounds"] += 1
+                        tool = decision["tool"]
+                        identity = digest({"tool": tool, "args": decision["args"]})
+                        if tool not in request.tools:
+                            state["feedback"] = f"Tool {tool} is not available for this agent."
+                        elif counts["tool_dispatches"] >= p.max_tool_steps:
+                            state["feedback"] = "Tool budget exhausted."
+                        elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
+                            state["feedback"] = "Duplicate successful/permanent-failed action rejected; use its prior Observation."
+                        else:
+                            prior = state["seen"].get(identity)
+                            state["pending"] = "tool"
+                            counts["tool_dispatches"] += 1
+                            trace.emit("tool_dispatch", {"step": counts["tool_dispatches"], "tool": tool}, visible=decision)
+                            trace.snapshot(state)
+                            result = await request.registry.dispatch(tool, decision["args"], request.tool_context)
+                            observation = {**decision, "ok": result.ok, "output": result.output, "error": result.error,
+                                           "status": result.status, "blocked_by_gate": result.blocked_by_gate}
+                            if p.trace == "full":
+                                raw = request.trace_root / "tools" / f"{counts['tool_dispatches']:04d}.json"
+                                atomic_json(raw, observation)
+                                observation["raw_ref"] = str(raw)
+                            state["history"].append(observation)
+                            counts["observations"] += 1
+                            state["pending"] = None
+                            retryable = (not result.ok and not result.blocked_by_gate and not result.requires_approval
+                                         and any(word in (result.error or "").lower() for word in
+                                                 ("timeout", "timed out", "429", "502", "503", "504", "connection")))
+                            state["seen"][identity] = {"retry_allowed": retryable and prior is None}
+                            state["feedback"] = ""
+                            trace.emit("observation", {"step": counts["tool_dispatches"], "tool": tool, "ok": result.ok},
+                                       visible=observation)
+                            if result.requires_approval or result.blocked_by_gate:
+                                state["status"] = "blocked"
+                                break
+                    if state["status"] == "blocked":
+                        break
+                    state["pending_batch"] = False
                 trace.snapshot(state)
             if state["status"] == "running":
                 state["status"] = "budget_exhausted"

@@ -47,3 +47,30 @@ def test_context_digest_matches_wire_messages() -> None:
     from app.harness.agent_loop.trace import digest
     messages, manifest = pack_context([Message('system','task')], [], '', '', budget=4000, observation_chars=512)
     assert manifest['visible_sha256'] == digest([m.to_wire() for m in messages])
+
+
+def test_batch_parsing_preserves_ids_and_context_group() -> None:
+    from app.harness.agent_loop.native_protocol import group_messages
+    calls = (ToolCall('a',wire_name('read'),'{"path":"a"}'),
+             ToolCall('b',wire_name('read'),'{"path":"b"}'))
+    actions = native_decision(Completion('inspect both', 'parser','parser',tool_calls=calls),('read',))['batch']
+    for action in actions:
+        action.update(native_batch_id=1, native_batch_size=2)
+    messages = group_messages(actions, ['authored result A','authored result B'])
+    assert messages[0].tool_calls == calls
+    assert [m.tool_call_id for m in messages[1:]] == ['a','b']
+    with pytest.raises(ValueError, match='incomplete'):
+        group_messages(actions[:1], ['authored result A'])
+    with pytest.raises(ValueError, match='duplicate'):
+        native_decision(Completion('', 'parser','parser',tool_calls=(calls[0],calls[0])),('read',))
+
+
+def test_native_idea_prompt_has_no_legacy_json_instruction() -> None:
+    from app.agents.idea.agent import IdeaAgent
+    from app.agents.base import RunRequest, ContextPack
+    agent = IdeaAgent()
+    request = RunRequest(project='pimc',user_request='public task')
+    context = ContextPack(system=agent.agent_brief,project='',task='public task')
+    text = '\n'.join(m.content for m in agent._messages_for_context(request,context,purpose='contract'))
+    assert 'final.metadata' not in text and 'final.body' not in text
+    assert 'YAML frontmatter' in text

@@ -6,7 +6,7 @@ from typing import Any
 
 from app.harness.agent_loop.trace import canonical, digest
 from app.harness.llm.provider_base import Message
-from app.harness.agent_loop.native_protocol import observation_messages
+from app.harness.agent_loop.native_protocol import history_groups, group_messages
 
 
 def token_upper_bound(messages: Sequence[Message]) -> int:
@@ -48,13 +48,15 @@ def pack_context(
     compressed: list[int] = []
     omitted: list[int] = []
     # Newer observations get priority, but output ordering remains chronological.
-    for index in reversed(range(len(history))):
-        item = history[index]
-        content = "[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars))
-        group = observation_messages(item, content)
+    groups = history_groups(history)
+    for index in reversed(range(len(groups))):
+        items = groups[index]
+        contents = ["[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars)) for item in items]
+        group = group_messages(items, contents)
         if token_upper_bound(required + selected + group) > budget:
-            minimal = {k: item.get(k) for k in ("tool", "args", "reason", "ok", "error", "raw_ref")}
-            group = observation_messages(item, "[compressed evidence reference]\n" + canonical(minimal))
+            contents = ["[compressed evidence reference]\n" + canonical({k: item.get(k) for k in
+                        ("tool", "args", "reason", "ok", "error", "raw_ref")}) for item in items]
+            group = group_messages(items, contents)
             compressed.append(index)
         if token_upper_bound(required + selected + group) <= budget:
             selected[0:0] = group

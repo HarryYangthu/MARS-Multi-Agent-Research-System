@@ -169,10 +169,16 @@ class BaseAgent(ABC):
                               purpose: str) -> list[Message]:
         schema_path = repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")
         schema = json.loads(schema_path.read_text())
+        output_instruction = (
+            "Return the complete Markdown document directly, beginning with YAML frontmatter matching this schema. "
+            "Do not wrap the document in JSON or a code fence. JSON Schema:\n"
+            if self.loop_policy.protocol == "native_tools" else
+            "Return final.metadata as a native JSON object matching this schema, "
+            "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
+        )
         messages = [Message(role="system", content=context.system),
                     Message(role="system", content=context.project),
-                    Message(role="system", content="Return final.metadata as a native JSON object matching this schema, "
-                            "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
+                    Message(role="system", content=output_instruction
                             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))),
                     Message(role="user", content=context.task)]
         for label, content in context.upstream.items():
