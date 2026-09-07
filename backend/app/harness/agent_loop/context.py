@@ -29,7 +29,7 @@ def compact(value: Any, chars: int) -> Any:
 
 def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
-    candidate: str, *, budget: int, observation_chars: int,
+    candidate: str, *, budget: int, observation_chars: int, native: bool = False,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if history:
@@ -39,7 +39,7 @@ def pack_context(
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
     if candidate:
-        required.append(Message(role="assistant", content=canonical({"candidate": candidate})))
+        required.append(Message(role="assistant", content=candidate if native else canonical({"candidate": candidate})))
     if feedback:
         required.append(Message(role="user", content="[host validation/review feedback]\n" + feedback))
     if token_upper_bound(required) > budget:
