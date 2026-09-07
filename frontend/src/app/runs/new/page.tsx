@@ -9,7 +9,7 @@ import {
   createRun,
   dataSourceSpectrumUrl,
   type DataSourceProfile,
-  type ResearchContext,
+  type IdeaContext,
   getDataSource,
   getDefaultDataSource,
   getTemplateByAgent,
@@ -37,13 +37,13 @@ const VALID_ENTRYPOINTS = new Set([
 // draft proposal.v1 for you). Other entries use the schema-template form.
 const TEMPLATE_ENTRIES = new Set(["experiment", "coding", "execution", "writing"]);
 
-const RESEARCH_FIELDS: { key: keyof ResearchContext; label: string; hint: string }[] = [
+const RESEARCH_FIELDS: { key: keyof IdeaContext; label: string; hint: string }[] = [
   { key: "background", label: "研究背景", hint: "问题背景、信号含义、允许修改的范围和必须保留的接口" },
   { key: "baseline_code", label: "基线代码", hint: "粘贴相关模块代码，并注明版本、输入输出和训练入口" },
   { key: "data_description", label: "数据说明", hint: "数据含义、形状、归一化、训练集与测试集的划分" },
   { key: "analysis_results", label: "已有分析结果", hint: "基线指标、误差分布、稳定性观察和已尝试的方法" },
   { key: "metric_definition", label: "目标与指标", hint: "指标公式、单位、优化方向、验收阈值和参数预算" },
-  { key: "literature", label: "参考资料", hint: "论文或博客的链接、标题与相关摘录；链接仍需实际读取" },
+  { key: "literature_notes", label: "参考资料", hint: "论文或博客的链接、标题与相关摘录；链接仍需实际读取" },
 ];
 
 export default function NewRun(): JSX.Element {
@@ -75,7 +75,7 @@ function NewRunInner(): JSX.Element {
     setProject(selectedProject);
   }, [selectedProject]);
   const [seedArtifact, setSeedArtifact] = useState("");
-  const [researchContext, setResearchContext] = useState<ResearchContext>({});
+  const [researchContext, setIdeaContext] = useState<IdeaContext>({});
   const [ideaScope, setIdeaScope] = useState<"method_proposal" | "project_proposal">("method_proposal");
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [dataSource, setDataSource] = useState<DataSourceProfile | null>(null);
@@ -185,12 +185,17 @@ function NewRunInner(): JSX.Element {
     setSchemaErrors(null);
     try {
       const activeDataSource = dataFile && !dataSource ? await uploadSelectedData() : dataSource;
+      const suppliedContext: IdeaContext = {};
+      for (const { key } of RESEARCH_FIELDS) {
+        const value = researchContext[key];
+        if (value?.trim()) suppliedContext[key] = value;
+      }
       const body: Parameters<typeof createRun>[0] = {
         task,
         project,
         entrypoint,
         user_request: userRequest,
-        research_context: researchContext,
+        idea_context: suppliedContext,
       };
       if (!usesTemplate) body.idea_scope = ideaScope;
       if (activeDataSource) {
@@ -490,7 +495,7 @@ function NewRunInner(): JSX.Element {
                 <Field key={key} label={label}>
                   <textarea
                     value={researchContext[key] ?? ""}
-                    onChange={(event) => setResearchContext((current) => ({ ...current, [key]: event.target.value }))}
+                    onChange={(event) => setIdeaContext((current) => ({ ...current, [key]: event.target.value }))}
                     rows={4}
                     placeholder={hint}
                     className="input text-sm"

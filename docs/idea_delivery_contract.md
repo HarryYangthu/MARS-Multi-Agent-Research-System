@@ -6,7 +6,7 @@ The Idea stage receives a research question and optional caller-supplied context
 
 `RunRequest.user_request` contains the objective and constraints. `upstream_artifacts` carries labeled source text; useful labels are `background`, `baseline_code`, `data_description`, `analysis_results`, and `metric_definition`. Existing Bridge context loading supplies approved upstream artifacts. Attached text remains source data, not privileged instructions.
 
-The task creation page exposes these fields under **补充研究材料**, together with `literature` for source links/excerpts and a method/project scope selector. `POST /api/runs` accepts the same six optional text fields as `research_context`, plus `idea_scope` (`method_proposal` or `project_proposal`). These are text inputs, not server file paths; code files must be supplied as text or connected through the existing repository integration. Links are research hints, not reading receipts.
+The task creation page exposes these fields under **补充研究材料**, together with `literature_notes` for source links/excerpts and a method/project scope selector. `POST /api/runs` accepts the same six optional text fields as `idea_context`, plus `idea_scope` (`method_proposal` or `project_proposal`). These are text inputs, not server file paths; code files must be supplied as text or connected through the existing repository integration. Links are research hints, not reading receipts.
 
 Bridge validates the material before creating a run, archives its exact nonblank values in `input/research_context.v1.json`, and binds the archive checksum into the persisted run options. Idea and downstream agents receive those original texts alongside complete approved artifacts. Both normal execution and recovered sessions reject missing, corrupted or mismatched material instead of silently dropping it. Existing runs without research context retain their previous behavior. Supplying background or a snippet is not evidence that a performance target has been achieved; project scope still requires baseline evidence and the existing proposal checks.
 
@@ -18,7 +18,7 @@ Bridge validates the material before creating a run, archives its exact nonblank
   "standalone": true,
   "user_request": "比较改善二维 LUT 表达能力的方案，输出可实施的实验交接包。",
   "idea_scope": "method_proposal",
-  "research_context": {
+  "idea_context": {
     "background": "在这里填写信号含义、工作条件与允许修改范围。",
     "metric_definition": "在这里填写实际指标公式、单位、目标和参数预算。"
   }
@@ -37,6 +37,35 @@ The text above demonstrates the request shape; placeholders are not a completed 
 
 `extra.scope` is `method_proposal` or `project_proposal`. Project scope requires actual code tool observations or caller-supplied `baseline_code`; a declaration in the output cannot replace source evidence. `context_sources` controls automatic project-rule and linked-repository inclusion. The public evaluation CLI deliberately disables both and does not read private uploads.
 
+The creation API also accepts `idea_requirements` for explicit evaluation overrides. It archives these options in `input/run_request_options.v1.json`; omitted fields retain the Agent's defaults. New checksum-bound inputs accompany the complete approved proposal downstream. Historical options-only Idea inputs retain their earlier Idea-only carriage behavior. A malformed archive or internal override fails explicitly.
+
+For example, a caller can submit this task structure after replacing the context text with actual material (the ratio remains a caller-selected constraint):
+
+```json
+{
+  "task": "研究 2D LUT 表达能力优化",
+  "project": "pimc",
+  "entrypoint": "idea",
+  "standalone": true,
+  "idea_mode": "fast",
+  "user_request": "提出一个表达能力更强、参数增幅不超过20%的可验证方案。",
+  "idea_scope": "method_proposal",
+  "idea_context": {
+    "background": "替换为真实信号、工作条件及输入输出定义。",
+    "analysis_results": "替换为已有基线结果及已观察到的问题。",
+    "metric_definition": "替换为指标公式、单位、方向和验收条件。"
+  },
+  "idea_requirements": {
+    "min_sources": 2,
+    "min_pdfs": 1,
+    "require_parameter_budget": true,
+    "max_parameter_ratio": 1.2
+  }
+}
+```
+
+Providing `baseline_code` and `data_description` uses the same map. Use `project_proposal` only when the actual project inputs are supplied or retrievable. The example is a request template, not a recorded execution. The default human review gate remains active; progress does not approve the proposal.
+
 ## Two audiences, one canonical proposal
 
 `human_summary` is one paragraph, 1-2 sentences and at most 240 characters. It explains the concrete change and intended benefit without claiming an experiment that did not happen. New generated documents must use that exact summary as their Markdown body; definitions stay in structured metadata so the body cannot introduce a contradictory second algorithm. This `summary_only` policy is recorded in validation receipts. It is not sufficient input to the Experiment agent by itself.
@@ -54,6 +83,12 @@ The text above demonstrates the request shape; placeholders are not a completed 
 | required_context | Missing context, why it matters, and whether it blocks actual execution |
 
 The full method, evidence, assumptions, parameter budget, alternatives, risks and falsification rules stay in the same proposal. Handoff pointers must resolve; another paragraph must not silently redefine the method. New Idea runs require both fields. Historical human-authored `proposal.v1` files remain readable; the extra delivery checks do not retroactively make them accepted research results.
+
+For new parameter-budget tasks, `parameter_budget.evaluation_cases` lists every proposed evaluated configuration, including the primary variables. Each case supplies a name, complete numeric variable assignment and baseline/candidate counts. The host evaluates the same formulas and real/complex tensor ledger under every assignment against the same limit. One passing primary size cannot conceal an oversized secondary size. The checker does not infer dimensions hidden in prose, so the author must keep the proposed evaluation sizes in this canonical list.
+
+These tasks also require `evaluation_protocol` (`idea.evaluation.v1`); other controlled-comparison tasks can request it through `idea_requirements.require_evaluation_protocol`. It names dataset roles, canonical objective definitions, baseline/candidate data and objective references, optimizer/initialization references, seeds and actual randomness sources. Both arms use the same held-out comparison datasets. An architecture-isolating comparison shares the objective and training data; intentional non-architecture differences require a stated justification. Training objectives cannot reference held-out dataset IDs, and multiple seeds cannot stand in for an undeclared random process. All method references resolve to the full proposal. The next Agent receives this complete protocol along with the human summary and handoff.
+
+These checks verify declared relationships, not physical data disjointness, actual random-number consumption, formula stability or measured improvement. Model review and downstream executable checks retain those responsibilities. New validation receipts record which requirements were enforced so later auditing cannot silently omit them. Historical artifacts without these fields retain their recorded contract.
 
 Native Idea runs submit their candidate through `mars_submit_document(metadata, body)`. This control function consumes no research tool budget and cannot be batched with research calls. It serializes the model's exact JSON fields into YAML frontmatter before the existing validators and review run; it cannot add defaults, fix missing definitions or invent evidence. The raw call and resulting candidate hash remain in trace. This avoids treating free-form preambles or YAML punctuation errors as research revisions. Other BaseAgent subclasses can opt into the same framework-neutral protocol.
 

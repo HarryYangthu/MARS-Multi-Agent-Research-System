@@ -133,6 +133,7 @@ class NativeAgentLoop:
             state["status"] = "running"
             state["pending"] = None
         state.setdefault("review_issues", [])
+        state.setdefault("validation_issues", [])
         state.setdefault("protocol_output", "")
         state.setdefault("reviewed_candidate_sha", "")
         state.setdefault("phase_efforts", {})
@@ -223,6 +224,7 @@ class NativeAgentLoop:
                     state["history"], feedback, state["candidate"],
                     budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
                     native=native, reviewing=reviewing, review_issues=state["review_issues"],
+                    validation_issues=state["validation_issues"],
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
@@ -290,7 +292,11 @@ class NativeAgentLoop:
                     elif native:
                         final_instruction = ("call mars_submit_document with complete metadata and body"
                                              if request.final_schema is not None else "submit the complete Markdown candidate")
-                        state["feedback"] = f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. No rejected action was executed."
+                        state["feedback"] = (f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. "
+                                             "For document submission, arguments must be exactly one JSON object with "
+                                             "two keys: metadata and body. Close metadata before body; close the root "
+                                             "once after body. Do not append another body or object after the root. "
+                                             "Resolve the pinned candidate validation errors too. No rejected action was executed.")
                     trace.emit("protocol_error", {"error": str(exc)})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
@@ -327,6 +333,7 @@ class NativeAgentLoop:
                     errors = await request.validate(state["candidate"], state["history"])
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
                         errors.append("/candidate: unresolved review issues require a revised candidate")
+                    state["validation_issues"] = list(errors)
                     trace.emit("validation", {"valid": not errors}, visible=errors)
                     await progress("validation", valid=not errors, issues=errors)
                     if errors:

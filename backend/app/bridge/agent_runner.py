@@ -406,7 +406,7 @@ def load_agent_handoff_context(
     # Pick up upstream approved artifacts as handoff.
     from app.bridge.research_context import load_research_context
 
-    upstream = load_research_context(run, _load_run_request_extra(run))
+    upstream = load_research_context(run, _load_run_request_extra(run, strict=True), allow_legacy=stage == "idea")
     selected_data_source = _load_selected_data_source(run)
     if selected_data_source:
         upstream["input.selected_data_source"] = selection_summary(selected_data_source)
@@ -510,20 +510,26 @@ def _load_selected_data_source(run: RunHandle) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
+def _load_run_request_extra(run: RunHandle, *, strict: bool = False) -> dict[str, Any]:
     path = run.subdir("input") / "run_request_options.v1.json"
     if not path.is_file():
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("run request options are unreadable; refusing to drop task inputs") from exc
+        if strict:
+            raise ValueError("Idea run request options are unreadable") from exc
+        logger.warning("run request options are unreadable: {}", path)
+        return {}
     if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
-        raise ValueError("run request options use an unsupported schema")
+        if strict:
+            raise ValueError("Idea run request options use an unsupported schema")
+        logger.warning("run request options use an unsupported schema: {}", path)
+        return {}
     extra = raw.get("extra")
-    if not isinstance(extra, dict):
-        raise ValueError("run request options must contain an extra object")
-    return {str(key): value for key, value in extra.items()}
+    if strict and not isinstance(extra, dict):
+        raise ValueError("Idea run request extra must be an object")
+    return {str(key): value for key, value in extra.items()} if isinstance(extra, dict) else {}
 
 
 def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str:

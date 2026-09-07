@@ -64,7 +64,6 @@ class RunRequest:
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
     data_source: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
-    research_context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,9 +96,10 @@ class Orchestrator:
     # --------------------------------------------------------------- create
 
     def create_session(self, request: RunRequest) -> RunSession:
-        from app.bridge.research_context import ResearchContext, archive_research_context
+        from app.bridge.research_context import archive_research_context
+        from app.bridge.idea_input_context import validate_idea_extra
 
-        research_context = ResearchContext.model_validate(request.research_context)
+        research_context = validate_idea_extra(request.extra)
         settings = get_settings()
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
@@ -944,7 +944,7 @@ class Orchestrator:
         waiting = snapshot is not None and snapshot.status == "waiting_feedback"
         from app.bridge.research_context import load_research_context
 
-        request.research_context = load_research_context(run, request.extra)
+        load_research_context(run, request.extra)
         session = RunSession(
             run=run,
             graph=graph,

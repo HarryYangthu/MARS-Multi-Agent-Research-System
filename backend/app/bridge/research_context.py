@@ -5,31 +5,14 @@ import hashlib
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, StrictStr
-
+from app.bridge.idea_input_context import validate_idea_context, validate_idea_extra
 from app.harness.agent_loop.trace import atomic_json
 from app.storage.run_store import RunHandle
 
 
-class ResearchContext(BaseModel):
-    """Text excerpts, never server paths or privileged instructions."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    background: StrictStr = ""
-    baseline_code: StrictStr = ""
-    data_description: StrictStr = ""
-    analysis_results: StrictStr = ""
-    metric_definition: StrictStr = ""
-    literature: StrictStr = ""
-
-    def supplied(self) -> dict[str, str]:
-        return {key: value for key, value in self.model_dump().items() if value.strip()}
-
-
-def archive_research_context(run: RunHandle, context: ResearchContext) -> str | None:
+def archive_research_context(run: RunHandle, context: dict[str, str]) -> str | None:
     """Archive exact supplied text and return the receipt bound into run options."""
-    supplied = context.supplied()
+    supplied = validate_idea_context(context)
     if not supplied:
         return None
     target = run.subdir("input") / "research_context.v1.json"
@@ -41,12 +24,13 @@ def archive_research_context(run: RunHandle, context: ResearchContext) -> str | 
     return hashlib.sha256(target.read_bytes()).hexdigest()
 
 
-def load_research_context(run: RunHandle, extra: dict[str, Any]) -> dict[str, str]:
+def load_research_context(run: RunHandle, extra: dict[str, Any], *, allow_legacy: bool = True) -> dict[str, str]:
     """Fail on lost/corrupt inputs instead of silently researching without them."""
     target = run.subdir("input") / "research_context.v1.json"
     expected = extra.get("research_context_sha256")
     if expected is None and not target.exists():
-        return {}  # Historical runs did not carry caller-supplied research text.
+        # Historical unreceipted inputs retain their Idea-only contract.
+        return validate_idea_extra(extra) if allow_legacy else {}
     if not isinstance(expected, str) or len(expected) != 64:
         raise ValueError("research context has no valid input receipt")
     if not target.resolve().is_relative_to(run.root.resolve()):
@@ -64,4 +48,7 @@ def load_research_context(run: RunHandle, extra: dict[str, Any]) -> dict[str, st
     if (not isinstance(document, dict) or document.get("schema_id") != "research_context.v1"
             or document.get("project") != run.project or document.get("run_id") != run.run_id):
         raise ValueError("archived research context belongs to a different run or schema")
-    return ResearchContext.model_validate(document.get("context")).supplied()
+    context = validate_idea_context(document.get("context"))
+    if context != validate_idea_extra(extra):
+        raise ValueError("research context differs between run options and archived input")
+    return context
