@@ -19,6 +19,7 @@ from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
+from app.bridge.idea_input_context import validate_idea_extra
 from app.harness.execution_intent import (
     requested_experiment_count,
     wants_execution_sweep,
@@ -405,6 +406,8 @@ def load_agent_handoff_context(
     stage, attempt = identity.stage, identity.attempt
     # Pick up upstream approved artifacts as handoff.
     upstream: dict[str, str] = {}
+    if stage == "idea":
+        upstream.update(validate_idea_extra(_load_run_request_extra(run, strict=True)))
     selected_data_source = _load_selected_data_source(run)
     if selected_data_source:
         upstream["input.selected_data_source"] = selection_summary(selected_data_source)
@@ -508,19 +511,25 @@ def _load_selected_data_source(run: RunHandle) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _load_run_request_extra(run: RunHandle) -> dict[str, Any]:
+def _load_run_request_extra(run: RunHandle, *, strict: bool = False) -> dict[str, Any]:
     path = run.subdir("input") / "run_request_options.v1.json"
     if not path.is_file():
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        if strict:
+            raise ValueError("Idea run request options are unreadable") from exc
         logger.warning("run request options are unreadable: {}", path)
         return {}
     if not isinstance(raw, dict) or raw.get("schema_id") != "run_request_options.v1":
+        if strict:
+            raise ValueError("Idea run request options use an unsupported schema")
         logger.warning("run request options use an unsupported schema: {}", path)
         return {}
     extra = raw.get("extra")
+    if strict and not isinstance(extra, dict):
+        raise ValueError("Idea run request extra must be an object")
     return {str(key): value for key, value in extra.items()} if isinstance(extra, dict) else {}
 
 

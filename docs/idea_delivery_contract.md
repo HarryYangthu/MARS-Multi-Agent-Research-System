@@ -16,6 +16,35 @@ The Idea stage receives a research question and optional caller-supplied context
 
 `extra.scope` is `method_proposal` or `project_proposal`. Project scope requires actual code tool observations or caller-supplied `baseline_code`; a declaration in the output cannot replace source evidence. `context_sources` controls automatic project-rule and linked-repository inclusion. The public evaluation CLI deliberately disables both and does not read private uploads.
 
+The production creation API, `POST /api/runs`, accepts `idea_context`, `idea_scope`, and `idea_requirements`. `idea_context` is a map of nonempty source texts with the labels in the table above, plus `literature_notes`. The API preserves text rather than reading caller-supplied filesystem paths. Bridge archives these options in `input/run_request_options.v1.json` and loads the original labeled texts into the Idea invocation. Downstream agents receive the approved proposal instead of automatically inheriting these raw Idea inputs. A malformed archive or internal override fails explicitly.
+
+For example, a caller can submit this task structure after replacing the context text with actual material (the ratio remains a caller-selected constraint):
+
+```json
+{
+  "task": "研究 2D LUT 表达能力优化",
+  "project": "pimc",
+  "entrypoint": "idea",
+  "standalone": true,
+  "idea_mode": "fast",
+  "user_request": "提出一个表达能力更强、参数增幅不超过20%的可验证方案。",
+  "idea_scope": "method_proposal",
+  "idea_context": {
+    "background": "替换为真实信号、工作条件及输入输出定义。",
+    "analysis_results": "替换为已有基线结果及已观察到的问题。",
+    "metric_definition": "替换为指标公式、单位、方向和验收条件。"
+  },
+  "idea_requirements": {
+    "min_sources": 2,
+    "min_pdfs": 1,
+    "require_parameter_budget": true,
+    "max_parameter_ratio": 1.2
+  }
+}
+```
+
+Providing `baseline_code` and `data_description` uses the same map. Use `project_proposal` only when the actual project inputs are supplied or retrievable. The example is a request template, not a recorded execution. The default human review gate remains active; progress does not approve the proposal.
+
 ## Two audiences, one canonical proposal
 
 `human_summary` is one paragraph, 1-2 sentences and at most 240 characters. It explains the concrete change and intended benefit without claiming an experiment that did not happen. New generated documents must use that exact summary as their Markdown body; definitions stay in structured metadata so the body cannot introduce a contradictory second algorithm. This `summary_only` policy is recorded in validation receipts. It is not sufficient input to the Experiment agent by itself.
