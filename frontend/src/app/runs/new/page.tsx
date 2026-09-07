@@ -9,6 +9,7 @@ import {
   createRun,
   dataSourceSpectrumUrl,
   type DataSourceProfile,
+  type IdeaContext,
   getDataSource,
   getDefaultDataSource,
   getTemplateByAgent,
@@ -35,6 +36,15 @@ const VALID_ENTRYPOINTS = new Set([
 // Pipeline + Idea use the simple research-question form (Idea Agent will
 // draft proposal.v1 for you). Other entries use the schema-template form.
 const TEMPLATE_ENTRIES = new Set(["experiment", "coding", "execution", "writing"]);
+
+const RESEARCH_FIELDS: { key: keyof IdeaContext; label: string; hint: string }[] = [
+  { key: "background", label: "研究背景", hint: "问题背景、信号含义、允许修改的范围和必须保留的接口" },
+  { key: "baseline_code", label: "基线代码", hint: "粘贴相关模块代码，并注明版本、输入输出和训练入口" },
+  { key: "data_description", label: "数据说明", hint: "数据含义、形状、归一化、训练集与测试集的划分" },
+  { key: "analysis_results", label: "已有分析结果", hint: "基线指标、误差分布、稳定性观察和已尝试的方法" },
+  { key: "metric_definition", label: "目标与指标", hint: "指标公式、单位、优化方向、验收阈值和参数预算" },
+  { key: "literature_notes", label: "参考资料", hint: "论文或博客的链接、标题与相关摘录；链接仍需实际读取" },
+];
 
 export default function NewRun(): JSX.Element {
   return (
@@ -65,6 +75,8 @@ function NewRunInner(): JSX.Element {
     setProject(selectedProject);
   }, [selectedProject]);
   const [seedArtifact, setSeedArtifact] = useState("");
+  const [researchContext, setIdeaContext] = useState<IdeaContext>({});
+  const [ideaScope, setIdeaScope] = useState<"method_proposal" | "project_proposal">("method_proposal");
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [dataSource, setDataSource] = useState<DataSourceProfile | null>(null);
   const [dataFsMhz, setDataFsMhz] = useState("184.32");
@@ -173,12 +185,19 @@ function NewRunInner(): JSX.Element {
     setSchemaErrors(null);
     try {
       const activeDataSource = dataFile && !dataSource ? await uploadSelectedData() : dataSource;
+      const suppliedContext: IdeaContext = {};
+      for (const { key } of RESEARCH_FIELDS) {
+        const value = researchContext[key];
+        if (value?.trim()) suppliedContext[key] = value;
+      }
       const body: Parameters<typeof createRun>[0] = {
         task,
         project,
         entrypoint,
         user_request: userRequest,
+        idea_context: suppliedContext,
       };
+      if (!usesTemplate) body.idea_scope = ideaScope;
       if (activeDataSource) {
         body.data_source = {
           id: activeDataSource.id,
@@ -446,6 +465,45 @@ function NewRunInner(): JSX.Element {
               </Field>
             </>
           )}
+
+          <details className="rounded border border-mars-border bg-mars-panel p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              补充研究材料（可选）
+              <span className="ml-2 text-xs font-normal text-slate-400">
+                {Object.values(researchContext).filter((value) => value?.trim()).length} 类已填写
+              </span>
+            </summary>
+            <p className="mt-2 text-xs text-slate-400">
+              材料会随本次任务保存，供 Idea 分析和后续 Agent 使用。缺少的关键信息会在方案中列出。
+            </p>
+            {!usesTemplate && (
+              <div className="mt-4">
+                <Field label="方案范围">
+                  <select
+                    value={ideaScope}
+                    onChange={(event) => setIdeaScope(event.target.value as typeof ideaScope)}
+                    className="input"
+                  >
+                    <option value="method_proposal">探索方法：先形成可验证的研究方案</option>
+                    <option value="project_proposal">优化当前项目：需要提供或接入真实基线代码</option>
+                  </select>
+                </Field>
+              </div>
+            )}
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {RESEARCH_FIELDS.map(({ key, label, hint }) => (
+                <Field key={key} label={label}>
+                  <textarea
+                    value={researchContext[key] ?? ""}
+                    onChange={(event) => setIdeaContext((current) => ({ ...current, [key]: event.target.value }))}
+                    rows={4}
+                    placeholder={hint}
+                    className="input text-sm"
+                  />
+                </Field>
+              ))}
+            </div>
+          </details>
 
           {schemaErrors ? (
             <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">

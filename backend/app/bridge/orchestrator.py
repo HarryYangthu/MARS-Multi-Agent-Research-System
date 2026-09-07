@@ -96,6 +96,10 @@ class Orchestrator:
     # --------------------------------------------------------------- create
 
     def create_session(self, request: RunRequest) -> RunSession:
+        from app.bridge.research_context import archive_research_context
+        from app.bridge.idea_input_context import validate_idea_extra
+
+        research_context = validate_idea_extra(request.extra)
         settings = get_settings()
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
@@ -114,6 +118,9 @@ class Orchestrator:
         )
         session = RunSession(run=run, graph=graph, request=request, bus=self.bus)
         self._sessions[run.run_id] = session
+        context_sha = archive_research_context(run, research_context)
+        if context_sha is not None:
+            request.extra = {**request.extra, "research_context_sha256": context_sha}
         self._persist_request_extra(run, request.extra)
         TraceRecorder(run).ensure_manifest()
         if self.langgraph_runtime.enabled():
@@ -935,6 +942,9 @@ class Orchestrator:
                 ),
             )
         waiting = snapshot is not None and snapshot.status == "waiting_feedback"
+        from app.bridge.research_context import load_research_context
+
+        load_research_context(run, request.extra)
         session = RunSession(
             run=run,
             graph=graph,

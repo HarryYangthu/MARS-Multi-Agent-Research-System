@@ -31,8 +31,13 @@ def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
     reviewing: bool = False, review_issues: Sequence[str] = (),
+    validation_issues: Sequence[str] = (),
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
+    if validation_issues and not reviewing:
+        required.append(Message(role="user", content=(
+            "[host validation errors for current candidate; still unresolved after tool/protocol repair]\n"
+            + canonical({"candidate_sha256": digest(candidate), "errors": list(validation_issues)}))))
     if review_issues and not reviewing:
         # The author needs revision history. A fresh reviewer must judge the
         # current document without treating earlier model criticism as facts.
@@ -80,4 +85,5 @@ def pack_context(
                       "compressed_history": compressed, "omitted_history": omitted,
                       "reviewing": reviewing,
                       "prior_review_issues_visible": bool(review_issues) and not reviewing,
+                      "validation_issues_visible": bool(validation_issues) and not reviewing,
                       "visible_sha256": digest([m.to_wire() for m in messages])}

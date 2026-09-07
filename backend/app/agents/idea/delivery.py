@@ -115,9 +115,16 @@ def progress_sink(request: RunRequest, invocation: str) -> ProgressSink:
     target = Path(str(request.extra["run_root"])) / "idea" / "progress.jsonl"
 
     async def emit(event: dict[str, Any]) -> None:
+        message = progress_message(event)
+        if event["kind"] == "started":
+            labels = {"background": "研究背景", "baseline_code": "基线代码", "data_description": "数据说明",
+                      "analysis_results": "已有分析", "metric_definition": "指标定义", "literature_notes": "参考资料"}
+            supplied = [label for key, label in labels.items() if request.upstream_artifacts.get(key, "").strip()]
+            if supplied:
+                message = "已收到" + "、".join(supplied) + "。我会先核对目标与基线，再形成可验证的研究方案。"
         payload = {"id": uuid.uuid4().hex, "timestamp": datetime.now(timezone.utc).isoformat(),
                    "kind": event["kind"], "phase": event.get("phase", "act"),
-                   "message": progress_message(event), "agent": "idea", "project": request.project,
+                   "message": message, "agent": "idea", "project": request.project,
                    "run_id": str(request.extra.get("run_id", Path(str(request.extra["run_root"])).name)),
                    "invocation": invocation}
         target.parent.mkdir(parents=True, exist_ok=True)

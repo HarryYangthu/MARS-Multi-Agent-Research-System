@@ -1087,6 +1087,11 @@ export async function listTrashedRuns(project?: string): Promise<TrashRunSummary
 export async function getRun(runId: string): Promise<RunDetail> {
   return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}`));
 }
+export type IdeaContext = Partial<Record<
+  "background" | "baseline_code" | "data_description" | "analysis_results" | "metric_definition" | "literature_notes",
+  string
+>>;
+
 export async function createRun(body: {
   task: string;
   project: string;
@@ -1094,6 +1099,8 @@ export async function createRun(body: {
   user_request?: string;
   standalone?: boolean;
   seed_artifact?: string;
+  idea_context?: IdeaContext;
+  idea_scope?: "method_proposal" | "project_proposal";
   data_source?: {
     id: string;
     fs_mhz?: number | null;

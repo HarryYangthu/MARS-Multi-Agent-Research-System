@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.idea.delivery import delivery_errors
+from app.agents.idea.protocol import protocol_errors
 from app.agents.idea.research import evidence_inventory, material_errors
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.schema.frontmatter_parser import parse
@@ -127,8 +128,15 @@ def validation_record_delivery_errors(metadata: dict[str, Any], record: dict[str
         return []
     if version != "idea.handoff.v1":
         return ["/delivery_contract_version: unsupported recorded delivery contract"]
-    return delivery_errors(metadata, str(record.get("scope", "method_proposal")),
-                           body=body if record.get("body_policy") == "summary_only" else None)
+    errors = delivery_errors(metadata, str(record.get("scope", "method_proposal")),
+                             body=body if record.get("body_policy") == "summary_only" else None)
+    if record.get("evaluation_protocol_required"):
+        errors.extend(protocol_errors(metadata, required=True))
+    if record.get("parameter_cases_required"):
+        budget = metadata.get("parameter_budget")
+        if not isinstance(budget, dict) or not budget.get("evaluation_cases"):
+            errors.append("/parameter_budget/evaluation_cases: required by this candidate's recorded contract")
+    return errors
 
 
 def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, Any]:

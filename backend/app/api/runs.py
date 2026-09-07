@@ -5,10 +5,11 @@ import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest
+from app.bridge.idea_input_context import IdeaRequirements, validate_idea_context
 from app.bridge.run_observability import build_run_observability
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 from app.storage.data_source_store import DataSourceStore
@@ -35,6 +36,25 @@ class CreateRunPayload(BaseModel):
     idea_mode: Literal["auto", "fast", "deep"] | None = None
     idea_budget_profile: Literal["fast", "balanced", "thorough"] | None = None
     project_inputs: dict[str, Any] = Field(default_factory=dict)
+    idea_context: dict[str, str] | None = None
+    idea_scope: Literal["method_proposal", "project_proposal"] | None = None
+    idea_requirements: IdeaRequirements | None = None
+
+    @field_validator("idea_context", mode="before")
+    @classmethod
+    def validate_context(cls, value: Any) -> dict[str, str] | None:
+        return None if value is None else validate_idea_context(value)
+
+    def idea_request_extra(self) -> dict[str, Any]:
+        """Preserve labeled inputs and only explicitly requested overrides."""
+        extra: dict[str, Any] = {}
+        if self.idea_context is not None:
+            extra["idea_context"] = dict(self.idea_context)
+        if self.idea_scope is not None:
+            extra["scope"] = self.idea_scope
+        if self.idea_requirements is not None:
+            extra["idea_requirements"] = self.idea_requirements.model_dump(exclude_none=True)
+        return extra
 
 
 class DataSourceSelection(BaseModel):
@@ -91,7 +111,7 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         project=payload.project,
     )
     orch = get_orchestrator()
-    request_extra: dict[str, Any] = {}
+    request_extra: dict[str, Any] = payload.idea_request_extra()
     if payload.idea_mode is not None:
         request_extra["idea_mode"] = payload.idea_mode
     if payload.idea_budget_profile is not None:
