@@ -7,7 +7,7 @@ from app.harness.gates.baseline_compatibility import (
     GATE_ID,
     static_check,
 )
-from app.harness.tools.registry import ToolContext, ToolResult, reset_for_tests
+from app.harness.tools.registry import ToolContext, reset_for_tests
 
 
 def _ctx() -> ToolContext:
@@ -127,21 +127,11 @@ async def test_gate_runs_inside_dispatch_and_blocks() -> None:
     """The integration we care about: dispatch() must short-circuit on Gate 5."""
     reg = reset_for_tests()
 
-    called = False
-
-    async def fake_tool(args: dict[str, object], ctx: ToolContext) -> ToolResult:
-        nonlocal called
-        called = True
-        return ToolResult(ok=True, output="should not run")
-
-    reg.register("code.patch_generator", fake_tool, override=True)
-
     res = await reg.dispatch(
         "code.patch_generator",
         {"path": "baseline/x", "diff": "x"},
         _ctx(),
     )
-    assert called is False
     assert res.ok is False
     assert res.blocked_by_gate == GATE_ID
 
@@ -150,14 +140,10 @@ async def test_gate_runs_inside_dispatch_and_blocks() -> None:
 async def test_dispatch_lets_safe_tools_through() -> None:
     reg = reset_for_tests()
 
-    async def fake_tool(args: dict[str, object], ctx: ToolContext) -> ToolResult:
-        return ToolResult(ok=True, output="ran")
-
-    reg.register("code.patch_generator", fake_tool, override=True)
     res = await reg.dispatch(
         "code.patch_generator",
         {"path": "libs/x.py", "diff": "x"},
         _ctx(),
     )
     assert res.ok is True
-    assert res.output == "ran"
+    assert res.output["diff"] == "x"

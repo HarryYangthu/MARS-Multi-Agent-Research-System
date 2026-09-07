@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 
 import pytest
 
 from scripts.release.export_v30 import ReleaseGateError, audit_release
-from scripts.release.gitleaks_wrapper import GitleaksResult
 
 
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="real gitleaks binary is not installed")
 def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
     tmp_path: Path,
 ) -> None:
@@ -26,7 +27,6 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
         treeish=commit,
         allowlist_path="allowlist.txt",
         scan_history=False,
-        gitleaks_runner=_passing_gitleaks,
     )
     (repo / "safe.txt").write_text("dirty " + "P" + "IMC" + " text\n", encoding="utf-8")
     (repo / "untracked.txt").write_text("not selected\n", encoding="utf-8")
@@ -37,7 +37,6 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
         treeish=commit,
         allowlist_path="allowlist.txt",
         scan_history=False,
-        gitleaks_runner=_passing_gitleaks,
     )
 
     assert baseline.decision == dirty.decision == "pass"
@@ -50,6 +49,7 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
     assert dirty.source_mode == "resolved_git_commit_objects_only"
 
 
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="real gitleaks binary is not installed")
 def test_tree_and_history_denylist_findings_are_independent(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     marker = "D" + "PD"
@@ -64,14 +64,12 @@ def test_tree_and_history_denylist_findings_are_independent(tmp_path: Path) -> N
         treeish=commit,
         allowlist_path="allowlist.txt",
         scan_history=False,
-        gitleaks_runner=_passing_gitleaks,
     )
     with_history = audit_release(
         repo=repo,
         treeish=commit,
         allowlist_path="allowlist.txt",
         scan_history=True,
-        gitleaks_runner=_passing_gitleaks,
     )
 
     assert tree_only.decision == "pass"
@@ -82,6 +80,7 @@ def test_tree_and_history_denylist_findings_are_independent(tmp_path: Path) -> N
     )
 
 
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="real gitleaks binary is not installed")
 def test_absolute_user_path_binary_internal_doc_and_docker_context_block(
     tmp_path: Path,
 ) -> None:
@@ -103,7 +102,6 @@ def test_absolute_user_path_binary_internal_doc_and_docker_context_block(
         treeish=commit,
         allowlist_path="allowlist.txt",
         scan_history=False,
-        gitleaks_runner=_passing_gitleaks,
     )
 
     rules = {finding.rule for finding in audit.findings}
@@ -116,7 +114,7 @@ def test_absolute_user_path_binary_internal_doc_and_docker_context_block(
     }.issubset(rules)
 
 
-def test_archive_symlink_and_missing_gitleaks_fail_closed(tmp_path: Path) -> None:
+def test_archive_symlink_and_missing_gitleaks_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repository(tmp_path)
     (repo / "safe.txt").write_text("safe\n", encoding="utf-8")
     (repo / "link.txt").symlink_to("safe.txt")
@@ -131,8 +129,7 @@ def test_archive_symlink_and_missing_gitleaks_fail_closed(tmp_path: Path) -> Non
             treeish=commit,
             allowlist_path="allowlist.txt",
             scan_history=False,
-            gitleaks_runner=_passing_gitleaks,
-        )
+            )
 
     repo_two = _repository(tmp_path / "second")
     (repo_two / "safe.txt").write_text("safe\n", encoding="utf-8")
@@ -140,12 +137,18 @@ def test_archive_symlink_and_missing_gitleaks_fail_closed(tmp_path: Path) -> Non
         "allowlist.txt\nsafe.txt\n", encoding="utf-8"
     )
     second_commit = _commit(repo_two, "safe")
+    # Keep the real git executable available; gitleaks is genuinely absent from PATH.
+    git_path = shutil.which("git")
+    assert git_path is not None
+    isolated_bin = tmp_path / "bin"
+    isolated_bin.mkdir()
+    (isolated_bin / "git").symlink_to(git_path)
+    monkeypatch.setenv("PATH", str(isolated_bin))
     audit = audit_release(
         repo=repo_two,
         treeish=second_commit,
         allowlist_path="allowlist.txt",
         scan_history=False,
-        gitleaks_runner=_missing_gitleaks,
     )
 
     assert audit.decision == "blocked"
@@ -175,23 +178,3 @@ def _git(repo: Path, *arguments: str) -> str:
         text=True,
     )
     return completed.stdout
-
-
-def _passing_gitleaks(_repo: Path, _treeish: str, report: Path) -> GitleaksResult:
-    report.write_text("[]\n", encoding="utf-8")
-    return GitleaksResult(
-        status="passed",
-        returncode=0,
-        report_path=str(report),
-        command=("gitleaks-test-double",),
-    )
-
-
-def _missing_gitleaks(_repo: Path, _treeish: str, report: Path) -> GitleaksResult:
-    return GitleaksResult(
-        status="missing",
-        returncode=127,
-        report_path=str(report),
-        command=(),
-        detail="not installed",
-    )
