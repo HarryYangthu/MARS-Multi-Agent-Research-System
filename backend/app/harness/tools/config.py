@@ -20,6 +20,7 @@ class ToolConfig:
     requires_approval: bool = False
     network: bool = False
     bridge_only: bool = False
+    runtime_bound: bool = False
     command_allowlist: tuple[tuple[str, ...], ...] = ()
     redaction: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
@@ -52,6 +53,7 @@ def load_tool_configs() -> dict[str, ToolConfig]:
             requires_approval=bool(cfg.get("requires_approval", False)),
             network=bool(cfg.get("network", False)),
             bridge_only=bool(cfg.get("bridge_only", False)),
+            runtime_bound=bool(cfg.get("runtime_bound", False)),
             command_allowlist=_command_allowlist(cfg.get("command_allowlist")),
             redaction=_str_tuple(cfg.get("redaction")),
             input_schema=cfg.get("input_schema") if isinstance(cfg.get("input_schema"), dict) else None,

@@ -18,6 +18,7 @@ import httpx as httpx
 
 from app.harness.kb.memory_writer import write_to_zone
 from app.harness.kb.provenance import record_retrieval
+from app.harness.tools.search.openalex import openalex_search_tool as openalex_search_tool
 from app.harness.tools.search.source_fetch import fetch_sources_tool as fetch_sources_tool
 from app.harness.tools.registry import ToolContext, ToolResult
 from app.settings import get_settings, repo_root

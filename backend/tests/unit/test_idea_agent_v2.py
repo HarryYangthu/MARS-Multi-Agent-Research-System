@@ -102,7 +102,10 @@ def test_parameter_ledger_checks_exact_arithmetic(candidate_count: int) -> None:
 @pytest.mark.asyncio
 async def test_project_scope_requires_real_baseline_evidence(tmp_path: Path) -> None:
     # A manually authored schema-valid document cannot imply code was inspected.
-    agent = IdeaAgent()
+    # Isolate baseline evidence from the separately tested research-delegation contract.
+    original = get_agent_config("idea")
+    agent = IdeaAgent(agent_config=replace(original, tools=tuple(
+        name for name in original.tools if name != "idea.research_delegate")))
     metadata: dict[str, Any] = {"schema": "proposal.v1", "project": "pimc", "agent": "idea",
                 "research_question": "How should this baseline be extended?",
                 "hypothesis": "An extension still requires code evidence.",

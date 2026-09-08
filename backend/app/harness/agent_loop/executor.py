@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.harness.agent_loop.context import pack_context
-from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, native_decision, native_specs
+from app.harness.agent_loop.context import compact, pack_context
+from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
@@ -50,6 +50,7 @@ class LoopInput:
     progress_sink: ProgressSink | None = None
     review_messages: list[Message] | None = None
     final_schema: dict[str, Any] | None = None
+    required_review_tools: tuple[str, ...] = ()
 
 
 @dataclass
@@ -77,6 +78,19 @@ def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
                    json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
 
 
+def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, Any],
+                            required_tools: tuple[str, ...], *, observation_chars: int) -> list[str]:
+    """Refuse review when required real tool evidence was compressed or omitted."""
+    hidden = set(manifest.get("compressed_history", [])) | set(manifest.get("omitted_history", []))
+    missing: list[str] = []
+    for index, group in enumerate(history_groups(history)):
+        for item in group:
+            if item.get("tool") in required_tools and item.get("ok"):
+                if index in hidden or compact(item, observation_chars) != item:
+                    missing.append(str(item["tool"]) + " history group " + str(index))
+    return missing
+
+
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
@@ -99,6 +113,8 @@ class NativeAgentLoop:
                               "context_format_version": 3})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
+        if request.required_review_tools:
+            fingerprint = digest({"base": fingerprint, "required_review_tools": request.required_review_tools})
         if request.review_messages is not None:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:
@@ -228,6 +244,15 @@ class NativeAgentLoop:
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
+                if reviewing:
+                    missing = missing_review_evidence(state["history"], manifest, request.required_review_tools,
+                                                      observation_chars=p.observation_chars)
+                    if missing:
+                        state["status"] = "review_evidence_unavailable"
+                        state["feedback"] = "Required review evidence was compressed or omitted: " + "; ".join(missing)
+                        trace.emit("review_evidence_unavailable", {"missing": missing, "context_manifest": manifest})
+                        trace.snapshot(state)
+                        break
                 counts["model_requests"] += 1
                 state["pending"] = "model"
                 call_config = phase_config()

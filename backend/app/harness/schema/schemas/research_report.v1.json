@@ -1,4 +1,5 @@
 {
+  "$id": "mars://schemas/research_report.v1.json",
   "type": "object",
   "additionalProperties": false,
   "required": [

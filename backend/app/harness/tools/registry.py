@@ -137,6 +137,14 @@ class ToolRegistry:
         self._tools[name] = fn
         self._specs[name] = _spec_from_config(spec or _default_spec(name))
 
+    def fork(self) -> "ToolRegistry":
+        """Isolate run-local registrations while preserving dispatch policies and gates."""
+        child = ToolRegistry()
+        child._tools = dict(self._tools)
+        child._specs = dict(self._specs)
+        child._gates = list(self._gates)
+        return child
+
     def has(self, name: str) -> bool:
         return name in self._tools
 
@@ -352,6 +360,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.reporting import report_bundle_tool
     from app.harness.tools.search import (
         arxiv_search_tool,
+        openalex_search_tool,
         fetch_sources_tool,
         local_docs_tool,
         web_search_tool,
@@ -360,6 +369,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     # search.*
     reg.register("search.local_docs", local_docs_tool)
     reg.register("search.arxiv_search", arxiv_search_tool)
+    reg.register("search.openalex_search", openalex_search_tool)
     reg.register("search.web_search", web_search_tool)
     reg.register("search.fetch_sources", fetch_sources_tool)
     # knowledge.*
@@ -400,7 +410,7 @@ def _validate_agent_tool_references(reg: ToolRegistry) -> None:
             if reg.has(tool_name):
                 continue
             cfg = configured.get(tool_name)
-            if cfg is not None and cfg.bridge_only:
+            if cfg is not None and (cfg.bridge_only or cfg.runtime_bound):
                 continue
             missing.append(f"{agent.name}:{tool_name}")
     if missing:

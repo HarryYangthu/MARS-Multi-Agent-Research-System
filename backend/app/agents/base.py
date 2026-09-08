@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator
 
@@ -21,6 +21,10 @@ from app.harness.schema.validator import ValidationResult, validate_document
 from app.settings import repo_root
 
 
+if TYPE_CHECKING:
+    from app.harness.tools.registry import ToolRegistry
+
+
 @dataclass
 class RunRequest:
     project: str
@@ -28,6 +32,7 @@ class RunRequest:
     upstream_artifacts: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
     progress_sink: ProgressSink | None = field(default=None, repr=False, compare=False)
+    runtime: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
 
 @dataclass
@@ -234,9 +239,16 @@ class BaseAgent(ABC):
         schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
         return schema
 
+    def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
+        return ()
+
+    def loop_registry(self, request: RunRequest, context: ContextPack) -> "ToolRegistry":
+        from app.harness.tools.registry import get_registry
+        return get_registry()
+
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
                              debate_role: str | None = None) -> Artifact:
-        from app.harness.tools.registry import ToolContext, get_registry
+        from app.harness.tools.registry import ToolContext
         from app.harness.tools.config import tool_config
         from app.harness.agent_loop.review import ExternalReview
         run_root = Path(str(request.extra.get("run_root") or
@@ -255,7 +267,7 @@ class BaseAgent(ABC):
 
         result = await self._executor.run(LoopInput(
             messages=self._messages_for_context(request, context, purpose="loop"),
-            provider=provider, config=config, registry=get_registry(),
+            provider=provider, config=config, registry=self.loop_registry(request, context),
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
                                      project=request.project, agent=self.name,
                                      extra={"run_root": str(run_root)}),
@@ -263,6 +275,7 @@ class BaseAgent(ABC):
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
             progress_sink=self.loop_progress_sink(request, invocation),
             review_messages=self.review_messages(request, context),
+            required_review_tools=self.required_review_tools(request),
             final_schema=self.submission_schema(request),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),

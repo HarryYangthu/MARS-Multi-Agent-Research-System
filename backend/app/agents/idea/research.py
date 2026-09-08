@@ -193,7 +193,7 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
         output = obs.get("output")
         if not obs.get("ok") or not isinstance(output, dict):
             continue
-        if obs.get("tool") in {"search.arxiv_search", "search.web_search"}:
+        if obs.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
             for hit in output.get("hits", []):
                 if isinstance(hit, dict) and hit.get("title") and hit.get("url"):
                     identity = canonical_source(hit["url"])
