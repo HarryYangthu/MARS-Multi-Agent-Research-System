@@ -5176,6 +5176,761 @@
         "manual_research_review.json": "aaf7a623c05ca2bca5519f417d8f4d08c5919e7519f5752f25e6b97da11872ae",
         "summary.json": "742245ccded73263423a1fe394d8957f0f5a36b8df9541297b8e3680df3d2e72"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T183706_cf97e2",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 1503.2566120000047,
+      "counts": {
+        "action_rounds": 12,
+        "model_requests": 21,
+        "model_responses": 20,
+        "observations": 11,
+        "protocol_repairs": 1,
+        "reflections": 3,
+        "sdk_attempts": 21,
+        "tool_dispatches": 12,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "completion_tokens": 87948,
+        "prompt_tokens": 272047,
+        "total_tokens": 359995
+      },
+      "trace_consistent": true,
+      "usage_complete": false,
+      "research_counts": {
+        "read_windows": 6,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 16
+      },
+      "attempt_counts": {
+        "action_rounds": 12,
+        "model_requests": 21,
+        "model_responses": 20,
+        "observations": 11,
+        "protocol_repairs": 1,
+        "reflections": 3,
+        "sdk_attempts": 21,
+        "tool_dispatches": 12,
+        "validation_repairs": 0
+      },
+      "attempt_known_usage": {
+        "completion_tokens": 87948,
+        "prompt_tokens": 272047,
+        "total_tokens": 359995
+      },
+      "cumulative_duration_seconds": 1503.2566120000047,
+      "accounting_note": "counts/usage include inherited history once; attempt_counts/attempt_known_usage contain only this invocation's increments. Unknown earlier usage stays unknown.",
+      "source_commit": "1fc21648094c316d87510a9997d762e5b42ab20a",
+      "source_tree": "28098ed705c835a85a1d1c7c5fb1ee895519621b",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T183706_cf97e2",
+      "separate_review_records": {
+        "manual_quality_review.json": {
+          "reviewer": "Codex independent offline review",
+          "created_at": "2026-09-08T19:03:38.846871+00:00",
+          "record_kind": "offline_derived_record",
+          "source_run_id": "idea_research_20260908T183706_cf97e2",
+          "source_run_root": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/research_quality_20260908/idea_research_20260908T183706_cf97e2",
+          "source_commit": "1fc21648094c316d87510a9997d762e5b42ab20a",
+          "scientific_validated": false,
+          "injected_into_runtime": false,
+          "original_records_replaced": false,
+          "original_files_sha256": {
+            "summary.json": "ab2d997d7caadcfa71c8225a6a58950b23a3b5fc250f88819633e1421cbd05d4",
+            "all_traces_audit.json": "256eaf862d10cc2035d1f6e3b795aa8f9abb1dc66d6ac3ab9acc6b7dd552aabd",
+            "research_findings.json": "6a97e54be3891301bd65404238164a11897bd7474ea25abc6ae948a6f8bc628e",
+            "review.md": "e026a30ddf832ab133bcc20ba001e0c433065422b01c1f510880d4d78c32c46b",
+            "idea_research/research/searches/775d16340f39a6c85bfc954debd52a7bea95108159f91517ac569be6f346bc05.json": "675ae097ac0cc904e58c8a18f0ef4c61d921cf637543ced0c9f1ad4676a6c052",
+            "idea_research/research/searches/8c3d66a6fc2f2aecd39b1c218496e689a455a9ba2002b93cd0edf6f19b92e135.json": "d73b207c2fdeb8738ce460962e534392fd54102ad699404836f12f4c5d1dec4e",
+            "idea_research/research/downloads/98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af.pdf": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+            "idea_research/research/downloads/fe0ed6590a413d0ec712a345b500aff7f3a5144ec98f38d6c0fd2d96c7af82a9.pdf": "fe0ed6590a413d0ec712a345b500aff7f3a5144ec98f38d6c0fd2d96c7af82a9",
+            "idea_research/research/downloads/c524f74e863746be9f1feba40fd34efa.read.json": "ef4ed3378a61190e138c860db1b173ddefc7ebfe6ab4826bcf11d9de23f3b62e",
+            "idea_research/research/downloads/af61cb539a97491db50c3f3d294fc9e3.read.json": "9683215ddca6b03bbb5c0b2047e7bb8889898ec1eaed2c450dc63ad90bc91fb0",
+            "idea_research/research/downloads/fef088025cc0425dbac7bc23f4cf54d1.read.json": "42d2c53de1647e0b3982244c39668c7a249a965aa69041bba4234cdfe5092c42",
+            "idea_research/research/downloads/b2c56f52d86e4080893090715228ca15.read.json": "250ed2731d3f21993b569a8cf6e1a7b9ce584595b8154e1ec1ac4a59e453d2d6",
+            "idea_research/research/downloads/5b63d6e76f074aa294723d60a07182e0.read.json": "d649f96de2cded646e86964c15e3e2c45b597b075eea60e44829fa75b0c4f0da",
+            "idea_research/research/downloads/50e1d3c06da94328a503f3da605725f2.read.json": "cd498de07c3b09f651bd7dab368838b64b0c37ca91401f9749b458c90f3c2bf9",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "48249ef5d18edb76644f86a6df98b8a91852e64e483faba48f4c2e08a88d8caf",
+            "context/trace_manifest.v2.json": "2555fc805a22835f5dad156e6402f4935d0f7d5aae4946ba15034ca2dc16add0",
+            "memory/_semantic_graph.json": "d439d31a439ed2c0ecbecf3c8e5e473459c862eb259f88454a69c08ac314b435",
+            "memory/literature/_index.json": "2bd982e50464ee21b1fa6426014c76193497b7a40e9a69ceef5885e55a0280be",
+            "memory/literature/_arxiv_cache/048dd15ba156ee3a61128030.json": "4644471eb947ed6a3df8187a659b4b3c10e32d62395e367d52d42c8ae08f4cb1",
+            "memory/literature/_arxiv_cache/66ea8a9b6c1484f459878fc3.json": "6ad0c825ca12e74de7185df876922ea233ea8f3d0d32cddedfd0320e09a6b5c0",
+            "memory/literature/_arxiv_cache/66ea8a9b6c1484f459878fc3.xml": "9d1cbd0098ab7a8d14b7248df231ebd22c6408c4d0ecbe90c35fd3c84dd706b2",
+            "memory/_retrieval_receipts/7b73cfa09d89456fa87e34d09ef51259.json": "f632630082dd6221cd00abe215dde19928ceb3520a64987ca42df2da1f157719",
+            "memory/_retrieval_receipts/f73baf58a3cc4a4a90145b760c461599.json": "8bcd81f21660d4c727ea46ac661ddf70b33c50e8a1eaa5a544b58474f0c9f3df",
+            "memory/_retrieval_receipts/81d06637e5684dcfafc076b7035003b7.json": "dda01bc0b70284998adeebfc0193cd6ac3335add6e20874cbbff0e9eb3797bf7",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/checkpoint.json": "b3af8fd3c293af59950b26e7f7da6ce3ae715c686f4e315fd5bb674276cfffba",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/events.jsonl": "3fa252d51388fe420eaa6e5fae7596150db93868b781f302b6a7d604c77ef846",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/facts.json": "fb585dff8ef8eed4fa6e21759b8ef47177af57e9c8a2d32ea4dafb4013576c4e",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0004.json": "22a573051cf64cee951bca0abbd7d0d1ffc96bc65782601ce4a1f64f2396336c",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0003.json": "c5e09f5e3b9094cc21f271b24a227accbfe8a84537afb7a40fe029e706fe4143",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0002.json": "627d729b7092eeb50ddfe913b2f0818564f3fca205384394f8625eab21d90811",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0001.json": "7e5b0e9537b38eefecee0bdfb46bc02ac1283a1b0bd78e87fed3e4f68166783f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/checkpoint.json": "e76b68a122d7b2db3c16608fbb313ae4e51f5273f0e194a6b18f51135602175f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/events.jsonl": "7bfb1bbb744c988959f1c26507c88eaec7b93d4a6d071e19d98712dc8e2bfb85",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/facts.json": "32306ee2f759d00f9fee3885721fc4722691b50ba9a0fb7b6bf6b700c748d837",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0005.json": "9cdd9006e17bad607421947731dc17c6796b1f4d0749bb81d910eef7478de429",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0004.json": "faea265ce5c943892dbef665dfa87feb68ca4ec03d39d061da5eafe3814cd0fc",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0003.json": "092ba09688021ee7c5ca4691323b05b58912f81b1c896c08d776838dc2cf8c93",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0002.json": "233f4887644530be849dd782927ae005ad2e8e686a9f4556078e7da5c82a698f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0001.json": "378916ab8fefae6365c3b5fc5732a3e8059c47d03ed876533e685ee081ed670f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0006.json": "e824a59377f66d20d811ab89f067679999af2e2c30e255fe19d396c90b87c2a1",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/checkpoint.json": "cd80d02eb996640e4a5ccef5dbc1ac35655cee4d2fb3b57ad0648e7701d76de0",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/events.jsonl": "cdd392fcba0d2aef52513d6e6ded1222f0f97e269f8d321c684f01646865040b",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/facts.json": "24afb2342df6b76d8537e594d9445ad9c70ab3de3d70accf6d3e34b71fd5b06c",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/tools/0001.json": "5c6feb9dc7335f6dd473b0cffbd0a532f917e73e285dcbdc087b43b30c46e6a8",
+            "input/request.json": "510d29fc8b9da25557b37fcc900d25b2b30de00009b795b108cd2ce5fad27966",
+            "idea/progress.jsonl": "2091ebbe035026461624999d550915c8e791533a25672d7bfd6947d9f84f6203",
+            "idea/research/tool_results.v1.json": "9a459afda90f38a1d09b361875557a95828c3f54f768c60c1fe3fb19be7d7e3c",
+            "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+            "idea/research_delegations/caa7d88ec4104ba2bb48e818351cf5b8/request.json": "9bbecd5853f7626131d67de90335246cda22eaee5bd98418c8d159b460dfb411",
+            "idea/research_delegations/caa7d88ec4104ba2bb48e818351cf5b8/progress.jsonl": "4308c654147ca624410aa0dc268c83a314b5ba5a2218113c4ea82ac468d0112d",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/request.json": "4ae4b9cf3c9b66f6a9bd6b4ecf426f4f80840e439aeec2f6d6d42cebcdbf5ec2",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/progress.jsonl": "04a27ee615765e8303a3af56c1a6ec1d831fe223a0fbf006bb682c41aa90edfe",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/failure.json": "66a36e90cfbca3ef265fe473b5939b51b33f52229b07401d23f090ca8272954f",
+            "coding/tool_applications/9dac9ff7d13d4094a97f1dc5bced195c.json": "e5aebf9cc5b99d3562f8005ba09c7bd576c18fb7188539b03ee0be01e10b6af9",
+            "coding/tool_applications/87cd6b27551b431f9671521ca4bd9d9d.json": "6b57ae9399a64df688cccbd4f6984e2698678d524a522009af62cac69c1aecb2",
+            "coding/tool_applications/486b8a56df464ecc95df74ffd6a59794.json": "66417f301d2e2661d36a71ea1d5a11c5266c22d7ffe611ea0ee15927a4ae6161",
+            "coding/tool_applications/cf619e17866c478098c924908cee68b3.json": "2dc38bbb31fac318434db774c55a135b2aa86af8db6923d54e6f2b4c354bde6d",
+            "coding/tool_applications/773a2cd3056c47fdb0e3f6c4146426fe.json": "4787e890b6f9e62f1a7af7e052b62dd4a1980502e11982c411f5ba86595f65a5",
+            "coding/tool_applications/fc6592bee0b04ef59c82d5e7bbab7f88.json": "d1fabeadc23d394745ddde8ce87caf8cf55e8214e722bba4efdae2033fc3fd11",
+            "coding/tool_applications/2a8e00f56a284bfb911b98222b3119be.json": "ab5be739bc890620c5755c075eb3048171fa1b31dcedc0dc3c5860d4165718a4",
+            "coding/tool_applications/f6fc8f4dcced4510b5799e1b2b02627f.json": "e08897b52079d7f83a98fe759845dadf38262920e4644b69c4d9c84dcf6e3d36",
+            "coding/tool_applications/c8372d803d0c45d19e1fc2ddce526b42.json": "9ca10a4c48f753d3165ecc12557386d91135cb9e36251bbbdfb758c24e58e81e",
+            "coding/tool_applications/d43e9f5a09194512919f5488a6caac28.json": "a0656c0031e0fb1e86b0df2a77647b7f3ab8df3dbf4e18a8c7525d0ba210145e",
+            "coding/tool_applications/bb3fbb8837b441fea2b2a354ed81e862.json": "24b1c4b8296db7bb6a5c2a171e15972c101544beca4690a59fca54e41cf4d57f",
+            "events/tool_events.jsonl": "c1e8099edd5e20e5ec0c6f178bcc1dc78e57644bdb439fa03151cf431a87880f",
+            "events/tool_calls.jsonl": "9d8d3600b3e497635e1f4b71f81cc980ed3c139a386a4d279b479c776dbcc4b2"
+          },
+          "original_files_unchanged": true,
+          "controlled_stop": {
+            "reported_by": "root orchestration agent",
+            "action": "one SIGINT to its own live driver PID 74087",
+            "reason": "Stop repeated known unit-versus-whole review scope and claim/issue consistency failures in the frozen v1 profile rather than spend more evidence/model budget.",
+            "observed_driver_result": {
+              "summary_status": "failed",
+              "error_type": "CancelledError",
+              "lead_checkpoint_status": "interrupted"
+            },
+            "boundary": "This provenance records the controlling agent message together with the actual cancellation records; it does not rewrite the original runtime status.",
+            "archived_control_record": {
+              "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/verification/run15_controlled_stop_20260908T190209Z.json",
+              "sha256": "88053a96a4b1eb2a4c82cc177123099905e77dae18eff8b4491e3c17646c54e9"
+            }
+          },
+          "schema": "idea.offline_quality_review.v1",
+          "scope": "Terminal completeness and provenance assessment only: no main proposal exists to review mathematically.",
+          "runtime_status": "failed",
+          "runtime_error": "CancelledError",
+          "independent_quality": "not_assessed_no_main_proposal",
+          "main_proposal_produced": false,
+          "main_proposal_reviewed": false,
+          "final_delivery_produced": false,
+          "accepted_research_report_count": 0,
+          "candidate_digest": null,
+          "lead_checkpoint_path": "agent_traces/idea/f95a17ade45f41c48862de08e394307b/checkpoint.json",
+          "lead_checkpoint_sha256": "cd80d02eb996640e4a5ccef5dbc1ac35655cee4d2fb3b57ad0648e7701d76de0",
+          "lead_candidate_chars": 0,
+          "issues": [],
+          "interpretation": "The controlled stop leaves real paper reads and two unaccepted research drafts, but no completed research handoff and no main method proposal. This record does not call an absent proposal scientifically passed or failed and does not treat a rejected report as accepted evidence.",
+          "actual_evidence_vs_runtime_acceptance": {
+            "unique_pdf_publications_with_visible_pages": 2,
+            "read_windows": 6,
+            "accepted_research_reports": 0,
+            "summary_unique_publications_with_verified_extractions": 0,
+            "note": "Actual PDF reading is separate from producing a runtime-accepted research_report and downstream proposal."
+          },
+          "related_research_review": "manual_research_review.json",
+          "run_statistics": {
+            "counts": {
+              "action_rounds": 12,
+              "model_requests": 21,
+              "model_responses": 20,
+              "observations": 11,
+              "protocol_repairs": 1,
+              "reflections": 3,
+              "sdk_attempts": 21,
+              "tool_dispatches": 12,
+              "validation_repairs": 0
+            },
+            "known_usage": {
+              "completion_tokens": 87948,
+              "prompt_tokens": 272047,
+              "total_tokens": 359995
+            },
+            "usage_complete": false,
+            "duration_seconds": 1503.2566120000047,
+            "research_counts": {
+              "read_windows": 6,
+              "unique_downloaded_contents": 2,
+              "unique_pdf_publications_with_visible_pages": 2,
+              "unique_publications_with_verified_extractions": 0,
+              "unique_retrieved_publications": 16
+            },
+            "traces": [
+              {
+                "trace": "agent_traces/idea/f95a17ade45f41c48862de08e394307b",
+                "status": "interrupted",
+                "counts": {
+                  "action_rounds": 2,
+                  "model_requests": 3,
+                  "model_responses": 3,
+                  "observations": 1,
+                  "protocol_repairs": 1,
+                  "reflections": 0,
+                  "sdk_attempts": 3,
+                  "tool_dispatches": 2,
+                  "validation_repairs": 0
+                },
+                "usage_complete": true
+              },
+              {
+                "trace": "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421",
+                "status": "reflection_rejected",
+                "counts": {
+                  "action_rounds": 6,
+                  "model_requests": 10,
+                  "model_responses": 10,
+                  "observations": 6,
+                  "protocol_repairs": 0,
+                  "reflections": 2,
+                  "sdk_attempts": 10,
+                  "tool_dispatches": 6,
+                  "validation_repairs": 0
+                },
+                "usage_complete": true
+              },
+              {
+                "trace": "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8",
+                "status": "interrupted",
+                "counts": {
+                  "action_rounds": 4,
+                  "model_requests": 8,
+                  "model_responses": 7,
+                  "observations": 4,
+                  "protocol_repairs": 0,
+                  "reflections": 1,
+                  "sdk_attempts": 8,
+                  "tool_dispatches": 4,
+                  "validation_repairs": 0
+                },
+                "usage_complete": false
+              }
+            ]
+          },
+          "unknown_usage": "The second child had8requests and7responses when interrupted. The in-flight response and its token usage are unavailable;359995is known total usage only, not a complete billed total."
+        },
+        "manual_research_review.json": {
+          "reviewer": "Codex independent offline review",
+          "created_at": "2026-09-08T19:03:38.846871+00:00",
+          "record_kind": "offline_derived_record",
+          "source_run_id": "idea_research_20260908T183706_cf97e2",
+          "source_run_root": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/research_quality_20260908/idea_research_20260908T183706_cf97e2",
+          "source_commit": "1fc21648094c316d87510a9997d762e5b42ab20a",
+          "scientific_validated": false,
+          "injected_into_runtime": false,
+          "original_records_replaced": false,
+          "original_files_sha256": {
+            "summary.json": "ab2d997d7caadcfa71c8225a6a58950b23a3b5fc250f88819633e1421cbd05d4",
+            "all_traces_audit.json": "256eaf862d10cc2035d1f6e3b795aa8f9abb1dc66d6ac3ab9acc6b7dd552aabd",
+            "research_findings.json": "6a97e54be3891301bd65404238164a11897bd7474ea25abc6ae948a6f8bc628e",
+            "review.md": "e026a30ddf832ab133bcc20ba001e0c433065422b01c1f510880d4d78c32c46b",
+            "idea_research/research/searches/775d16340f39a6c85bfc954debd52a7bea95108159f91517ac569be6f346bc05.json": "675ae097ac0cc904e58c8a18f0ef4c61d921cf637543ced0c9f1ad4676a6c052",
+            "idea_research/research/searches/8c3d66a6fc2f2aecd39b1c218496e689a455a9ba2002b93cd0edf6f19b92e135.json": "d73b207c2fdeb8738ce460962e534392fd54102ad699404836f12f4c5d1dec4e",
+            "idea_research/research/downloads/98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af.pdf": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+            "idea_research/research/downloads/fe0ed6590a413d0ec712a345b500aff7f3a5144ec98f38d6c0fd2d96c7af82a9.pdf": "fe0ed6590a413d0ec712a345b500aff7f3a5144ec98f38d6c0fd2d96c7af82a9",
+            "idea_research/research/downloads/c524f74e863746be9f1feba40fd34efa.read.json": "ef4ed3378a61190e138c860db1b173ddefc7ebfe6ab4826bcf11d9de23f3b62e",
+            "idea_research/research/downloads/af61cb539a97491db50c3f3d294fc9e3.read.json": "9683215ddca6b03bbb5c0b2047e7bb8889898ec1eaed2c450dc63ad90bc91fb0",
+            "idea_research/research/downloads/fef088025cc0425dbac7bc23f4cf54d1.read.json": "42d2c53de1647e0b3982244c39668c7a249a965aa69041bba4234cdfe5092c42",
+            "idea_research/research/downloads/b2c56f52d86e4080893090715228ca15.read.json": "250ed2731d3f21993b569a8cf6e1a7b9ce584595b8154e1ec1ac4a59e453d2d6",
+            "idea_research/research/downloads/5b63d6e76f074aa294723d60a07182e0.read.json": "d649f96de2cded646e86964c15e3e2c45b597b075eea60e44829fa75b0c4f0da",
+            "idea_research/research/downloads/50e1d3c06da94328a503f3da605725f2.read.json": "cd498de07c3b09f651bd7dab368838b64b0c37ca91401f9749b458c90f3c2bf9",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "48249ef5d18edb76644f86a6df98b8a91852e64e483faba48f4c2e08a88d8caf",
+            "context/trace_manifest.v2.json": "2555fc805a22835f5dad156e6402f4935d0f7d5aae4946ba15034ca2dc16add0",
+            "memory/_semantic_graph.json": "d439d31a439ed2c0ecbecf3c8e5e473459c862eb259f88454a69c08ac314b435",
+            "memory/literature/_index.json": "2bd982e50464ee21b1fa6426014c76193497b7a40e9a69ceef5885e55a0280be",
+            "memory/literature/_arxiv_cache/048dd15ba156ee3a61128030.json": "4644471eb947ed6a3df8187a659b4b3c10e32d62395e367d52d42c8ae08f4cb1",
+            "memory/literature/_arxiv_cache/66ea8a9b6c1484f459878fc3.json": "6ad0c825ca12e74de7185df876922ea233ea8f3d0d32cddedfd0320e09a6b5c0",
+            "memory/literature/_arxiv_cache/66ea8a9b6c1484f459878fc3.xml": "9d1cbd0098ab7a8d14b7248df231ebd22c6408c4d0ecbe90c35fd3c84dd706b2",
+            "memory/_retrieval_receipts/7b73cfa09d89456fa87e34d09ef51259.json": "f632630082dd6221cd00abe215dde19928ceb3520a64987ca42df2da1f157719",
+            "memory/_retrieval_receipts/f73baf58a3cc4a4a90145b760c461599.json": "8bcd81f21660d4c727ea46ac661ddf70b33c50e8a1eaa5a544b58474f0c9f3df",
+            "memory/_retrieval_receipts/81d06637e5684dcfafc076b7035003b7.json": "dda01bc0b70284998adeebfc0193cd6ac3335add6e20874cbbff0e9eb3797bf7",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/checkpoint.json": "b3af8fd3c293af59950b26e7f7da6ce3ae715c686f4e315fd5bb674276cfffba",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/events.jsonl": "3fa252d51388fe420eaa6e5fae7596150db93868b781f302b6a7d604c77ef846",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/facts.json": "fb585dff8ef8eed4fa6e21759b8ef47177af57e9c8a2d32ea4dafb4013576c4e",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0004.json": "22a573051cf64cee951bca0abbd7d0d1ffc96bc65782601ce4a1f64f2396336c",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0003.json": "c5e09f5e3b9094cc21f271b24a227accbfe8a84537afb7a40fe029e706fe4143",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0002.json": "627d729b7092eeb50ddfe913b2f0818564f3fca205384394f8625eab21d90811",
+            "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/tools/0001.json": "7e5b0e9537b38eefecee0bdfb46bc02ac1283a1b0bd78e87fed3e4f68166783f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/checkpoint.json": "e76b68a122d7b2db3c16608fbb313ae4e51f5273f0e194a6b18f51135602175f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/events.jsonl": "7bfb1bbb744c988959f1c26507c88eaec7b93d4a6d071e19d98712dc8e2bfb85",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/facts.json": "32306ee2f759d00f9fee3885721fc4722691b50ba9a0fb7b6bf6b700c748d837",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0005.json": "9cdd9006e17bad607421947731dc17c6796b1f4d0749bb81d910eef7478de429",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0004.json": "faea265ce5c943892dbef665dfa87feb68ca4ec03d39d061da5eafe3814cd0fc",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0003.json": "092ba09688021ee7c5ca4691323b05b58912f81b1c896c08d776838dc2cf8c93",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0002.json": "233f4887644530be849dd782927ae005ad2e8e686a9f4556078e7da5c82a698f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0001.json": "378916ab8fefae6365c3b5fc5732a3e8059c47d03ed876533e685ee081ed670f",
+            "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/tools/0006.json": "e824a59377f66d20d811ab89f067679999af2e2c30e255fe19d396c90b87c2a1",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/checkpoint.json": "cd80d02eb996640e4a5ccef5dbc1ac35655cee4d2fb3b57ad0648e7701d76de0",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/events.jsonl": "cdd392fcba0d2aef52513d6e6ded1222f0f97e269f8d321c684f01646865040b",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/facts.json": "24afb2342df6b76d8537e594d9445ad9c70ab3de3d70accf6d3e34b71fd5b06c",
+            "agent_traces/idea/f95a17ade45f41c48862de08e394307b/tools/0001.json": "5c6feb9dc7335f6dd473b0cffbd0a532f917e73e285dcbdc087b43b30c46e6a8",
+            "input/request.json": "510d29fc8b9da25557b37fcc900d25b2b30de00009b795b108cd2ce5fad27966",
+            "idea/progress.jsonl": "2091ebbe035026461624999d550915c8e791533a25672d7bfd6947d9f84f6203",
+            "idea/research/tool_results.v1.json": "9a459afda90f38a1d09b361875557a95828c3f54f768c60c1fe3fb19be7d7e3c",
+            "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+            "idea/research_delegations/caa7d88ec4104ba2bb48e818351cf5b8/request.json": "9bbecd5853f7626131d67de90335246cda22eaee5bd98418c8d159b460dfb411",
+            "idea/research_delegations/caa7d88ec4104ba2bb48e818351cf5b8/progress.jsonl": "4308c654147ca624410aa0dc268c83a314b5ba5a2218113c4ea82ac468d0112d",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/request.json": "4ae4b9cf3c9b66f6a9bd6b4ecf426f4f80840e439aeec2f6d6d42cebcdbf5ec2",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/progress.jsonl": "04a27ee615765e8303a3af56c1a6ec1d831fe223a0fbf006bb682c41aa90edfe",
+            "idea/research_delegations/4d03b379c4234391a7eefb088dd68421/failure.json": "66a36e90cfbca3ef265fe473b5939b51b33f52229b07401d23f090ca8272954f",
+            "coding/tool_applications/9dac9ff7d13d4094a97f1dc5bced195c.json": "e5aebf9cc5b99d3562f8005ba09c7bd576c18fb7188539b03ee0be01e10b6af9",
+            "coding/tool_applications/87cd6b27551b431f9671521ca4bd9d9d.json": "6b57ae9399a64df688cccbd4f6984e2698678d524a522009af62cac69c1aecb2",
+            "coding/tool_applications/486b8a56df464ecc95df74ffd6a59794.json": "66417f301d2e2661d36a71ea1d5a11c5266c22d7ffe611ea0ee15927a4ae6161",
+            "coding/tool_applications/cf619e17866c478098c924908cee68b3.json": "2dc38bbb31fac318434db774c55a135b2aa86af8db6923d54e6f2b4c354bde6d",
+            "coding/tool_applications/773a2cd3056c47fdb0e3f6c4146426fe.json": "4787e890b6f9e62f1a7af7e052b62dd4a1980502e11982c411f5ba86595f65a5",
+            "coding/tool_applications/fc6592bee0b04ef59c82d5e7bbab7f88.json": "d1fabeadc23d394745ddde8ce87caf8cf55e8214e722bba4efdae2033fc3fd11",
+            "coding/tool_applications/2a8e00f56a284bfb911b98222b3119be.json": "ab5be739bc890620c5755c075eb3048171fa1b31dcedc0dc3c5860d4165718a4",
+            "coding/tool_applications/f6fc8f4dcced4510b5799e1b2b02627f.json": "e08897b52079d7f83a98fe759845dadf38262920e4644b69c4d9c84dcf6e3d36",
+            "coding/tool_applications/c8372d803d0c45d19e1fc2ddce526b42.json": "9ca10a4c48f753d3165ecc12557386d91135cb9e36251bbbdfb758c24e58e81e",
+            "coding/tool_applications/d43e9f5a09194512919f5488a6caac28.json": "a0656c0031e0fb1e86b0df2a77647b7f3ab8df3dbf4e18a8c7525d0ba210145e",
+            "coding/tool_applications/bb3fbb8837b441fea2b2a354ed81e862.json": "24b1c4b8296db7bb6a5c2a171e15972c101544beca4690a59fca54e41cf4d57f",
+            "events/tool_events.jsonl": "c1e8099edd5e20e5ec0c6f178bcc1dc78e57644bdb439fa03151cf431a87880f",
+            "events/tool_calls.jsonl": "9d8d3600b3e497635e1f4b71f81cc980ed3c139a386a4d279b479c776dbcc4b2"
+          },
+          "original_files_unchanged": true,
+          "controlled_stop": {
+            "reported_by": "root orchestration agent",
+            "action": "one SIGINT to its own live driver PID 74087",
+            "reason": "Stop repeated known unit-versus-whole review scope and claim/issue consistency failures in the frozen v1 profile rather than spend more evidence/model budget.",
+            "observed_driver_result": {
+              "summary_status": "failed",
+              "error_type": "CancelledError",
+              "lead_checkpoint_status": "interrupted"
+            },
+            "boundary": "This provenance records the controlling agent message together with the actual cancellation records; it does not rewrite the original runtime status.",
+            "archived_control_record": {
+              "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/verification/run15_controlled_stop_20260908T190209Z.json",
+              "sha256": "88053a96a4b1eb2a4c82cc177123099905e77dae18eff8b4491e3c17646c54e9"
+            }
+          },
+          "schema": "idea.offline_research_review.v1",
+          "scope": "Semantic inspection of actual visible paper windows and two unaccepted research drafts; review of the three completed unit-review rejections and researcher recovery. Not an accepted research report or a final method review.",
+          "runtime_accepted_report_count": 0,
+          "research_report_status": "no accepted research_report produced",
+          "independent_draft_assessment": "No confirmed blocking source-finding or parameter-arithmetic error identified in the inspected drafts; final-method details and an attribution caveat remain. Runtime rejection is not equivalent to a scientific defect finding.",
+          "research_drafts": [
+            {
+              "delegation_id": "4d03b379c4234391a7eefb088dd68421",
+              "checkpoint_path": "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/checkpoint.json",
+              "checkpoint_sha256": "e76b68a122d7b2db3c16608fbb313ae4e51f5273f0e194a6b18f51135602175f",
+              "status": "reflection_rejected",
+              "candidate_sha256_utf8": "724493b15ea88383916fea7579fca68e08f98d761bdc8efaf3c09c8a2ad1d376",
+              "candidate_digest": "06fe290ef42835ed5ade05f623835a1b0863208a5ad7ef617aab0dc54e2398d8",
+              "candidate_chars": 3838,
+              "candidate_is_unaccepted": true,
+              "report_md_produced": false,
+              "sources": [
+                {
+                  "source_id": "AdaInt_2204_13983",
+                  "url": "http://arxiv.org/abs/2204.13983",
+                  "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+                  "decision": "use",
+                  "selection_reason": "提供3D LUT中可学习非均匀采样区间的软最大归一化、累积求和坐标、单调边界、三线性插值与反传、0/1初始化；可提取坐标参数化和边界处理，用于预算中性消融。",
+                  "gap_ids": [
+                    "G1"
+                  ]
+                },
+                {
+                  "source_id": "DCLS_2112_03740v4",
+                  "url": "http://arxiv.org/abs/2112.03740v4",
+                  "title": "Dilated convolution with learnable spacings",
+                  "decision": "use",
+                  "selection_reason": "提供二维可学习连续位置的双线性核构造公式及参数计量（每增加一个元素多3个参数）、位置clamp/初始化和优化技巧，可直接量化为≤256参数候选。",
+                  "gap_ids": [
+                    "G1"
+                  ]
+                }
+              ],
+              "human_summary": "已核实AdaInt与DCLS两篇方法论文的可学习插值机制：前者以软最大归一化区间做单调坐标并对查找插值求导，后者以二维可学习位置的双线性核给出“每个元素3参数”的预算计量。候选可在256参数内优先构建85个DCLS式位置/权重的16×16核（255参数）作判别实验，并用AdaInt式区间初始化做消融；均不声称已完成性能提升或真实PIMC仿真。",
+              "reflection_accepted": false,
+              "counts": {
+                "action_rounds": 6,
+                "model_requests": 10,
+                "model_responses": 10,
+                "observations": 6,
+                "protocol_repairs": 0,
+                "reflections": 2,
+                "sdk_attempts": 10,
+                "tool_dispatches": 6,
+                "validation_repairs": 0
+              },
+              "usage_complete": true,
+              "completed_review_units": [
+                {
+                  "event_seq": 49,
+                  "request": 7,
+                  "unit_id": "I1",
+                  "decision": {
+                    "accept": false,
+                    "issues": [
+                      "当前仅提供/可见AdaInt一个来源的完整洞察，未提供至少两篇已读出版物的方法公式与参数核算；委托缺口min_sources=2未满足，无法在本JSON中完成多源比较或声称完成论文调研。"
+                    ],
+                    "rationale": "逐项对照AdaInt可见页4-6：页4式(2)确认Qhat、softmax和cumsum；页5确认二分搜索、三线性插值与反传；页6确认593.5K/619.7K及g层0/1初始化，因此paper_finding的源文献陈述为supported。转移设想中的参数核算（每轴15区间、30额外参数、286以及226+30=256）算术正确，但2D[-1,1]映射、冻结30顶点与A/B实验均是未在原文验证的提议，判为hypothesis。limitations[0]到[2]与可见证据一致，均为supported。主要系统性缺口是只见到一个来源，未达到至少两篇的调研要求。"
+                  },
+                  "input_sha256": "87c1e07d4fa31ae481221d1343f44781b3ab204068b7dfc544af630f8e19f915",
+                  "response_sha256": "503ffcd3e814e679ad83f776a0e4fdf428bfb3a0b377af703d4f388a5f5a2d08"
+                },
+                {
+                  "event_seq": 70,
+                  "request": 10,
+                  "unit_id": "I1",
+                  "decision": {
+                    "accept": false,
+                    "issues": [
+                      "transfer_idea中“softmax后累积映射到[-1,1]”需显式补充仿射变换p=2z−1；原文坐标在[0,1]且端点为0/1，不写清该步会与任务输入域[-1,1]^2的端点产生歧义。",
+                      "预算中性方案仅说明“冻结30个顶点值”，未指定冻结哪些顶点或选择准则；该机制是待验证假设，不能作为已确立的源方法结论。",
+                      "原文表2的619.7K是完整图像自适应3D LUT系统的总参数量，包含CNN、基LUT和AdaInt映射，不能直接作为二维标量LUT在256参数下可获益的保证。"
+                    ],
+                    "rationale": "核对可见页4-6后，paper_finding中软最大区间、累积求和坐标、三线性插值与反传、593.5K/619.7K参数和0/1初始化均有原文依据；limitations对图像自适应3D、参数超限和缺乏2D/256消融的判断成立。transfer_idea的预算中性算术正确，但属于面向2D标量任务的迁移假设，需要补充[0,1]到[-1,1]的显式仿射、冻结顶点选择和A/B实验；不应被当作原文已验证结论或本任务性能保证。"
+                  },
+                  "input_sha256": "9b92d441fa5a1371698125af3ca39e3645260d49a9ca0db24dd60bb84134d214",
+                  "response_sha256": "47bf9f71b85239bb32dd2779c71f39cf0e42f743aaee78b44b2c149bac2b5c68"
+                }
+              ]
+            },
+            {
+              "delegation_id": "caa7d88ec4104ba2bb48e818351cf5b8",
+              "checkpoint_path": "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/checkpoint.json",
+              "checkpoint_sha256": "b3af8fd3c293af59950b26e7f7da6ce3ae715c686f4e315fd5bb674276cfffba",
+              "status": "interrupted",
+              "candidate_sha256_utf8": "d15737f6e50c31a647594f9eb27ff70ca0fbe705d5160c513b333d012758846b",
+              "candidate_digest": "38a0e8e5da49dbcf31679e86ed7b4ff2730a9a3ca3f366753fe21db5f4074c9b",
+              "candidate_chars": 4492,
+              "candidate_is_unaccepted": true,
+              "report_md_produced": false,
+              "sources": [
+                {
+                  "source_id": "arxiv:2204.13983v1",
+                  "url": "http://arxiv.org/abs/2204.13983v1",
+                  "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+                  "decision": "use",
+                  "selection_reason": "该文提出的 AdaInt 机制直接对应“用可学习单调坐标区间映射替换固定均匀网格”，方法页页4给出 softmax/cumsum/端点公式，附录表7给出层形状，且满足本委派缺口对 AdaInt 原文的要求。",
+                  "gap_ids": [
+                    "G1",
+                    "G2"
+                  ]
+                }
+              ],
+              "human_summary": "已读取 AdaInt v1 方法页，核实其以 softmax 归一化可学习区间、再用 cumsum 并拼接原点得到非均匀网格；该坐标弯曲可迁移到固定 2D LUT，但原文是图像自适应 3D LUT+CNN，且缺少 2D 16×16、256 实数预算下的消融。",
+              "reflection_accepted": false,
+              "counts": {
+                "action_rounds": 4,
+                "model_requests": 8,
+                "model_responses": 7,
+                "observations": 4,
+                "protocol_repairs": 0,
+                "reflections": 1,
+                "sdk_attempts": 8,
+                "tool_dispatches": 4,
+                "validation_repairs": 0
+              },
+              "usage_complete": false,
+              "completed_review_units": [
+                {
+                  "event_seq": 42,
+                  "request": 6,
+                  "unit_id": "I1",
+                  "decision": {
+                    "accept": false,
+                    "issues": [
+                      "insight 的 paper_finding 缺少委派缺口要求的原文累积求和与端点公式 P̂=[0_3; cumsum(Q, axis=1)]，也未写参数数量随网格大小的表达式 3×(Ns−1)；虽然可见页4有这些内容，但该字段没有报告，需补充才能满足 completion criteria。",
+                      "transfer_idea 未显式定义由区间长度 q 到节点坐标的累积求和；p=2z−1 的符号 z 已在句中定义为输入坐标，若按字面理解 p=x，不构成可学习弯曲坐标，应明确对 cumsum(q) 的结果做 p=2P−1 才符合要求。"
+                    ],
+                    "rationale": "核对可见原文页4：AdaInt 精确公式为 Q=softmax(Q̂,axis=1)、P̂=[0_3;cumsum(Q,axis=1)]，页4也给出 3×(Ns−1) 的区间数量；候选正确识别了 softmax 区间和图像自适应来源，但没报告 cumsum/端点/参数计数，且 transfer_idea 对 p=2z−1 的使用含糊，故不能直接接受。"
+                  },
+                  "input_sha256": "e3828220bb7ab51be04bd5d19155222a2f0b7271f5f92b3e68a81c92a6334ffd",
+                  "response_sha256": "9e35d0ba42b6dc40650f4c8ce99fb2140c1da26109d76e1a418184006814e74d"
+                }
+              ]
+            }
+          ],
+          "actual_visible_receipts": [
+            {
+              "path": "idea_research/research/downloads/50e1d3c06da94328a503f3da605725f2.read.json",
+              "sha256": "cd498de07c3b09f651bd7dab368838b64b0c37ca91401f9749b458c90f3c2bf9",
+              "document_sha256": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+              "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "text_chars": 3751,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "text_chars": 5802,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "text_chars": 4119,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "text_chars": 2328,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "path": "idea_research/research/downloads/5b63d6e76f074aa294723d60a07182e0.read.json",
+              "sha256": "d649f96de2cded646e86964c15e3e2c45b597b075eea60e44829fa75b0c4f0da",
+              "document_sha256": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+              "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+              "visible_pages": [
+                {
+                  "page": 4,
+                  "text_chars": 4510,
+                  "truncated": false
+                },
+                {
+                  "page": 5,
+                  "text_chars": 4271,
+                  "truncated": false
+                },
+                {
+                  "page": 6,
+                  "text_chars": 4244,
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "path": "idea_research/research/downloads/af61cb539a97491db50c3f3d294fc9e3.read.json",
+              "sha256": "9683215ddca6b03bbb5c0b2047e7bb8889898ec1eaed2c450dc63ad90bc91fb0",
+              "document_sha256": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+              "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "text_chars": 3751,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "text_chars": 5802,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "text_chars": 4119,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "text_chars": 2328,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "path": "idea_research/research/downloads/b2c56f52d86e4080893090715228ca15.read.json",
+              "sha256": "250ed2731d3f21993b569a8cf6e1a7b9ce584595b8154e1ec1ac4a59e453d2d6",
+              "document_sha256": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+              "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+              "visible_pages": [
+                {
+                  "page": 13,
+                  "text_chars": 4522,
+                  "truncated": false
+                },
+                {
+                  "page": 14,
+                  "text_chars": 2884,
+                  "truncated": false
+                },
+                {
+                  "page": 15,
+                  "text_chars": 403,
+                  "truncated": false
+                },
+                {
+                  "page": 16,
+                  "text_chars": 180,
+                  "truncated": false
+                },
+                {
+                  "page": 17,
+                  "text_chars": 182,
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "path": "idea_research/research/downloads/c524f74e863746be9f1feba40fd34efa.read.json",
+              "sha256": "ef4ed3378a61190e138c860db1b173ddefc7ebfe6ab4826bcf11d9de23f3b62e",
+              "document_sha256": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+              "title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+              "visible_pages": [
+                {
+                  "page": 5,
+                  "text_chars": 4271,
+                  "truncated": false
+                },
+                {
+                  "page": 6,
+                  "text_chars": 4244,
+                  "truncated": false
+                },
+                {
+                  "page": 7,
+                  "text_chars": 3957,
+                  "truncated": false
+                },
+                {
+                  "page": 8,
+                  "text_chars": 1528,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "path": "idea_research/research/downloads/fef088025cc0425dbac7bc23f4cf54d1.read.json",
+              "sha256": "42d2c53de1647e0b3982244c39668c7a249a965aa69041bba4234cdfe5092c42",
+              "document_sha256": "fe0ed6590a413d0ec712a345b500aff7f3a5144ec98f38d6c0fd2d96c7af82a9",
+              "title": "Dilated convolution with learnable spacings",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "text_chars": 3655,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "text_chars": 3184,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "text_chars": 3497,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "text_chars": 3143,
+                  "truncated": false
+                },
+                {
+                  "page": 5,
+                  "text_chars": 2521,
+                  "truncated": true
+                }
+              ]
+            }
+          ],
+          "supported_findings": [
+            "AdaInt visible page4 describes 3(Ns-1) image-conditioned interval outputs, per-axis softmax, cumulative coordinates and an origin; page5 supports binary lookup, trilinear interpolation and coordinate gradients.",
+            "AdaInt page6 supports baseline593.5K/plusAdaInt619.7K whole-system counts and g weights0/bias1 initialization. The drafts explicitly separate the CNN image-adaptive3D setting from direct fixed2D trainable logits.",
+            "DCLS visible pages3-5 support a discrete kernel constructed from splatted weights and learnable two-coordinate positions, overlap addition, clamping, central initialization and 3 parameters per2D element. The first draft clearly retains a later fixed bilinear LUT query and labels this as a transfer.",
+            "First-draft budgets are arithmetically correct: 3*85=255;16*16+2*15=286;226+30=256.",
+            "Second-draft g-layer parameter count3(Ns-1)(F+1) follows the singleFC with bias described on visible page13. The direct2D candidate has15*15+2*14=253 trainables, and zero logits yield equal intervals."
+          ],
+          "scope_caveats": [
+            {
+              "field": "first draft I1 transfer_idea",
+              "finding": "Freezing30 vertices requires exact indices, fixed values and initialization before a final method is executable. This is explicitly an untested transfer, so lack of those choices is not proof that a source-paper claim is false."
+            },
+            {
+              "field": "first draft I2 limitations[2] and transfer_idea",
+              "finding": "The statement that fixed-position ablation needs extra equal parameters or random-sharing controls before any attribution is overly categorical. It can estimate the total effect of enabling position learning while acknowledging added degrees of freedom; it cannot by itself isolate position mechanism independently of added capacity. No final model was produced using this claim."
+            },
+            {
+              "field": "first draft I2 paper_finding",
+              "finding": "Position-learning-rate multiplier5 is on visible DCLS page5 rather than page4. It remains supported by the same actual receipt; this is a page-location precision issue."
+            },
+            {
+              "field": "second draft I3 transfer_idea",
+              "finding": "The225versus253 comparison tests allowing coordinates to learn; it explicitly acknowledges the parameter increase. A final proposal still needs the retained256parameter16x16baseline and explicit forward/boundary/initialization/decision contracts."
+            }
+          ],
+          "review_process_findings": [
+            {
+              "id": "P1",
+              "delegation_id": "4d03b379c4234391a7eefb088dd68421",
+              "request": 7,
+              "review_event_seq": 49,
+              "classification": "false rejection from global completion criterion applied to isolated insight",
+              "runtime_issue": "Only AdaInt is visible, so minimum two papers is not met.",
+              "independent_evidence": "At that time the complete candidate already contained AdaInt and DCLS with real read receipts. The I1 request intentionally supplied only matching AdaInt source rows. Every local claim was supported or hypothesis.",
+              "observed_consequence": "Researcher request8 performed an additional OpenAlex search, saying it needed a second accepted source; request9 resubmitted the same two-paper set with no new PDF."
+            },
+            {
+              "id": "P2",
+              "delegation_id": "4d03b379c4234391a7eefb088dd68421",
+              "request": 10,
+              "review_event_seq": 70,
+              "classification": "hypothesis/final-method clarification escalated into rejection and warning without contrary claim",
+              "runtime_issues": "Requires explicit p=2z-1 and frozen vertex choices; warns619.7Kcannot guarantee256task gains.",
+              "independent_evidence": "The transfer already states mapping to[-1,1] with endpoints and explicitly labels frozen-budget reallocation a hypothesis. The limitations explicitly say the largeCNN3Dsystem does not guarantee this task. The final warning repeats an existing limitation rather than identifies a false opposite assertion. Mapping/frozen-set detail is appropriate final-method work, not established source error.",
+              "observed_consequence": "First child terminates reflection_rejected. Parent model independently starts a one-source AdaInt delegation with min_sources1 and clearer requested formulas."
+            },
+            {
+              "id": "P3",
+              "delegation_id": "caa7d88ec4104ba2bb48e818351cf5b8",
+              "request": 6,
+              "review_event_seq": 42,
+              "classification": "per-insight completion overreach with a useful local notation clarification",
+              "runtime_issues": "I1 must itself contain cumsum/endpoints/parameter count; its z/p transformation does not itself create learned nodes.",
+              "independent_evidence": "The same complete report already supplied cumsum and node endpoints in I2 and full budget/layer counts in I3. I1 separately described input normalization and softmax intervals; the local p/z wording could be clearer, but the report did not globally lack learnable nodes. All local claim verdicts were supported or hypothesis.",
+              "observed_consequence": "Researcher request7 incorporates softmax→P=[0;cumsum(q)]→u=2P-1 directly into I1. This genuine clarification is present in the terminal unaccepted draft; the next I1 request8 was interrupted before a response."
+            }
+          ],
+          "external_component_boundary": {
+            "path": "runs/verification/insight_scope_review_20260908T185010Z_8d468b5a/comparison.json",
+            "description": "A separate one-call replay of original first-childrequest7 changed only its scope paragraph and accepted I1. The actual result was not injected into this run and does not retroactively replace any runtime review."
+          },
+          "counts": {
+            "read_windows": 6,
+            "unique_downloaded_contents": 2,
+            "unique_pdf_publications_with_visible_pages": 2,
+            "unique_publications_with_verified_extractions": 0,
+            "unique_retrieved_publications": 16
+          },
+          "usage": {
+            "completion_tokens": 87948,
+            "prompt_tokens": 272047,
+            "total_tokens": 359995
+          },
+          "usage_complete": false
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/f95a17ade45f41c48862de08e394307b/checkpoint.json": "cd80d02eb996640e4a5ccef5dbc1ac35655cee4d2fb3b57ad0648e7701d76de0",
+        "agent_traces/idea/f95a17ade45f41c48862de08e394307b/events.jsonl": "cdd392fcba0d2aef52513d6e6ded1222f0f97e269f8d321c684f01646865040b",
+        "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/checkpoint.json": "e76b68a122d7b2db3c16608fbb313ae4e51f5273f0e194a6b18f51135602175f",
+        "agent_traces/idea_research/4d03b379c4234391a7eefb088dd68421/events.jsonl": "7bfb1bbb744c988959f1c26507c88eaec7b93d4a6d071e19d98712dc8e2bfb85",
+        "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/checkpoint.json": "b3af8fd3c293af59950b26e7f7da6ce3ae715c686f4e315fd5bb674276cfffba",
+        "agent_traces/idea_research/caa7d88ec4104ba2bb48e818351cf5b8/events.jsonl": "3fa252d51388fe420eaa6e5fae7596150db93868b781f302b6a7d604c77ef846",
+        "all_traces_audit.json": "256eaf862d10cc2035d1f6e3b795aa8f9abb1dc66d6ac3ab9acc6b7dd552aabd",
+        "input/request.json": "510d29fc8b9da25557b37fcc900d25b2b30de00009b795b108cd2ce5fad27966",
+        "manual_quality_review.json": "54ede1eb505a01b55b93add696a278a56b550dca0f1c24f200a2e2a1d79d6a5b",
+        "manual_research_review.json": "1adacaed5801dd49f3f25056ee8fac7c275a362f6b33a9ac0cd0c3b0ea81a0a5",
+        "summary.json": "ab2d997d7caadcfa71c8225a6a58950b23a3b5fc250f88819633e1421cbd05d4"
+      }
     }
   ]
 }
