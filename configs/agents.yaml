@@ -80,7 +80,7 @@ idea:
     trace: full
     # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
-    reflection_reasoning_effort: low
+    reflection_reasoning_effort: high
     # Includes the submission schema, supplied context and visible paper excerpts.
     input_token_budget: 96000
     max_model_calls: 36

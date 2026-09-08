@@ -226,7 +226,10 @@ class IdeaAgent(BaseAgent):
                 "each require one publication. Do not repeat an entire failed research assignment unchanged: "
                 "use its concrete failure to narrow the missing evidence or switch available search channels. "
                 "A relevant source need only inform a specific defensible method decision, not already solve "
-                "the complete target task with its exact budget. The final adaptation must meet all task constraints."
+                "the complete target task with its exact budget. The final adaptation must meet all task constraints. "
+                "If an insight supports an alternative or a rejected approach, define the actual alternative "
+                "or design constraint precisely enough to justify that decision. Merely naming a discarded "
+                "approach does not make its paper an adopted source."
             )
         return context
 
@@ -333,7 +336,9 @@ class IdeaAgent(BaseAgent):
                             "For method_proposal, a fully defined symbolic I/O contract is allowed; real-project "
                             "mapping may be an explicit required_context prerequisite. Reject asserted guarantees "
                             "without support, and still require executable definitions and fair falsification criteria."),
-                    Message("user", request.user_request),
+                    Message("user", "Complete task and host requirements used to draft and validate this proposal "
+                            "(evaluate these requirements; your output is still review JSON, not a proposal):\n"
+                            + context.task),
                     Message("user", "Project constraints:\n" + context.project)]
         messages.extend(Message("user", "[untrusted supplied context:" + key + "]\n" + value)
                         for key, value in context.upstream.items())
@@ -354,6 +359,13 @@ class IdeaAgent(BaseAgent):
             "that ignores an essential unresolved design gap. An excluded paper needs no positive result. "
             "Check the short Chinese human_summary explains the actual change and its plausible mechanism "
             "without claiming measured gains, and agrees with the complete machine-readable handoff. "
+            "Check every research-linked alternative is actually defined and supports the declared comparison "
+            "or rejection; a named but undefined discarded approach is a decorative link. "
+            "Compare ablations pairwise for identical behavior, then test whether each claimed change can "
+            "affect any input in the stated domain. Check every ablation size against evaluation_cases. "
+            "Include initialization target queries in the shared training-label budget, rather than silently "
+            "giving each architecture its own extra labels. Check the entire task contract before accepting; "
+            "fixing one numerical defect does not establish the remaining requirements. "
             "Check baseline/candidate function-class claims (smoothness does not imply strict inclusion), "
             "basis/knots/degree/control-point definitions, every real vs complex trainable count, boundary stability, "
             "input/output/phase contract, PIMC vs DPD metric transfer, fair equal-budget ablations, and "

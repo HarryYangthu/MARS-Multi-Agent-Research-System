@@ -93,6 +93,9 @@ async def test_reviewer_has_separate_instructions_and_supplied_context() -> None
     assert "Idea acceptance scope: method_proposal" in text
     assert "Missing measured improvement" in text
     assert "Judge this document independently" in text
+    # The independent reviewer must receive the actual candidate contract,
+    # not only the caller's shorter question with the host requirements omitted.
+    assert context.task in text
 
 
 def test_candidate_progress_never_claims_acceptance() -> None:
