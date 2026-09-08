@@ -82,7 +82,7 @@ idea:
     reflection_reasoning_effort: high
     reflection_format_repair_enabled: true
     # Includes the submission schema, supplied context and visible paper excerpts.
-    input_token_budget: 96000
+    input_token_budget: 256000
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
@@ -125,7 +125,7 @@ idea_research:
     reflection_format_repair_enabled: true
     max_reflections: 2
     trace: full
-    input_token_budget: 96000
+    input_token_budget: 256000
     observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12

@@ -1847,6 +1847,1514 @@
         "manual_research_review.json": "dff06354675be3a380d03d343c1946cc585151f32a055f5877bf5a84fac8a80b",
         "summary.json": "37f9df377cafc8cf0c801ee93ad298579b5d148540b7a6e1226a82616dded48d"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T162510_d56c0a",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 841.8050317079978,
+      "counts": {
+        "action_rounds": 23,
+        "model_requests": 28,
+        "model_responses": 28,
+        "observations": 23,
+        "protocol_repairs": 7,
+        "reflections": 0,
+        "sdk_attempts": 28,
+        "tool_dispatches": 23,
+        "validation_repairs": 2
+      },
+      "usage": {
+        "completion_tokens": 135754,
+        "prompt_tokens": 542978,
+        "total_tokens": 678732
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 8,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 49
+      },
+      "attempt_counts": {
+        "action_rounds": 23,
+        "model_requests": 28,
+        "model_responses": 28,
+        "observations": 23,
+        "protocol_repairs": 7,
+        "reflections": 0,
+        "sdk_attempts": 28,
+        "tool_dispatches": 23,
+        "validation_repairs": 2
+      },
+      "attempt_known_usage": {
+        "completion_tokens": 135754,
+        "prompt_tokens": 542978,
+        "total_tokens": 678732
+      },
+      "cumulative_duration_seconds": 841.8050317079978,
+      "accounting_note": "counts/usage include inherited history once; attempt_counts/attempt_known_usage contain only this invocation's increments. Unknown earlier usage stays unknown.",
+      "source_commit": "ba9438757a51545e766aa2af72ccf24287aa308b",
+      "source_tree": "111790baba9f2f9d0a756e4be6b7d791a04f64b1",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T162510_d56c0a",
+      "separate_review_records": {
+        "manual_research_review.json": {
+          "schema": "codex.offline_research_review.v1",
+          "reviewer": {
+            "identity": "Codex independent offline review",
+            "role": "独立离线复核；不是用户、人工科研评审或原 runtime Reflection"
+          },
+          "created_at": "2026-09-08T16:42:00.888054+00:00",
+          "run_id": "idea_research_20260908T162510_d56c0a",
+          "source_commit": "ba94387",
+          "scope": "真实可见页段、两份未通过校验的研究草稿及最终缺口结果。没有成功研究报告，没有主方案候选，不能作为完整方案质量审查。",
+          "status": "no_accepted_research_report/no_proposal_candidate",
+          "scientific_validated": false,
+          "simulation_executed": false,
+          "runtime_records_modified": false,
+          "runtime_status": {
+            "run": "failed",
+            "error_type": "RuntimeError",
+            "lead": "protocol_exhausted",
+            "research_counts": {
+              "read_windows": 8,
+              "unique_downloaded_contents": 2,
+              "unique_pdf_publications_with_visible_pages": 2,
+              "unique_publications_with_verified_extractions": 0,
+              "unique_retrieved_publications": 49
+            },
+            "accepted_report_count": 0,
+            "candidate_exists": false,
+            "model_review_passed": false
+          },
+          "children": [
+            {
+              "delegation_id": "7d1a1b7fa6f34b46b2ef484c9f685af2",
+              "status": "evidence_unavailable",
+              "final_gap_candidate_sha256": "b1d0922a857583710a0fe2ff26654652a129dd01f2ac34010466e50c61a94ec0",
+              "checkpoint_ref": "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/checkpoint.json",
+              "last_model_request_seq": 79,
+              "last_model_input_sha256": "219290537601e108ddcaf9f7b28a32c21dc07696425b39ec67d0d6d1bcc910ac",
+              "last_model_input_contains_actual_validation_excerpt": true,
+              "model_reviews": 0,
+              "remaining_tool_calls": 0
+            },
+            {
+              "delegation_id": "94f7c7d0ffbd4fd28f18ec889b2c1c27",
+              "status": "evidence_unavailable",
+              "final_gap_candidate_sha256": "85a7f83949a4ff6d845807321fff5769a87f30bffc87c3a3a84ca7fc345bb0fa",
+              "checkpoint_ref": "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/checkpoint.json",
+              "last_model_request_seq": 63,
+              "last_model_input_sha256": "03d85fa51d16ef4ff19542e7421e8d441ac9b5758b646aa62a427f50b05e78d2",
+              "last_model_input_contains_actual_validation_excerpt": true,
+              "model_reviews": 0,
+              "remaining_tool_calls": 1
+            }
+          ],
+          "invalid_drafts": [
+            {
+              "delegation_id": "7d1a1b7fa6f34b46b2ef484c9f685af2",
+              "event_ref": "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/events.jsonl",
+              "event_seq": 75,
+              "visible_sha256": "93498fb41682f462b2197553f1459cbe106298973062d92fe28591b21dbbb10b",
+              "arguments_sha256": "1c9114619b94044d78c3b7d032acc91cd24bf1c573f2746aebb11fa21124bc92",
+              "metadata_sha256": "e5d2a1f034a4eef67efe95f5174d0e7921db46c27ba695a17be8bab655f182e1",
+              "status": "invalid_unaccepted_research_draft"
+            },
+            {
+              "delegation_id": "94f7c7d0ffbd4fd28f18ec889b2c1c27",
+              "event_ref": "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/events.jsonl",
+              "event_seq": 29,
+              "visible_sha256": "e6ffb835c6db101672599fdd51c94f8dc2324800bac6d3021a1ee97e89cf648f",
+              "arguments_sha256": "59204c07836ee24b0981f69c813c49abda2ade81075891cbd9d9fcb8c50bf17b",
+              "metadata_sha256": "447b056b21780ab7d94364c63675656d2700efc7289fe88d723bc026273a4efc",
+              "status": "invalid_unaccepted_research_draft"
+            }
+          ],
+          "actual_receipts": [
+            {
+              "ref": "idea_research/research/downloads/4842b7bb232442adb59ca0e2ea5019aa.read.json",
+              "sha256": "9ad464e9bb634d4d184550c7ce0ba610d55850f62a6879461dfce6ceb0c6327c",
+              "url": "https://arxiv.org/abs/1405.5713",
+              "document_sha256": "e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/6164283fd266492b9f1137f89e0c808f.read.json",
+              "sha256": "15d8f8672b6339ad15d9f1d941b1459c2b656a4de376141d5b42dd4ceb1636d0",
+              "url": "https://arxiv.org/abs/1405.5713",
+              "document_sha256": "e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/66a197ce6c2d4f6b8f7d983542ac20a2.read.json",
+              "sha256": "0de8e55270fe69b798637ab61ca7044f59870f5f2cb71f1456fa64421dd59677",
+              "url": "https://arxiv.org/abs/1510.09088",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/75f2229de20e4c8a975f1924f3a0e789.read.json",
+              "sha256": "0cc31a2405f9071afb1a56fa21c1401fe3e90c7fdea8e2ab6f8a36ee1fd23108",
+              "url": "https://arxiv.org/abs/1510.09088",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_pages": [
+                {
+                  "page": 5,
+                  "truncated": false
+                },
+                {
+                  "page": 6,
+                  "truncated": false
+                },
+                {
+                  "page": 7,
+                  "truncated": false
+                },
+                {
+                  "page": 8,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/76a62869bd3648d184445ed3c169da69.read.json",
+              "sha256": "9551f8b8e5d07860ea1fa2766c72166e8e44154e22a39d6e0e7ffb6b02c1aa9d",
+              "url": "https://arxiv.org/abs/1510.09088",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "truncated": false
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/b000fbb941cf40d2b0fb76a3e64768db.read.json",
+              "sha256": "bee3e0729c3dd19835db8031d688d6658c6e635af89ad871c687e49b1eed1ee6",
+              "url": "https://arxiv.org/abs/1510.09088",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_pages": [
+                {
+                  "page": 5,
+                  "truncated": false
+                },
+                {
+                  "page": 6,
+                  "truncated": false
+                },
+                {
+                  "page": 7,
+                  "truncated": false
+                },
+                {
+                  "page": 8,
+                  "truncated": false
+                },
+                {
+                  "page": 9,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/b0d5259db33447b8ac7e1041c95e9b3b.read.json",
+              "sha256": "fa14e7a41202d24a5a69814a26bd07f775494bac986bf7b84b22bd2c34f23992",
+              "url": "https://arxiv.org/abs/1510.09088",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "truncated": false
+                },
+                {
+                  "page": 5,
+                  "truncated": true
+                }
+              ]
+            },
+            {
+              "ref": "idea_research/research/downloads/dd3f2822bc914dfc9d3129294b63e616.read.json",
+              "sha256": "bf4e9bf645e59d705bfa5be181b0c3acf0cc4639d56cd4129f0e81bf9028b991",
+              "url": "https://arxiv.org/abs/1405.5713",
+              "document_sha256": "e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8",
+              "visible_pages": [
+                {
+                  "page": 1,
+                  "truncated": false
+                },
+                {
+                  "page": 2,
+                  "truncated": false
+                },
+                {
+                  "page": 3,
+                  "truncated": false
+                },
+                {
+                  "page": 4,
+                  "truncated": false
+                },
+                {
+                  "page": 5,
+                  "truncated": true
+                }
+              ]
+            }
+          ],
+          "source_semantics": [
+            {
+              "source": "Spectral tensor-train decomposition, arXiv:1405.5713v4",
+              "document_sha256": "e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8",
+              "visible_basis": "第2页式(1.2)给出可分离函数和；第3页二维情形与矩阵 SVD 的联系；第4页给出 TT 定义。谱方法的优势带有函数正则性与秩的条件，不能自动转成小预算线性插值核的收益保证。",
+              "interpretation": "可支持低秩参数化的数学构造，不能证明相同16节点固定基下比完整256值双线性LUT有更大的函数类。"
+            },
+            {
+              "source": "A continuous analogue of the tensor-train decomposition, arXiv:1510.09088v3",
+              "document_sha256": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+              "visible_basis": "第6页矩阵值函数核乘积与线性/非线性参数化；第7页说明参数化可独立变化；第8页明确线性固定参数化、同一维共享相同基时与系数张量 TT 等价。",
+              "interpretation": "自由或独立自适应参数化的额外表达灵活性不能无条件转移给共享固定16节点基的低秩分解。"
+            }
+          ],
+          "findings": [
+            {
+              "id": "R11-R1",
+              "scope": "invalid research draft, not accepted evidence",
+              "delegation_id": "94f7c7d0ffbd4fd28f18ec889b2c1c27",
+              "event_seq": 29,
+              "pointer": "/metadata/insights/2/transfer_idea",
+              "title": "把独立可训练节点位置的优势与仅节点值的32r账本混同",
+              "evidence": "草稿同时写每因子16参数、总32r、r=8，以及“不共享同一组节点/基”“各因子节点可独立训练”。",
+              "analysis": "若仅训练固定16节点上的值，2×16×r=32r正确，但属于第8页的固定基等价情形。若每因子的16节点位置也训练，即使两端点固定也有14个额外位置，2r×(16+14)=60r，r=8时为480，超过256。",
+              "qualification": "这份草稿因来源/引文校验失败从未进入语义 Reflection，不能说自动审查接受了此错误。"
+            },
+            {
+              "id": "R11-R2",
+              "scope": "failure/recovery decision",
+              "delegation_id": "7d1a1b7fa6f34b46b2ef484c9f685af2",
+              "title": "把可由已有可见文本修正的引文问题当作必须重取证",
+              "evidence": "第77条 validation 给出三条相关 visible_page_excerpt；这些片段在第79条实际 model_request.visible 中仍然存在。之后 gap 声称工具用尽，必须重新读取才能提取精确引文。",
+              "analysis": "现有输入已有可复制的短片段，并非缺正文；当前失败主要是未利用已有材料完成协议修订。宿主没有把该 gap 当成功研究证据，这一失败边界保持正确。"
+            },
+            {
+              "id": "R11-R3",
+              "scope": "failure/recovery decision",
+              "delegation_id": "94f7c7d0ffbd4fd28f18ec889b2c1c27",
+              "title": "来源身份恢复计划忽略已有检索结果与剩余批量取证可能性",
+              "evidence": "最终 gap 引用已知 versioned arXiv URL/pdf_url，又认为必须重新检索再抓取而至少需2次调用；终态仍剩1次工具调用，第63条实际 model_request 含已知带版本来源。",
+              "analysis": "可以考虑使用已知检索结果在一次 fetch_sources 中取两篇并生成匹配收据，再按已有精确文字修正；不能据此保证重试必定成功，但“必须再次检索所以已无恢复路径”的断言过强。不得通过忽略版本或伪造收据绕过来源身份校验。"
+            }
+          ],
+          "other_scope_limits": [
+            "草稿 i1 写了额外 c_alpha，但32r预算未说明其固定还是吸收入因子；最终方法若采用必须唯一界定，这里不假定它已经额外训练r个系数。",
+            "高阶 canonical 张量近似的非闭性不能直接作为二维 rank<=r 矩阵近似的限制；这里没有已接受方案依赖该错误推断。",
+            "为方法迁移寻找相关机制不要求文献已经实现完全相同256参数LUT或提供其性能数字；最终gap对此要求偏强。",
+            "本次没有拿未做真实实验、没有找到第三篇精确基线对照、或没有普适收益证明作为独立质量失败。"
+          ],
+          "original_files_sha256": {
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/checkpoint.json": "8f9f0ebead917b68acc9ba00bf7b540f382ddcc42342756ee948ad094279a077",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/events.jsonl": "bf458932857a6987e95e388d085a68e691f6f479c1a6e521b74a01a515460b9b",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/facts.json": "12347671c5b1d3d3b47d4dd316f4cf431ee73d14122c69f1caee0c143ffda309",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/tools/0001.json": "6ba8ee0a5845a613726519f2fe3b7c9cf977116cf391e657621cd959febb5714",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/tools/0002.json": "2fd198cd604abd71f726263ce163a7fb588d4c3b0343547e9bc95daff8dc8eb9",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/tools/0003.json": "2f6f6c7a08695c100ef4e2bf5c43a469eaca1fbb8b43d5b6eaf9d1fec061cd3f",
+            "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/tools/0004.json": "362d2e5dd08643a71396d2d573ead7d5ca21e7f1aaa81a71e7ebc863a0b02e26",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/checkpoint.json": "4a73914819c334b1d3c3d5b45a0140d11aba442f044ed5aef8e6c29878c540d8",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/events.jsonl": "fc39b66ccd45025cf0fdab92006bd9a85972e8600c2ef5c509ea1b2f01e651ee",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/facts.json": "6d4f867c92f1c8aefe4f602cb9c4a32a308d7b70e89dbac6afb300973be75067",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0001.json": "fa9f24ce07e9024e3964e700d0281e694113090b82aeb3d018acb06abf5d8164",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0002.json": "3566b34e9beade1333470fd0a9740d6f3c1463b122d2db20912ca1e3c8aebbb3",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0003.json": "cf8759dacc5602f32e815d648468fb55c490b217fd9e0c1483ded4ed9e2bc900",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0004.json": "4071cd013fb0142ab57aec1b97970afeeab3c42042b1b5ed8d695b734f644f92",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0005.json": "45d4cd7180e8edd3e151a1171a7cd37b86b30245e4bc4b3a4604714a40bd0c6d",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0006.json": "70ebe18d9b6c7415ab38238bfa61e89397b2a547df0440293d1cc4f18a044519",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0007.json": "e48c782d93bb2ff405010d6402a59331d77955a496581c5f3f991796b60bddf4",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0008.json": "318ccaa3bc16abb6319ad953fc0fdd25f7af42e3fb7e23e5d5a6f601ed37d641",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0009.json": "123e46ddd8049941ec60dd37f6784a4d03c3d5c0dc40bc75ca66d00dd6c450a1",
+            "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/tools/0010.json": "6499799613110686ad9ff26a52bf9b84cca8ee1c42960315f475dabc917087f2",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/checkpoint.json": "940b551dc7d90ab2b6577a2b2af7fb14deafc4ccb6950e4a62a73338ce37f451",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/events.jsonl": "8fc1466f2b0bb46f559744a651376152d60a61cbab3a85d8c4f32e9d87be0bf0",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/facts.json": "87a8272bf934f08bfdcc458feca5b998e247d1b4a7aa75f34c0abcb885b27d69",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0001.json": "0954485ccd9941569dcbca9131175782d590b188bb644689de0318a69109719f",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0002.json": "7f202f545afff113f6ff265e338c27348a060ee6ef8afdfd379e1bbf6de5931b",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0003.json": "1b5a8fe11cbcb911d4968d8f39e55f9aa4cc9b41e50f533cd04b63b1e95609fd",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0004.json": "1a825ec7a24725569a479b03c2f5370888ecb61c71034b0824c8b2c405d0d8d1",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0005.json": "80fdbdd24cadd8bcf0c33e839b5836384d1f96eab7d2ec3621f34871a01e75d0",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0006.json": "973301695aa137b9ba75c3000e4723ba06af92b1f1101687279e9b3f909e4713",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0007.json": "ef760817d9880b7578ef64ec69c3742a0f5f094ea11396e6f06dd5ce7633b306",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0008.json": "6153908afc6ec7f8ac92331613299e8eefc0cdf103409bfa294edd92efe2a284",
+            "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/tools/0009.json": "1d60349f650885507e0e01fbc7fe7722dd151c452cbd258f6e5ebe22f5292759",
+            "all_traces_audit.json": "b055344b27e0fe0a1a4cce8dfc4d10c57fab57429de46d397b0448e20eb276c9",
+            "coding/tool_applications/06ddd46c63d04301aa6eaa570fb8c052.json": "0c5ae35b714c1a52b64072c7481aff2413e7e7bd647ef3c8aec290f7812e933b",
+            "coding/tool_applications/0aa4fa63db0142949beac2a814175025.json": "c4a91e9c6ab7eb261407dc8329bf7aedd955211fca561e8a6d848b0f117f3409",
+            "coding/tool_applications/306788188fec41d79dab4b04905a21d8.json": "cbf2f3bad89e8667d2e1fd6a2630f67cee1e492be7ce6385e5f04d0e4e542bb5",
+            "coding/tool_applications/59d7b6bdd8fb4767b4b361ab58f2dee8.json": "1758ba59dade8aeddf0955b4e5212e2a94dffd3ea38134ba937e8344463bce35",
+            "coding/tool_applications/60958f1c51da4a7dae997aec3e8b4a7b.json": "bb068a754e4d308cec9f31538e1434a4ecbc1608e08cde4b472cec0d2dcca45d",
+            "coding/tool_applications/62125b95b69b469ba310c8e7d3058fb3.json": "420766f026b4a1fd81eb5c60b35d4d2f06f65e60b678bf94b5b82e706657c724",
+            "coding/tool_applications/72c301b610994b6a8acdebe94ba527dc.json": "93c61ae24b6687e1ff52a2e72f68435730d1f00d374df611134a21aa6dc2fc2d",
+            "coding/tool_applications/7f2caa53274a44a29dfebf44f3a18073.json": "cff6d00b031586c0c7769a47b5a763d7598021122658e759f87d46735ffcc0f6",
+            "coding/tool_applications/85571a60ae0c4487806001646c6c38ff.json": "5b167e3de0e2fc456e9d57acd66e422eb1caa8d540b0377c76aa2c41e448dceb",
+            "coding/tool_applications/8d71356e8d8d412290f927d37981c036.json": "19f9661e050f4f2a6bb9890d4260ade40bd68c45ebd421f6b4c456c322aff143",
+            "coding/tool_applications/90915202bed2491fb6510b1392bcf668.json": "e34bb4b4a128ffd071c8bf0888d0d47a38b0fbf972ad0eb0907bfd05348c1966",
+            "coding/tool_applications/a7d3c0fa957c4c47bd1b6b94bfe5f4f9.json": "9687d5023f31994b7d58147240964dd48a2ebd1c02598e4dbdadafeb390754e4",
+            "coding/tool_applications/ae80d04c658b49d8b5b69a1f5001ade6.json": "a2a904b3fc55ca05acdeaeb00f2eb1ae9f1bb7ff7e8d3c08f1f260b3e0a5c760",
+            "coding/tool_applications/b0566bc26beb49939f4625a989fbb01a.json": "7029ea5b56180d65c01d0e7907805f9e2d4e219b69ad78c1902837225185022f",
+            "coding/tool_applications/bea073520c8746e4baae296d17a3d26e.json": "266e9b35ee8050fabe360aaffd376af2d4df311bdc755c22c22b609ea26c4ef9",
+            "coding/tool_applications/ce7d5c868f234b2aacfacfc44b9c78f1.json": "a55fba2d73c4463c610d7ad0e7ea8b2264b53f19a5ec2d45899684d3feecc4c2",
+            "coding/tool_applications/d19978c015f74857a426b979f8f34d6c.json": "cc3e728787d353e67edb9e98fd7f37f3ab200c1c259227032c39ac2df503e7c5",
+            "coding/tool_applications/d57b6be0831a42e092283b483f18ff13.json": "efe4ee8ac9e7d885fb1833aaf0980532cd08ac4a085d814245f3d9c31e4aa36e",
+            "coding/tool_applications/d772ed62a8ab46aca508a6afccf01ed2.json": "4b7c4ec744c89204e587a6b166f2a447a4dfe33347be0fb43616882501d31c05",
+            "coding/tool_applications/d9607ca657b74efdbc304ad0240aabee.json": "5be14050aa9c22df2d6c7ea98668885d7cd9c8a4134218282a2d9116f028c58e",
+            "coding/tool_applications/f6f8134e99564f998bc16a1c563c1009.json": "f0ba68b7d7a461e077181d2d0e17a8af722e601a0f6a0d89b10143ff054f8d22",
+            "coding/tool_applications/fb7d632c6b6444638cc5d424fc4b4319.json": "44cc6fb511aaf8e5fc367911b5c15a8534857dc3a50425eb5a23693ad32f165d",
+            "coding/tool_applications/fea9ba939c3e46b8b65a01b3f6bcf3d0.json": "f744422b6b5078a385996fd067320f58f3ea9aeb300d03c6b4028f49589afbe0",
+            "context/trace_manifest.v2.json": "d525105b804aa1d37ff90d9d946d3942007249f7fc0a18df2d6eec0a15cdd9c2",
+            "events/tool_calls.jsonl": "7dbed754831edbbabd8c7ba635bb20e96ef638bc6d7ce79702b490b4c26c575c",
+            "events/tool_events.jsonl": "4dae2127fb7e526b3b7eb93b250a306c305ddec401481791fc10039231d7a39c",
+            "idea/progress.jsonl": "6f529628f056a83c1eab6deb3263301539dcbc88f1e5e11d0d77830fa99d31fb",
+            "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+            "idea/research/tool_results.v1.json": "963435476bc3a64304f484aef61e0811820d9835bfb302d4ae229b9c64a00f54",
+            "idea/research_delegations/7d1a1b7fa6f34b46b2ef484c9f685af2/failure.json": "960e2f588f34964f826b5910aac805ab04680aee1a6e3b0b015fb5587bf3abc2",
+            "idea/research_delegations/7d1a1b7fa6f34b46b2ef484c9f685af2/progress.jsonl": "333ef7a8c73278697cee00d1b942cbeb7228af23024314db980688df2697e6ba",
+            "idea/research_delegations/7d1a1b7fa6f34b46b2ef484c9f685af2/request.json": "cd57ecd917c419c3a38562d70b9a2a2f294df5283b64d0ffb9c93588093a0909",
+            "idea/research_delegations/94f7c7d0ffbd4fd28f18ec889b2c1c27/failure.json": "5a9492509afb21728e5b693a6190f3d73756ad09f4d70d0214664b58d79a67ae",
+            "idea/research_delegations/94f7c7d0ffbd4fd28f18ec889b2c1c27/progress.jsonl": "7ebcaa4fe8c8b1f790ac36da6891e82fb60498723ce47b588692fffba22e025c",
+            "idea/research_delegations/94f7c7d0ffbd4fd28f18ec889b2c1c27/request.json": "7413118c2cfa6163c432edd1620803bc2be83b594550064725d7867a69ea1751",
+            "idea_research/research/downloads/4842b7bb232442adb59ca0e2ea5019aa.read.json": "9ad464e9bb634d4d184550c7ce0ba610d55850f62a6879461dfce6ceb0c6327c",
+            "idea_research/research/downloads/6164283fd266492b9f1137f89e0c808f.read.json": "15d8f8672b6339ad15d9f1d941b1459c2b656a4de376141d5b42dd4ceb1636d0",
+            "idea_research/research/downloads/66a197ce6c2d4f6b8f7d983542ac20a2.read.json": "0de8e55270fe69b798637ab61ca7044f59870f5f2cb71f1456fa64421dd59677",
+            "idea_research/research/downloads/75f2229de20e4c8a975f1924f3a0e789.read.json": "0cc31a2405f9071afb1a56fa21c1401fe3e90c7fdea8e2ab6f8a36ee1fd23108",
+            "idea_research/research/downloads/76a62869bd3648d184445ed3c169da69.read.json": "9551f8b8e5d07860ea1fa2766c72166e8e44154e22a39d6e0e7ffb6b02c1aa9d",
+            "idea_research/research/downloads/b000fbb941cf40d2b0fb76a3e64768db.read.json": "bee3e0729c3dd19835db8031d688d6658c6e635af89ad871c687e49b1eed1ee6",
+            "idea_research/research/downloads/b0d5259db33447b8ac7e1041c95e9b3b.read.json": "fa14e7a41202d24a5a69814a26bd07f775494bac986bf7b84b22bd2c34f23992",
+            "idea_research/research/downloads/c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27.pdf": "c7c6efe1df919b5673eb689379f73a0477f3a4743807fb41f7764a1434438c27",
+            "idea_research/research/downloads/dd3f2822bc914dfc9d3129294b63e616.read.json": "bf4e9bf645e59d705bfa5be181b0c3acf0cc4639d56cd4129f0e81bf9028b991",
+            "idea_research/research/downloads/e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8.pdf": "e1662fcc4ffa2b0b58d5c6bca81a141189cf4085955d31b270eaced2c6c460d8",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "fe3cf0b4d1ba338bcf0e6eabfd18fb5fef6707d950ed68dcde33b182047376c2",
+            "idea_research/research/searches/160bcd7e8b7288b93e6465aedb959e1180c5427771bfea4c2a305e3fd0b17942.json": "2e2f5180411c8453f41dea14441e790169b6d299a4ab7f0be5b8881634c77ea8",
+            "idea_research/research/searches/42d9e03dfea7f1d3dab52ad043d619d6749605d656fdf286fa128d12bd42e2a6.json": "bef24ebdead00e616429837930b1afebd326b90a2fa23286d6c107a764e07686",
+            "idea_research/research/searches/4c2ed70aba4500934ac1b5000f35d36b457f4fdc1728805dad208ef559db5a02.json": "7417d8b5e223750d3eebf714b04c4a8f823dee01c56579934c13f980f74fdaaf",
+            "idea_research/research/searches/6dec90c98160c02e4dad5698ad4444d99d8516c5ff4aa63820de4ca917d34c40.json": "827366422eb103fb34c847d76f81a30e5a7786b64cf283e517f3327fbc53a2c0",
+            "idea_research/research/searches/95aa1cc0705c544bd22e8d29646aa81067d24f0521d07f86d5f1143ae1637a8d.json": "35f006b6559f012d5fe5e9a817f667faa5be20d8d545eecc49ca9980f03122e0",
+            "idea_research/research/searches/e04fb2e12480307c9d34c473302f61fbebfef53d427e41354895b612a756860f.json": "4e614ed3f32cbd1b401cbfc997798e7edfe729a9fcb98a6b5bcb400dc2c1a0ed",
+            "input/request.json": "b39f19c775281d13b52954ebf81f98c88237ab78857ab5c8d206edec17c14138",
+            "memory/_retrieval_receipts/13a8761265664ef7a6756d3eda465d3e.json": "466e84eea2c343e24e36d47e82de53e8d84623adaa3415ad5119825f25df66c3",
+            "memory/_retrieval_receipts/140fed2072ee46819a9de990f8bd3ca4.json": "a8e2671eb611e4c64137e3769d339cbd4da18ccb39d1bdcd02d46c33c596ec7c",
+            "memory/_retrieval_receipts/2d89c0af91214dd892186fd6e8061fba.json": "59d48ac6cb716b0470410f9385e5d392a0e572086814ce7af2b62e4b569694f4",
+            "memory/_retrieval_receipts/4285cc31a6ce4ca7a98fc65495f3fff5.json": "d1d3eda6c377390cfa377b9e3da7c89ebaee69ec3ca21d8d07610cfdb5660295",
+            "memory/_retrieval_receipts/450496d4140241a4933b9f70143fda8d.json": "e53e6264ce2715c30d0456d3cfb028810b9dd9f646422509edc9fc6fdeece4cb",
+            "memory/_retrieval_receipts/5aed2f88f9d54651b5b6ef69d60186dc.json": "45a7910322ff5730efe0794a7950efed56c44eee718641f3c08f7404d197ed49",
+            "memory/_retrieval_receipts/6da9d8cf22234e25843e28a9ca53bbc3.json": "5b4735be1be106593d0c955f9b5dc0d7260c81eefaa6979367ad05e0569a9e16",
+            "memory/_retrieval_receipts/72a9b31cd4d6489f9bbb9b236e3373a0.json": "d5bf20ba71ac8a4d03afa474712847f3e734e6811bf8e505653e6dddfd70f379",
+            "memory/_retrieval_receipts/8ac77f2c8d92434fb472ccfecffabc70.json": "6b38bee77cfe8363bd57f4e7ec46e21cf509fadc0e9a9deecce2aadc66baa4b0",
+            "memory/_retrieval_receipts/97431a73e51f4ad2826608e506630d90.json": "51051ca348434f14029f042dae6c7d62f850af0dc7e7b6aeab147e8f77042fbc",
+            "memory/_retrieval_receipts/a74b3ba9a3a64461b2e6df571d016a80.json": "c16b6d6913233271b1c932fb32c5b73e73664c57e6f68b7f1368479e10c4d039",
+            "memory/_retrieval_receipts/aed5cfd3a976433ca304cb035af8e437.json": "f7f62debaacda9410c620816caff6904df881013a40e8b7aa56b8ea8f5a36b79",
+            "memory/_retrieval_receipts/b080dd88ac784824a5147a279dc8df28.json": "146423c0f8f236bd68c3bf832e8e76da6175bd95f8b637b7690608101d60f70b",
+            "memory/_retrieval_receipts/be73dfb3501d469d8395b56e31dd805c.json": "a605bcb6b5be78b39f0db5d17a24121348541a28229a4e3e2f48f65089526867",
+            "memory/_retrieval_receipts/beb32e36907a48b8aac54b7c96bd67a2.json": "d5bf20ba71ac8a4d03afa474712847f3e734e6811bf8e505653e6dddfd70f379",
+            "memory/_retrieval_receipts/cc51297f387347ecb3a4ccd89880a9b3.json": "b394514591116a606653d2fdf063ab38c13c57bc41d00a46c5ec81f8662c12ce",
+            "memory/_retrieval_receipts/f37a450e2e114c7ab1a64e165db173da.json": "382fab37641f3a0e12a456f8104707568bb713fef2a22ba21fe0333ae00c75a9",
+            "memory/_retrieval_receipts/fbcfb7ff3121447b88a1d793c0a181e5.json": "c9b87c831ea45fb8efa5749c6df39ffb5e4c45b57a8a9ab9e9f8ee07b0b5bac3",
+            "memory/_retrieval_receipts/fbdacde553b24638be5af06a3645aa48.json": "127538f1e896c94b7fd1663378080bef6b3f1e2c13a198b86ce0e0c4683313ad",
+            "memory/_retrieval_receipts/fd6f0028d7cb4148a2a2cab934e2109f.json": "4002c9548a80e8af7968c14569c1fdc7b4f1eb53ba1f1607c5c253d0d7fc602b",
+            "memory/_semantic_graph.json": "4fe907efd8d885bb507b7f25b8464dc56fd983094ce156af9049675ed77b2e56",
+            "memory/literature/_arxiv_cache/09e967ad12c1372a837246b5.json": "510021bdf6c5ec943ddc7daf150358c20ef373eb9819df1fb2a1fb19d019a70d",
+            "memory/literature/_arxiv_cache/0dba9f2cfb5678bb7166aa16.json": "a67ba83beb71897e40541e776b4ad18c5c118f6e21017f7c7a082d99935e0d72",
+            "memory/literature/_arxiv_cache/266d5b4fcbc15f517df31fad.json": "1053c346a069b1c1b9c0c9dcfb305df0023407685fd5f298f6e2a8305caee718",
+            "memory/literature/_arxiv_cache/600adec23e048c7a3ae81f89.json": "f77887e90711091d74083515a4abe568022e3bbd8420cd2cd279dc9d5bbd1536",
+            "memory/literature/_arxiv_cache/8be3f9f9280f439219019d9b.json": "3fa0566ce00a3a894b1efa4f529aad4118d098a5f02576dcb1b55294dbbe4b1a",
+            "memory/literature/_arxiv_cache/a3edef02e36aab5e4ab1bf7f.json": "ce9e1b694fa717d662e7fe45f3f8f7861cc0ebaa734e5679a6e44055b8253d87",
+            "memory/literature/_arxiv_cache/cb68de05b0d504928dc65b82.json": "884943a0e0d15efa6d649e6e3474183a0750dc81e3cf1cecb77d59fb93e69b10",
+            "memory/literature/_arxiv_cache/e665f3dbc4bd2cc69bbe87d1.json": "6bbc064f977b6e5857f99dd379f14c5927349f1133feb1019b15084928278e46",
+            "memory/literature/_index.json": "e2540de155aab2dcae0be735519f399052b3be935b656399a50bab9898fbd7aa",
+            "research_findings.json": "d69ae32abf083067b905d55adf5c7a41a487cc6e9a7bfb7a3fc521788b18c726",
+            "review.md": "feef10a2114111699f4f8ae7c0bfcbe93d3ce1cf2e22cbd1ce5167dd5f9eead1",
+            "summary.json": "3f14d3b9144d3a01969caa59bd8f9d1c6a23fbaab1a690b19f406f190c6cad1a"
+          },
+          "pro_comparison_injected": false,
+          "conclusion": "本轮确实读到两篇相关论文和8个页窗口，但可复用的已验证研究报告仍为0。来源与引文协议、恢复判断和主输出格式失败阻止进入完整方案审查；未验证草稿中另有可具体修正的节点预算/迁移歧义。"
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/checkpoint.json": "8f9f0ebead917b68acc9ba00bf7b540f382ddcc42342756ee948ad094279a077",
+        "agent_traces/idea/01be88073c5445aea5afc57070c3b4d0/events.jsonl": "bf458932857a6987e95e388d085a68e691f6f479c1a6e521b74a01a515460b9b",
+        "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/checkpoint.json": "4a73914819c334b1d3c3d5b45a0140d11aba442f044ed5aef8e6c29878c540d8",
+        "agent_traces/idea_research/7d1a1b7fa6f34b46b2ef484c9f685af2/events.jsonl": "fc39b66ccd45025cf0fdab92006bd9a85972e8600c2ef5c509ea1b2f01e651ee",
+        "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/checkpoint.json": "940b551dc7d90ab2b6577a2b2af7fb14deafc4ccb6950e4a62a73338ce37f451",
+        "agent_traces/idea_research/94f7c7d0ffbd4fd28f18ec889b2c1c27/events.jsonl": "8fc1466f2b0bb46f559744a651376152d60a61cbab3a85d8c4f32e9d87be0bf0",
+        "all_traces_audit.json": "b055344b27e0fe0a1a4cce8dfc4d10c57fab57429de46d397b0448e20eb276c9",
+        "input/request.json": "b39f19c775281d13b52954ebf81f98c88237ab78857ab5c8d206edec17c14138",
+        "manual_research_review.json": "58ae84c9ed4cef777a2095f93af45ea624c4c1c93e32bd2d00be4d2d095c1b65",
+        "summary.json": "3f14d3b9144d3a01969caa59bd8f9d1c6a23fbaab1a690b19f406f190c6cad1a"
+      }
+    },
+    {
+      "run_id": "idea_research_20260908T163806_d3e93e",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 1295.7188859590024,
+      "counts": {
+        "action_rounds": 27,
+        "model_requests": 37,
+        "model_responses": 37,
+        "observations": 27,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 37,
+        "tool_dispatches": 27,
+        "validation_repairs": 10
+      },
+      "usage": {
+        "completion_tokens": 97548,
+        "prompt_tokens": 718525,
+        "total_tokens": 816073
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 9,
+        "unique_downloaded_contents": 3,
+        "unique_pdf_publications_with_visible_pages": 3,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 45
+      },
+      "attempt_counts": {
+        "action_rounds": 27,
+        "model_requests": 37,
+        "model_responses": 37,
+        "observations": 27,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 37,
+        "tool_dispatches": 27,
+        "validation_repairs": 10
+      },
+      "attempt_known_usage": {
+        "completion_tokens": 97548,
+        "prompt_tokens": 718525,
+        "total_tokens": 816073
+      },
+      "cumulative_duration_seconds": 1295.7188859590024,
+      "accounting_note": "counts/usage include inherited history once; attempt_counts/attempt_known_usage contain only this invocation's increments. Unknown earlier usage stays unknown.",
+      "source_commit": "ba9438757a51545e766aa2af72ccf24287aa308b",
+      "source_tree": "111790baba9f2f9d0a756e4be6b7d791a04f64b1",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T163806_d3e93e",
+      "separate_review_records": {
+        "manual_quality_review.json": {
+          "reviewer": "independent Codex agent /root/framework_review",
+          "review_time_utc": "2026-09-08T17:04:46.001921+00:00",
+          "run_id": "idea_research_20260908T163806_d3e93e",
+          "run_root": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/research_quality_20260908/idea_research_20260908T163806_d3e93e",
+          "source_commit": "ba9438757a51545e766aa2af72ccf24287aa308b",
+          "source_tree": "111790baba9f2f9d0a756e4be6b7d791a04f64b1",
+          "source_dirty_at_start": false,
+          "models": {
+            "lead": "deepseek-v4-pro",
+            "child": "deepseek-v4-pro"
+          },
+          "scope": "Frozen run 12 only. No code edits, Agent feedback, injected research answers, model calls, or use of run 11 evidence. These manual reviews do not alter host acceptance.",
+          "run_status": "failed",
+          "scientific_validation": false,
+          "downstream_delivery": false,
+          "original_files_sha256": {
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/checkpoint.json": "dcfd56902bc1c132da6a8ab0fb741bc2f073f815f4ff94c27700074e8f7a57a1",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/events.jsonl": "95ab482c61b152cda7a72fe6b07dd94449ae268e604ff9a18f65ac86fbd4a6e3",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/facts.json": "f2d6eacef7f0ebdc5b7d7bbba0d59432cf5b98d93fcc5c85f71bda2d50946e4b",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0001.json": "bcddee93d4ccab3413c3fd95a4bb69781bdd0b2d7d13988155e15f548c34f018",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0002.json": "cf2c904507f90b5d5478a745d141392d265ed786dd2cd69126f11b76a3c3036f",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0003.json": "bc6082150afdd45caaecfd337be10231f86e5593833dfe3b7190fc8169fe307b",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0004.json": "452cb53bea558ffaa55f3392a2cdae827da0e6780051694d1f00d3af4c6af74e",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0005.json": "94a7211126fd537300a876acb01ffa3b548ad1cc6e1a2b09b64bbc109923cbca",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/checkpoint.json": "b44eb1b1934ce7754dcc1e7e5c7bde0be109b66a00fe8dfd4619a279ee6f92b3",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/events.jsonl": "8fbd93786692d64f829fb9244195f33c4f1f61a3d65b16f3367a21e94b5361d6",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/facts.json": "319ecb647600c1d2e6d2e77e6eceea3fde1b6453bad71f1a2e7f1dab088589d6",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0001.json": "3a82488481e34d910b849299d9800d73f991b07f3de715bad78a1fd47967d11e",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0002.json": "95e74bdd6b21cdebd680e416c50ef47364ac06eb72573e2e980ba478603144c7",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0003.json": "135efdeb08da3adef7652e6113c653998f37928cc3ce8ce39d101b86717b1393",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0004.json": "01259993d640d89919a5c6a2e2b37a5890fe62cca96e160786aacc2b8d95bb17",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0005.json": "8a50e63554ac43ff9c61c05e570ea556c34137560d06cb39110911ce8342e110",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0006.json": "1044ec03bafae446fc2bfccacfd36da6fe66b594c76696ba06ccdd8144fe0ff3",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/checkpoint.json": "32efbf3a9e73e247867bd49b4c042fdf9de0a997e7079e45935fc151cd50c73a",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/events.jsonl": "db31e2035da81d5c23e7b481d97fc8e91776c21d5b7a50123ac0bc59e7145ae2",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/facts.json": "5b4ed6855ba6fd48f187c5e9c983203fda585d7a6e4d26e1256a88b70de485ef",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0001.json": "992e20f06dc23b70f4dad1e1dae8c82d203992d9f269e164dea70e6e1c3f229b",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0002.json": "3e8924b73c5ac4460c9b9c3c927b5c0a1d2a2f490aaf75173a5938ef2ca59801",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0003.json": "0b4d5f8aa78479b5ed8b1479ea00d3c898b56a093f38770b51e3c0113c7aa7e5",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0004.json": "b5bf665470f8206c90708af84c8c20661eba68d55b287ccf1cf8127022e6f776",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0005.json": "3dd14efc0b0d5d23954ae02664ea9ca81b9d03219aada260c90030fed0ff20d6",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0006.json": "b908e83da0d9b1c9ebbbd78f30ab690ba996afd04b1b36457daa09cca37c9061",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0007.json": "a30bd054c7fbee6bb0cbbff1b73bfa36fb24ac38305c5a400090eabd2687dcb3",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0008.json": "9d3edd6d7dba3035a70f460383108f2539f952e2ea8f9a2571d40668782260d6",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0009.json": "8fd19c712c5566f95c5b2e5ac14e698e5c14b4e53aa5d75edd4dab368e9150c8",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0010.json": "60c711890ed07a3e32b2fb719330a5728e2d13c31a0e51bd6efdf188f2944d94",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/checkpoint.json": "c530b8415f9b3452918987a48691c4c10bc72b92024e8de924ec1dc10c8c2db6",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/events.jsonl": "469d54070f155b6f381e70eb793f7fb486b1c337210207c90b226869ee058c97",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/facts.json": "07ca2993b2615d803460b072c7c419e38ac7449dcabc27762af1c2c6a6a470e3",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0001.json": "03f6a639630fd90cdda4e886e27d188859b8033de01bcef5082bdd2b28b93a59",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0002.json": "c4686f17da2cb9dd4c2fba8309628cd8a91f8cb32a127f435a3663d7b1fc1b6f",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0003.json": "252a0e2cc9f2c2f036a713acd54dbce51298a7346367299267e7a14d0888d46b",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0004.json": "2ead76ec655a38d6e7012e80d6408213a25279b4ed156008c29d3d4b7aadefbb",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0005.json": "85452baaa7a7261910112a422902cff8c2ec7ddacf006bb784f954cf0d9c0a51",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0006.json": "b89f9d385320a6fc50bd13a25cdf981d2827061271a216df4fa0316dcaff97e8",
+            "all_traces_audit.json": "e079829e295447f061dd9f8c1a73265f586b2e35bf78bfb5a0c39f5765ab0935",
+            "coding/tool_applications/036ab89f0da84ceba934252278a44938.json": "1283d802a6ba3e25fd179ed3c4dc0fdbd213fae86b732003f970acf2aa9a07f5",
+            "coding/tool_applications/05c41a16cb474ae588ca499d72abe5a6.json": "f96b7ce9296f112e82cb7165b9a118ee2ea8deb7e31d37fee4310e0e4b518d4a",
+            "coding/tool_applications/0fd39baae5144606aa30cac78f7c767d.json": "fb34ca58aff15cbd22f6cea7f770594685d674ad7bc42e915099a7c788a211d1",
+            "coding/tool_applications/10c0d453127d41979f62be63ba5e19be.json": "9f85114b7c4e107bea60355332ca632a75ea499cdbdeaedf567241e490eb33ea",
+            "coding/tool_applications/2f1bf0b9b0ba45a5bd5e8873b0e42cb5.json": "4bc79094245fa0598b5c2897a8d1ae54d574d807959ba9334a2310cedcbdb9e7",
+            "coding/tool_applications/3676cc073d694446adef73a1c2ec367f.json": "d20542d9ac8cfa70a94bc427d3712c9a7cd964ed25c20c2de13a08d135ca1ecd",
+            "coding/tool_applications/37ed252458214a8aaa8a58b2b67ed194.json": "1f3b7e6c5db1e8b7af78dace016bf45e5686bb3afa78d383679eb17e8fa9a24a",
+            "coding/tool_applications/4061d48baf2e4b20bf86a14748efd2b4.json": "e8110423509cdbe5b369ef3ef98fc0143299ee20fe1f382bde88a2394f1a1e07",
+            "coding/tool_applications/5c38b5f1d0da478b84389d09f09c57b1.json": "6055e7c33396ea452798a87ab4a51c41725932651ba5b5cfde1c3c37a1ac919a",
+            "coding/tool_applications/5cd234f6cfa1456a9b48f7dd820c1799.json": "9d411eeaf43d4859bd9e12a91e855822c4ccf4a9d506df7d0aa45bcca4167051",
+            "coding/tool_applications/6f97640789fa4f598412caafac7c7398.json": "04a437ae6a38b9adfecc592b9f8572fbecdbed1e41fb2e8a3c4918d2a9b16593",
+            "coding/tool_applications/75b3aca4452c462cbb4abcf59662cd89.json": "54d15b0a7cba231ce7e2fe951d9a5b991dfbaacb617e85d62fc8ecb1ce8db84e",
+            "coding/tool_applications/7e3b50bf85f84aaa83109e4e4f3ec014.json": "32127e403e428da9af78801feb7ac2016151a00074a9cd137dd4aee49a097d4e",
+            "coding/tool_applications/8b8bac86997941b7be13fa849f980415.json": "f6772f489c6f1ba0e7ba91564c8b01cacbd5a3654671f9e64cf503c46db2b486",
+            "coding/tool_applications/97458ad0d1f243c88f05852350dd9f6e.json": "33fed8f8c114a6f3ae6e4b2d94625e01a23866bbd7077ec152936018f6c80075",
+            "coding/tool_applications/a37ce23af095423c874ea8297b3d49d7.json": "06d437b24610f7fbc9cc59112c009862f982fb4c35e42a1d24bd0ecd6299f199",
+            "coding/tool_applications/a8f1d17baf644bdb9c60555315963022.json": "778b9eb6a87ffdcaaf5f56d697a909ddc9f4b4eac477f1b1c59141423ae5cf5c",
+            "coding/tool_applications/aa911be5904b4156976fecb460011953.json": "038b80241a0eea9164dae89b91dae934534045c76c3f784d0e7d640e4aab40bc",
+            "coding/tool_applications/c3ce0eec7fa645439ccb06898da4fe71.json": "94f403beaeb3ff41e5d65f647c43e0e4acafb0eeb6ee24b0fc6915ddb343279b",
+            "coding/tool_applications/c98478d91fea4f4e865ee6499e0d4c23.json": "ff07c310d1a2d479ac430e71518e44c824609265d24d70b9163b06aaaf79315e",
+            "coding/tool_applications/d2ba1ba6106f4ef3a9d5acdfcdd64e92.json": "ce57932bd84de4a9071648cd4e1774ee6a9f392b0c4980c0bb191090da7cc4f1",
+            "coding/tool_applications/ded8259ca5da4c459c567fcdb92bc2d5.json": "b6eeeabc93cafeedb08bf3f8e8c9dddf92b811854276fedd48c50afa9d01df86",
+            "coding/tool_applications/e0c06b5a6f6044cf8a0c597310ceebcc.json": "851e141ee8a814d5d3a42f960af6c55ae7b71e04162fc2788f3f9453da55d979",
+            "coding/tool_applications/e1829a5b4aa94e17aa7d397a82f3e9dd.json": "aa21a40be1fc5f35b853706fd11777c94088443ef929b15fa7cac9cea094d5bf",
+            "coding/tool_applications/e3d203ca8cc94f0fb78e7d16ea50837b.json": "c0341c7b4f85c74fe93c3c9f238a4146b10bb8577aa4af5763e64ad64a178772",
+            "coding/tool_applications/ef4044d3c840470994762632d850a508.json": "1f5c8021e3a20db75f7d31de4781d07cb4a9c529f800214c8afaf3a4a56449cf",
+            "coding/tool_applications/ffa70c7524884b11ae5abaaa0f2d289a.json": "a77cd0d1951805cdc15fb96254ebe48e18802af96ff2cd8f1fdc3761a3a819bd",
+            "context/trace_manifest.v2.json": "59449cada04abe75f1f57ff648d3972a975dcf6759018b467e98ece793a62146",
+            "events/tool_calls.jsonl": "6332f0110df22d3b88e99b19fdc7cce8fe54cde11492c2e2238df4636cbf96ab",
+            "events/tool_events.jsonl": "adb4133aa725e64ec0610fd3c2d50c8c48759dbe93247617dd2158a43b6f8ca5",
+            "idea/progress.jsonl": "ae2af57ee76d62ad1277c025704e1c4a493ad26b5a59f3639dbff0984a87ff05",
+            "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+            "idea/research/tool_results.v1.json": "dc17919585b98909d6f1689d61d9da2fcb3b57b3e4e8078a4af223004131a82d",
+            "idea/research_delegations/9fa062bc7ac445b9a9d1adaa3c966056/progress.jsonl": "70d99a1c0b31bb1750885de273df0f55559968780da20b2455fbd0961be483e1",
+            "idea/research_delegations/9fa062bc7ac445b9a9d1adaa3c966056/request.json": "f8824051a9c23caefe594aa7bbcdba1c6dbfb4bd69e55ae90f2412fd5bba42eb",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/failure.json": "3cb49f927b94add96c4685f69e6889af75b3b81a2931ef29a73395766056d1ef",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/progress.jsonl": "29d07408239267155cb295b3403746151dab6c76b4f35e9811e32007fa57e1d9",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/request.json": "6677ebef72ad02775a32cad98efa5aff7dd8c18bce613d5f9a5f92768a7bf58b",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/failure.json": "847968dbefd014172b78b5fffc779573a534de4d6cd89d2b6f31f63933281a3a",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/progress.jsonl": "657f16f7387f31fa501130b90ce4e584614d40fb55eac263daae92b23c5cb037",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/request.json": "9ce2fb464363cca3f493ca22ceba74054c6c3b14da342a3164542916c39d4a8a",
+            "idea/validation/24848350f20b496b81076180f29496c9.json": "5b3e21b10bf7047bf819371a6a8de763d6976cb7994efb02354255a88e771d49",
+            "idea_research/research/downloads/03b34dc78e6c4828a107ed52c98b8ed5.read.json": "fc004d381243f816a46bf7398b0818e3d7fbda5425fb068fc3d0f14976867041",
+            "idea_research/research/downloads/1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799.pdf": "1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799",
+            "idea_research/research/downloads/60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91.pdf": "60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91",
+            "idea_research/research/downloads/62cbec98910a407c9847b92343517c2a.read.json": "90628d254a0e782e782c8acd7b4ad362019f7b4a048a1cfe1cd391441f455545",
+            "idea_research/research/downloads/ae15249d43f1489b8544f993157a7add.read.json": "14140bfef939671c7884b612824e15dae4a96dfc9f582a6693ae8f02dec5357a",
+            "idea_research/research/downloads/b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b.pdf": "b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b",
+            "idea_research/research/downloads/b6625c471e3041ad845405343da27298.read.json": "55c5f979552d682e304c4086e8f6d663b72b0ae686e059585824daca49c689b0",
+            "idea_research/research/downloads/ba4b7be0e4b443cea49225530861c28c.read.json": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+            "idea_research/research/downloads/da100310ff7045bbbb814531b292fc96.read.json": "13ff4bd70f6921948339554497f627773c3a46345751a3cbcc513382e5954db6",
+            "idea_research/research/downloads/e0eced3e3420457d8f447d3c05b72035.read.json": "e61f2d4da3ff0697f52ee9e38907dec8e1a517596381007e18bdc74ecab22ce3",
+            "idea_research/research/downloads/e201fd04b11b4e14936c67752216264f.read.json": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+            "idea_research/research/downloads/e61e04e324a145209d91f538a847d580.read.json": "262596ea35071680c97a27cec09903c0268566129b66fb90a826175bbddba64e",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "4c33b0f21cd837152b79bef31687e7f4dc4f1a2a1d294a2b8c105ae2efda7af5",
+            "idea_research/research/searches/0476f28cadc3523b14eafc08902a6bc41a841e9cd96004f55c1c25b08f50c9ce.json": "48be9b4dc3060f9d933de9229a52fb0678c4aaec7643654077c7f93d14feb361",
+            "idea_research/research/searches/bed3e949d1f38b48e5f92fa35dc7de8b001334b4ff1e7b2ea8e9f181322173f5.json": "cb2fded39d5c515ef7c3c4851aaf88cbed21b30020ddf4431bab3d98388cb6b8",
+            "input/request.json": "d683db1cadc10cd21281a642cddd5d663e1063a0c10d2943a765f10e46520f5b",
+            "memory/_retrieval_receipts/01fa3154a7e946e6b68de14df39f8c75.json": "2389a07d33c62339e17528924f9955a6d29091a2120093a269eeba8a465f2566",
+            "memory/_retrieval_receipts/188470f2831e4df9bd575023bc78b089.json": "161c3a03a9d2a2b2674829f87c73d8259304217783582bebc286fa8db3d0b4ea",
+            "memory/_retrieval_receipts/200e6fa9769747d68612c1d3a9cb0623.json": "2fa86eb5809327c263d19d7ab78053f37938bdfb853d3d8d344c24687613bda4",
+            "memory/_retrieval_receipts/247f334b14f64f439b4394638cf1b621.json": "8b956f9d07375a0766ed23a0ee05359c441776d0f80988288a95ff118ac281be",
+            "memory/_retrieval_receipts/2eeca9c8f58547ff8408233a401a104c.json": "7e001172e3a3020371b405418e031bf84dfa13a6b67f8d5d0ba5e9985e828879",
+            "memory/_retrieval_receipts/3745613a502947918efd5fbcc54969fd.json": "9b6c7189859566745c3be6b448764a740fa7135ff046dab8bed7f27ff2156e97",
+            "memory/_retrieval_receipts/51953c6ee982461e8602b9ec3d84f5f4.json": "a696cf5a0a462163683ffbeefa3ef406129de9c435d8b3b56d8513adc714da15",
+            "memory/_retrieval_receipts/5fa56deccef64c63a0c6df1735f56a3d.json": "833a7888948c8ed477a4cb1c251c6593e58b90f05be2f71b42f6c4cd768d3122",
+            "memory/_retrieval_receipts/66770083a1d84ea7a25772354f412fa0.json": "36cf9b1b3d333bf29676210bf95c8277d8fdb8af634fa0198714f41e68ce4a58",
+            "memory/_retrieval_receipts/68dd823c688f4cfa97fd4adab75c1da7.json": "2c83a2bd3c6e1ea214a101e2665b1bec5128b4be8a93c548421e532b6ac15375",
+            "memory/_retrieval_receipts/69c71368cb184253bc4d6121bed4ceed.json": "d03a593a5ba272a8579b41c8b4c931517a265e9b533b91c0c440b56e55a5dd91",
+            "memory/_retrieval_receipts/6acb40b4e8bc431e8129d367bc3a92ac.json": "7c70c5a72ee0c06934cc86f703aba270c4765af6d263e7f60c7a2019be17736f",
+            "memory/_retrieval_receipts/6acd4345ea9b4ca0acdad5db33dcc88a.json": "5978618548c49c806ec6feda498f98235f1a5440fcd92eb37530ed8287d4ccf1",
+            "memory/_retrieval_receipts/70239f790fd6405b9ba750296b57c742.json": "3fbea10642df366b200076ffeac769e22ffbe0e6e9a366934331aef789e46c10",
+            "memory/_retrieval_receipts/7ccdc3068eb44f24944a1cdc34a4acbd.json": "c7b7eef3fd2f75165dd50dfaeebfea11cc07d50da6556be8f56d7d8d2c6a4f46",
+            "memory/_retrieval_receipts/82d5ffe3c6fa42e6bc38dee1d4498e77.json": "15c7da390eabfd285c8e5a74feeddf6ab5f8092c6e8350c5c6ea41baf588ace1",
+            "memory/_retrieval_receipts/8befdd99fdeb4093a4c900860c073b45.json": "b353db541f0a687cbdfe75ee0c6311db4a95f5ba4059e228fd6db9aa6e2441cb",
+            "memory/_retrieval_receipts/8c510de4bf544905a86f1a29a07ff017.json": "0179dcc2ff9efebbb64f3694a94805952e7fb51cfbd83fb50cdec402494700e4",
+            "memory/_retrieval_receipts/99bf66cc751d4472896420f5bc0930d7.json": "2de02c07968a9a863d5ab009b9de39e90feea5392c0095e38fbaa5e216c2eed2",
+            "memory/_retrieval_receipts/9eb52994633e49548e45eb1cccf90c85.json": "67fb4ae409f4292a2696b67219a580c7cb1e83dbea3a369bb78e6a3545853994",
+            "memory/_retrieval_receipts/a26248261bb044669ed2803412483e3c.json": "f3ed6a1139037e5d9ebbfeb76e2e4b58bcb791b96bdff8227eaf575bb5b4ffa7",
+            "memory/_retrieval_receipts/ae5df145448247b498d74e087103c8f6.json": "fd22e2cb9421dbe279acfdbb2a54a9f35bde7a01f0e91505d2528ebbe9d47402",
+            "memory/_retrieval_receipts/b83bf481215e4cfd8a7ebaad6f6e70a2.json": "45908119e2951808ffb441955468f1a6d7cbdf72b0dd01d96c410bc1fd0498a3",
+            "memory/_retrieval_receipts/b8cb7d5ad53244b8a4e26b7dfa6fccf7.json": "5a66eaebd8eb41933d13a81ad088b9f8620f3defe99b251eaec0721ea6296ca2",
+            "memory/_retrieval_receipts/bbb12b9567f54759a9d315599592af7d.json": "a0285586d2a5de17b339ad9d29fe3cc2a4c9858b434f9e33782d7d215e7ec5ba",
+            "memory/_retrieval_receipts/c0a22dff9c51461a8104b306f618bbed.json": "611e9cace917fd43ba9ad24de29445561a57d966f34394aafbceabe9fd9509e7",
+            "memory/_retrieval_receipts/c9f880d7d2ba4546b87d5e0a53929163.json": "b79942bc9884a1ca4d9b2f9609b983bfb13c0013c31925723b0138c6904aead7",
+            "memory/_retrieval_receipts/ccf14be8e397404da32489e617bf536d.json": "dc24fc440d5018452f7c631e0bf029f0c0f1f482676085ffdfe835cc75011800",
+            "memory/_retrieval_receipts/d091c9face384e82887221ad74ea3b58.json": "d57b25984d9642c03e70a3683d226b701133d742518bd4126f4f400d25e330e2",
+            "memory/_retrieval_receipts/ebf55cff22ce4de39ae3094f95984349.json": "664c6e8d30e289129f2a73f3995d98faf9f10fc80d4a39968d2dbfbad6fe79a8",
+            "memory/_retrieval_receipts/f11a6fd1b5544ab5a311b5911a2f17e2.json": "4a6d32e3d7c1649ae89c5fa8436448161d3afec352af84b15b0520c88b11397d",
+            "memory/_retrieval_receipts/f1659a7a21ce402abf535f6def6e5146.json": "ef7a8a47e1be7f13cc47f6bca4769c80c79574e5f12b4f9ce68f88a788ffdc1a",
+            "memory/_semantic_graph.json": "8a9a0c8d809c01c584d453cb2d6cdd936c7a3d5522da1c516f2cbc530e5ba7aa",
+            "memory/literature/_arxiv_cache/2508397815b85a91d11f7159.json": "37925096724e6d665bd6d2ec2317df002427d601d74bec87d4c7a24ce5619ed0",
+            "memory/literature/_arxiv_cache/266d5b4fcbc15f517df31fad.json": "ee458d5d81688fead0edcb8b61cea4a86f7661718a8960b3221f7715f72b2faf",
+            "memory/literature/_arxiv_cache/5c33363e073f9c53b948d5ea.json": "08430220a87c04d965b2e16353de703bcc21cd612c7441c630badad4657edf50",
+            "memory/literature/_arxiv_cache/6674c8cab14683aa9cec3e3d.json": "a9883e10db6750fd2427670df6494687486a850b54981d6658bfedd13062eddc",
+            "memory/literature/_arxiv_cache/693d1910a21bde579bf208ff.json": "05193f425eefd11748c6a8867811f87975f405d699bac66a0a249930228a9d43",
+            "memory/literature/_arxiv_cache/6c6d0958bce48b9beb59d4f7.json": "dc72cbc184ddf9a09eeeadcdf58694848c264cc851aef7c14f1fc8563c451c68",
+            "memory/literature/_arxiv_cache/7985f499e33aca2696e555ca.json": "f327924bfe7086d453a3a419b0be926901db5a554d099574b38555342695b9ee",
+            "memory/literature/_arxiv_cache/a74204da9acaa4d4cf591487.json": "e3e2159b6d8a4d115c0f39329c14a49d708511e28446556ca6ddb38ddcab2d69",
+            "memory/literature/_arxiv_cache/e428c65b3e98c293e83b8a49.json": "2048f6ff0158facfa5174e2800cff47b8b99472a8080da76bf717efae0f78414",
+            "memory/literature/_arxiv_cache/fd0a5dfaac15ad7edcd532b0.json": "386d7e0bb5bc9aab696b6b2da845107ef8d0b3a9f1511c07ef17740b5ffc64d3",
+            "memory/literature/_index.json": "cd58fc34b8a0434ab3d0b33e6ce5eb2e7e8e6f4adf58130494ece813469bc266",
+            "research_findings.json": "a4ab4502d98ce97bad5f9d958f7d91af8d829f1e46c013c8d26de99cee1f5d82",
+            "review.md": "34dda5240fc5b3247c2da22ef63326d92e297ebf793df1a69a8b0db46b88ba5a",
+            "summary.json": "e4e82c3412c25decab9113783f5bd3e0ef640414af17920c23c1f827b53464b0"
+          },
+          "original_file_integrity": {
+            "original_file_count": 145,
+            "verified_before_review_write": true,
+            "verified_after_review_write": true
+          },
+          "schema": "manual_quality_review.v1",
+          "verdict": "not_accepted",
+          "passed": false,
+          "proposal_artifact": null,
+          "reviewed_candidate": {
+            "path": "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/checkpoint.json",
+            "json_pointer": "/candidate",
+            "sha256": "fc5a0699192856333b9e0b6ec9f125e0f5cd1264149a1aad9238fa154ab2af7e",
+            "hash_encoding": "UTF-8 candidate text",
+            "host_candidate_sha256": "1f3c66edad432aa4ec8b90f6866df362d367f98edc1fadf42ea56f51f00640f8",
+            "host_hash_encoding": "canonical JSON string as used by agent_loop.trace.digest",
+            "host_status": "evidence_unavailable",
+            "schema_valid": false,
+            "reflection_count": 0,
+            "accepted": false
+          },
+          "host_validation_issues": [
+            "/research_links: complete a real research delegation before submitting; no verified report exists",
+            "/research_assessment: research_links/0 does not resolve in a trusted report",
+            "/research_assessment: research_links/1 does not resolve in a trusted report",
+            "/research_assessment/source_decisions/0: source does not exist in the named trusted delegation",
+            "/research_assessment/source_decisions/0/insight_ids: insight does not belong to this source and delegation",
+            "/research_assessment/source_decisions/0/insight_ids: adopted insights must exactly match this source's research_links",
+            "/research_assessment/source_decisions/1: source does not exist in the named trusted delegation",
+            "/research_assessment/source_decisions/1/insight_ids: insight does not belong to this source and delegation",
+            "/research_assessment/source_decisions/1/insight_ids: adopted insights must exactly match this source's research_links",
+            "/research_assessment/source_decisions/2: source does not exist in the named trusted delegation",
+            "/evaluation_protocol/datasets: train and held-out datasets cannot share a canonical spec_ref",
+            "/related_literature/0: URL/title not matched to a real search result",
+            "/related_literature/1: URL/title not matched to a real search result",
+            "/related_literature: need 2 distinct retrieved cited sources; observed 0",
+            "/evidence: need 2 source-matched downloaded PDFs with visible page excerpts"
+          ],
+          "summary": "The run did not produce an accepted proposal or Experiment handoff. A complete candidate exists only inside the frozen checkpoint and contains an implementable core idea plus unresolved source and experiment-contract defects.",
+          "positive_checks": [
+            "The main candidate preserves a scalar 2D bilinear forward operation and the requested [-1,1]^2 domain.",
+            "Its primary tensor ledger is internally consistent: 15*15+2*14=253 actual trainable real scalars, within the 256 budget; baseline remains 16*16=256.",
+            "Fourteen positive normalized widths produce 15 nodes per axis, including -1 and +1; the written tie and final-endpoint cell handling matches the declared 15-node candidate and 16-node baseline in exact arithmetic.",
+            "Uniform width initialization with independently random coefficients permits a loss path to widths through interpolation weights; the formula is not a hard-index-only attempt.",
+            "Three ablations honestly count 225 (frozen knots), 28 (frozen coefficients), and 239 (shared axis widths) trainables. Lower counts are permitted and are not penalized; no dummy parameters are required.",
+            "The proposal defines a synthetic target, an MSE objective, a fixed-step Adam configuration, five seeds, paired lower-is-better comparisons, and accept/reject/inconclusive cases. It explicitly avoids claiming a completed PIMC simulation.",
+            "Human and structured outputs are both present in the candidate, and the Markdown body matches human_summary; their presence is not host acceptance."
+          ],
+          "findings": [
+            {
+              "id": "Q1",
+              "priority": "P1",
+              "title": "Research links and claimed adopted insight identities have no trusted report",
+              "fields": [
+                "/research_links",
+                "/research_assessment/source_decisions",
+                "/research_assessment/stopping_reason"
+              ],
+              "detail": "All three delegations failed. The lead candidate nevertheless cites unaccepted delegation IDs and invented insight IDs (learnable_knot_shift_sorted and spline_grid_learnable_approximator) rather than actual accepted report identifiers. It acknowledges failed reports but treats visible excerpts as sufficient for the required trusted handoff. The host correctly rejected these references.",
+              "required_correction": "Obtain accepted research reports and copy their exact source/insight identities into a new proposal. Do not rewrite old receipts or turn a failed run into an accepted one."
+            },
+            {
+              "id": "Q2",
+              "priority": "P1",
+              "title": "The claimed baseline-cell sampling and canonical split references conflict",
+              "fields": [
+                "/method_spec/baseline/grid",
+                "/method_spec/data_sampling",
+                "/evaluation_protocol/datasets"
+              ],
+              "detail": "The baseline has 16 nodes and 15 intervals per axis, hence 225 cells. data_sampling instead says 16x16 baseline cells times 8 = 2048 training points, and 16x16 times 2 = 512 validation points. A real baseline-cell construction would yield 1800 and 450; an independent 16x16 stratum construction can yield the stated counts but needs its own boundaries and cannot be called baseline cells. All three data roles also point to the same /method_spec/data_sampling, which the host rejected.",
+              "required_correction": "Give separate canonical train/validation/test definitions with exact stratum boundaries, counts, target binding and seeded random construction. Use 15x15 actual baseline cells if claiming guaranteed baseline-cell coverage, or explicitly define the separate strata and prove the intended coverage."
+            },
+            {
+              "id": "Q3",
+              "priority": "P2",
+              "title": "The hand-expanded coefficient gradient disagrees with the canonical MSE",
+              "fields": [
+                "/method_spec/objective_mse",
+                "/ablation_plan/0/description"
+              ],
+              "detail": "For L=(1/N)*sum_n(f_n-y_n)^2, the written equality dL/dC=sum_n(f_n-y_n)*basis_weight omits 2/N. The canonical loss plus autodiff is sufficient, but this redundant equality supplies a conflicting optimization instruction.",
+              "required_correction": "Remove the redundant derivative or include (2/N). Keep the same canonical scalar objective for both arms."
+            },
+            {
+              "id": "Q4",
+              "priority": "P2",
+              "title": "The proposed validation early stopping has no executable contract",
+              "fields": [
+                "/method_spec/optimizer",
+                "/risk_register/0/mitigation",
+                "/evaluation_protocol/arms"
+              ],
+              "detail": "The canonical optimizer says 2000 full-batch steps. The risk mitigation adds validation early stopping, while arms only reference test assessment and no patience, validation interval, best-checkpoint rule or tie behavior is defined. Implementers must choose between different training procedures.",
+              "required_correction": "Use the declared fixed 2000-step procedure throughout, or define one canonical early-stopping rule with validation references and make every compared arm use it."
+            },
+            {
+              "id": "Q5",
+              "priority": "P2",
+              "title": "A knot-width question points to an MSE-only decision rule",
+              "fields": [
+                "/handoff/verification_requirements/2",
+                "/decision_rule",
+                "/testable_predictions/1"
+              ],
+              "detail": "vr3 asks whether widths near (0.5,0.3) are below 1/7, but points to the sole rule whose metric and paired test are test MSE. The width neighborhood/aggregation and its statistical criterion are not defined by that rule.",
+              "required_correction": "Either label knot concentration as a precisely defined descriptive diagnostic outside the MSE acceptance gate, or give it an explicit coherent comparison and decision contract."
+            },
+            {
+              "id": "Q6",
+              "priority": "P2",
+              "title": "The human summary presents the hoped-for benefit as an outcome",
+              "fields": [
+                "/human_summary",
+                "Markdown body"
+              ],
+              "detail": "The summary says the change thereby improves approximation ability. No experiment was executed. The method limits correctly call the benefits untested, but the human-facing sentence needs the same qualification. Also, the 28 trainables are raw interval-width parameters, not 28 independently movable interior knot coordinates.",
+              "required_correction": "Say the widths may improve approximation and will be tested, and label the 28 raw width parameters accurately."
+            },
+            {
+              "id": "Q7",
+              "priority": "P2",
+              "title": "An alternative is rejected using an inaccurate structural claim",
+              "fields": [
+                "/alternatives/1/reason"
+              ],
+              "detail": "Factorizing C=sum_r u_r*v_r^T constrains the coefficient matrix but need not replace bilinear interpolation or remove its local support in input space. Factor updates can influence many coefficients, which is a different limitation. The stated rejection conflates coefficient coupling with the forward interpolation stencil.",
+              "required_correction": "Reject the low-rank arm on clearly stated rank/optimization/budget tradeoffs or a testable underfitting hypothesis; keep the bilinear stencil separate from global parameter coupling."
+            }
+          ],
+          "additional_limits": [
+            "The normalized positive-width construction gives no fixed positive minimum spacing and needs a numerically stable softplus implementation for an actual experiment; no stability guarantee was accepted here.",
+            "This review does not reject the candidate merely because frozen ablations have fewer parameters, because sources come from KAN rather than exact 2D-LUT tasks, or because benefits await experiments.",
+            "No actual datasets, optimizer runs, scientific metrics, approved handoff, product API run, or downstream Agent execution were produced by this review."
+          ],
+          "acceptance": {
+            "human_output_present": true,
+            "structured_candidate_present": true,
+            "schema_valid": false,
+            "research_reports_accepted": 0,
+            "model_reflection_passed": false,
+            "manual_quality_passed": false,
+            "experiment_handoff_delivered": false,
+            "scientific_validated": false
+          }
+        },
+        "manual_research_review.json": {
+          "reviewer": "independent Codex agent /root/framework_review",
+          "review_time_utc": "2026-09-08T17:04:46.001921+00:00",
+          "run_id": "idea_research_20260908T163806_d3e93e",
+          "run_root": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/research_quality_20260908/idea_research_20260908T163806_d3e93e",
+          "source_commit": "ba9438757a51545e766aa2af72ccf24287aa308b",
+          "source_tree": "111790baba9f2f9d0a756e4be6b7d791a04f64b1",
+          "source_dirty_at_start": false,
+          "models": {
+            "lead": "deepseek-v4-pro",
+            "child": "deepseek-v4-pro"
+          },
+          "scope": "Frozen run 12 only. No code edits, Agent feedback, injected research answers, model calls, or use of run 11 evidence. These manual reviews do not alter host acceptance.",
+          "run_status": "failed",
+          "scientific_validation": false,
+          "downstream_delivery": false,
+          "original_files_sha256": {
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/checkpoint.json": "dcfd56902bc1c132da6a8ab0fb741bc2f073f815f4ff94c27700074e8f7a57a1",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/events.jsonl": "95ab482c61b152cda7a72fe6b07dd94449ae268e604ff9a18f65ac86fbd4a6e3",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/facts.json": "f2d6eacef7f0ebdc5b7d7bbba0d59432cf5b98d93fcc5c85f71bda2d50946e4b",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0001.json": "bcddee93d4ccab3413c3fd95a4bb69781bdd0b2d7d13988155e15f548c34f018",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0002.json": "cf2c904507f90b5d5478a745d141392d265ed786dd2cd69126f11b76a3c3036f",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0003.json": "bc6082150afdd45caaecfd337be10231f86e5593833dfe3b7190fc8169fe307b",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0004.json": "452cb53bea558ffaa55f3392a2cdae827da0e6780051694d1f00d3af4c6af74e",
+            "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/tools/0005.json": "94a7211126fd537300a876acb01ffa3b548ad1cc6e1a2b09b64bbc109923cbca",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/checkpoint.json": "b44eb1b1934ce7754dcc1e7e5c7bde0be109b66a00fe8dfd4619a279ee6f92b3",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/events.jsonl": "8fbd93786692d64f829fb9244195f33c4f1f61a3d65b16f3367a21e94b5361d6",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/facts.json": "319ecb647600c1d2e6d2e77e6eceea3fde1b6453bad71f1a2e7f1dab088589d6",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0001.json": "3a82488481e34d910b849299d9800d73f991b07f3de715bad78a1fd47967d11e",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0002.json": "95e74bdd6b21cdebd680e416c50ef47364ac06eb72573e2e980ba478603144c7",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0003.json": "135efdeb08da3adef7652e6113c653998f37928cc3ce8ce39d101b86717b1393",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0004.json": "01259993d640d89919a5c6a2e2b37a5890fe62cca96e160786aacc2b8d95bb17",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0005.json": "8a50e63554ac43ff9c61c05e570ea556c34137560d06cb39110911ce8342e110",
+            "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/tools/0006.json": "1044ec03bafae446fc2bfccacfd36da6fe66b594c76696ba06ccdd8144fe0ff3",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/checkpoint.json": "32efbf3a9e73e247867bd49b4c042fdf9de0a997e7079e45935fc151cd50c73a",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/events.jsonl": "db31e2035da81d5c23e7b481d97fc8e91776c21d5b7a50123ac0bc59e7145ae2",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/facts.json": "5b4ed6855ba6fd48f187c5e9c983203fda585d7a6e4d26e1256a88b70de485ef",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0001.json": "992e20f06dc23b70f4dad1e1dae8c82d203992d9f269e164dea70e6e1c3f229b",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0002.json": "3e8924b73c5ac4460c9b9c3c927b5c0a1d2a2f490aaf75173a5938ef2ca59801",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0003.json": "0b4d5f8aa78479b5ed8b1479ea00d3c898b56a093f38770b51e3c0113c7aa7e5",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0004.json": "b5bf665470f8206c90708af84c8c20661eba68d55b287ccf1cf8127022e6f776",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0005.json": "3dd14efc0b0d5d23954ae02664ea9ca81b9d03219aada260c90030fed0ff20d6",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0006.json": "b908e83da0d9b1c9ebbbd78f30ab690ba996afd04b1b36457daa09cca37c9061",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0007.json": "a30bd054c7fbee6bb0cbbff1b73bfa36fb24ac38305c5a400090eabd2687dcb3",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0008.json": "9d3edd6d7dba3035a70f460383108f2539f952e2ea8f9a2571d40668782260d6",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0009.json": "8fd19c712c5566f95c5b2e5ac14e698e5c14b4e53aa5d75edd4dab368e9150c8",
+            "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/tools/0010.json": "60c711890ed07a3e32b2fb719330a5728e2d13c31a0e51bd6efdf188f2944d94",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/checkpoint.json": "c530b8415f9b3452918987a48691c4c10bc72b92024e8de924ec1dc10c8c2db6",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/events.jsonl": "469d54070f155b6f381e70eb793f7fb486b1c337210207c90b226869ee058c97",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/facts.json": "07ca2993b2615d803460b072c7c419e38ac7449dcabc27762af1c2c6a6a470e3",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0001.json": "03f6a639630fd90cdda4e886e27d188859b8033de01bcef5082bdd2b28b93a59",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0002.json": "c4686f17da2cb9dd4c2fba8309628cd8a91f8cb32a127f435a3663d7b1fc1b6f",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0003.json": "252a0e2cc9f2c2f036a713acd54dbce51298a7346367299267e7a14d0888d46b",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0004.json": "2ead76ec655a38d6e7012e80d6408213a25279b4ed156008c29d3d4b7aadefbb",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0005.json": "85452baaa7a7261910112a422902cff8c2ec7ddacf006bb784f954cf0d9c0a51",
+            "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/tools/0006.json": "b89f9d385320a6fc50bd13a25cdf981d2827061271a216df4fa0316dcaff97e8",
+            "all_traces_audit.json": "e079829e295447f061dd9f8c1a73265f586b2e35bf78bfb5a0c39f5765ab0935",
+            "coding/tool_applications/036ab89f0da84ceba934252278a44938.json": "1283d802a6ba3e25fd179ed3c4dc0fdbd213fae86b732003f970acf2aa9a07f5",
+            "coding/tool_applications/05c41a16cb474ae588ca499d72abe5a6.json": "f96b7ce9296f112e82cb7165b9a118ee2ea8deb7e31d37fee4310e0e4b518d4a",
+            "coding/tool_applications/0fd39baae5144606aa30cac78f7c767d.json": "fb34ca58aff15cbd22f6cea7f770594685d674ad7bc42e915099a7c788a211d1",
+            "coding/tool_applications/10c0d453127d41979f62be63ba5e19be.json": "9f85114b7c4e107bea60355332ca632a75ea499cdbdeaedf567241e490eb33ea",
+            "coding/tool_applications/2f1bf0b9b0ba45a5bd5e8873b0e42cb5.json": "4bc79094245fa0598b5c2897a8d1ae54d574d807959ba9334a2310cedcbdb9e7",
+            "coding/tool_applications/3676cc073d694446adef73a1c2ec367f.json": "d20542d9ac8cfa70a94bc427d3712c9a7cd964ed25c20c2de13a08d135ca1ecd",
+            "coding/tool_applications/37ed252458214a8aaa8a58b2b67ed194.json": "1f3b7e6c5db1e8b7af78dace016bf45e5686bb3afa78d383679eb17e8fa9a24a",
+            "coding/tool_applications/4061d48baf2e4b20bf86a14748efd2b4.json": "e8110423509cdbe5b369ef3ef98fc0143299ee20fe1f382bde88a2394f1a1e07",
+            "coding/tool_applications/5c38b5f1d0da478b84389d09f09c57b1.json": "6055e7c33396ea452798a87ab4a51c41725932651ba5b5cfde1c3c37a1ac919a",
+            "coding/tool_applications/5cd234f6cfa1456a9b48f7dd820c1799.json": "9d411eeaf43d4859bd9e12a91e855822c4ccf4a9d506df7d0aa45bcca4167051",
+            "coding/tool_applications/6f97640789fa4f598412caafac7c7398.json": "04a437ae6a38b9adfecc592b9f8572fbecdbed1e41fb2e8a3c4918d2a9b16593",
+            "coding/tool_applications/75b3aca4452c462cbb4abcf59662cd89.json": "54d15b0a7cba231ce7e2fe951d9a5b991dfbaacb617e85d62fc8ecb1ce8db84e",
+            "coding/tool_applications/7e3b50bf85f84aaa83109e4e4f3ec014.json": "32127e403e428da9af78801feb7ac2016151a00074a9cd137dd4aee49a097d4e",
+            "coding/tool_applications/8b8bac86997941b7be13fa849f980415.json": "f6772f489c6f1ba0e7ba91564c8b01cacbd5a3654671f9e64cf503c46db2b486",
+            "coding/tool_applications/97458ad0d1f243c88f05852350dd9f6e.json": "33fed8f8c114a6f3ae6e4b2d94625e01a23866bbd7077ec152936018f6c80075",
+            "coding/tool_applications/a37ce23af095423c874ea8297b3d49d7.json": "06d437b24610f7fbc9cc59112c009862f982fb4c35e42a1d24bd0ecd6299f199",
+            "coding/tool_applications/a8f1d17baf644bdb9c60555315963022.json": "778b9eb6a87ffdcaaf5f56d697a909ddc9f4b4eac477f1b1c59141423ae5cf5c",
+            "coding/tool_applications/aa911be5904b4156976fecb460011953.json": "038b80241a0eea9164dae89b91dae934534045c76c3f784d0e7d640e4aab40bc",
+            "coding/tool_applications/c3ce0eec7fa645439ccb06898da4fe71.json": "94f403beaeb3ff41e5d65f647c43e0e4acafb0eeb6ee24b0fc6915ddb343279b",
+            "coding/tool_applications/c98478d91fea4f4e865ee6499e0d4c23.json": "ff07c310d1a2d479ac430e71518e44c824609265d24d70b9163b06aaaf79315e",
+            "coding/tool_applications/d2ba1ba6106f4ef3a9d5acdfcdd64e92.json": "ce57932bd84de4a9071648cd4e1774ee6a9f392b0c4980c0bb191090da7cc4f1",
+            "coding/tool_applications/ded8259ca5da4c459c567fcdb92bc2d5.json": "b6eeeabc93cafeedb08bf3f8e8c9dddf92b811854276fedd48c50afa9d01df86",
+            "coding/tool_applications/e0c06b5a6f6044cf8a0c597310ceebcc.json": "851e141ee8a814d5d3a42f960af6c55ae7b71e04162fc2788f3f9453da55d979",
+            "coding/tool_applications/e1829a5b4aa94e17aa7d397a82f3e9dd.json": "aa21a40be1fc5f35b853706fd11777c94088443ef929b15fa7cac9cea094d5bf",
+            "coding/tool_applications/e3d203ca8cc94f0fb78e7d16ea50837b.json": "c0341c7b4f85c74fe93c3c9f238a4146b10bb8577aa4af5763e64ad64a178772",
+            "coding/tool_applications/ef4044d3c840470994762632d850a508.json": "1f5c8021e3a20db75f7d31de4781d07cb4a9c529f800214c8afaf3a4a56449cf",
+            "coding/tool_applications/ffa70c7524884b11ae5abaaa0f2d289a.json": "a77cd0d1951805cdc15fb96254ebe48e18802af96ff2cd8f1fdc3761a3a819bd",
+            "context/trace_manifest.v2.json": "59449cada04abe75f1f57ff648d3972a975dcf6759018b467e98ece793a62146",
+            "events/tool_calls.jsonl": "6332f0110df22d3b88e99b19fdc7cce8fe54cde11492c2e2238df4636cbf96ab",
+            "events/tool_events.jsonl": "adb4133aa725e64ec0610fd3c2d50c8c48759dbe93247617dd2158a43b6f8ca5",
+            "idea/progress.jsonl": "ae2af57ee76d62ad1277c025704e1c4a493ad26b5a59f3639dbff0984a87ff05",
+            "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+            "idea/research/tool_results.v1.json": "dc17919585b98909d6f1689d61d9da2fcb3b57b3e4e8078a4af223004131a82d",
+            "idea/research_delegations/9fa062bc7ac445b9a9d1adaa3c966056/progress.jsonl": "70d99a1c0b31bb1750885de273df0f55559968780da20b2455fbd0961be483e1",
+            "idea/research_delegations/9fa062bc7ac445b9a9d1adaa3c966056/request.json": "f8824051a9c23caefe594aa7bbcdba1c6dbfb4bd69e55ae90f2412fd5bba42eb",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/failure.json": "3cb49f927b94add96c4685f69e6889af75b3b81a2931ef29a73395766056d1ef",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/progress.jsonl": "29d07408239267155cb295b3403746151dab6c76b4f35e9811e32007fa57e1d9",
+            "idea/research_delegations/bddb8b67f7844fa88db4a1c2589972b6/request.json": "6677ebef72ad02775a32cad98efa5aff7dd8c18bce613d5f9a5f92768a7bf58b",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/failure.json": "847968dbefd014172b78b5fffc779573a534de4d6cd89d2b6f31f63933281a3a",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/progress.jsonl": "657f16f7387f31fa501130b90ce4e584614d40fb55eac263daae92b23c5cb037",
+            "idea/research_delegations/f2d58c4255e1495798158fc744e9f3d9/request.json": "9ce2fb464363cca3f493ca22ceba74054c6c3b14da342a3164542916c39d4a8a",
+            "idea/validation/24848350f20b496b81076180f29496c9.json": "5b3e21b10bf7047bf819371a6a8de763d6976cb7994efb02354255a88e771d49",
+            "idea_research/research/downloads/03b34dc78e6c4828a107ed52c98b8ed5.read.json": "fc004d381243f816a46bf7398b0818e3d7fbda5425fb068fc3d0f14976867041",
+            "idea_research/research/downloads/1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799.pdf": "1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799",
+            "idea_research/research/downloads/60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91.pdf": "60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91",
+            "idea_research/research/downloads/62cbec98910a407c9847b92343517c2a.read.json": "90628d254a0e782e782c8acd7b4ad362019f7b4a048a1cfe1cd391441f455545",
+            "idea_research/research/downloads/ae15249d43f1489b8544f993157a7add.read.json": "14140bfef939671c7884b612824e15dae4a96dfc9f582a6693ae8f02dec5357a",
+            "idea_research/research/downloads/b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b.pdf": "b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b",
+            "idea_research/research/downloads/b6625c471e3041ad845405343da27298.read.json": "55c5f979552d682e304c4086e8f6d663b72b0ae686e059585824daca49c689b0",
+            "idea_research/research/downloads/ba4b7be0e4b443cea49225530861c28c.read.json": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+            "idea_research/research/downloads/da100310ff7045bbbb814531b292fc96.read.json": "13ff4bd70f6921948339554497f627773c3a46345751a3cbcc513382e5954db6",
+            "idea_research/research/downloads/e0eced3e3420457d8f447d3c05b72035.read.json": "e61f2d4da3ff0697f52ee9e38907dec8e1a517596381007e18bdc74ecab22ce3",
+            "idea_research/research/downloads/e201fd04b11b4e14936c67752216264f.read.json": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+            "idea_research/research/downloads/e61e04e324a145209d91f538a847d580.read.json": "262596ea35071680c97a27cec09903c0268566129b66fb90a826175bbddba64e",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "4c33b0f21cd837152b79bef31687e7f4dc4f1a2a1d294a2b8c105ae2efda7af5",
+            "idea_research/research/searches/0476f28cadc3523b14eafc08902a6bc41a841e9cd96004f55c1c25b08f50c9ce.json": "48be9b4dc3060f9d933de9229a52fb0678c4aaec7643654077c7f93d14feb361",
+            "idea_research/research/searches/bed3e949d1f38b48e5f92fa35dc7de8b001334b4ff1e7b2ea8e9f181322173f5.json": "cb2fded39d5c515ef7c3c4851aaf88cbed21b30020ddf4431bab3d98388cb6b8",
+            "input/request.json": "d683db1cadc10cd21281a642cddd5d663e1063a0c10d2943a765f10e46520f5b",
+            "memory/_retrieval_receipts/01fa3154a7e946e6b68de14df39f8c75.json": "2389a07d33c62339e17528924f9955a6d29091a2120093a269eeba8a465f2566",
+            "memory/_retrieval_receipts/188470f2831e4df9bd575023bc78b089.json": "161c3a03a9d2a2b2674829f87c73d8259304217783582bebc286fa8db3d0b4ea",
+            "memory/_retrieval_receipts/200e6fa9769747d68612c1d3a9cb0623.json": "2fa86eb5809327c263d19d7ab78053f37938bdfb853d3d8d344c24687613bda4",
+            "memory/_retrieval_receipts/247f334b14f64f439b4394638cf1b621.json": "8b956f9d07375a0766ed23a0ee05359c441776d0f80988288a95ff118ac281be",
+            "memory/_retrieval_receipts/2eeca9c8f58547ff8408233a401a104c.json": "7e001172e3a3020371b405418e031bf84dfa13a6b67f8d5d0ba5e9985e828879",
+            "memory/_retrieval_receipts/3745613a502947918efd5fbcc54969fd.json": "9b6c7189859566745c3be6b448764a740fa7135ff046dab8bed7f27ff2156e97",
+            "memory/_retrieval_receipts/51953c6ee982461e8602b9ec3d84f5f4.json": "a696cf5a0a462163683ffbeefa3ef406129de9c435d8b3b56d8513adc714da15",
+            "memory/_retrieval_receipts/5fa56deccef64c63a0c6df1735f56a3d.json": "833a7888948c8ed477a4cb1c251c6593e58b90f05be2f71b42f6c4cd768d3122",
+            "memory/_retrieval_receipts/66770083a1d84ea7a25772354f412fa0.json": "36cf9b1b3d333bf29676210bf95c8277d8fdb8af634fa0198714f41e68ce4a58",
+            "memory/_retrieval_receipts/68dd823c688f4cfa97fd4adab75c1da7.json": "2c83a2bd3c6e1ea214a101e2665b1bec5128b4be8a93c548421e532b6ac15375",
+            "memory/_retrieval_receipts/69c71368cb184253bc4d6121bed4ceed.json": "d03a593a5ba272a8579b41c8b4c931517a265e9b533b91c0c440b56e55a5dd91",
+            "memory/_retrieval_receipts/6acb40b4e8bc431e8129d367bc3a92ac.json": "7c70c5a72ee0c06934cc86f703aba270c4765af6d263e7f60c7a2019be17736f",
+            "memory/_retrieval_receipts/6acd4345ea9b4ca0acdad5db33dcc88a.json": "5978618548c49c806ec6feda498f98235f1a5440fcd92eb37530ed8287d4ccf1",
+            "memory/_retrieval_receipts/70239f790fd6405b9ba750296b57c742.json": "3fbea10642df366b200076ffeac769e22ffbe0e6e9a366934331aef789e46c10",
+            "memory/_retrieval_receipts/7ccdc3068eb44f24944a1cdc34a4acbd.json": "c7b7eef3fd2f75165dd50dfaeebfea11cc07d50da6556be8f56d7d8d2c6a4f46",
+            "memory/_retrieval_receipts/82d5ffe3c6fa42e6bc38dee1d4498e77.json": "15c7da390eabfd285c8e5a74feeddf6ab5f8092c6e8350c5c6ea41baf588ace1",
+            "memory/_retrieval_receipts/8befdd99fdeb4093a4c900860c073b45.json": "b353db541f0a687cbdfe75ee0c6311db4a95f5ba4059e228fd6db9aa6e2441cb",
+            "memory/_retrieval_receipts/8c510de4bf544905a86f1a29a07ff017.json": "0179dcc2ff9efebbb64f3694a94805952e7fb51cfbd83fb50cdec402494700e4",
+            "memory/_retrieval_receipts/99bf66cc751d4472896420f5bc0930d7.json": "2de02c07968a9a863d5ab009b9de39e90feea5392c0095e38fbaa5e216c2eed2",
+            "memory/_retrieval_receipts/9eb52994633e49548e45eb1cccf90c85.json": "67fb4ae409f4292a2696b67219a580c7cb1e83dbea3a369bb78e6a3545853994",
+            "memory/_retrieval_receipts/a26248261bb044669ed2803412483e3c.json": "f3ed6a1139037e5d9ebbfeb76e2e4b58bcb791b96bdff8227eaf575bb5b4ffa7",
+            "memory/_retrieval_receipts/ae5df145448247b498d74e087103c8f6.json": "fd22e2cb9421dbe279acfdbb2a54a9f35bde7a01f0e91505d2528ebbe9d47402",
+            "memory/_retrieval_receipts/b83bf481215e4cfd8a7ebaad6f6e70a2.json": "45908119e2951808ffb441955468f1a6d7cbdf72b0dd01d96c410bc1fd0498a3",
+            "memory/_retrieval_receipts/b8cb7d5ad53244b8a4e26b7dfa6fccf7.json": "5a66eaebd8eb41933d13a81ad088b9f8620f3defe99b251eaec0721ea6296ca2",
+            "memory/_retrieval_receipts/bbb12b9567f54759a9d315599592af7d.json": "a0285586d2a5de17b339ad9d29fe3cc2a4c9858b434f9e33782d7d215e7ec5ba",
+            "memory/_retrieval_receipts/c0a22dff9c51461a8104b306f618bbed.json": "611e9cace917fd43ba9ad24de29445561a57d966f34394aafbceabe9fd9509e7",
+            "memory/_retrieval_receipts/c9f880d7d2ba4546b87d5e0a53929163.json": "b79942bc9884a1ca4d9b2f9609b983bfb13c0013c31925723b0138c6904aead7",
+            "memory/_retrieval_receipts/ccf14be8e397404da32489e617bf536d.json": "dc24fc440d5018452f7c631e0bf029f0c0f1f482676085ffdfe835cc75011800",
+            "memory/_retrieval_receipts/d091c9face384e82887221ad74ea3b58.json": "d57b25984d9642c03e70a3683d226b701133d742518bd4126f4f400d25e330e2",
+            "memory/_retrieval_receipts/ebf55cff22ce4de39ae3094f95984349.json": "664c6e8d30e289129f2a73f3995d98faf9f10fc80d4a39968d2dbfbad6fe79a8",
+            "memory/_retrieval_receipts/f11a6fd1b5544ab5a311b5911a2f17e2.json": "4a6d32e3d7c1649ae89c5fa8436448161d3afec352af84b15b0520c88b11397d",
+            "memory/_retrieval_receipts/f1659a7a21ce402abf535f6def6e5146.json": "ef7a8a47e1be7f13cc47f6bca4769c80c79574e5f12b4f9ce68f88a788ffdc1a",
+            "memory/_semantic_graph.json": "8a9a0c8d809c01c584d453cb2d6cdd936c7a3d5522da1c516f2cbc530e5ba7aa",
+            "memory/literature/_arxiv_cache/2508397815b85a91d11f7159.json": "37925096724e6d665bd6d2ec2317df002427d601d74bec87d4c7a24ce5619ed0",
+            "memory/literature/_arxiv_cache/266d5b4fcbc15f517df31fad.json": "ee458d5d81688fead0edcb8b61cea4a86f7661718a8960b3221f7715f72b2faf",
+            "memory/literature/_arxiv_cache/5c33363e073f9c53b948d5ea.json": "08430220a87c04d965b2e16353de703bcc21cd612c7441c630badad4657edf50",
+            "memory/literature/_arxiv_cache/6674c8cab14683aa9cec3e3d.json": "a9883e10db6750fd2427670df6494687486a850b54981d6658bfedd13062eddc",
+            "memory/literature/_arxiv_cache/693d1910a21bde579bf208ff.json": "05193f425eefd11748c6a8867811f87975f405d699bac66a0a249930228a9d43",
+            "memory/literature/_arxiv_cache/6c6d0958bce48b9beb59d4f7.json": "dc72cbc184ddf9a09eeeadcdf58694848c264cc851aef7c14f1fc8563c451c68",
+            "memory/literature/_arxiv_cache/7985f499e33aca2696e555ca.json": "f327924bfe7086d453a3a419b0be926901db5a554d099574b38555342695b9ee",
+            "memory/literature/_arxiv_cache/a74204da9acaa4d4cf591487.json": "e3e2159b6d8a4d115c0f39329c14a49d708511e28446556ca6ddb38ddcab2d69",
+            "memory/literature/_arxiv_cache/e428c65b3e98c293e83b8a49.json": "2048f6ff0158facfa5174e2800cff47b8b99472a8080da76bf717efae0f78414",
+            "memory/literature/_arxiv_cache/fd0a5dfaac15ad7edcd532b0.json": "386d7e0bb5bc9aab696b6b2da845107ef8d0b3a9f1511c07ef17740b5ffc64d3",
+            "memory/literature/_index.json": "cd58fc34b8a0434ab3d0b33e6ce5eb2e7e8e6f4adf58130494ece813469bc266",
+            "research_findings.json": "a4ab4502d98ce97bad5f9d958f7d91af8d829f1e46c013c8d26de99cee1f5d82",
+            "review.md": "34dda5240fc5b3247c2da22ef63326d92e297ebf793df1a69a8b0db46b88ba5a",
+            "summary.json": "e4e82c3412c25decab9113783f5bd3e0ef640414af17920c23c1f827b53464b0"
+          },
+          "original_file_integrity": {
+            "original_file_count": 145,
+            "verified_before_review_write": true,
+            "verified_after_review_write": true
+          },
+          "schema": "manual_research_review.v1",
+          "verdict": "not_accepted",
+          "passed": false,
+          "accepted_reports": [],
+          "report_sha256": null,
+          "reviewed_candidate": {
+            "kind": "embedded candidate, host source/schema validation passed but Reflection never started",
+            "path": "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/checkpoint.json",
+            "json_pointer": "/candidate",
+            "sha256": "aec7a050150d8f592685282bece2a0c73776189afd4e7dd8ffc32f195ac6d5ff",
+            "hash_encoding": "UTF-8 candidate text",
+            "host_candidate_sha256": "7b09f26cae106c3a71d6d1090f5aa1a4c39dc97b796eb3e5a9d40e9b1091d508",
+            "host_hash_encoding": "canonical JSON string as used by agent_loop.trace.digest",
+            "child_status": "error",
+            "reflection_count": 0,
+            "accepted": false
+          },
+          "actual_counts": {
+            "read_windows": 9,
+            "unique_downloaded_contents": 3,
+            "unique_pdf_publications_with_visible_pages": 3,
+            "unique_publications_with_verified_extractions": 0,
+            "unique_retrieved_publications": 45
+          },
+          "publications": [
+            {
+              "title": "KAN: Kolmogorov-Arnold Networks",
+              "pdf": "idea_research/research/downloads/60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91.pdf",
+              "pdf_sha256": "60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91",
+              "pdf_pages": 48,
+              "read_receipts": [
+                {
+                  "path": "idea_research/research/downloads/03b34dc78e6c4828a107ed52c98b8ed5.read.json",
+                  "sha256": "fc004d381243f816a46bf7398b0818e3d7fbda5425fb068fc3d0f14976867041",
+                  "visible_pages": [
+                    7,
+                    8,
+                    9
+                  ],
+                  "requested_extracted_pages": [
+                    7,
+                    8,
+                    9
+                  ],
+                  "network_download_performed": false,
+                  "reused": true
+                },
+                {
+                  "path": "idea_research/research/downloads/da100310ff7045bbbb814531b292fc96.read.json",
+                  "sha256": "13ff4bd70f6921948339554497f627773c3a46345751a3cbcc513382e5954db6",
+                  "visible_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "requested_extracted_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "network_download_performed": true,
+                  "reused": false
+                }
+              ],
+              "visible_pages": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "truncated_visible_pages": [
+                6,
+                9
+              ],
+              "network_download_count": 1,
+              "agent_full_document_read": false
+            },
+            {
+              "title": "Free-Knots Kolmogorov-Arnold Network: On the Analysis of Spline Knots and Advancing Stability",
+              "pdf": "idea_research/research/downloads/b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b.pdf",
+              "pdf_sha256": "b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b",
+              "pdf_pages": 11,
+              "read_receipts": [
+                {
+                  "path": "idea_research/research/downloads/62cbec98910a407c9847b92343517c2a.read.json",
+                  "sha256": "90628d254a0e782e782c8acd7b4ad362019f7b4a048a1cfe1cd391441f455545",
+                  "visible_pages": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ],
+                  "requested_extracted_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "network_download_performed": true,
+                  "reused": false
+                },
+                {
+                  "path": "idea_research/research/downloads/b6625c471e3041ad845405343da27298.read.json",
+                  "sha256": "55c5f979552d682e304c4086e8f6d663b72b0ae686e059585824daca49c689b0",
+                  "visible_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "requested_extracted_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "network_download_performed": false,
+                  "reused": true
+                },
+                {
+                  "path": "idea_research/research/downloads/ba4b7be0e4b443cea49225530861c28c.read.json",
+                  "sha256": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+                  "visible_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "requested_extracted_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "network_download_performed": false,
+                  "reused": true
+                },
+                {
+                  "path": "idea_research/research/downloads/e0eced3e3420457d8f447d3c05b72035.read.json",
+                  "sha256": "e61f2d4da3ff0697f52ee9e38907dec8e1a517596381007e18bdc74ecab22ce3",
+                  "visible_pages": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ],
+                  "requested_extracted_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "network_download_performed": false,
+                  "reused": true
+                },
+                {
+                  "path": "idea_research/research/downloads/e201fd04b11b4e14936c67752216264f.read.json",
+                  "sha256": "8ae0dfa7b7e42486e7de0a6726b52a08479611ae5522b5a67ae9973247441215",
+                  "visible_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "requested_extracted_pages": [
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "network_download_performed": false,
+                  "reused": true
+                },
+                {
+                  "path": "idea_research/research/downloads/e61e04e324a145209d91f538a847d580.read.json",
+                  "sha256": "262596ea35071680c97a27cec09903c0268566129b66fb90a826175bbddba64e",
+                  "visible_pages": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ],
+                  "requested_extracted_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "network_download_performed": true,
+                  "reused": false
+                }
+              ],
+              "visible_pages": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "truncated_visible_pages": [
+                4,
+                8
+              ],
+              "network_download_count": 2,
+              "agent_full_document_read": false
+            },
+            {
+              "title": "CG-FKAN: Compressed-Grid Federated Kolmogorov-Arnold Networks for Communication Constrained Environment",
+              "pdf": "idea_research/research/downloads/1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799.pdf",
+              "pdf_sha256": "1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799",
+              "pdf_pages": 5,
+              "read_receipts": [
+                {
+                  "path": "idea_research/research/downloads/ae15249d43f1489b8544f993157a7add.read.json",
+                  "sha256": "14140bfef939671c7884b612824e15dae4a96dfc9f582a6693ae8f02dec5357a",
+                  "visible_pages": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ],
+                  "requested_extracted_pages": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                  ],
+                  "network_download_performed": true,
+                  "reused": false
+                }
+              ],
+              "visible_pages": [
+                1,
+                2,
+                3,
+                4
+              ],
+              "truncated_visible_pages": [
+                4
+              ],
+              "network_download_count": 1,
+              "agent_full_document_read": false
+            }
+          ],
+          "reviewer_pdf_visual_checks": [
+            {
+              "pdf_sha256": "1de527f1894725caf7f80c56929b1bb09a6c688828f0c84290ae98bb2da23799",
+              "pages": [
+                3
+              ],
+              "scope": "Agent-visible sparsification proposition and communication-budget mechanism"
+            },
+            {
+              "pdf_sha256": "60ad4ccf034b54b38049042043f576098b45dd3e80df28a2f85001aed4466e91",
+              "pages": [
+                7
+              ],
+              "scope": "Agent-visible smooth-composition assumptions and approximation bound"
+            },
+            {
+              "pdf_sha256": "b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b",
+              "pages": [
+                4,
+                5
+              ],
+              "scope": "Page 5 matches Agent-visible text. Reviewer additionally inspected full page 4; its section 5 and equations 5/6 were NOT visible to the Agent, whose page 4 receipts end before this method section. This additional reviewer reading is not counted as Agent evidence."
+            }
+          ],
+          "questions": {
+            "how_many": "45 distinct retrieved publications according to the frozen summary; 3 distinct PDFs with visible pages across 9 read windows; 0 publications in accepted research reports. Download/read counts are not full-paper review or acceptance counts.",
+            "selection_principles": "The Agent stated gaps concerning fixed-budget interpolation order, learnable knot positions, low-rank coefficients, initialization and boundaries. These are relevant questions. First broad conjunctive searches often returned no hits. Later searches found CG-FKAN, Free-Knots KAN and other works. The original KAN PDF was read but was not actually found by the first delegation's recorded searches.",
+            "why_these_papers": "KAN can inform spline coefficients and conditional approximation analysis; CG-FKAN can inform coefficient sparsification under a communication budget, which differs from the task's total-trainable-parameter cap; Free-Knots KAN has a directly relevant learnable-grid-shift mechanism. These are defensible cross-domain starting points, provided the transfer is qualified. The final unaccepted proposal excluded CG-FKAN rather than attaching it to an irrelevant design field.",
+            "what_was_extracted": "Unaccepted candidates extracted spline coefficient expansions, a conditional KAN approximation bound, CG-FKAN sparsification, and Free-Knots KAN shifts/sorting. The final lead candidate chose normalized positive interval widths for a 15x15 bilinear LUT. No accepted report or trusted downstream link was produced."
+          },
+          "delegations": [
+            {
+              "id": "9fa062bc7ac445b9a9d1adaa3c966056",
+              "checkpoint_path": "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/checkpoint.json",
+              "status": "error",
+              "candidate_sha256": "aec7a050150d8f592685282bece2a0c73776189afd4e7dd8ffc32f195ac6d5ff",
+              "counts": {
+                "action_rounds": 6,
+                "model_requests": 9,
+                "model_responses": 9,
+                "observations": 6,
+                "protocol_repairs": 1,
+                "reflections": 0,
+                "sdk_attempts": 9,
+                "tool_dispatches": 6,
+                "validation_repairs": 1
+              },
+              "validation_issues": []
+            },
+            {
+              "id": "bddb8b67f7844fa88db4a1c2589972b6",
+              "checkpoint_path": "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/checkpoint.json",
+              "status": "evidence_unavailable",
+              "candidate_sha256": "2508df44d9c4b8a4c687cb8d4cfaf5ea38897b3dfc257a140c0874774ab58a2c",
+              "counts": {
+                "action_rounds": 10,
+                "model_requests": 11,
+                "model_responses": 11,
+                "observations": 10,
+                "protocol_repairs": 0,
+                "reflections": 0,
+                "sdk_attempts": 11,
+                "tool_dispatches": 10,
+                "validation_repairs": 3
+              },
+              "validation_issues": [
+                "/sources/0: title/URL must match a retrieved search result",
+                "/insights/0: read receipt download URL does not match the retrieved source PDF",
+                "/insights/1: read receipt download URL does not match the retrieved source PDF",
+                "/insights/2: read receipt download URL does not match the retrieved source PDF",
+                "/sources/kan: used source requires a verified extracted insight",
+                "/sources: require 2 distinct read publications; observed 1"
+              ]
+            },
+            {
+              "id": "f2d58c4255e1495798158fc744e9f3d9",
+              "checkpoint_path": "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/checkpoint.json",
+              "status": "validation_exhausted",
+              "candidate_sha256": "da1c4f42f244c29835467783776f90a8f1cf89ae623c0f132d9c62345375d790",
+              "counts": {
+                "action_rounds": 6,
+                "model_requests": 9,
+                "model_responses": 9,
+                "observations": 6,
+                "protocol_repairs": 1,
+                "reflections": 0,
+                "sdk_attempts": 9,
+                "tool_dispatches": 6,
+                "validation_repairs": 4
+              },
+              "validation_issues": [
+                "/insights/0: quote is absent from visible page 3; copy a short contiguous excerpt from that page's actual visible text, preserving words and hyphens. Untrusted locator only; does not establish support for interpretations; candidate remains invalid. visible_page_excerpt=\" Analysis of Spline Knots and Advancing Stability φ(xi) =Ab GX j=0 cjBj(xi) +AsSiLU (xi) (1) where,Ab andAs are the linear combination weights and cj are the weight of combination of each spline. The initial-ization of grid follows Uniform distribution G∼ U[a,b ], where [a,b ] is grid range. Intuiti\"",
+                "/insights/1: quote is absent from visible page 5; copy a short contiguous excerpt from that page's actual visible text, preserving words and hyphens. Untrusted locator only; does not establish support for interpretations; candidate remains invalid. visible_page_excerpt=\"ltimodal (A VMNIST, MIMIC-III), AG NEWS(Text Classification), ETTh1(Time Series Forecasting) Adding a learnable shiftbg∈ RG to grids can increase the possibility to generate more unique knots, wherebg is ran-domly initialized from range [−a+b ZG, a+b ZG ] and optimized by gradient descent to find th\"",
+                "/insights/2: quote is absent from visible page 5; copy a short contiguous excerpt from that page's actual visible text, preserving words and hyphens. Untrusted locator only; does not establish support for interpretations; candidate remains invalid. visible_page_excerpt=\"eurons, This minor shift can naturally introduce more knots located at different position. To avoid the case that positional reversal occurred between two grid point, that isgj−1 >g j, and break the mathemati-cal form of B-spline. We sorted the entire grid to maintain the grid orderg1 <g 2 <··· <g j\""
+              ]
+            }
+          ],
+          "findings": [
+            {
+              "id": "R1",
+              "priority": "P1",
+              "title": "No accepted report; the third candidate failed before Reflection",
+              "evidence": [
+                "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/events.jsonl: event_seq 63 validation valid=true",
+                "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/events.jsonl: event_seq 64 ValueError",
+                "summary.json"
+              ],
+              "detail": "The third candidate passed source/quote/schema validation, then context packing raised: pinned rules/task/schema/upstream/candidate exceed input budget; nothing was silently dropped. Earlier delegations ended evidence_unavailable and validation_exhausted. No report.md or successful research receipt exists; every Reflection count is zero.",
+              "required_correction": "Fix context packing/budget in a new source version and run a new real test. Do not mark this archived candidate accepted or retrofit a success receipt."
+            },
+            {
+              "id": "R2",
+              "priority": "P1",
+              "title": "Original KAN background equation was presented as FR-KAN's verified forward model",
+              "candidate_fields": [
+                "/human_summary",
+                "/insights/0/paper_finding",
+                "/insights/0/transfer_idea"
+              ],
+              "evidence": [
+                "FR-KAN PDF page 3 Eq(1)",
+                "FR-KAN PDF page 4 section 5.1 Eq(5), reviewed additionally by the human-facing reviewer",
+                "FR-KAN read receipts: page 4 text is clipped before section 5"
+              ],
+              "detail": "The candidate summarizes FR-KAN with independent Ab and As and derives a two-branch-scalar count from page 3 Eq(1). Page 4 explicitly introduces grouping and a shared A and calls Eq(5) the final FR-KAN architecture. Its method section was omitted from every Agent-visible page 4 window; rereads started at page 5. This is an attribution/reading gap, not a demand that the paper already solve the exact 256-parameter task.",
+              "required_correction": "Read the missing method section. Label Eq(1) as the original KAN baseline; accurately distinguish the proposed grouped/shared architecture, or explicitly adopt only the visible knot-shift mechanism without claiming a verified full FR-KAN forward/parameter ledger."
+            },
+            {
+              "id": "R3",
+              "priority": "P2",
+              "title": "Unsupported categorical claim that sorting cannot pass gradients",
+              "candidate_fields": [
+                "/insights/2/limitations/0"
+              ],
+              "evidence": [
+                "FR-KAN PDF page 5 sorting paragraph",
+                "third candidate /insights/2/limitations/0"
+              ],
+              "detail": "The source says the grid is sorted but does not claim gradients cannot propagate. Away from equal values, sorted values are locally a permutation of the inputs. For example, at z=(2,1), L=3*sort(z)[0]+5*sort(z)[1] has gradient (5,3). Nondifferentiability at ties and absent implementation details are valid limitations; a blanket no-gradient assertion is not.",
+              "required_correction": "State piecewise permutation gradients, define tie handling, and separately identify whether the source specifies its implementation. Do not confuse sorted values with discrete argsort indices."
+            },
+            {
+              "id": "R4",
+              "priority": "P2",
+              "title": "The source's initialization formula has a task-specific degenerate case",
+              "candidate_fields": [
+                "/insights/1/paper_finding",
+                "/insights/1/limitations"
+              ],
+              "evidence": [
+                "FR-KAN PDF page 5: shifts initialized in [-(a+b)/(ZG),(a+b)/(ZG)]"
+              ],
+              "detail": "The third candidate now faithfully includes G in the denominator. However, directly substituting this task's symmetric a=-1,b=1 makes the range [0,0]. The candidate should expose this ambiguity/degeneracy when discussing random shifts. The final lead candidate independently initializes normalized widths to zero and coefficients randomly, so this is not claimed to invalidate its gradient signal.",
+              "required_correction": "Separate faithful quotation from the adaptation. Specify a justified initialization for the new method without silently correcting the paper or claiming its formula creates random shifts on a symmetric interval."
+            }
+          ],
+          "discarded_candidate_observations": [
+            {
+              "delegation_id": "bddb8b67f7844fa88db4a1c2589972b6",
+              "status": "unaccepted; not counted as final research",
+              "detail": "The candidate transferred CG-FKAN's upper bound between top-coefficient and optimal sparsification to an actual o*2^o-scale loss from low-rank/sparse budget reallocation. Page 3 supports an upper-bound comparison for its stated sparsification setup, not mandatory loss, a low-rank theorem, or the 256-parameter task. KAN's page 7 bound is conditional on smooth compositional representation; fixed 256 coefficients alone do not imply an achieved error gain."
+            }
+          ],
+          "claim_boundary": "Cross-domain transfer is allowed. Missing real-task data, unmeasured gains, and lower-parameter frozen ablations are not themselves failures. The failure is the missing accepted evidence chain and the specific source-reading/interpretation errors above."
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/checkpoint.json": "dcfd56902bc1c132da6a8ab0fb741bc2f073f815f4ff94c27700074e8f7a57a1",
+        "agent_traces/idea/3c0c1017f59a4674a51cd322857f29e2/events.jsonl": "95ab482c61b152cda7a72fe6b07dd94449ae268e604ff9a18f65ac86fbd4a6e3",
+        "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/checkpoint.json": "b44eb1b1934ce7754dcc1e7e5c7bde0be109b66a00fe8dfd4619a279ee6f92b3",
+        "agent_traces/idea_research/9fa062bc7ac445b9a9d1adaa3c966056/events.jsonl": "8fbd93786692d64f829fb9244195f33c4f1f61a3d65b16f3367a21e94b5361d6",
+        "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/checkpoint.json": "32efbf3a9e73e247867bd49b4c042fdf9de0a997e7079e45935fc151cd50c73a",
+        "agent_traces/idea_research/bddb8b67f7844fa88db4a1c2589972b6/events.jsonl": "db31e2035da81d5c23e7b481d97fc8e91776c21d5b7a50123ac0bc59e7145ae2",
+        "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/checkpoint.json": "c530b8415f9b3452918987a48691c4c10bc72b92024e8de924ec1dc10c8c2db6",
+        "agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/events.jsonl": "469d54070f155b6f381e70eb793f7fb486b1c337210207c90b226869ee058c97",
+        "all_traces_audit.json": "e079829e295447f061dd9f8c1a73265f586b2e35bf78bfb5a0c39f5765ab0935",
+        "input/request.json": "d683db1cadc10cd21281a642cddd5d663e1063a0c10d2943a765f10e46520f5b",
+        "manual_quality_review.json": "f431885cbd8e0b7da045ed0bb97bb6df9c3f24c36e3c72f2ab20cac2fc0ea0d9",
+        "manual_research_review.json": "46293e6f05425f5bfd966026100e94825716124f93e438d8306fae1edb9031c4",
+        "summary.json": "e4e82c3412c25decab9113783f5bd3e0ef640414af17920c23c1f827b53464b0"
+      }
     }
   ]
 }

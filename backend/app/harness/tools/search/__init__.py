@@ -18,6 +18,7 @@ import httpx as httpx
 
 from app.harness.kb.memory_writer import write_to_zone
 from app.harness.kb.provenance import record_retrieval
+from app.harness.tools.search.arxiv_query import exact_arxiv_ids, verify_arxiv_lookup
 from app.harness.tools.search.openalex import openalex_search_tool as openalex_search_tool
 from app.harness.tools.search.source_fetch import fetch_sources_tool as fetch_sources_tool
 from app.harness.tools.registry import ToolContext, ToolResult
@@ -74,7 +75,11 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
             ok=False,
             error="network tools are disabled; set MARS_ENABLE_NETWORK_TOOLS=true",
         )
-    query = str(args.get("q") or args.get("query") or "").strip()
+    try:
+        ids = exact_arxiv_ids(args)
+    except ValueError as exc:
+        return ToolResult(ok=False, error=str(exc))
+    query = ",".join(ids) if ids else str(args.get("q") or args.get("query") or "").strip()
     if not query:
         return ToolResult(ok=False, error="query (q) is required")
     top_k = max(1, min(int(args.get("top_k", 5) or 5), 20))
@@ -91,7 +96,7 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     )
     terms = query if re.search(r"\b(AND|OR|ANDNOT)\b|:", query) else " AND ".join(query.split())
     search_query = terms + category_query
-    cache_key = _cache_key(
+    cache_key = _cache_key({"lookup_contract": 1, "arxiv_ids": ids}) if ids else _cache_key(
         {
             "q": search_query,
             "top_k": top_k,
@@ -102,6 +107,15 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     cache_path = _cache_dir() / f"{cache_key}.json"
     if cache_path.exists():
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        if ids:
+            try:
+                verify_arxiv_lookup(ids, payload["hits"])
+                raw = cache_path.with_suffix(".xml").read_bytes()
+                if (hashlib.sha256(raw).hexdigest() != payload.get("metadata_response_sha256")
+                        or _parse_arxiv(raw.decode("utf-8"), date_from="") != payload["hits"]):
+                    raise ValueError("cached metadata differs from its actual archived response")
+            except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as exc:
+                return ToolResult(ok=False, error=f"invalid exact arXiv lookup cache: {exc}")
         return ToolResult(ok=True, output={**payload, "cached": True})
     params = {
         "search_query": search_query,
@@ -110,6 +124,8 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
         "sortBy": sort_by,
         "sortOrder": "descending",
     }
+    if ids:
+        params = {"id_list": ",".join(ids), "start": "0", "max_results": str(len(ids))}
     url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
     try:
         await _respect_arxiv_rate_limit()
@@ -118,7 +134,11 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
             response.raise_for_status()
     except httpx.HTTPError as exc:
         return ToolResult(ok=False, error=f"arXiv request failed: {type(exc).__name__}: {exc}")
-    hits = _parse_arxiv(response.text, date_from=date_from)
+    try:
+        hits = _parse_arxiv(response.text, date_from=date_from)
+        missing = verify_arxiv_lookup(ids, hits) if ids else []
+    except (ValueError, ET.ParseError) as exc:
+        return ToolResult(ok=False, error=f"arXiv metadata rejected: {exc}")
     for hit in hits:
         receipt = record_retrieval(text=f"{hit['title']}\n\n{hit['summary']}", url=hit["url"], title=hit["title"], run_id=ctx.run_id)
         write_to_zone(
@@ -143,7 +163,14 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
         "cached": False,
         "cached_at": datetime.now(tz=timezone.utc).isoformat(),
     }
+    if ids:
+        payload.update(lookup_mode="arxiv_id", requested_arxiv_ids=ids, missing_arxiv_ids=missing)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if ids:
+        response_path = cache_path.with_suffix(".xml")
+        response_path.write_bytes(response.content)
+        payload.update(metadata_response_ref=str(response_path),
+                       metadata_response_sha256=hashlib.sha256(response.content).hexdigest())
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return ToolResult(ok=True, output=payload, evidence_refs=[str(cache_path)])
 
@@ -222,7 +249,7 @@ def _parse_arxiv(xml_text: str, *, date_from: str) -> list[dict[str, Any]]:
         arxiv_id = _entry_text(entry, "id", ns)
         out.append(
             {
-                "id": arxiv_id.rsplit("/", 1)[-1],
+                "id": arxiv_id.split("/abs/", 1)[-1],
                 "title": " ".join(_entry_text(entry, "title", ns).split()),
                 "summary": " ".join(_entry_text(entry, "summary", ns).split()),
                 "published": published,
@@ -269,7 +296,7 @@ def _pdf_url_for_source(url: str) -> str:
         return url
     if "/abs/" not in parsed.path:
         return ""
-    arxiv_id = parsed.path.rsplit("/", 1)[-1]
+    arxiv_id = parsed.path.split("/abs/", 1)[-1]
     return f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
 

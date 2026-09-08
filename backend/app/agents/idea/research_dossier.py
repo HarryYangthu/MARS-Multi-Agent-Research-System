@@ -5,9 +5,10 @@ import hashlib
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
 
@@ -21,11 +22,80 @@ def dossier_schema() -> dict[str, Any]:
     return value
 
 
+def _normalized_page(value: str) -> tuple[str, frozenset[int], frozenset[int]]:
+    """Preserve legacy text while mapping eligible real line-end hyphens into it."""
+    normalized = unicodedata.normalize("NFKC", value)
+    parts: list[str] = []
+    optional: set[int] = set()
+    paragraph_boundaries: set[int] = set()
+    previous, previous_end, length = "", 0, 0
+    for token in re.finditer(r"\S+", normalized):
+        word = token.group()
+        whitespace = normalized[previous_end:token.start()]
+        join_hyphen = bool(re.search(r"[A-Za-z]-$", previous) and re.match(r"[A-Za-z]", word))
+        if previous and not join_hyphen:
+            parts.append(" ")
+            length += 1
+        if previous and re.search(r"\n[ \t]*\n", whitespace.replace("\r\n", "\n").replace("\r", "\n")):
+            paragraph_boundaries.add(length)
+        if (join_hyphen and re.search(r"[a-z]{2}-$", previous) and re.match(r"[a-z]{2}", word)
+                and re.fullmatch(r"[ \t]*(?:\r\n|[\r\n])[ \t]*", whitespace)):
+            # Only the actual page can authorize an omission. Ordinary inline
+            # hyphens, blank lines, single-letter symbols and digits never do.
+            optional.add(length - 1)
+        parts.append(word)
+        length += len(word)
+        previous, previous_end = word, token.end()
+    return "".join(parts), frozenset(optional), frozenset(paragraph_boundaries)
+
+
 def normalized_excerpt_text(value: str) -> str:
     """Normalize PDF typography without deleting hyphens or inventing text."""
-    normalized = unicodedata.normalize("NFKC", value)
-    normalized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "-", normalized)
-    return " ".join(normalized.split())
+    return _normalized_page(value)[0]
+
+
+@dataclass(frozen=True)
+class QuoteMatch:
+    start: int
+    end: int
+    normalization_mode: Literal["exact_normalized", "pdf_line_end_hyphen"]
+    omitted_hyphen_offsets: tuple[int, ...] = ()
+
+
+def locate_quote(quote: str, page_text: str) -> QuoteMatch | None:
+    """Match one continuous page span, optionally omitting verified line-end hyphens.
+
+    All offsets refer to the original normalized page, which retains its hyphens.
+    This is a typographic match, not verification of a finding or a formula.
+    """
+    needle = normalized_excerpt_text(quote)
+    text, optional, paragraph_boundaries = _normalized_page(page_text)
+    if not needle:
+        return None
+    start = text.find(needle)
+    if start >= 0:
+        return QuoteMatch(start, start + len(needle), "exact_normalized")
+    if not optional:
+        return None
+    start = text.find(needle[0])
+    while start >= 0:
+        position, matched = start, 0
+        omitted: list[int] = []
+        while position < len(text) and matched < len(needle):
+            if position != start and position in paragraph_boundaries:
+                break
+            if text[position] == needle[matched]:
+                position += 1
+                matched += 1
+            elif position in optional:
+                omitted.append(position)
+                position += 1
+            else:
+                break
+        if matched == len(needle):
+            return QuoteMatch(start, position, "pdf_line_end_hyphen", tuple(omitted))
+        start = text.find(needle[0], start + 1)
+    return None
 
 
 def _quote_location_excerpt(quote: str, page_texts: list[str]) -> str:
@@ -66,8 +136,8 @@ def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
         pages = [page for page in receipt.get("visible_pages", []) if page.get("page") == insight["page"]]
         if not pages:
             return f"page {insight['page']} is not visible in this read_receipt; read that page or cite a visible page"
-        quote = normalized_excerpt_text(insight["quote"])
-        if not any(quote in normalized_excerpt_text(str(page.get("text", ""))) for page in pages):
+        quote = insight["quote"]
+        if not any(locate_quote(quote, str(page.get("text", ""))) is not None for page in pages):
             error = (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
                      "from that page's actual visible text, preserving words and hyphens")
             excerpt = _quote_location_excerpt(quote, [str(page.get("text", "")) for page in pages])

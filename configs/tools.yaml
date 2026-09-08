@@ -68,7 +68,7 @@ tools:
 
   search.arxiv_search:
     enabled: true
-    description: Search arXiv and cache results into literature KB.
+    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 65
@@ -78,10 +78,29 @@ tools:
       additionalProperties: false
       oneOf:
         - required: [query]
+          not: {required: [arxiv_ids]}
         - required: [q]
+          not: {required: [arxiv_ids]}
+        - required: [arxiv_ids]
+          not:
+            anyOf:
+              - required: [query]
+              - required: [q]
+              - required: [date_from]
+              - required: [categories]
+              - required: [sort_by]
+              - required: [top_k]
       properties:
         q: {type: string, minLength: 1}
         query: {type: string, minLength: 1}
+        arxiv_ids:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^(?:[0-9]{4}\.[0-9]{4,5}|[a-zA-Z.-]+/[0-9]{7})(?:v[1-9][0-9]*)?$'
         top_k: {type: integer, minimum: 1, maximum: 20}
         date_from: {type: string}
         sort_by:

@@ -44,8 +44,8 @@ class AgentLoopPolicy:
                 raise ValueError(f"{item.name} must be a nonnegative integer")
         if not 1 <= self.max_model_calls <= 128:
             raise ValueError("max_model_calls must be in [1,128]")
-        if not 4000 <= self.input_token_budget <= 128000:
-            raise ValueError("input_token_budget must be in [4000,128000]")
+        if not 4000 <= self.input_token_budget <= 512000:
+            raise ValueError("input_token_budget must be in [4000,512000]")
         if self.observation_chars < 512 or self.max_reflections < 1:
             raise ValueError("observation_chars >=512 and max_reflections >=1 required")
 

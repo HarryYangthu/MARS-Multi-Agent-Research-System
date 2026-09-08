@@ -30,7 +30,7 @@ loop:
   max_protocol_repairs: 4
   max_validation_repairs: 4
   max_reflections: 3
-  input_token_budget: 96000
+  input_token_budget: 256000
   observation_chars: 16000
   protocol: native_tools
 research:
@@ -63,7 +63,7 @@ child_loop:
   max_protocol_repairs: 2
   max_validation_repairs: 3
   max_reflections: 2
-  input_token_budget: 96000
+  input_token_budget: 256000
   observation_chars: 16000
   protocol: native_tools
 child_tools: [search.openalex_search, search.arxiv_search, search.fetch_sources, knowledge.kb_query]
