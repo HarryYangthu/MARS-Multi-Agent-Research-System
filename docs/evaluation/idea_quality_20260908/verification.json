@@ -1333,6 +1333,187 @@
         "protocol_repair_execution_check.json": "fad2e313aae8cee9d624103beeae3900754f474cc26a1946012cdf99fbdc3393",
         "summary.json": "cedea9800984ea3ee210c4f75b500ac40b0f3e7a8b60b458c6be34de26970d69"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T135405_d8359e",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 738.5937932090019,
+      "counts": {
+        "action_rounds": 29,
+        "model_requests": 30,
+        "model_responses": 28,
+        "observations": 28,
+        "protocol_repairs": 0,
+        "reflections": 0,
+        "sdk_attempts": 30,
+        "tool_dispatches": 28,
+        "validation_repairs": 8
+      },
+      "usage": {
+        "completion_tokens": 19177,
+        "prompt_tokens": 340480,
+        "total_tokens": 359657
+      },
+      "trace_consistent": true,
+      "usage_complete": false,
+      "research_counts": {
+        "read_windows": 0,
+        "unique_downloaded_contents": 0,
+        "unique_pdf_publications_with_visible_pages": 0,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 58
+      },
+      "source_commit": "2d095b99949a864e79d8080da0146da78949c9cc",
+      "source_tree": "6d0827f52e7d35054ce1c916a796ba98e3e94f7d",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T135405_d8359e",
+      "separate_review_records": {
+        "network_diagnosis.json": {
+          "record_kind": "separate_read_only_header_probe",
+          "created_at": "2026-09-08T14:00:43.751203+00:00",
+          "request_method": "HEAD",
+          "model_generation_performed": false,
+          "results_supplied_to_model": false,
+          "system_proxy_changed": false,
+          "results": [
+            {
+              "url": "https://arxiv.org/pdf/2505.03042v1.pdf",
+              "route": "direct",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2505.03042v1",
+              "declared_bytes": "5314178",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 0.85
+            },
+            {
+              "url": "https://arxiv.org/pdf/2505.03042v1.pdf",
+              "route": "inherited_proxy",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2505.03042v1",
+              "declared_bytes": "5314178",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 6.43
+            },
+            {
+              "url": "https://arxiv.org/pdf/2009.14468v1.pdf",
+              "route": "direct",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2009.14468v1",
+              "declared_bytes": "14831188",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 2.19
+            },
+            {
+              "url": "https://arxiv.org/pdf/2009.14468v1.pdf",
+              "route": "inherited_proxy",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2009.14468v1",
+              "declared_bytes": "14831188",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 6.34
+            },
+            {
+              "url": "https://arxiv.org/pdf/2306.11920v3.pdf",
+              "route": "direct",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2306.11920v3",
+              "declared_bytes": "14181022",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 7.1
+            },
+            {
+              "url": "https://arxiv.org/pdf/2306.11920v3.pdf",
+              "route": "inherited_proxy",
+              "status": 200,
+              "final_url": "https://arxiv.org/pdf/2306.11920v3",
+              "declared_bytes": "14181022",
+              "content_type": "application/pdf",
+              "elapsed_seconds": 5.97
+            }
+          ],
+          "interpretation": "Header reachability does not prove a full PDF download or successful Agent reading."
+        },
+        "external_run_routing.json": {
+          "record_kind": "external_run_routing",
+          "configured_at": "2026-09-08T13:54:05.287269+00:00",
+          "direct_research_hosts": [
+            "api.openalex.org",
+            "export.arxiv.org",
+            "arxiv.org"
+          ],
+          "direct_model_hosts": [
+            "api.deepseek.com"
+          ],
+          "system_proxy_changed": false,
+          "system_power_settings_changed": false,
+          "scoped_idle_sleep_assertion": true,
+          "other_routes": "inherited unchanged",
+          "preflight_paper_results_supplied_to_model": false
+        },
+        "environment_diagnosis.json": {
+          "record_kind": "codex_offline_environment_diagnosis",
+          "interpretation": "Read-only system power events overlap this actual run. Any sleep overlap is recorded separately from PDF fetch failures and does not prove provider or proposal quality. A process-scoped idle sleep assertion was used; it cannot prevent deliberate clamshell sleep.",
+          "system_power_settings_changed": false,
+          "model_generation_performed": false
+        },
+        "download_transport_probe.json": {
+          "record_kind": "separate_read_only_partial_download_probe",
+          "created_at": "2026-09-08T14:03:21.345710+00:00",
+          "results_supplied_to_model": false,
+          "complete_paper_downloaded": false,
+          "paper_content_persisted": false,
+          "system_proxy_changed": false,
+          "results": [
+            {
+              "url": "https://arxiv.org/pdf/2505.03042v1",
+              "route": "direct",
+              "bytes_observed": 78346,
+              "status": 200,
+              "headers_seconds": 0.591,
+              "declared_bytes": "5314178",
+              "first_body_seconds": 0.591,
+              "stopped_at_sample_limit": true,
+              "elapsed_seconds": 1.197
+            },
+            {
+              "url": "https://arxiv.org/pdf/2505.03042v1",
+              "route": "inherited_proxy",
+              "bytes_observed": 81148,
+              "status": 200,
+              "headers_seconds": 6.106,
+              "declared_bytes": "5314178",
+              "first_body_seconds": 6.107,
+              "stopped_at_sample_limit": true,
+              "elapsed_seconds": 6.347
+            }
+          ],
+          "interpretation": "This samples only transfer behavior. It supplies no research material and does not establish full-paper availability."
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/a2f632f2d6024ebaa6bc5b4a3394fad4/checkpoint.json": "1d7f45267c12477a503bbebc27987e3c6f8bb4abee5c0e464271118ab1964718",
+        "agent_traces/idea/a2f632f2d6024ebaa6bc5b4a3394fad4/events.jsonl": "923b626d570d1725763333cc3ccbd49bc952d4fac6d07e5f8a1bf8a53c1670af",
+        "agent_traces/idea_research/462e882910a549dea0186376a4aafaf5/checkpoint.json": "e0bf777ce818e289b70ecb1d2a5709051f6b278c4220c389e5e261b0fec0ff03",
+        "agent_traces/idea_research/462e882910a549dea0186376a4aafaf5/events.jsonl": "e632e373f8acfd7aa726a096f410f1bed7683d7fc48e129c06620f2009bc2a9b",
+        "agent_traces/idea_research/77cecbddf5614a7b822f54223dae7f02/checkpoint.json": "892f1c9d9729b55c13e60e991e39d6ff8cd599b0be7ad537d84baf25df1e9af9",
+        "agent_traces/idea_research/77cecbddf5614a7b822f54223dae7f02/events.jsonl": "afad1ab57524a4da572c2279c767edc21b85073b393a2381a6b76db4f8f2b0ce",
+        "agent_traces/idea_research/c50000854fcf4f4e967e1292628a9eec/checkpoint.json": "a6d62ce0ad0e79b86af14e8aa037d768086675e49ab3594305d39d826c1f446a",
+        "agent_traces/idea_research/c50000854fcf4f4e967e1292628a9eec/events.jsonl": "bd3d0c0b49a6c1abeafee013c0c7cd373fb1f5dff8b6466ec5228b500116bc28",
+        "all_traces_audit.json": "cc0cc5268e52838af17db33e6ada034323dd17d845c851be711486aacfb97dd9",
+        "download_transport_probe.json": "56823949d81947c0a748c5f10ebb89d9a5c3a349ca66bcc828a7ec703fcf04b5",
+        "environment_diagnosis.json": "2a7594df31fb545386c88ba3572e34166c05933950ea8c6f4cc09a05be36d4fa",
+        "external_run_routing.json": "871fd8f8f18c65b9994b3aeaba768f46439b66db688a53ae8d5776c52b133ee0",
+        "input/request.json": "d36ce0d1bcb1a51829da313dcff1f337914b3e67d4148e352b1f1e6f97c2e1c2",
+        "network_diagnosis.json": "3fa5a746c02ce0d99b42bdcf86bc196061e5661258fd9df257c2fe02a7ea29f8",
+        "summary.json": "58c676e0e63f85e13a75070a9fe2f0a4463e990365402e67ae9a67fcd2b07877"
+      }
     }
   ]
 }
