@@ -101,6 +101,13 @@ def test_blocking_verdict_cannot_be_accepted_or_get_a_host_authored_reason(verdi
     assert result.decision["accept"] is False and result.decision["issues"] == authored["issues"]
 
 
+def test_nonblocking_claims_cannot_produce_unrelated_blocking_feedback() -> None:
+    authored = _human_contract("hypothesis")
+    authored["issues"] = ["Human-authored inconsistency: block despite all claims being nonblocking."]
+    with pytest.raises(ValueError, match="issues require an incorrect or unverifiable claim"):
+        parse_insight_review(json.dumps(authored), fields=("paper_finding", "transfer_idea", "limitations[0]"))
+
+
 def test_field_parser_rejects_missing_duplicate_or_undeclared_fields() -> None:
     original = _human_contract("supported")
     fields = ("paper_finding", "transfer_idea", "limitations[0]")
@@ -307,3 +314,27 @@ def test_original_real_field_review_is_parsed_without_revising_its_checks() -> N
     assert result.decision["accept"] is False
     assert any(claim["verdict"] == "incorrect" for check in result.details["checks"] for claim in check["claims"])
     assert path.read_bytes() == before
+
+
+def test_real_scope_failure_is_rejected_as_inconsistent_without_rewriting_the_response() -> None:
+    configured = os.environ.get("MARS_TEST_INSIGHT_SCOPE_COMPONENT")
+    if not configured:
+        pytest.skip("requires the actual run15 scope-review component; no substitute response is generated")
+    root = Path(configured)
+    paths = (root / "request.json", root / "original_review_response.json", root / "response.json")
+    original = {path: path.read_bytes() for path in paths}
+    request = json.loads(original[paths[0]])
+    fields = tuple(request["response_contract"]["properties"]["checks"]["items"]["properties"]["field"]["enum"])
+    response = json.loads(original[paths[1]])["visible"]
+    assert all(claim["verdict"] in {"supported", "hypothesis"}
+               for check in json.loads(response)["checks"] for claim in check["claims"])
+    assert json.loads(response)["issues"]
+    with pytest.raises(ValueError, match="issues require an incorrect or unverifiable claim"):
+        parse_insight_review(response, fields=fields)
+    # A separate, actual one-call scope comparison is parsed as its own response;
+    # it neither repairs nor supersedes the original run's rejected decision.
+    revised_response = json.loads(original[paths[2]])["text"]
+    result = parse_insight_review(revised_response, fields=fields)
+    assert result.details == json.loads(revised_response)
+    assert result.decision["accept"] is True
+    assert all(path.read_bytes() == value for path, value in original.items())
