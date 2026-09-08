@@ -197,7 +197,9 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
             for hit in output.get("hits", []):
                 if isinstance(hit, dict) and hit.get("title") and hit.get("url"):
                     identity = canonical_source(hit["url"])
-                    papers[identity] = {**hit, "identity": identity,
+                    previous_titles = papers.get(identity, {}).get("observed_titles", [])
+                    titles = list(dict.fromkeys([*previous_titles, hit["title"]]))
+                    papers[identity] = {**hit, "identity": identity, "observed_titles": titles,
                                         "selection_reason": obs.get("reason", ""), "tool": obs["tool"]}
         if obs.get("tool") == "search.fetch_sources":
             for source in output.get("sources", []):
@@ -238,7 +240,8 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
             continue
         identity = canonical_source(str(citation.get("url", "")))
         source = papers.get(identity)
-        if source is None or title_key(str(citation.get("title", ""))) != title_key(source["title"]):
+        if source is None or title_key(str(citation.get("title", ""))) not in {
+                title_key(title) for title in source.get("observed_titles", [source["title"]])}:
             errors.append(f"/related_literature/{index}: URL/title not matched to a real search result")
         else:
             cited.add(identity)
