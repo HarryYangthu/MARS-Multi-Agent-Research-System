@@ -1,0 +1,108 @@
+{
+  "source_run": "runs/real_idea_research/idea_research_20260908T034606_60f4ce",
+  "original_files_unchanged": true,
+  "subset_copy": true,
+  "complete_trace_and_pdf": "preserved in original run for full archive; omitted from this Git subset",
+  "files": [
+    {
+      "path": "review.md",
+      "sha256": "56378042bdeab518df7291ca2891555f5bfb0b54338202c603760331dffd1968",
+      "bytes": 2096
+    },
+    {
+      "path": "summary.json",
+      "sha256": "bee9670fa2e0c3ca407ffdc105299b673fb59cfcb8f1a7d1d1012e083b6f34b1",
+      "bytes": 3571
+    },
+    {
+      "path": "research_findings.json",
+      "sha256": "473efce3c08b9f3e1833e4e2a09f40a8b9b23e754449e5dba7b076cc68c0ff0b",
+      "bytes": 366837
+    },
+    {
+      "path": "ASSESSMENT.md",
+      "sha256": "06ceb63b87fd4c8201a95cadbe38fda511092ad56260a170ff33b5a08b08bab1",
+      "bytes": 6788
+    },
+    {
+      "path": "all_traces_audit.json",
+      "sha256": "9dbab85b4f0de400c92e8dcf8679b38343eaa454503da24d0d5a3779d9f92c83",
+      "bytes": 2085
+    },
+    {
+      "path": "input/request.json",
+      "sha256": "6737ef11435c8c010ed06fd9cd7ff3983d19e1ff846cf3fcd58e0b2ff2929d74",
+      "bytes": 12207
+    },
+    {
+      "path": "idea/research_delegations/50b4f21ee4564ff498f91a16628c91e0/failure.json",
+      "sha256": "594450eaea04bd01135ab2e72fe220da9ebec52fcfa1f33d2e2d9894fcd1f225",
+      "bytes": 108
+    },
+    {
+      "path": "idea/research_delegations/50b4f21ee4564ff498f91a16628c91e0/request.json",
+      "sha256": "8a0197f939212dbaacae77b42031b35eefc0af4d294ebb2d4aff05809f8b7f4a",
+      "bytes": 2121
+    },
+    {
+      "path": "idea/research_delegations/527b962fd6104392b2d2d5406577c92a/failure.json",
+      "sha256": "89ca033bd772e29245647d85d4f8193e73e2100d1018e011f895eeec1e2d922b",
+      "bytes": 108
+    },
+    {
+      "path": "idea/research_delegations/527b962fd6104392b2d2d5406577c92a/request.json",
+      "sha256": "b997a1fc7de54b0d7e0c3d41ae825029662aaf1399709dba1b1a40c97ead218a",
+      "bytes": 1258
+    },
+    {
+      "path": "idea/research_delegations/5634b15ad474460da1fbf09072a308db/failure.json",
+      "sha256": "cd9286bc24ee332839ae129a3fcfa8f77c46e63923acf34ff4fe6f8111ec5d98",
+      "bytes": 108
+    },
+    {
+      "path": "idea/research_delegations/5634b15ad474460da1fbf09072a308db/request.json",
+      "sha256": "aa821e9a4a6149012a6b904d6aba0ba42661b37eb4d6312500a21a049df47c4a",
+      "bytes": 1228
+    },
+    {
+      "path": "agent_traces/idea/612a400c539546538a263ac664e4aafc/checkpoint.json",
+      "sha256": "b5790113b2a927b21cc7f96d173cbd322f3b9daa43216eb36f1e89eddc0310ae",
+      "bytes": 47509
+    },
+    {
+      "path": "agent_traces/idea/612a400c539546538a263ac664e4aafc/candidate.md",
+      "sha256": "c0e01847dea6ea855c7030bf3a5aad914667d97611233a58fcf71a30d7246d01",
+      "bytes": 17158
+    },
+    {
+      "path": "agent_traces/idea_research/50b4f21ee4564ff498f91a16628c91e0/checkpoint.json",
+      "sha256": "d8d92e35b2680df75a24e2e41dff7f6db7987819c0884d8a357c42b26fa374fc",
+      "bytes": 59741
+    },
+    {
+      "path": "agent_traces/idea_research/50b4f21ee4564ff498f91a16628c91e0/candidate.md",
+      "sha256": "b0effc076e1b166c9b9af96f204ebddce499335c814526156f9fd3ef25f1fce8",
+      "bytes": 3611
+    },
+    {
+      "path": "agent_traces/idea_research/527b962fd6104392b2d2d5406577c92a/checkpoint.json",
+      "sha256": "e11c17e848dd93688a9caede3c6ab4135330517821a3a243c9c9865e475b2667",
+      "bytes": 114137
+    },
+    {
+      "path": "agent_traces/idea_research/527b962fd6104392b2d2d5406577c92a/candidate.md",
+      "sha256": "47ffea268942971755679187dab53361b8a3aec42a48509f716737b6f6cd4140",
+      "bytes": 5370
+    },
+    {
+      "path": "agent_traces/idea_research/5634b15ad474460da1fbf09072a308db/checkpoint.json",
+      "sha256": "48a99993f87d90167f4933a9e452a35b94f67a9dc72d6f2b0289e72a2f7bd0e1",
+      "bytes": 166918
+    },
+    {
+      "path": "agent_traces/idea_research/5634b15ad474460da1fbf09072a308db/candidate.md",
+      "sha256": "443c139b33b2428882371a1519bf8c023eeae2d2ccf70cb2d0fb0de470c52d67",
+      "bytes": 2166
+    }
+  ]
+}

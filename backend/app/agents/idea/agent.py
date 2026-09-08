@@ -11,8 +11,10 @@ from app.agents.idea.research import material_errors, write_evidence
 from app.agents.idea.delivery import delivery_errors, progress_sink, write_delivery
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.protocol import protocol_schema
+from app.agents.idea.research_links import research_link_errors, research_links_schema
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.provider_base import Message
+from app.harness.tools.registry import ToolRegistry
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.schema.frontmatter_parser import parse
 from app.storage.artifact_store import ArtifactRef
@@ -36,6 +38,20 @@ class IdeaAgent(BaseAgent):
         "不要填补虚构 baseline、投票或实验结果。"
     )
 
+    def requires_research_dossier(self, request: RunRequest) -> bool:
+        return bool(request.extra.get("idea_requirements", {}).get("require_research_dossier")) or (
+            "idea.research_delegate" in self.config.tools
+        )
+
+    def loop_registry(self, request: RunRequest, context: ContextPack) -> ToolRegistry:
+        if "idea.research_delegate" not in self.config.tools:
+            return super().loop_registry(request, context)
+        from app.agents.idea.research_delegate import make_research_registry
+        return make_research_registry(self.config, request, context)
+
+    def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
+        return ("idea.research_delegate",) if self.requires_research_dossier(request) else ()
+
     def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
         schema = super().submission_schema(request)
         if schema is None:
@@ -48,6 +64,9 @@ class IdeaAgent(BaseAgent):
             schema["properties"][field] = {"type": "object", "minProperties": 1,
                 "description": "Canonical complete structured definition; never put this only in body."}
         requirements = request.extra.get("idea_requirements", {})
+        if self.requires_research_dossier(request):
+            schema["required"].append("research_links")
+            schema["properties"]["research_links"] = research_links_schema()
         if requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol"):
             schema["required"].append("evaluation_protocol")
             schema["properties"]["evaluation_protocol"] = protocol_schema()
@@ -159,6 +178,27 @@ class IdeaAgent(BaseAgent):
             )
         if request.upstream_artifacts:
             context.task += "\nCaller-supplied context is available under these exact references: " + ", ".join(request.upstream_artifacts)
+        if self.requires_research_dossier(request):
+            context.task += (
+                "\nDelegate literature research through idea.research_delegate. Specify a concrete "
+                "information gap and selection criteria derived from this task; the researcher has its own "
+                "context and actual search/PDF tools. You choose when to delegate and whether to request "
+                "further research. Each delegation has its own min_sources (default 1), separate from the "
+                "final task's global distinct-publication minimum. You can assign different gaps to different "
+                "research delegations and combine their verified reports. Once a report is accepted, reuse its "
+                "verified findings; do not repeat its papers merely to make each child meet the global total. "
+                "Mention already-covered paper titles/URLs in a new gap to guide complementary research; "
+                "this does not count as the new child having read them. "
+                "Search results alone are not evidence of reading. Use the returned "
+                "verified research_report.v1, which distinguishes paper_finding from transfer_idea and "
+                "limitations. Include research_links entries with the exact delegation_id and insight_id, "
+                "a resolving method_spec_ref under /method_spec/, and adaptation_reason explaining how "
+                "that paper insight informs your chosen method and under what conditions. Cite its original "
+                "title and URL in related_literature. Do not copy source claims into universal guarantees. "
+                "The researcher supplies evidence and possible transfers; you remain responsible for one "
+                "complete implementable proposal. Rejected candidates can be revised in this same loop. "
+                "Do not request new research simply to repeat an already answered question."
+            )
         return context
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
@@ -177,7 +217,14 @@ class IdeaAgent(BaseAgent):
             checkpoint = trace_root / "checkpoint.json"
             if checkpoint.is_file():
                 state = json.loads(checkpoint.read_text())
-                write_evidence(Path(str(request.extra["run_root"])), state["history"])
+                from app.agents.idea.research_delegate import load_delegated_research
+                run_root = Path(str(request.extra["run_root"]))
+                try:
+                    _, child_observations = load_delegated_research(run_root, state["history"])
+                except (OSError, ValueError, KeyError) as exc:
+                    child_observations = []
+                    atomic_json(trace_root / "research_evidence_error.json", {"error": str(exc)})
+                write_evidence(run_root, [*state["history"], *child_observations])
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
@@ -187,6 +234,16 @@ class IdeaAgent(BaseAgent):
         requirements = request.extra.get("idea_requirements", {})
         parsed = parse(text)
         metadata = parsed.metadata
+        from app.agents.idea.research_delegate import load_delegated_research
+        try:
+            reports, child_observations = load_delegated_research(
+                Path(str(request.extra["run_root"])), observations,
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            return ["/research_evidence: delegated evidence could not be verified: " + str(exc)]
+        material_observations = [*observations, *child_observations]
+        if self.requires_research_dossier(request):
+            errors.extend(research_link_errors(metadata, reports, min_sources=int(requirements.get("min_sources", 1))))
         candidate_sha = digest(text)
         input_receipt = archive_baseline_input(
             run_root=Path(str(request.extra["run_root"])), project=request.project,
@@ -194,7 +251,7 @@ class IdeaAgent(BaseAgent):
         )
         errors.extend(delivery_errors(metadata, str(request.extra.get("scope", "method_proposal")), body=parsed.body))
         errors.extend(material_errors(
-            metadata, observations,
+            metadata, material_observations,
             min_sources=int(requirements.get("min_sources", 1)),
             min_pdfs=int(requirements.get("min_pdfs", 1)),
             require_budget=bool(requirements.get("require_parameter_budget", False)),
@@ -211,6 +268,8 @@ class IdeaAgent(BaseAgent):
             "body_policy": "summary_only",
             "evaluation_protocol_required": bool(requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol")),
             "parameter_cases_required": bool(requirements.get("require_parameter_budget")),
+            "research_dossier_required": self.requires_research_dossier(request),
+            "verified_research_delegations": [r["delegation_id"] for r in reports],
             "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
             "project_ready": False, "scientific_validated": False,
@@ -249,6 +308,9 @@ class IdeaAgent(BaseAgent):
     def reflection_rubric(self) -> str:
         return (
             "Independently reconsider the candidate's logic using ONLY the supplied evidence. "
+            "For delegated research, check the original visible page excerpts against each paper_finding "
+            "and the proposal's research_links. Exact quote matching proves provenance only, not that the "
+            "paper supports the interpretation. Check transfer assumptions and explicitly untested claims. "
             "Check baseline/candidate function-class claims (smoothness does not imply strict inclusion), "
             "basis/knots/degree/control-point definitions, every real vs complex trainable count, boundary stability, "
             "input/output/phase contract, PIMC vs DPD metric transfer, fair equal-budget ablations, and "

@@ -18,13 +18,55 @@ def token_upper_bound(messages: Sequence[Message]) -> int:
 def compact(value: Any, chars: int) -> Any:
     """Truncate leaf strings, not serialized JSON; retain identity and error fields."""
     if isinstance(value, dict):
-        preserved = {"url", "pdf_url", "download_url", "raw_ref", "sha256", "title", "error", "reason", "status"}
-        return {k: v if k in preserved else compact(v, chars) for k, v in value.items()}
+        preserved = {"url", "pdf_url", "download_url", "raw_ref", "sha256", "title", "error", "status", "read_receipt", "download_path"}
+        return {k: compact(v, min(chars, 512)) if k == "reason" else
+                (v if k in preserved else compact(v, chars)) for k, v in value.items()}
     if isinstance(value, list):
         return [compact(x, chars) for x in value]
     if isinstance(value, str) and len(value) > chars:
         return {"excerpt": value[:chars], "original_chars": len(value), "sha256": digest(value), "truncated": True}
     return value
+
+
+def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retain actual source addresses when full tool groups no longer fit."""
+    receipts: dict[str, dict[str, Any]] = {}
+    rejected = 0
+    for item in history:
+        output = item.get("output")
+        if not item.get("ok") or not isinstance(output, dict):
+            continue
+        rows = output.get("sources")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("ok") or not isinstance(row.get("read_receipt"), str):
+                continue
+            bounds = {"url": 2048, "title": 300, "sha256": 64, "read_receipt": 1024}
+            if any(not isinstance(row.get(key), str) or not 1 <= len(row[key]) <= limit
+                   for key, limit in bounds.items()):
+                rejected += 1
+                continue
+            if len(row["sha256"]) != 64 or any(character not in "0123456789abcdef" for character in row["sha256"]):
+                rejected += 1
+                continue
+            pages = row.get("visible_pages", [])
+            if not isinstance(pages, list) or len(pages) > 10:
+                rejected += 1
+                continue
+            raw_ref = item.get("raw_ref")
+            receipts[row["read_receipt"]] = {
+                **{key: row.get(key) for key in ("url", "title", "sha256", "read_receipt")},
+                "visible_page_numbers": [page["page"] for page in pages
+                                         if isinstance(page, dict) and type(page.get("page")) is int],
+                "tool_raw_ref": raw_ref if isinstance(raw_ref, str) and len(raw_ref) <= 1024 else None,
+            }
+    selected = list(receipts.values())[-16:]
+    omitted = rejected + max(0, len(receipts) - len(selected))
+    if omitted:
+        selected.append({"omitted_receipt_entries": omitted,
+                         "reason": "Metadata exceeds bounded receipt index; consult actual tool history."})
+    return selected
 
 
 def pack_context(
@@ -47,9 +89,14 @@ def pack_context(
     if history:
         # The full observations may be compressed/omitted, but the agent must
         # still know which actions really happened and where their receipts live.
-        ledger = [{k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}
+        ledger = [compact({k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}, 512)
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
+        source_receipts = source_receipt_index(history)
+        if source_receipts:
+            required.append(Message(role="user", content=(
+                "[untrusted source receipt index; addresses and visible page numbers only, not excerpts or findings; "
+                "if the actual page text is absent, reread its window before quoting]\n" + canonical(source_receipts))))
     if candidate:
         required.append(Message(role="user", content="[untrusted current candidate; review or revise this document]\n"
                                 + (candidate if native else canonical({"candidate": candidate}))))
@@ -64,17 +111,37 @@ def pack_context(
     groups = history_groups(history)
     for index in reversed(range(len(groups))):
         items = groups[index]
+        # Rendering copies cap duplicated assistant commentary without touching
+        # recorded history or native tool IDs/arguments required for pairing.
+        rendering_items = []
+        for item in items:
+            reason = item.get("reason", "")
+            rendered_reason = (reason[:512] + " [reason truncated; full text in raw trace]"
+                               if isinstance(reason, str) and len(reason) > 512 else reason)
+            rendering_items.append({**item, "reason": rendered_reason})
         contents = ["[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars)) for item in items]
         # A separate reviewer reads evidence documents, not the generator's
         # native assistant/tool conversation. Its configured tool set is empty.
         group = ([Message(role="user", content=content) for content in contents]
-                 if reviewing else group_messages(items, contents))
+                 if reviewing else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) > budget:
-            contents = ["[compressed evidence reference]\n" + canonical({k: item.get(k) for k in
-                        ("tool", "args", "reason", "ok", "error", "raw_ref")}) for item in items]
-            group = ([Message(role="user", content=content) for content in contents]
-                     if reviewing else group_messages(items, contents))
             compressed.append(index)
+            # Preserve real page text prefixes before falling back to addresses.
+            # All reduced groups remain marked compressed for the review guard.
+            for limit in (4000, 2000, 1000, 512):
+                if limit >= observation_chars:
+                    continue
+                contents = ["[shortened actual Observation; leaf excerpts are incomplete]\n"
+                            + canonical(compact(item, limit)) for item in items]
+                group = ([Message(role="user", content=content) for content in contents]
+                         if reviewing else group_messages(rendering_items, contents))
+                if token_upper_bound(required + selected + group) <= budget:
+                    break
+            if token_upper_bound(required + selected + group) > budget:
+                contents = ["[compressed evidence reference]\n" + canonical(compact({k: item.get(k) for k in
+                            ("tool", "args", "reason", "ok", "error", "raw_ref")}, 512)) for item in items]
+                group = ([Message(role="user", content=content) for content in contents]
+                         if reviewing else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) <= budget:
             selected[0:0] = group
         else:

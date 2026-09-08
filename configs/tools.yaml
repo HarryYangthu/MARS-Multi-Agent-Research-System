@@ -1,9 +1,58 @@
 tools:
+  search.openalex_search:
+    enabled: true
+    description: Search OpenAlex metadata for papers with original PDF locations inside configured source domains. Returns explicit OpenAlex provenance; not MCP.
+    mutation_level: read
+    allowed_agents: [idea, idea_research]
+    timeout_seconds: 40
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: {type: string, minLength: 1}
+        top_k: {type: integer, minimum: 1, maximum: 10}
+    output_schema:
+      type: object
+      required: [query, source, hits]
+      additionalProperties: true
+
+  idea.research_delegate:
+    enabled: true
+    runtime_bound: true
+    description: Delegate a concrete literature evidence gap to an independent tool-using researcher. The overall task is passed automatically. context_refs must be exact available upstream keys; use [] when no additional context is supplied. Never invent task or background keys.
+    mutation_level: read
+    allowed_agents: [idea]
+    timeout_seconds: 2400
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [gap, context_refs, success_criteria]
+      properties:
+        gap: {type: string, minLength: 10, maxLength: 3000}
+        min_sources:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+          description: Minimum distinct read publications for THIS subproblem only; default 1. Separate completed delegations can contribute different papers to the final proposal, whose global evidence minimum remains enforced.
+        context_refs:
+          description: Exact keys from the supplied upstream context, not concepts or file paths. Use [] if no keys are available; the overall research task is always passed automatically. Invalid references return the exact available keys.
+          type: array
+          maxItems: 12
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+        success_criteria: {type: string, minLength: 10, maxLength: 2000}
+    output_schema:
+      type: object
+      additionalProperties: true
+
   search.local_docs:
     enabled: true
     description: Search local literature KB and uploaded documents.
     mutation_level: read
-    allowed_agents: [idea]
+    allowed_agents: [idea, idea_research]
     timeout_seconds: 10
     input_schema:
       type: object
@@ -21,7 +70,7 @@ tools:
     enabled: true
     description: Search arXiv and cache results into literature KB.
     mutation_level: read
-    allowed_agents: [idea]
+    allowed_agents: [idea, idea_research]
     timeout_seconds: 65
     network: true
     input_schema:
@@ -50,7 +99,7 @@ tools:
     enabled: true
     description: Provider-backed web search with domain allowlist.
     mutation_level: read
-    allowed_agents: [idea]
+    allowed_agents: [idea, idea_research]
     timeout_seconds: 65
     network: true
     input_schema:
@@ -75,7 +124,7 @@ tools:
     enabled: true
     description: Archive selected sources and read PDF page windows. Default max_sources=1; set explicitly for a batch. Reuse cached PDFs to read more pages.
     mutation_level: read
-    allowed_agents: [idea]
+    allowed_agents: [idea, idea_research]
     timeout_seconds: 125
     network: true
     input_schema:
@@ -107,7 +156,7 @@ tools:
     enabled: true
     description: Query one KB zone (literature/methodology/code_assets/run_archive) for PIM-cancellation evidence.
     mutation_level: read
-    allowed_agents: [idea, experiment]
+    allowed_agents: [idea, experiment, idea_research]
     timeout_seconds: 10
     input_schema:
       type: object
@@ -126,7 +175,7 @@ tools:
     enabled: true
     description: Match a candidate PIM ablation plan against prior runs (run_archive) to reuse a baseline.
     mutation_level: read
-    allowed_agents: [idea, experiment]
+    allowed_agents: [idea, experiment, idea_research]
     timeout_seconds: 10
     input_schema:
       type: object

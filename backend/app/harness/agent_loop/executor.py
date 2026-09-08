@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.harness.agent_loop.context import pack_context
-from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, native_decision, native_specs
+from app.harness.agent_loop.context import compact, pack_context
+from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
@@ -50,6 +50,7 @@ class LoopInput:
     progress_sink: ProgressSink | None = None
     review_messages: list[Message] | None = None
     final_schema: dict[str, Any] | None = None
+    required_review_tools: tuple[str, ...] = ()
 
 
 @dataclass
@@ -66,6 +67,18 @@ class AgentLoopExecutor(Protocol):
     async def run(self, request: LoopInput) -> LoopResult: ...
 
 
+def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
+    """Expose actual remaining local resources before choosing another action."""
+    remaining = {"model_calls": max(0, policy.max_model_calls - counts["model_requests"]),
+                 "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
+                 "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
+    return Message("system", "Host remaining budget for this agent loop: " + canonical(remaining)
+                   + ". The next model call is included. Each dispatched tool, including failures, consumes "
+                   "one tool call. Reserve tools for acquiring and checking evidence, and calls for submission "
+                   "and revision. These are local counters, not the total cost of any delegated loops. "
+                   "Do not invent evidence when resources are insufficient.")
+
+
 def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
                      native: bool, wire_tools: tuple[dict[str, Any], ...],
                      effort_overrides: dict[str, Any]) -> LLMConfig:
@@ -77,13 +90,26 @@ def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
                    json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
 
 
+def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, Any],
+                            required_tools: tuple[str, ...], *, observation_chars: int) -> list[str]:
+    """Refuse review when required real tool evidence was compressed or omitted."""
+    hidden = set(manifest.get("compressed_history", [])) | set(manifest.get("omitted_history", []))
+    missing: list[str] = []
+    for index, group in enumerate(history_groups(history)):
+        for item in group:
+            if item.get("tool") in required_tools and item.get("ok"):
+                if index in hidden or compact(item, observation_chars) != item:
+                    missing.append(str(item["tool"]) + " history group " + str(index))
+    return missing
+
+
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
         specs = []
         for name in request.tools:
             spec = request.registry.spec(name)
-            if spec is None or spec.bridge_only:
+            if not request.registry.has(name) or spec is None or spec.bridge_only:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
         native = p.protocol == "native_tools"
@@ -96,9 +122,11 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 3})
+                              "context_format_version": 6})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
+        if request.required_review_tools:
+            fingerprint = digest({"base": fingerprint, "required_review_tools": request.required_review_tools})
         if request.review_messages is not None:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:
@@ -205,7 +233,7 @@ class NativeAgentLoop:
                 reviewing = state["next_phase"] == "reflect"
                 if counts["model_requests"] == 0:
                     await progress("started")
-                extra: list[Message] = []
+                extra: list[Message] = [budget_message(p, counts)]
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"]))
                 if reviewing:
@@ -228,6 +256,15 @@ class NativeAgentLoop:
                 )
                 manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
+                if reviewing:
+                    missing = missing_review_evidence(state["history"], manifest, request.required_review_tools,
+                                                      observation_chars=p.observation_chars)
+                    if missing:
+                        state["status"] = "review_evidence_unavailable"
+                        state["feedback"] = "Required review evidence was compressed or omitted: " + "; ".join(missing)
+                        trace.emit("review_evidence_unavailable", {"missing": missing, "context_manifest": manifest})
+                        trace.snapshot(state)
+                        break
                 counts["model_requests"] += 1
                 state["pending"] = "model"
                 call_config = phase_config()

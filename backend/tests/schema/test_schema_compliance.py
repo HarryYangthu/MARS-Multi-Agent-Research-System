@@ -22,6 +22,50 @@ from app.harness.schema.validator import (
 # --------------------------------------------------------------------- builders
 
 
+def research_report_v1_base() -> dict[str, Any]:
+    """Authored schema-only input; no publication retrieval or tool success claimed."""
+    return {
+        "schema": "research_report.v1", "project": "schema_contract",
+        "human_summary": "人工编写的结构校验输入，未执行论文检索。",
+        "gaps": [{"id": "gap1", "question": "What assumptions need evidence?"}],
+        "selection_principles": ["Record task relevance and limitations."],
+        "sources": [{"source_id": "source1", "url": "https://example.org/schema-input",
+                     "title": "Authored schema input", "decision": "use",
+                     "selection_reason": "Schema shape only.", "gap_ids": ["gap1"]}],
+        "insights": [{"id": "insight1", "source_id": "source1",
+                      "read_receipt": "not-executed/schema-input.read.json", "document_sha256": "0" * 64,
+                      "page": 1, "quote": "Authored schema input; not a retrieved quotation.",
+                      "paper_finding": "No actual paper finding asserted.",
+                      "transfer_idea": "No actual method transfer asserted.",
+                      "limitations": ["Structure validation cannot establish provenance."]}],
+    }
+
+
+def _research_report_valid_variants() -> list[dict[str, Any]]:
+    variants = []
+    for decision in ("use", "reject", "defer"):
+        for page in (1, 2, 10, 100):
+            value = research_report_v1_base()
+            value["sources"][0]["decision"] = decision
+            value["insights"][0]["page"] = page
+            variants.append(value)
+    return variants
+
+
+def _research_report_invalid_variants() -> list[dict[str, Any]]:
+    variants = []
+    for field in research_report_v1_base():
+        value = research_report_v1_base()
+        del value[field]
+        variants.append(value)
+    for field, bad_value in (("page", 0), ("page", True), ("quote", "short"),
+                             ("document_sha256", "not-a-digest"), ("limitations", [])):
+        value = research_report_v1_base()
+        value["insights"][0][field] = bad_value
+        variants.append(value)
+    return variants
+
+
 def proposal_v1_base() -> dict[str, Any]:
     return {
         "schema": "proposal.v1",
@@ -199,6 +243,7 @@ def report_bundle_v1_base() -> dict[str, Any]:
 
 
 BASE_BUILDERS: dict[str, Callable[[], dict[str, Any]]] = {
+    "research_report.v1": research_report_v1_base,
     "proposal.v1": proposal_v1_base,
     "experiment_plan.v1": experiment_plan_v1_base,
     "code_spec.v1": code_spec_v1_base,
@@ -562,6 +607,7 @@ def _feedback_packet_valid_variants() -> list[dict[str, Any]]:
 
 
 VALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "research_report.v1": _research_report_valid_variants(),
     "proposal.v1": _proposal_valid_variants(),
     "experiment_plan.v1": _experiment_plan_valid_variants(),
     "code_spec.v1": _code_spec_valid_variants(),
@@ -789,6 +835,7 @@ def _report_bundle_invalid_variants() -> list[dict[str, Any]]:
 
 
 INVALID_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "research_report.v1": _research_report_invalid_variants(),
     "proposal.v1": _proposal_invalid_variants(),
     "experiment_plan.v1": _experiment_plan_invalid_variants(),
     "code_spec.v1": _code_spec_invalid_variants(),

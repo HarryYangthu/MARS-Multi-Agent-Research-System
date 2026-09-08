@@ -68,6 +68,7 @@ idea:
       provider: deepseek
       model: deepseek-v4-flash
   research:
+    max_delegations: 2
     required_tools: true
     enable_network: true
     source_downloads: true
@@ -86,6 +87,7 @@ idea:
     max_validation_repairs: 6
     max_tool_steps: 18
   tools:
+  - idea.research_delegate
   - search.local_docs
   - search.arxiv_search
   - search.web_search
@@ -93,6 +95,45 @@ idea:
   - knowledge.kb_query
   - knowledge.baseline_match
   - code.repo_reader
+idea_research:
+  enabled: true
+  output_schema: research_report.v1
+  model:
+    provider: deepseek
+    model: deepseek-v4-flash
+    temperature: 0.2
+    max_tokens: 8192
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
+    thinking:
+      enabled: false
+    reasoning_effort: null
+    request_timeout_seconds: 120
+    retry:
+      max_retries: 0
+      base_delay_seconds: 1
+  research:
+    excerpt_context_chars: 600
+  debate:
+    enabled: false
+  loop:
+    protocol: native_tools
+    mode: react
+    trace: full
+    input_token_budget: 48000
+    observation_chars: 12000
+    max_model_calls: 16
+    max_tool_steps: 12
+    max_validation_repairs: 3
+  tools:
+  - search.openalex_search
+  - search.arxiv_search
+  - search.web_search
+  - search.fetch_sources
+  - search.local_docs
+  - knowledge.kb_query
+  - knowledge.baseline_match
 experiment:
   enabled: true
   output_schema: experiment_plan.v1

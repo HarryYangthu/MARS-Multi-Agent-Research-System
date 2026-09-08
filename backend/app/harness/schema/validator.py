@@ -46,6 +46,7 @@ SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
 SUPPORTED_SCHEMAS: tuple[str, ...] = (
     "proposal.v1",
+    "research_report.v1",
     "experiment_plan.v1",
     "code_spec.v1",
     "run_log.v1",

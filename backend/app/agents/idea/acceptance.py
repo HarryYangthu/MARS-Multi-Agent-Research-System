@@ -172,6 +172,14 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
     if counts.get("reflections", 0) and not state.get("reflection_accepted"):
         errors.append("Reflection has unresolved issues.")
     observations = state.get("history", [])
+    from app.agents.idea.research_delegate import load_delegated_research
+    from app.agents.idea.research_links import research_link_errors
+    try:
+        research_reports, delegated_observations = load_delegated_research(run.root, observations)
+    except (OSError, ValueError, KeyError) as exc:
+        research_reports, delegated_observations = [], []
+        errors.append("Delegated research evidence verification failed: " + str(exc))
+    material_observations = [*observations, *delegated_observations]
     records = [_json(p) for p in (run.subdir("idea") / "validation").glob("*.json")]
     records = [r for r in records if r.get("candidate_sha256") == digest(text)]
     material_ready = False
@@ -188,8 +196,11 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
             if record.get("delivery_contract_version") is not None:
                 delivery_contract_valid = delivery_contract_valid is not False and not delivery_failures
             material_failures.extend(delivery_failures)
+            if record.get("research_dossier_required"):
+                material_failures.extend(research_link_errors(parse(text).metadata, research_reports,
+                                                             min_sources=int(req.get("min_sources", 1))))
             material_failures.extend(material_errors(
-                parse(text).metadata, observations,
+                parse(text).metadata, material_observations,
                 min_sources=int(req.get("min_sources", 1)), min_pdfs=int(req.get("min_pdfs", 1)),
                 require_budget=bool(req.get("require_parameter_budget", False)),
                 max_ratio=float(req.get("max_parameter_ratio", 1.2)),
@@ -218,13 +229,15 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
     for name in ("evidence_index.v1.json", "tool_results.v1.json"):
         if not (run.subdir("idea") / "research" / name).is_file():
             errors.append(f"Missing archived research file: {name}")
-    inventory = evidence_inventory(observations)
+    inventory = evidence_inventory(material_observations)
     return {"passed": not errors, "errors": errors, "schema_valid": validation.valid,
             "delivery_contract_valid": delivery_contract_valid,
             "input_evidence_refs": list(dict.fromkeys(input_evidence_refs)),
             "material_ready": material_ready, "scientific_validated": False, "project_ready": False,
             "trace_root": str(path.parent), "counts": counts, "usage_complete": state.get("usage_complete"),
-            "reflection_accepted": state.get("reflection_accepted"), "tools": observations,
+            "reflection_accepted": state.get("reflection_accepted"), "tools": material_observations,
+            "research_delegations": [r["delegation_id"] for r in research_reports],
+            "counts_scope": "lead_only; child calls are audited separately in their own traces",
             "evidence": inventory["counts"]}
 
 

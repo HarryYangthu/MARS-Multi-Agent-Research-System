@@ -21,7 +21,12 @@ from app.harness.agent_loop.trace import atomic_json
 from app.harness.tools.registry import ToolContext, ToolResult
 from app.settings import get_settings
 
-MAX_BYTES = 12 * 1024 * 1024
+def enforce_source_size(size_bytes: int, max_mib: int) -> None:
+    """Bound both declared and streamed sizes; no successful partial archives."""
+    if type(max_mib) is not int or not 1 <= max_mib <= 64:
+        raise ValueError("source size budget must be 1..64 MiB")
+    if size_bytes > max_mib * 1024 * 1024:
+        raise ValueError(f"source exceeds configured {max_mib} MiB limit; observed {size_bytes} bytes; partial file not archived")
 
 
 def source_batch(sources: list[Any], limit: int) -> tuple[list[Any], dict[str, Any]]:
@@ -50,19 +55,18 @@ def allowed_url(url: str) -> str:
 
 async def download(client: httpx.AsyncClient, url: str) -> tuple[bytes, str, str]:
     current = allowed_url(url)
+    max_mib = get_settings().mars_source_max_mib
     for _ in range(6):
         async with client.stream("GET", current) as response:
             if response.is_redirect:
                 current = allowed_url(urljoin(current, response.headers["location"]))
                 continue
             response.raise_for_status()
-            if int(response.headers.get("content-length", 0)) > MAX_BYTES:
-                raise ValueError("source exceeds 12 MiB limit")
+            enforce_source_size(int(response.headers.get("content-length", 0)), max_mib)
             data = bytearray()
             async for block in response.aiter_bytes():
                 data.extend(block)
-                if len(data) > MAX_BYTES:
-                    raise ValueError("source exceeds 12 MiB limit; partial file not archived")
+                enforce_source_size(len(data), max_mib)
             return bytes(data), response.headers.get("content-type", ""), current
     raise ValueError("source redirect limit exceeded")
 
@@ -117,7 +121,8 @@ async def fetch_sources_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResu
     async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
         for source in selected:
             row: dict[str, Any] = {"ok": False, "network_download_attempted": False,
-                                  "network_download_performed": False, "reused": False}
+                                  "network_download_performed": False, "reused": False,
+                                  "source_max_mib": get_settings().mars_source_max_mib}
             try:
                 if not isinstance(source, dict):
                     raise ValueError("source entry must be an object")
@@ -152,6 +157,7 @@ async def fetch_sources_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResu
                     data, mime, final_url = await asyncio.wait_for(download(client, url), timeout=min(45, remaining))
                     row["network_download_performed"] = True
                 assert data is not None
+                enforce_source_size(len(data), get_settings().mars_source_max_mib)
                 sha = hashlib.sha256(data).hexdigest()
                 is_pdf = data.startswith(b"%PDF-")
                 if ("pdf" in mime or "/pdf/" in url or url.endswith(".pdf")) and not is_pdf:
