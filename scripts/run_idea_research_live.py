@@ -140,6 +140,9 @@ def archive_report(root: Path, summary: dict[str, Any]) -> None:
     summary["research_counts"] = findings["counts"]
     atomic_json(root / "research_findings.json", findings)
     lines += ["Research counts: `" + json.dumps(findings["counts"]) + "`", ""]
+    if summary.get("delivery_root"):
+        brief = Path(summary["delivery_root"]) / "research_brief.md"
+        lines += ["[中文研究说明](" + str(brief.relative_to(root)) + ")", ""]
     def cell(value: Any) -> str:
         return str(value).replace("|", "\\|").replace("\n", " ")
     for report in findings["reports"]:
@@ -240,6 +243,8 @@ async def run(args: argparse.Namespace) -> int:
                        material_ready=True, proposal_path=str(target), proposal_sha256=digest(artifact.text),
                        human_summary=artifact.metadata.get("human_summary"), handoff=artifact.metadata.get("handoff"),
                        research_links=artifact.metadata.get("research_links"),
+                       research_assessment=artifact.metadata.get("research_assessment"),
+                       delivery_root=context.metadata.get("idea_delivery_root"),
                        model_review_passed=bool(context.metadata.get("reflection_accepted")))
     except (Exception, asyncio.CancelledError) as exc:
         summary.update(status="failed", error_type=type(exc).__name__, error=str(exc)[:2000])

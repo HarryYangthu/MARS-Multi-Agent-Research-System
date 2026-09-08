@@ -138,6 +138,7 @@ def test_submission_schema_requires_full_method_without_changing_legacy_parser()
     schema = IdeaAgent().submission_schema(request)
     assert schema is not None
     assert {"human_summary", "handoff", "method_spec", "parameter_budget", "ablation_plan"} <= set(schema["required"])
+    assert {"research_assessment", "research_links"} <= set(schema["required"])
     assert schema["properties"]["alternatives"]["minItems"] == 2
     budget = schema["properties"]["parameter_budget"]
     assert budget["properties"]["variables"]["additionalProperties"] == {"type": "number"}
@@ -161,3 +162,41 @@ def test_artifact_conversion_preserves_exact_candidate_digest() -> None:
     text = dumps(authored_metadata(), "Parser input.") + "\n\n"
     artifact = IdeaAgent()._artifact_from_completion(Completion(text, "parser", "parser"))
     assert artifact.text == text
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_research_delivery_requires_actual_evidence_even_with_claimed_review(tmp_path: Path, reviewed: bool) -> None:
+    metadata = authored_metadata()
+    metadata["research_assessment"] = {"version": "idea.research_assessment.v1"}
+    text = dumps(metadata, metadata["human_summary"])
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path)})
+    with pytest.raises(ValueError, match="research decisions"):
+        write_delivery(Artifact(text, "proposal.v1", metadata, ""), request,
+                       invocation="authored-negative-input", reviewed=reviewed)
+    assert not (tmp_path / "idea" / "deliveries").exists()
+
+
+def test_required_research_contract_cannot_be_dropped_at_export(tmp_path: Path) -> None:
+    metadata = authored_metadata()
+    text = dumps(metadata, metadata["human_summary"])
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path),
+                         "idea_requirements": {"require_research_dossier": True}})
+    with pytest.raises(ValueError, match="research_assessment"):
+        write_delivery(Artifact(text, "proposal.v1", metadata, ""), request,
+                       invocation="authored-negative-input", reviewed=True)
+    assert not (tmp_path / "idea" / "deliveries").exists()
+
+
+@pytest.mark.asyncio
+async def test_research_without_review_configuration_fails_before_model_call(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from app.harness.llm.model_registry import get_agent_config
+    config = get_agent_config("idea")
+    config = replace(config, raw={**config.raw, "loop": {**config.raw["loop"], "mode": "react"}})
+    agent = IdeaAgent(agent_config=config)
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path),
+                         "context_sources": {"project_rules": False, "code_repositories": False}})
+    context = await agent.build_context(request)
+    with pytest.raises(ValueError, match="requires reflection mode"):
+        await agent.draft(request, context)
+    assert not (tmp_path / "agent_traces").exists()

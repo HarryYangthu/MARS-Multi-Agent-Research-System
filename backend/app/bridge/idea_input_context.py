@@ -30,6 +30,7 @@ class IdeaRequirements(BaseModel):
     require_parameter_budget: bool | None = None
     max_parameter_ratio: float | None = Field(default=None, gt=0, le=100)
     require_evaluation_protocol: bool | None = None
+    require_research_dossier: bool | None = None
 
 
 def validate_idea_extra(extra: dict[str, Any]) -> dict[str, str]:

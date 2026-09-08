@@ -60,3 +60,29 @@ def test_duplicate_links_are_not_extra_evidence() -> None:
     metadata, reports = documents()
     metadata["research_links"] *= 2
     assert any("duplicate" in error for error in research_link_errors(metadata, reports))
+
+
+def test_reading_an_unused_second_paper_does_not_meet_current_source_floor() -> None:
+    metadata, reports = documents()
+    reports[0]["report"]["sources"].append({"source_id": "paper_b", "decision": "use",
+                                         "url": "https://arxiv.org/abs/2404.19756"})
+    reports[0]["report"]["insights"].append({"id": "finding_b", "source_id": "paper_b"})
+    metadata["related_literature"].append({"url": "https://arxiv.org/abs/2404.19756"})
+    # Preserve what the old source-count receipt actually checked.
+    assert not research_link_errors(metadata, reports, min_sources=2)
+    errors = research_link_errors(metadata, reports, min_sources=2, require_linked_sources=True)
+    assert any("observed 1" in error for error in errors)
+    link = {**metadata["research_links"][0], "insight_id": "finding_b"}
+    metadata["research_links"].append(link)
+    assert not research_link_errors(metadata, reports, min_sources=2, require_linked_sources=True)
+    link["method_spec_ref"] = "/method_spec/missing"
+    assert any("observed 1" in error for error in research_link_errors(
+        metadata, reports, min_sources=2, require_linked_sources=True))
+
+
+def test_two_delegations_reading_the_same_publication_count_once() -> None:
+    metadata, reports = documents()
+    reports.append({"delegation_id": "reading_b", "report": reports[0]["report"]})
+    metadata["research_links"].append({**metadata["research_links"][0], "delegation_id": "reading_b"})
+    assert any("observed 1" in error for error in research_link_errors(
+        metadata, reports, min_sources=2, require_linked_sources=True))

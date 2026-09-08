@@ -174,6 +174,7 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
     observations = state.get("history", [])
     from app.agents.idea.research_delegate import load_delegated_research
     from app.agents.idea.research_links import research_link_errors
+    from app.agents.idea.research_assessment import assessment_errors
     try:
         research_reports, delegated_observations = load_delegated_research(run.root, observations)
     except (OSError, ValueError, KeyError) as exc:
@@ -198,7 +199,12 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
             material_failures.extend(delivery_failures)
             if record.get("research_dossier_required"):
                 material_failures.extend(research_link_errors(parse(text).metadata, research_reports,
-                                                             min_sources=int(req.get("min_sources", 1))))
+                    min_sources=int(req.get("min_sources", 1)),
+                    require_linked_sources=bool(record.get("research_assessment_required"))))
+            if record.get("research_assessment_required"):
+                material_failures.extend(assessment_errors(parse(text).metadata, research_reports, required=True))
+                if not state.get("reflection_accepted") or counts.get("reflections", 0) < 1:
+                    material_failures.append("Research assessment requires an accepted model review of this candidate.")
             material_failures.extend(material_errors(
                 parse(text).metadata, material_observations,
                 min_sources=int(req.get("min_sources", 1)), min_pdfs=int(req.get("min_pdfs", 1)),

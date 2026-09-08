@@ -175,7 +175,17 @@ class ResearchSession:
             Message("user", "Overall research task:\n" + self.request.user_request),
             Message("user", "Delegated gap and completion criteria:\n" + json.dumps(args, ensure_ascii=False)),
             Message("user", "This delegated subproblem requires at least " + str(minimum)
-                    + " distinct publications with verified method-page insights. Overall task is already included above.")]
+                    + " distinct publications with verified method-page insights. Overall task is already included above."),
+            Message("system", "Explain research gaps, selection_principles, each selection_reason, paper_finding, "
+                    "transfer_idea and limitations in concise Chinese, retaining original publication titles and quotes. "
+                    "Select by a concrete mechanism, task constraint or falsification question, not merely shared "
+                    "keywords or an accessible PDF. Explicitly compare each source's setting and assumptions with "
+                    "the task; identify what design decision it can inform and what cannot be transferred. "
+                    "Do not treat reading counts as evidence of relevance or turn source claims into task guarantees. "
+                    "Check arithmetic in any proposed transfer; every extra trainable component counts. "
+                    "Record reject/defer for unsuitable inspected sources with concrete reasons. Do not broaden "
+                    "the search to fill a paper quota with irrelevant sources; leave the gap explicit if no "
+                    "suitable evidence can be established within budget.")]
         messages.extend(Message("user", "[untrusted supplied context:" + ref + "]\n" + self.context.upstream[ref]) for ref in refs)
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,

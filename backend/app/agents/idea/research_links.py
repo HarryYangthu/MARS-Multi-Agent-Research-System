@@ -19,7 +19,8 @@ def research_links_schema() -> dict[str, Any]:
                        "adaptation_reason": {"type": "string", "minLength": 12, "maxLength": 1200}}}}
 
 
-def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]], *, min_sources: int = 1) -> list[str]:
+def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]], *, min_sources: int = 1,
+                         require_linked_sources: bool = False) -> list[str]:
     """Reports must come from the trusted delegation loader, never proposal fields."""
     links = metadata.get("research_links")
     errors = ["/research_links/" + "/".join(map(str, e.absolute_path)) + ": " + e.message
@@ -33,12 +34,14 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
     indexed = {str(item["delegation_id"]): item["report"] for item in reports}
     read_sources = {canonical_source(source["url"]) for report in indexed.values()
                     for source in report.get("sources", []) if source.get("decision") == "use"}
-    if len(read_sources) < min_sources:
+    if not require_linked_sources and len(read_sources) < min_sources:
         errors.append(f"/research_links: require findings from {min_sources} distinct read publications; observed {len(read_sources)}")
     citations = {canonical_source(str(item.get("url", "")))
                  for item in metadata.get("related_literature", []) if isinstance(item, dict)}
     seen: set[tuple[str, str, str]] = set()
+    linked_sources: set[str] = set()
     for index, link in enumerate(links):
+        errors_before = len(errors)
         prefix = f"/research_links/{index}"
         key = (link["delegation_id"], link["insight_id"], link["method_spec_ref"])
         if key in seen:
@@ -60,4 +63,9 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
             resolve_pointer(metadata, link["method_spec_ref"])
         except ValueError as exc:
             errors.append(prefix + ": " + str(exc))
+        if insight is not None and len(errors) == errors_before:
+            linked_sources.add(canonical_source(str(source["url"])))
+    if require_linked_sources and len(linked_sources) < min_sources:
+        errors.append(f"/research_links: require {min_sources} distinct publications linked to actual method definitions; "
+                      f"observed {len(linked_sources)}. Reading or citing an unused paper does not satisfy this requirement.")
     return errors

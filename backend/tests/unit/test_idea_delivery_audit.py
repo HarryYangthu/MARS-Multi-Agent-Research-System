@@ -157,6 +157,160 @@ def test_legacy_receipts_do_not_require_new_handoff_or_export(tmp_path: Path) ->
     assert report["delivery_bundle_valid"] is None
 
 
+def _require_research_contract(root: Path, text: str) -> None:
+    """Declare a stricter file contract without claiming any Agent execution."""
+    path = root / "idea/validation/receipt.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["research_assessment_required"] = True
+    atomic_json(path, record)
+    atomic_json(root / "agent_traces/idea/invocation-a/checkpoint.json", {
+        "candidate": text, "history": [], "status": "unexecuted", "pending": None,
+    })
+
+
+def _write_unverified_research_files(delivery: Path, text: str) -> None:
+    """Create negative file inputs; neither file is a successful research result."""
+    (delivery / "research_brief.md").write_text("No verified research was performed.\n", encoding="utf-8")
+    atomic_json(delivery / "research_evidence.json", {
+        "schema": "idea.research_evidence.v1", "proposal_sha256": digest(text),
+        "reports": [], "scientific_validated": False,
+    })
+
+
+def test_historical_delivery_does_not_gain_research_requirements_from_unrelated_receipts(tmp_path: Path) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    atomic_json(tmp_path / "idea/validation/other-research.json", {
+        "candidate_sha256": digest("another candidate"), "delivery_contract_version": "idea.handoff.v1",
+        "research_assessment_required": True,
+    })
+    # A stray sidecar is not an authority for upgrading a historical receipt.
+    (delivery / "research_evidence.json").write_text("Unverified stray sidecar", encoding="utf-8")
+    report = _audit(tmp_path, summary, text)
+    assert report["errors"] == []
+    assert report["research_decisions_checked"] is None
+    assert not list(tmp_path.rglob("checkpoint.json"))
+
+
+@pytest.mark.parametrize("filename", ["research_brief.md", "research_evidence.json"])
+def test_new_exact_candidate_receipt_requires_research_delivery_files(tmp_path: Path, filename: str) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    (delivery / filename).unlink()
+    report = _audit(tmp_path, summary, text)
+    assert report["delivery_bundle_valid"] is False
+    assert report["research_decisions_checked"] is False
+    assert any(filename + ":" in error for error in report["errors"])
+
+
+def test_empty_checkpoint_history_does_not_verify_a_sidecars_claimed_reports(tmp_path: Path) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    path = delivery / "research_evidence.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["reports"] = [{"delegation_id": "authored-claim-without-execution", "report": {}}]
+    atomic_json(path, sidecar)
+    report = _audit(tmp_path, summary, text)
+    assert report["delivery_contract_valid"] is False
+    assert report["delivery_bundle_valid"] is False
+    assert any("reports differ from verified checkpoint evidence" in error for error in report["errors"])
+    assert any("research_assessment" in error for error in report["errors"])
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "unsupported"), ("proposal_sha256", "different candidate"),
+    ("scientific_validated", True), ("scientific_validated", 0), ("unexpected", "field"),
+])
+def test_research_sidecar_cannot_override_candidate_identity_or_evidence_limits(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    path = delivery / "research_evidence.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar[field] = value
+    atomic_json(path, sidecar)
+    assert any("research_evidence.json" in error for error in _audit(tmp_path, summary, text)["errors"])
+
+
+@pytest.mark.parametrize("content", ["not JSON", "null", "[]", "42"])
+def test_malformed_research_sidecar_is_reported(tmp_path: Path, content: str) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    (delivery / "research_evidence.json").write_text(content, encoding="utf-8")
+    assert any("research_evidence.json must be a JSON object" in error
+               for error in _audit(tmp_path, summary, text)["errors"])
+
+
+@pytest.mark.parametrize("history", [None, {}, "not observations", [None]])
+def test_new_research_audit_rejects_malformed_checkpoint_history(tmp_path: Path, history: object) -> None:
+    text, summary, _ = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    atomic_json(tmp_path / "agent_traces/idea/invocation-a/checkpoint.json", {
+        "candidate": text, "history": history, "status": "unexecuted",
+    })
+    assert any("checkpoint history" in error for error in _audit(tmp_path, summary, text)["errors"])
+
+
+def test_new_research_audit_cannot_use_another_candidates_checkpoint(tmp_path: Path) -> None:
+    text, summary, _ = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    path = tmp_path / "agent_traces/idea/invocation-a/checkpoint.json"
+    atomic_json(path, {"candidate": "another authored candidate", "history": [], "status": "unexecuted"})
+    assert any("checkpoint candidate differs" in error for error in _audit(tmp_path, summary, text)["errors"])
+    path.unlink()
+    assert any("research evidence verification failed" in error for error in _audit(tmp_path, summary, text)["errors"])
+
+
+def test_unverified_research_brief_cannot_be_accepted_as_rendered_evidence(tmp_path: Path) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    report = _audit(tmp_path, summary, text)
+    assert any("research_brief.md differs from exact rendering" in error for error in report["errors"])
+    assert any("accepted model review" in error for error in report["errors"])
+
+
+def test_research_decisions_checked_flag_requires_audited_support(tmp_path: Path) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    _write_unverified_research_files(delivery, text)
+    path = delivery / "acceptance.json"
+    acceptance = json.loads(path.read_text(encoding="utf-8"))
+    acceptance["research_decisions_checked"] = True
+    atomic_json(path, acceptance)
+    assert any("acceptance.json/research_decisions_checked" in error
+               for error in _audit(tmp_path, summary, text)["errors"])
+    del acceptance["research_decisions_checked"]
+    atomic_json(path, acceptance)
+    assert any("acceptance.json/research_decisions_checked" in error
+               for error in _audit(tmp_path, summary, text)["errors"])
+
+
+@pytest.mark.parametrize("filename", ["research_brief.md", "research_evidence.json"])
+def test_research_delivery_files_cannot_resolve_outside_export(tmp_path: Path, filename: str) -> None:
+    text, summary, delivery = _write_authored_delivery(tmp_path)
+    _require_research_contract(tmp_path, text)
+    outside = tmp_path / ("outside-" + filename)
+    outside.write_text("Unverified external file", encoding="utf-8")
+    (delivery / filename).symlink_to(outside)
+    assert any(filename + ": ValueError" in error for error in _audit(tmp_path, summary, text)["errors"])
+
+
+@pytest.mark.parametrize("value", ["true", "false", 1, 0, None])
+def test_research_requirement_is_a_recorded_boolean(tmp_path: Path, value: object) -> None:
+    text, summary, _ = _write_authored_delivery(tmp_path)
+    path = tmp_path / "idea/validation/receipt.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["research_assessment_required"] = value
+    atomic_json(path, record)
+    assert any("research_assessment_required must be a recorded boolean" in error
+               for error in _audit(tmp_path, summary, text)["errors"])
+
+
 def test_report_shows_both_outputs_and_separates_experiments_from_model_review() -> None:
     metadata = _metadata()
     # A report-rendering input with zero executions is not an Agent result.

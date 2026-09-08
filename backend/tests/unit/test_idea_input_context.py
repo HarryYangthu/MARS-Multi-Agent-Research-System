@@ -27,7 +27,8 @@ def test_exact_context_survives_real_archive_and_idea_handoff(tmp_path: Path) ->
                "metric_definition": "NMSE definition\n", "literature_notes": "User notes\n"}
     payload = CreateRunPayload.model_validate({"task": "Research", "project": "pimc", "idea_context": context,
         "idea_scope": "project_proposal", "idea_requirements": {"min_sources": 2, "min_pdfs": 1,
-        "max_parameter_ratio": 1.2, "require_parameter_budget": True, "require_evaluation_protocol": True}})
+        "max_parameter_ratio": 1.2, "require_parameter_budget": True, "require_evaluation_protocol": True,
+        "require_research_dossier": True}})
     run = RunStore(tmp_path).create(task="Research", project="pimc", entrypoint="idea")
     Orchestrator._persist_request_extra(run, payload.idea_request_extra())
     upstream, feedback = load_agent_handoff_context(run, "idea")
@@ -37,6 +38,7 @@ def test_exact_context_survives_real_archive_and_idea_handoff(tmp_path: Path) ->
     saved = json.loads((run.subdir("input") / "run_request_options.v1.json").read_text())
     assert saved["extra"]["scope"] == "project_proposal"
     assert saved["extra"]["idea_requirements"]["require_evaluation_protocol"] is True
+    assert saved["extra"]["idea_requirements"]["require_research_dossier"] is True
     downstream, _ = load_agent_handoff_context(run, "experiment")
     assert not set(context).intersection(downstream)
 
@@ -57,7 +59,8 @@ def test_invalid_public_context_rejected(context: Any) -> None:
 @pytest.mark.parametrize("requirements", [{"min_sources": -1}, {"min_sources": 101}, {"min_sources": True},
     {"min_pdfs": "1"}, {"min_pdfs": 101}, {"max_parameter_ratio": 0}, {"max_parameter_ratio": float("nan")},
     {"max_parameter_ratio": float("inf")}, {"max_parameter_ratio": 101}, {"require_parameter_budget": "true"},
-    {"require_evaluation_protocol": 1}, {"unknown": True}])
+    {"require_evaluation_protocol": 1}, {"require_research_dossier": "true"},
+    {"require_research_dossier": 1}, {"unknown": True}])
 def test_invalid_public_requirements_rejected(requirements: Any) -> None:
     with pytest.raises(ValidationError):
         CreateRunPayload.model_validate({"task": "Research", "project": "pimc", "idea_requirements": requirements})

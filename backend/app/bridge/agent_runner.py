@@ -82,7 +82,7 @@ async def run_agent_node(
     if user_request_path.exists():
         user_request = user_request_path.read_text(encoding="utf-8")
 
-    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason)
+    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
     if revision_reason:
         run.write_event(
             "agent_events",
@@ -398,7 +398,7 @@ def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> No
 
 
 def load_agent_handoff_context(
-    run: RunHandle, node_key: str, *, revision_reason: str = "",
+    run: RunHandle, node_key: str, *, revision_reason: str = "", registry: AgentRegistry | None = None,
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
     """Load actual approved upstream documents without silently truncating them."""
     identity = parse_node_key(node_key)
@@ -417,10 +417,22 @@ def load_agent_handoff_context(
         if not d.exists():
             continue
         for p in sorted(d.glob("*.approved.md")):
+            text = p.read_text(encoding="utf-8")
             upstream[p.name] = _handoff_summary(
-                text=p.read_text(encoding="utf-8"),
+                text=text,
                 source_ref=p.relative_to(run.root).as_posix(),
             )
+            if sub == "idea" and "research_assessment" in parse_fm(text).metadata:
+                idea_registry = registry if registry is not None else get_registry()
+                if not idea_registry.has("idea"):
+                    raise ValueError("Idea research handoff requires a registered Idea agent")
+                loader = getattr(idea_registry.get("idea"), "load_approved_research_context", None)
+                if not callable(loader):
+                    raise ValueError("registered Idea agent does not support verified research handoff")
+                evidence = loader(run_root=run.root, proposal_text=text, project=run.project)
+                if not isinstance(evidence, dict):
+                    raise ValueError("Idea research handoff did not return verified evidence")
+                upstream[p.name + ".research_evidence"] = json.dumps(evidence, ensure_ascii=False)
     feedback_context: dict[str, Any] | None = None
     if attempt > 1 and stage in {"experiment", "coding"}:
         feedback_context = load_feedback_context_for_agent(

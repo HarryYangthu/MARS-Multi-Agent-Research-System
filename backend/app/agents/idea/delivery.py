@@ -145,6 +145,25 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
         validation.metadata, str(request.extra.get("scope", "method_proposal")), body=parse(artifact.text).body)
     if errors:
         raise ValueError("cannot publish an invalid Idea delivery: " + "; ".join(errors))
+    reports: list[dict[str, Any]] = []
+    research_brief: str | None = None
+    if ("research_assessment" in validation.metadata
+            or request.extra.get("idea_requirements", {}).get("require_research_dossier")
+            or "idea_research_session" in request.runtime):
+        from app.agents.idea.research_assessment import assessment_errors
+        from app.agents.idea.research_brief import render_research_brief
+        from app.agents.idea.research_delegate import verified_delegated_reports
+        from app.agents.idea.research_links import research_link_errors
+        reports = verified_delegated_reports(request)
+        errors = assessment_errors(validation.metadata, reports, required=True)
+        errors.extend(research_link_errors(validation.metadata, reports,
+            min_sources=int(request.extra.get("idea_requirements", {}).get("min_sources", 1)),
+            require_linked_sources=True))
+        if not reviewed:
+            errors.append("research assessment requires an accepted independent-context model review")
+        if errors:
+            raise ValueError("cannot publish unreviewed or inconsistent research decisions: " + "; ".join(errors))
+        research_brief = render_research_brief(validation.metadata, reports, reviewed=reviewed)
     # A resumed invocation may produce another accepted revision. Keep each
     # export immutable so publishing it neither fails nor replaces earlier evidence.
     root = Path(str(request.extra["run_root"])) / "idea" / "deliveries" / invocation / uuid.uuid4().hex
@@ -152,8 +171,14 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
     (root / "proposal.md").write_text(artifact.text, encoding="utf-8")
     atomic_json(root / "proposal.json", validation.metadata)
     (root / "summary.txt").write_text(str(validation.metadata["human_summary"]) + "\n", encoding="utf-8")
+    if research_brief is not None:
+        (root / "research_brief.md").write_text(research_brief, encoding="utf-8")
+        atomic_json(root / "research_evidence.json", {"schema": "idea.research_evidence.v1",
+            "proposal_sha256": digest(artifact.text), "reports": reports,
+            "scientific_validated": False})
     atomic_json(root / "acceptance.json", {"schema_valid": True, "delivery_contract_valid": True,
         "model_review_passed": reviewed, "scientific_validated": False, "simulation_executed": False,
+        "research_decisions_checked": research_brief is not None,
         "proposal_sha256": digest(artifact.text), "scope": request.extra.get("scope", "method_proposal"),
         "execution_requires_context": any(c["blocks_execution"] for c in validation.metadata["handoff"]["required_context"])})
     return root

@@ -16,6 +16,10 @@ from loguru import logger
 
 from app.agents.idea.acceptance import validation_record_delivery_errors
 from app.agents.idea.research import evidence_inventory, material_errors
+from app.agents.idea.research_assessment import assessment_errors
+from app.agents.idea.research_brief import render_research_brief
+from app.agents.idea.research_delegate import load_delegated_research
+from app.agents.idea.research_links import research_link_errors
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.schema.validator import validate_document
 from scripts.idea_live_resume import audit_resumptions
@@ -80,7 +84,12 @@ def audit_delivery(
         if record.get("candidate_sha256") == candidate_sha:
             receipts.append((path, record))
     versioned = [(path, record) for path, record in receipts if record.get("delivery_contract_version") is not None]
+    research_receipts = [(path, record) for path, record in receipts
+                         if record.get("research_assessment_required") is True]
     contract_errors: list[str] = []
+    for path, record in receipts:
+        if "research_assessment_required" in record and type(record["research_assessment_required"]) is not bool:
+            contract_errors.append(f"{path.name}: research_assessment_required must be a recorded boolean")
     if not validation.valid:
         contract_errors.extend(f"{error.path}: {error.message}" for error in validation.errors)
     elif versioned:
@@ -90,6 +99,42 @@ def audit_delivery(
             contract_errors.extend(validation_record_delivery_errors(metadata, record, body=validation.body))
     elif not receipts and (has_versioned_receipt or summary.get("delivery_root") is not None):
         contract_errors.append("no exact-candidate validation receipt for the recorded delivery")
+    research_errors: list[str] = []
+    research_reports: list[dict[str, Any]] | None = None
+    expected_brief: str | None = None
+    if research_receipts:
+        checkpoint_path = root.resolve() / "agent_traces" / "idea" / invocation / "checkpoint.json"
+        try:
+            if (checkpoint_path.resolve() != checkpoint_path
+                    or not checkpoint_path.is_relative_to(root.resolve())):
+                raise ValueError("checkpoint resolves outside the recorded invocation")
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if not isinstance(checkpoint, dict) or checkpoint.get("candidate") != text:
+                raise ValueError("checkpoint candidate differs from the audited candidate")
+            observations = checkpoint.get("history")
+            if not isinstance(observations, list) or any(not isinstance(item, dict) for item in observations):
+                raise ValueError("checkpoint history must contain actual observation objects")
+            research_reports, _ = load_delegated_research(root, observations)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            research_errors.append("research evidence verification failed: " + str(exc))
+        if not model_review_passed:
+            research_errors.append("research assessment requires an accepted model review of this candidate")
+        if research_reports is not None and validation.valid:
+            research_errors.extend(assessment_errors(metadata, research_reports, required=True))
+            for path, record in research_receipts:
+                try:
+                    minimum = record.get("requirements", {}).get("min_sources", 1)
+                    if type(minimum) is not int or minimum < 0:
+                        raise ValueError("min_sources must be a nonnegative recorded integer")
+                    research_errors.extend(research_link_errors(metadata, research_reports,
+                        min_sources=minimum, require_linked_sources=True))
+                except (ValueError, TypeError, AttributeError) as exc:
+                    research_errors.append(f"{path.name}: invalid recorded research requirements: {exc}")
+            try:
+                expected_brief = render_research_brief(metadata, research_reports, reviewed=model_review_passed)
+            except (ValueError, TypeError, KeyError) as exc:
+                research_errors.append("research_brief.md cannot be reproduced from verified evidence: " + str(exc))
+        contract_errors.extend(research_errors)
     errors.extend(contract_errors)
     contract_valid: bool | None = not contract_errors if versioned else None
     bundle_errors: list[str] = []
@@ -102,12 +147,16 @@ def audit_delivery(
         bundle_errors.append("versioned candidate has no recorded delivery_root")
     if delivery_root is not None:
         files: dict[str, str] = {}
-        for name in ("proposal.md", "proposal.json", "summary.txt", "acceptance.json"):
+        filenames = ["proposal.md", "proposal.json", "summary.txt", "acceptance.json"]
+        if research_receipts:
+            filenames.extend(["research_brief.md", "research_evidence.json"])
+        for name in filenames:
             path = delivery_root / name
             try:
                 if path.resolve().parent != delivery_root:
                     raise ValueError("file resolves outside the recorded delivery directory")
-                files[name] = path.read_text(encoding="utf-8")
+                files[name] = (path.read_bytes().decode("utf-8") if name == "research_brief.md"
+                               else path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as exc:
                 bundle_errors.append(f"{name}: {type(exc).__name__} reading the recorded delivery file")
         if "proposal.md" in files and files["proposal.md"] != text:
@@ -125,6 +174,28 @@ def audit_delivery(
             bundle_errors.append("runner summary human_summary differs from the accepted candidate")
         if summary.get("handoff") != metadata.get("handoff"):
             bundle_errors.append("runner summary handoff differs from the accepted candidate")
+        if research_receipts:
+            if "research_evidence.json" in files:
+                try:
+                    sidecar = json.loads(files["research_evidence.json"])
+                except ValueError:
+                    sidecar = None
+                if not isinstance(sidecar, dict):
+                    bundle_errors.append("delivery research_evidence.json must be a JSON object")
+                else:
+                    if set(sidecar) != {"schema", "proposal_sha256", "reports", "scientific_validated"}:
+                        bundle_errors.append("delivery research_evidence.json has missing or unexpected fields")
+                    if sidecar.get("schema") != "idea.research_evidence.v1":
+                        bundle_errors.append("delivery research_evidence.json has an unsupported schema")
+                    if sidecar.get("proposal_sha256") != candidate_sha:
+                        bundle_errors.append("delivery research_evidence.json is bound to a different candidate hash")
+                    if sidecar.get("scientific_validated") is not False:
+                        bundle_errors.append("delivery research_evidence.json cannot claim scientific validation")
+                    if research_reports is None or digest(sidecar.get("reports")) != digest(research_reports):
+                        bundle_errors.append("delivery research_evidence.json reports differ from verified checkpoint evidence")
+            if "research_brief.md" in files:
+                if expected_brief is None or files["research_brief.md"] != expected_brief:
+                    bundle_errors.append("delivery research_brief.md differs from exact rendering of verified evidence")
         if "acceptance.json" in files:
             try:
                 acceptance = json.loads(files["acceptance.json"])
@@ -141,6 +212,8 @@ def audit_delivery(
                                   "scientific_validated": False, "simulation_executed": False,
                                   "execution_requires_context": any(isinstance(item, dict) and item.get("blocks_execution") is True
                                                                     for item in prerequisites)}
+                if research_receipts:
+                    expected_flags["research_decisions_checked"] = validation.valid and not research_errors
                 for key, expected in expected_flags.items():
                     if acceptance.get(key) is not expected:
                         bundle_errors.append(f"delivery acceptance.json/{key} differs from audited facts")
@@ -152,6 +225,7 @@ def audit_delivery(
     bundle_checked = bool(versioned) or summary.get("delivery_root") is not None
     return {"delivery_contract_valid": contract_valid,
             "delivery_bundle_valid": not bundle_errors if bundle_checked else None,
+            "research_decisions_checked": validation.valid and not research_errors if research_receipts else None,
             "delivery_root": str(delivery_root) if delivery_root is not None else None,
             "validation_receipts": [path.relative_to(root).as_posix() for path, _ in receipts],
             "delivery_contract_versions": list(dict.fromkeys(str(record["delivery_contract_version"]) for _, record in versioned)),

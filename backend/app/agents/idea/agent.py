@@ -12,6 +12,7 @@ from app.agents.idea.delivery import delivery_errors, progress_sink, write_deliv
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.protocol import protocol_schema
 from app.agents.idea.research_links import research_link_errors, research_links_schema
+from app.agents.idea.research_assessment import assessment_errors, assessment_schema
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.llm.provider_base import Message
 from app.harness.tools.registry import ToolRegistry
@@ -32,7 +33,7 @@ class IdeaAgent(BaseAgent):
         "如方法未出现在返回节选中，应选择新页窗口。不要改写工具错误或把空历史当成新颖性证明。"
         "方法迁移必须区分论文原结论、你的推断、尚待实验验证的假设。"
         "用户未定义的领域缩写、物理信号和硬件架构不得凭字母猜测；将它们列为需要确认的背景。"
-        "检索应有明确的信息缺口；当已取得要求数量的相关来源并读到方法页段后，应形成候选方案。"
+        "检索应有明确的信息缺口；当核心设计已有相关原文支持、满足材料要求且未决问题已明确时，形成候选方案。"
         "只有具体定义、证据或比较仍缺失时再补检索，不为增加篇数反复扩展检索。"
         "最终输出遵循宿主指定的协议，方案必须包含完整元数据和中文正文。"
         "不要填补虚构 baseline、投票或实验结果。"
@@ -42,6 +43,11 @@ class IdeaAgent(BaseAgent):
         return bool(request.extra.get("idea_requirements", {}).get("require_research_dossier")) or (
             "idea.research_delegate" in self.config.tools
         )
+
+    def load_approved_research_context(self, *, run_root: Path, proposal_text: str,
+                                       project: str) -> dict[str, Any] | None:
+        from app.agents.idea.research_handoff import load_research_handoff
+        return load_research_handoff(run_root, proposal_text, project=project)
 
     def loop_registry(self, request: RunRequest, context: ContextPack) -> ToolRegistry:
         if "idea.research_delegate" not in self.config.tools:
@@ -67,6 +73,8 @@ class IdeaAgent(BaseAgent):
         if self.requires_research_dossier(request):
             schema["required"].append("research_links")
             schema["properties"]["research_links"] = research_links_schema()
+            schema["required"].append("research_assessment")
+            schema["properties"]["research_assessment"] = assessment_schema()
         if requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol"):
             schema["required"].append("evaluation_protocol")
             schema["properties"]["evaluation_protocol"] = protocol_schema()
@@ -198,6 +206,21 @@ class IdeaAgent(BaseAgent):
                 "The researcher supplies evidence and possible transfers; you remain responsible for one "
                 "complete implementable proposal. Rejected candidates can be revised in this same loop. "
                 "Do not request new research simply to repeat an already answered question."
+                "\nProvide research_assessment (idea.research_assessment.v1) in concise Chinese: "
+                "state the task_question, selection_principles with id/criterion/task_basis, stopping_reason "
+                "and remaining_gaps (an empty list is allowed). For every used source in each verified report, "
+                "record a source_decision with delegation_id, source_id, decision (adopt/exclude/defer), "
+                "reason, task_relevance, criterion_ids, insight_ids and transfer_assumptions. "
+                "Explain which current design decision the paper can inform, relevant differences in input, "
+                "budget or assumptions, and when that transfer could fail. A matching keyword, high citation "
+                "count, available PDF or minimum paper quota is insufficient as a scientific selection reason. "
+                "For adopt, insight_ids must exactly match the insights from that source used in research_links; "
+                "exclude/defer use empty insight_ids and no method links. A useful negative result may inform "
+                "an explicit design constraint or rejected alternative under method_spec. Unrelated papers "
+                "should be excluded, never attached to a dummy method field to meet a count. "
+                "Only distinct papers linked to actual method definitions count toward min_sources. "
+                "Explain why the research is sufficient for this decision and list unresolved gaps honestly. "
+                "Every claim in the human_summary must agree with the canonical method_spec and handoff."
             )
         return context
 
@@ -205,6 +228,8 @@ class IdeaAgent(BaseAgent):
         mode = str(request.extra.get("idea_mode", "fast"))
         if mode != "fast":
             raise ValueError("deep discovery is not wired to the audited loop yet; use fast with reflection mode")
+        if self.requires_research_dossier(request) and self.loop_policy.mode != "reflection":
+            raise ValueError("research dossier delivery requires reflection mode to review relevance and transfer before publication")
         try:
             artifact = await self._draft_via_llm(request, context)
             trace_root = Path(str(context.metadata["loop_trace_root"]))
@@ -243,7 +268,9 @@ class IdeaAgent(BaseAgent):
             return ["/research_evidence: delegated evidence could not be verified: " + str(exc)]
         material_observations = [*observations, *child_observations]
         if self.requires_research_dossier(request):
-            errors.extend(research_link_errors(metadata, reports, min_sources=int(requirements.get("min_sources", 1))))
+            errors.extend(research_link_errors(metadata, reports, min_sources=int(requirements.get("min_sources", 1)),
+                                               require_linked_sources=True))
+            errors.extend(assessment_errors(metadata, reports, required=True))
         candidate_sha = digest(text)
         input_receipt = archive_baseline_input(
             run_root=Path(str(request.extra["run_root"])), project=request.project,
@@ -269,6 +296,7 @@ class IdeaAgent(BaseAgent):
             "evaluation_protocol_required": bool(requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol")),
             "parameter_cases_required": bool(requirements.get("require_parameter_budget")),
             "research_dossier_required": self.requires_research_dossier(request),
+            "research_assessment_required": self.requires_research_dossier(request),
             "verified_research_delegations": [r["delegation_id"] for r in reports],
             "input_evidence": [input_receipt] if input_receipt is not None else [],
             "scope": request.extra.get("scope", "method_proposal"),
@@ -311,6 +339,15 @@ class IdeaAgent(BaseAgent):
             "For delegated research, check the original visible page excerpts against each paper_finding "
             "and the proposal's research_links. Exact quote matching proves provenance only, not that the "
             "paper supports the interpretation. Check transfer assumptions and explicitly untested claims. "
+            "Evaluate research_assessment against the original task, verified reports and method_spec: "
+            "do the selection principles resolve concrete task gaps, are adopted papers genuinely relevant "
+            "to the stated design decisions, and do the extracted findings support the proposed transfers "
+            "under the declared assumptions? A source count, citation, keyword match or nonempty field "
+            "does not demonstrate usefulness. Reject decorative links, unsupported inference, copied "
+            "paper guarantees, contradictions between source_decisions and actual use, and a stopping_reason "
+            "that ignores an essential unresolved design gap. An excluded paper needs no positive result. "
+            "Check the short Chinese human_summary explains the actual change and its plausible mechanism "
+            "without claiming measured gains, and agrees with the complete machine-readable handoff. "
             "Check baseline/candidate function-class claims (smoothness does not imply strict inclusion), "
             "basis/knots/degree/control-point definitions, every real vs complex trainable count, boundary stability, "
             "input/output/phase contract, PIMC vs DPD metric transfer, fair equal-budget ablations, and "
