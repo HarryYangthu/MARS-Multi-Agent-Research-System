@@ -7,6 +7,7 @@ from jsonschema import Draft202012Validator
 
 from app.agents.idea.delivery import resolve_pointer
 from app.agents.idea.research import canonical_source
+from app.agents.idea.source_identity import document_key
 
 
 def research_links_schema() -> dict[str, Any]:
@@ -36,7 +37,7 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
                     for source in report.get("sources", []) if source.get("decision") == "use"}
     if not require_linked_sources and len(read_sources) < min_sources:
         errors.append(f"/research_links: require findings from {min_sources} distinct read publications; observed {len(read_sources)}")
-    citations = {canonical_source(str(item.get("url", "")))
+    citations = {document_key(str(item.get("url", "")))
                  for item in metadata.get("related_literature", []) if isinstance(item, dict)}
     seen: set[tuple[str, str, str]] = set()
     linked_sources: set[str] = set()
@@ -57,8 +58,9 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
             source = sources.get(insight["source_id"], {})
             if source.get("decision") != "use":
                 errors.append(prefix + ": linked source was not selected for use")
-            if canonical_source(str(source.get("url", ""))) not in citations:
-                errors.append(prefix + ": cite the linked insight's original source in related_literature")
+            source_key = document_key(str(source.get("url", "")))
+            if not source_key or source_key not in citations:
+                errors.append(prefix + ": cite the linked insight's original source in related_literature with the same document version; copy the verified report source URL, not a guessed latest/version alias")
         try:
             resolve_pointer(metadata, link["method_spec_ref"])
         except ValueError as exc:

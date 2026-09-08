@@ -13,6 +13,7 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source, title_key
+from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.schema.validator import SCHEMAS_DIR
 
@@ -159,19 +160,12 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
         return errors
     if type(min_sources) is not int or min_sources < 0:
         return ["/sources: min_sources must be a nonnegative integer"]
-    hits: dict[str, set[str]] = {}
-    download_urls: dict[str, set[str]] = {}
+    documents = SourceIdentityIndex(observations)
     receipts: dict[str, dict[str, Any]] = {}
     for observation in observations:
         output = observation.get("output")
         if not observation.get("ok") or not isinstance(output, dict):
             continue
-        if observation.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
-            for hit in output.get("hits", []):
-                if isinstance(hit, dict) and isinstance(hit.get("url"), str) and isinstance(hit.get("title"), str):
-                    identity = canonical_source(hit["url"])
-                    hits.setdefault(identity, set()).add(title_key(hit["title"]))
-                    download_urls.setdefault(identity, set()).add(canonical_source(str(hit.get("pdf_url") or hit["url"])))
         if observation.get("tool") == "search.fetch_sources":
             for row in output.get("sources", []):
                 if isinstance(row, dict) and row.get("ok") and isinstance(row.get("read_receipt"), str):
@@ -188,8 +182,8 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
             errors.append(prefix + ": duplicate source id or publication")
         sources[source["source_id"]] = source
         identities.add(identity)
-        if title_key(source["title"]) not in hits.get(identity, set()):
-            errors.append(prefix + ": title/URL must match a retrieved search result")
+        if title_key(source["title"]) not in {title_key(hit["title"]) for hit in documents.matching_hits(source["url"])}:
+            errors.append(prefix + ": title/URL must match a retrieved search result at the declared document version")
         if not set(source["gap_ids"]) <= gaps:
             errors.append(prefix + "/gap_ids: unknown research gap")
     read_sources: set[str] = set()
@@ -207,11 +201,9 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
         if row is None:
             errors.append(prefix + "/read_receipt: receipt is not in actual tool observations; use an actual tool read receipt")
             continue
-        if canonical_source(str(row.get("url", ""))) != canonical_source(source["url"]):
-            errors.append(prefix + "/source_id: read receipt belongs to a different source URL")
-            continue
-        if canonical_source(str(row.get("download_url", ""))) not in download_urls.get(canonical_source(source["url"]), set()):
-            errors.append(prefix + ": read receipt download URL does not match the retrieved source PDF")
+        matches = documents.matching_hits(source["url"], read_receipt=insight["read_receipt"])
+        if title_key(source["title"]) not in {title_key(hit["title"]) for hit in matches}:
+            errors.append(prefix + ": read receipt download URL does not match the retrieved source PDF at the declared document version; use the observed version and its receipt")
             continue
         receipt_error = _receipt_error(insight, row)
         if receipt_error:

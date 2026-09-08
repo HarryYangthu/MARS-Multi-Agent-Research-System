@@ -9,11 +9,12 @@ from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source, evidence_inventory
 from app.agents.idea.research_dossier import dossier_schema
+from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.stop import LoopStop, LoopStopView
 from app.harness.schema.frontmatter_parser import parse
 
 GAP_SCHEMA = "research_gap.v1"
-STOP_CONTRACT = "idea.research_evidence_stop.v1"
+STOP_CONTRACT = "idea.research_evidence_stop.v2"
 
 
 def gap_schema() -> dict[str, Any]:
@@ -56,7 +57,7 @@ def _gap_declaration(text: str, *, project: str) -> dict[str, Any] | None:
 def material_state(observations: list[dict[str, Any]]) -> dict[str, Any]:
     """Count potentially citable pages, not just downloads or asserted reading."""
     inventory = evidence_inventory(observations)
-    papers = {row["identity"]: row for row in inventory["papers"]}
+    documents = SourceIdentityIndex(observations)
     reads: list[dict[str, Any]] = []
     identities: set[str] = set()
     for row in inventory["reads"]:
@@ -65,8 +66,7 @@ def material_state(observations: list[dict[str, Any]]) -> dict[str, Any]:
         if row.get("source_type") != "pdf" or not visible or not row.get("read_receipt"):
             continue
         identity = canonical_source(str(row.get("url", "")))
-        paper = papers.get(identity)
-        if not paper or canonical_source(str(row.get("download_url", ""))) != canonical_source(str(paper.get("pdf_url") or paper["url"])):
+        if not documents.matching_hits(str(row.get("url", "")), read_receipt=str(row["read_receipt"])):
             continue
         try:
             receipt = json.loads(Path(row["read_receipt"]).read_text())

@@ -11,7 +11,7 @@ from app.agents.idea.research_links import research_link_errors
 def documents() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] = {
         "method_spec": {"candidate": {"definition": "Human-authored pointer target"}},
-        "related_literature": [{"url": "https://arxiv.org/abs/1907.02350"}],
+        "related_literature": [{"url": "https://arxiv.org/abs/1907.02350v4"}],
         "research_links": [{"delegation_id": "reading_a", "insight_id": "finding_a",
             "method_spec_ref": "/method_spec/candidate",
             "adaptation_reason": "Human-authored syntax-check input; no scientific claim."}],
@@ -27,6 +27,13 @@ def test_consistent_pointers_only_do_not_validate_research_provenance() -> None:
     metadata, reports = documents()
     assert research_link_errors(metadata, reports) == []
     assert research_link_errors(metadata, [])
+
+
+@pytest.mark.parametrize("suffix", ["", "v1", "v5"])
+def test_citation_cannot_relabel_a_versioned_report_source(suffix: str) -> None:
+    metadata, reports = documents()
+    metadata["related_literature"][0]["url"] = "https://arxiv.org/abs/1907.02350" + suffix
+    assert any("same document version" in error for error in research_link_errors(metadata, reports))
 
 
 @pytest.mark.parametrize("field,value", [

@@ -95,7 +95,20 @@ def test_actual_overflow_failure_preserves_evidence_and_consumed_delegation(actu
     assert record["status"] == "error" and record["failure_type"] == "research_runtime_failed"
     assert record["usable_as_final_evidence"] is False and record["scientific_validated"] is False
     assert record["remaining_budget"] == {"tool_calls": 4, "model_calls": 3}
-    assert len(record["attempts"]) == 6 and len(record["read_sources"]) == 4
+    assert len(record["attempts"]) == 6
+    assert record["observed_material_counts"]["read_windows"] == 4
+    archived_receipts = [source["read_receipt"] for observation in checkpoint["history"]
+                         if observation["tool"] == "search.fetch_sources" and observation["ok"]
+                         for source in observation["output"]["sources"] if source.get("read_receipt")]
+    recorded_receipts = [source["read_receipt"] for attempt in record["attempts"]
+                         for source in attempt.get("source_results", []) if source.get("read_receipt")]
+    assert len(archived_receipts) == 4 and recorded_receipts == archived_receipts
+    # The old publication-level match counted all four real reads. The strict
+    # document contract does not infer aliases across receipts sharing PDF bytes:
+    # only the two unversioned reads directly match this child's search metadata.
+    matched_receipts = [checkpoint["history"][index]["output"]["sources"][0]["read_receipt"]
+                        for index in (4, 5)]
+    assert [source["read_receipt"] for source in record["read_sources"]] == matched_receipts
     assert record["observed_material_counts"]["distinct_read_publications"] == 1
     assert record["remaining_gaps"]
     assert checkpoint == original

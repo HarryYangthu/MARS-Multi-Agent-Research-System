@@ -7,7 +7,7 @@ from app.agents.idea.research import canonical_source
 from app.agents.idea.research_delegate import TOOL, load_delegated_research
 from app.harness.agent_loop.stop import LoopStop, LoopStopView
 
-LEAD_STOP_CONTRACT = "idea.lead_research_stop.v1"
+LEAD_STOP_CONTRACT = "idea.lead_research_stop.v2"
 
 
 def lead_evidence_stop(view: LoopStopView, *, run_root: Path, min_sources: int,

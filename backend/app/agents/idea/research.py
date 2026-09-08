@@ -11,15 +11,17 @@ from urllib.parse import urlparse
 
 from app.harness.agent_loop.trace import atomic_json
 from app.agents.idea.protocol import protocol_errors
+from app.agents.idea.source_identity import SourceIdentityIndex, document_key
 
 
 def canonical_source(url: str) -> str:
+    """Publication-level deduplication only; never use this to bind PDF evidence."""
     p = urlparse(url.strip())
     host = (p.hostname or "").lower()
     path = p.path.rstrip("/")
-    if host in {"arxiv.org", "export.arxiv.org"}:
-        paper = re.sub(r"v[0-9]+$", "", path.removesuffix(".pdf").split("/")[-1])
-        return "arxiv:" + paper
+    key = document_key(url)
+    if key.startswith("arxiv:"):
+        return key.rsplit(":", 1)[0]
     if host == "ieeexplore.ieee.org":
         match = re.search(r"(?:document|abstract/document)/([0-9]+)", path)
         if match:
@@ -233,7 +235,7 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
 def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], *,
                     min_sources: int, min_pdfs: int, require_budget: bool, max_ratio: float) -> list[str]:
     inventory = evidence_inventory(observations)
-    papers = {p["identity"]: p for p in inventory["papers"]}
+    identities = SourceIdentityIndex(observations)
     errors: list[str] = protocol_errors(metadata)
     debate = metadata.get("debate_summary")
     if isinstance(debate, dict) and debate.get("rounds", 0) != 0:
@@ -242,26 +244,25 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
     if not isinstance(citations, list):
         citations = []
     cited: set[str] = set()
+    cited_urls: set[str] = set()
     for index, citation in enumerate(citations):
         if not isinstance(citation, dict):
             errors.append(f"/related_literature/{index}: object required")
             continue
         identity = canonical_source(str(citation.get("url", "")))
-        source = papers.get(identity)
-        if source is None or title_key(str(citation.get("title", ""))) not in {
-                title_key(title) for title in source.get("observed_titles", [source["title"]])}:
-            errors.append(f"/related_literature/{index}: URL/title not matched to a real search result")
+        matches = identities.matching_hits(str(citation.get("url", "")))
+        if title_key(str(citation.get("title", ""))) not in {title_key(source["title"]) for source in matches}:
+            errors.append(f"/related_literature/{index}: URL/title not matched to a real search result at the declared document version")
         else:
             cited.add(identity)
+            cited_urls.add(str(citation["url"]))
     if len(cited) < min_sources:
         errors.append(f"/related_literature: need {min_sources} distinct retrieved cited sources; observed {len(cited)}")
     valid_pdfs = set()
     for row in inventory["reads"]:
-        identity = canonical_source(row["url"])
-        source = papers.get(identity)
-        download_id = canonical_source(row["download_url"])
-        expected = canonical_source(str((source or {}).get("pdf_url") or (source or {}).get("url", "")))
-        if source and download_id == expected and row.get("source_type") == "pdf" and row.get("visible_pages"):
+        cited_read = any(identities.matching_hits(url, read_receipt=str(row.get("read_receipt", "")))
+                         for url in cited_urls)
+        if cited_read and row.get("source_type") == "pdf" and row.get("visible_pages"):
             valid_pdfs.add(row["sha256"])
     if len(valid_pdfs) < min_pdfs:
         errors.append(f"/evidence: need {min_pdfs} source-matched downloaded PDFs with visible page excerpts")
