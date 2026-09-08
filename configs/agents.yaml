@@ -115,6 +115,7 @@ idea_research:
       base_delay_seconds: 1
   research:
     excerpt_context_chars: 600
+    review_mode: whole_report
   debate:
     enabled: false
   loop:

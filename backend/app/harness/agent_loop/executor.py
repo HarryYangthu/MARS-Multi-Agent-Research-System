@@ -12,6 +12,11 @@ from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
+from app.harness.agent_loop.review_plan import (
+    WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, finish_review_unit, pack_review_unit,
+    prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
+    start_review_unit, validate_review_plan_resume, validate_review_provider,
+)
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
@@ -54,6 +59,8 @@ class LoopInput:
     required_review_tools: tuple[str, ...] = ()
     stop_condition: StopCondition | None = None
     stop_contract_id: str | None = None
+    review_plan_factory: ReviewPlanFactory | None = None
+    review_plan_contract_id: str | None = None
 
 
 @dataclass
@@ -75,11 +82,7 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     remaining = {"model_calls": max(0, policy.max_model_calls - counts["model_requests"]),
                  "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
                  "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
-    return Message("system", "Host remaining budget for this agent loop: " + canonical(remaining)
-                   + ". The next model call is included. Each dispatched tool, including failures, consumes "
-                   "one tool call. Reserve tools for acquiring and checking evidence, and calls for submission "
-                   "and revision. These are local counters, not the total cost of any delegated loops. "
-                   "Do not invent evidence when resources are insufficient.")
+    return remaining_budget_message(remaining)
 
 
 def action_instructions(specs: list[dict[str, Any]], *, native: bool,
@@ -171,6 +174,26 @@ def apply_review_decision(state: dict[str, Any], decision: dict[str, Any], *,
     return "revision"
 
 
+def apply_planned_review_decision(state: dict[str, Any], result: UnitReviewResult, *, response_text: str,
+                                  response_visible: Any, max_reflections: int) -> tuple[dict[str, Any], str]:
+    """Commit unit and candidate transitions together, before any notification await."""
+    record = finish_review_unit(state, result, response_text=response_text, response_visible=response_visible)
+    if record["unit_id"] != WHOLE_REVIEW_UNIT and result.decision["accept"]:
+        return record, "next_unit"
+    outcome = apply_review_decision(state, result.decision, format_repair=False, max_reflections=max_reflections)
+    return record, outcome
+
+
+def apply_loop_cancellation(state: dict[str, Any]) -> bool:
+    """Interrupt unfinished work; notification cancellation cannot reopen a terminal outcome."""
+    if state["status"] != "running":
+        return False
+    state["status"] = "interrupted"
+    if state["pending"] == "model":
+        state["usage_complete"] = False
+    return True
+
+
 def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, Any],
                             required_tools: tuple[str, ...], *, observation_chars: int) -> list[str]:
     """Refuse review when required real tool evidence was compressed or omitted."""
@@ -215,6 +238,11 @@ class NativeAgentLoop:
         if request.final_schema is not None:
             fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
         fingerprint = stop_fingerprint(fingerprint, request.stop_condition, request.stop_contract_id)
+        fingerprint = review_plan_fingerprint(fingerprint, request.review_plan_factory, request.review_plan_contract_id,
+                                              request.config, p)
+        if request.review_plan_factory is not None:
+            validate_review_provider(request.provider, configured_provider=request.config.provider)
+            fingerprint = digest({"base": fingerprint, "reflection_rubric": request.reflection_rubric})
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
         state: dict[str, Any] = {
             "fingerprint": fingerprint, "status": "running", "pending": None,
@@ -226,6 +254,8 @@ class NativeAgentLoop:
             "next_phase": "act", "seen": {}, "reflection_accepted": False,
             "review_issues": [], "reviewed_candidate_sha": "",
         }
+        if request.review_plan_factory is not None:
+            state["review_plan_contract_id"] = request.review_plan_contract_id
         if request.resume:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
@@ -236,6 +266,8 @@ class NativeAgentLoop:
                 review_revision(state, request.external_review, p)
             if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
+            if request.review_plan_contract_id is not None:
+                validate_review_plan_resume(state, request.trace_root, contract_id=request.review_plan_contract_id)
             if state.get("pending_batch"):
                 raise ValueError("incomplete batch: reconcile tool receipts before resuming; automatic replay forbidden")
             if state["pending"] == "tool":
@@ -252,7 +284,15 @@ class NativeAgentLoop:
         state.setdefault("review_format_repair_pending", False)
         async def progress(kind: str, **payload: Any) -> None:
             if request.progress_sink is not None:
-                await request.progress_sink({"kind": kind, "phase": state["next_phase"], **payload})
+                try:
+                    await request.progress_sink({"kind": kind, "phase": state["next_phase"], **payload})
+                except asyncio.CancelledError:
+                    if state["status"] == "running":
+                        raise
+                    # Delivery cancellation after durable completion cannot
+                    # replace a known final outcome or force another review.
+                    trace.emit("progress_cancelled_after_completion", {"progress_kind": kind, "status": state["status"]})
+                    trace.snapshot(state)
         if request.resume and "last_model_error" not in state:
             prior_events = [json.loads(line) for line in trace.events.read_text().splitlines()]
             state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
@@ -284,15 +324,23 @@ class NativeAgentLoop:
                     state["usage_complete"] = False
 
         cfg.attempt_observer = on_attempt
+        active_plan: ReviewPlan | None = None
 
         def phase_config() -> LLMConfig:
-            return phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
+            configured = phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
                                     wire_tools=wire_tools, effort_overrides=state["phase_efforts"],
-                                    review_format_repair=bool(p.reflection_format_repair_enabled
+                                    review_format_repair=bool(request.review_plan_factory is None and p.reflection_format_repair_enabled
                                         and state["next_phase"] == "reflect" and state["protocol_output"]
                                         and state["review_format_repair_pending"]))
+            # One actual attempt per review unit. Provider SDK retries are also
+            # disabled by the provider adapter; author behavior is unchanged.
+            if request.review_plan_factory is not None and state["next_phase"] == "reflect":
+                configured = review_unit_config(configured)
+            return configured
 
         def recover_completion(reason: object) -> bool:
+            if request.review_plan_factory is not None and state["next_phase"] == "reflect":
+                return False  # An attempted unit cannot receive a second draw.
             plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
                                        limit=p.max_protocol_repairs, effort=phase_config().reasoning_effort)
             if plan is None:
@@ -335,7 +383,27 @@ class NativeAgentLoop:
                 if stop_at_boundary("before_model"):
                     break
                 reviewing = state["next_phase"] == "reflect"
-                format_repair = bool(p.reflection_format_repair_enabled and reviewing
+                planned_review = reviewing and request.review_plan_factory is not None
+                unit: ReviewUnit | None = None
+                if planned_review:
+                    assert request.review_plan_factory is not None and request.review_plan_contract_id is not None
+                    if active_plan is None or active_plan.candidate_sha256 != digest(state["candidate"]):
+                        # Domain callbacks get a copy of history, no provider or
+                        # dispatcher. Only the loop can make or account for calls.
+                        active_plan = request.review_plan_factory(state["candidate"], json.loads(canonical(state["history"])))
+                    prior_plan_sha = state.get("review_plan", {}).get("plan_sha256")
+                    ready = prepare_review_plan(state, active_plan, contract_id=request.review_plan_contract_id,
+                                                max_model_calls=p.max_model_calls)
+                    if state["review_plan"]["plan_sha256"] != prior_plan_sha:
+                        trace.emit("review_plan_started", {"candidate_sha256": active_plan.candidate_sha256,
+                                   "plan_sha256": state["review_plan"]["plan_sha256"]}, visible=state["review_plan"])
+                    if not ready:
+                        trace.emit("review_budget_exhausted", {"reason": state["feedback"], "budgets_reset": False})
+                        trace.snapshot(state)
+                        break
+                    index = state["review_plan"]["next_unit"]
+                    unit = active_plan.units[index] if index < len(active_plan.units) else None
+                format_repair = bool(not planned_review and p.reflection_format_repair_enabled and reviewing
                                      and state["protocol_output"] and state["review_format_repair_pending"])
                 if counts["model_requests"] == 0:
                     await progress("started")
@@ -343,24 +411,35 @@ class NativeAgentLoop:
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"],
                                  native=native and not (reviewing and p.reflection_format_repair_enabled)))
-                if reviewing:
+                if reviewing and unit is None:
                     extra.append(reflection_instruction(request.reflection_rubric, format_repair=format_repair))
                 feedback = state["feedback"]
                 if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 # Reflection sends no tools; reserve only schemas actually sent.
                 phase_schema_budget = 0 if reviewing else tool_schema_budget
-                messages, manifest = pack_context(
-                    (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
-                    state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget - phase_schema_budget, observation_chars=p.observation_chars,
-                    native=native, reviewing=reviewing, review_issues=state["review_issues"],
-                    validation_issues=state["validation_issues"],
-                    required_review_tools=request.required_review_tools,
-                )
+                if unit is not None:
+                    try:
+                        messages, manifest = pack_review_unit(unit, budget=p.input_token_budget,
+                                                              budget_context=budget_message(p, counts))
+                    except ValueError as exc:
+                        state["status"] = "review_evidence_unavailable"
+                        state["feedback"] = str(exc)
+                        trace.emit("review_evidence_unavailable", {"reason": str(exc), "unit_id": unit.unit_id})
+                        trace.snapshot(state)
+                        break
+                else:
+                    messages, manifest = pack_context(
+                        (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
+                        state["history"], feedback, state["candidate"],
+                        budget=p.input_token_budget - phase_schema_budget, observation_chars=p.observation_chars,
+                        native=native, reviewing=reviewing, review_issues=state["review_issues"],
+                        validation_issues=state["validation_issues"],
+                        required_review_tools=request.required_review_tools,
+                    )
                 manifest["tool_schema_upper_bound_tokens"] = phase_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + phase_schema_budget
-                if reviewing:
+                if reviewing and unit is None:
                     missing = missing_review_evidence(state["history"], manifest, request.required_review_tools,
                                                       observation_chars=p.observation_chars)
                     if missing:
@@ -372,12 +451,17 @@ class NativeAgentLoop:
                 counts["model_requests"] += 1
                 state["pending"] = "model"
                 call_config = phase_config()
+                review_request = start_review_unit(state, messages) if planned_review else None
                 trace.emit("context_packed", manifest)
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "thinking_enabled": call_config.thinking_enabled,
                                              "repair_mode": "review_format" if format_repair else None,
-                                             "max_tokens": call_config.max_tokens},
+                                             "max_tokens": call_config.max_tokens,
+                                             **({"review_unit_id": review_request["unit_id"],
+                                                 "review_plan_sha256": review_request["plan_sha256"],
+                                                 "review_candidate_sha256": review_request["candidate_sha256"],
+                                                 "max_retries": call_config.max_retries} if review_request else {})},
                            visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)
                 try:
@@ -403,14 +487,22 @@ class NativeAgentLoop:
                 usage(completion.raw.get("usage"))
                 state["pending"] = None
                 state["last_model_error"] = None
+                response_visible = ({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]}
+                                    if native else completion.text)
                 trace.emit("model_response", {"request": counts["model_requests"], "provider": completion.provider,
                                               "model": completion.model, "usage": completion.raw.get("usage")},
-                           visible=({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]}
-                                    if native else completion.text))
+                           visible=response_visible)
                 review_conflict = False
+                unit_result: UnitReviewResult | None = None
                 try:
-                    decision = (parse_review(completion.text) if reviewing else
-                                native_decision(completion, request.tools, structured_final=request.final_schema is not None) if native else parse_action(completion.text))
+                    if planned_review and completion.tool_calls:
+                        raise ValueError("review units cannot return tool calls")
+                    if unit is not None:
+                        unit_result = unit.parse_response(completion.text)
+                        decision = parse_review(canonical(unit_result.decision))
+                    else:
+                        decision = (parse_review(completion.text) if reviewing else
+                                    native_decision(completion, request.tools, structured_final=request.final_schema is not None) if native else parse_action(completion.text))
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
@@ -419,6 +511,24 @@ class NativeAgentLoop:
                     trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
                     counts["protocol_repairs"] += 1
+                    if planned_review:
+                        # A malformed reviewer response is an execution failure,
+                        # not an invitation to edit the scientific candidate or
+                        # silently call the same review unit again.
+                        failure = UnitReviewResult({"accept": False, "issues": ["Review response failed its contract: " + str(exc)],
+                                                    "rationale": "No usable review decision; the candidate is not accepted."},
+                                                   {"protocol_error": str(exc)})
+                        record = finish_review_unit(state, failure, response_text=completion.text,
+                                                    response_visible=response_visible, valid=False)
+                        trace.emit("review_unit", {"request": counts["model_requests"], "unit_id": record["unit_id"],
+                                                   "valid": False}, visible=record)
+                        state["status"] = "review_protocol_error"
+                        state["reflection_accepted"] = False
+                        state["feedback"] = failure.decision["issues"][0]
+                        trace.emit("protocol_error", {"error": str(exc), "review_unit_id": record["unit_id"],
+                                                      "automatic_retry": False})
+                        trace.snapshot(state)
+                        break
                     state["review_format_repair_pending"] = bool(
                         p.reflection_format_repair_enabled and reviewing and is_review_format_error(exc))
                     state["protocol_output"] = (canonical({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]})
@@ -456,8 +566,22 @@ class NativeAgentLoop:
                     continue
                 state["protocol_output"] = ""
                 if reviewing:
-                    outcome = apply_review_decision(state, decision, format_repair=format_repair,
-                                                    max_reflections=p.max_reflections)
+                    finished_record: dict[str, Any] | None = None
+                    if planned_review:
+                        details = unit_result.details if unit_result is not None else {"review": decision}
+                        finished_record, outcome = apply_planned_review_decision(state, UnitReviewResult(decision, details),
+                            response_text=completion.text, response_visible=response_visible, max_reflections=p.max_reflections)
+                        trace.emit("review_unit", {"request": counts["model_requests"], "unit_id": finished_record["unit_id"],
+                                                   "valid": True}, visible=finished_record)
+                        if outcome == "next_unit":
+                            # Positive units are not whole-candidate acceptance.
+                            # They also never become input to another reviewer.
+                            trace.snapshot(state)
+                            await progress("review_unit", unit_id=finished_record["unit_id"], accepted=True)
+                            continue
+                    else:
+                        outcome = apply_review_decision(state, decision, format_repair=format_repair,
+                                                        max_reflections=p.max_reflections)
                     if outcome == "independent_review":
                         trace.emit("review_format_repaired", {"accept": True, "effective_accept": False,
                                    "repair_mode": "review_format", "independent_review_required": True}, visible=decision)
@@ -467,6 +591,9 @@ class NativeAgentLoop:
                     trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
                                               "host_conflict_rejection": review_conflict,
                                               "repair_mode": "review_format" if format_repair else None}, visible=decision)
+                    trace.snapshot(state)
+                    if finished_record is not None:
+                        await progress("review_unit", unit_id=finished_record["unit_id"], accepted=decision["accept"])
                     await progress("review", accepted=decision["accept"], issues=decision["issues"])
                     if outcome == "accepted":
                         break
@@ -559,11 +686,10 @@ class NativeAgentLoop:
             if state["status"] == "running":
                 state["status"] = "budget_exhausted"
         except asyncio.CancelledError:
-            state["status"] = "interrupted"
-            if state["pending"] == "model":
-                state["usage_complete"] = False
-            trace.emit("interrupted", {"pending": state["pending"]})
-            raise
+            if apply_loop_cancellation(state):
+                trace.emit("interrupted", {"pending": state["pending"]})
+                raise
+            trace.emit("cancelled_after_completion", {"status": state["status"]})
         except Exception as exc:
             state["status"] = "error"
             trace.emit("error", {"error_type": type(exc).__name__, "message": str(exc)[:500]})

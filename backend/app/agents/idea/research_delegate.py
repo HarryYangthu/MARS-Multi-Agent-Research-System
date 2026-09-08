@@ -5,6 +5,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,11 @@ from app.agents.idea.research_gap import (
     GAP_SCHEMA, STOP_CONTRACT, evidence_stop, failure_record, gap_errors, research_submission_schema,
 )
 from app.agents.idea.research_review import RESEARCH_REVIEW_RUBRIC, research_review_messages
+from app.agents.idea.research_review_plan import (
+    REVIEW_PLAN_CONTRACT, build_research_review_plan, research_plan_errors, research_review_mode, review_plan_claim,
+)
 from app.agents.idea.research_origin import ResearchOrigin, research_origins
-from app.harness.agent_loop import AgentLoopPolicy, LoopInput, NativeAgentLoop
+from app.harness.agent_loop import AgentLoopPolicy, LoopInput, LoopResult, NativeAgentLoop
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
@@ -35,6 +39,8 @@ def research_policy(config: AgentConfig, *, require_review: bool) -> AgentLoopPo
         raise ValueError("research delegation requires full auditable traces")
     if require_review and policy.mode != "reflection":
         raise ValueError("required research dossier needs an independent reflection review; react cannot bypass it")
+    if research_review_mode(config.raw.get("research", {})) == "per_insight_then_whole" and policy.mode != "reflection":
+        raise ValueError("per_insight_then_whole requires reflection review")
     return policy
 
 
@@ -45,8 +51,13 @@ def research_submission_instruction(policy: AgentLoopPolicy) -> str:
 
 
 def research_review_errors(manifest: dict[str, Any], output: dict[str, Any],
-                           checkpoint: dict[str, Any], text: str) -> list[str]:
+                           checkpoint: dict[str, Any], text: str, *, trace_root: Path | None = None,
+                           request_record: dict[str, Any] | None = None) -> list[str]:
     """Historical missing flags convey no review; new flags are receipt-bound."""
+    plan_errors = research_plan_errors(manifest, output, checkpoint, text,
+                                      trace_root=trace_root, request_record=request_record)
+    if plan_errors:
+        return plan_errors
     if "model_review_required" not in manifest:
         if "model_review_required" in output or "model_review_passed" in output:
             return ["historical manifest cannot gain a review claim from its output"]
@@ -118,6 +129,30 @@ def file_sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def postprocessing_failure(*, root: Path, trace: Path, delegation_id: str, error: Exception,
+                           min_sources: int, policy: AgentLoopPolicy, gap: str, project: str) -> dict[str, Any]:
+    """Keep identity and actual progress when a completed loop's receipt fails verification."""
+    checkpoint_path = trace / "checkpoint.json"
+    failure: dict[str, Any] = {}
+    try:
+        checkpoint = json.loads(checkpoint_path.read_text())
+        failure = failure_record(delegation_id=delegation_id, trace_ref=trace.relative_to(root).as_posix(),
+            checkpoint=checkpoint, min_sources=min_sources, max_tool_steps=policy.max_tool_steps,
+            max_model_calls=policy.max_model_calls, gap=gap, project=project)
+        failure["checkpoint_status"] = checkpoint["status"]
+        failure["checkpoint_sha256"] = file_sha(checkpoint_path)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
+        failure["checkpoint_read_error"] = {"type": type(exc).__name__, "message": str(exc)[:1000]}
+    failure.update({"schema": "research.failure.v1", "delegation_id": delegation_id, "status": "error",
+                    "failure_type": "research_result_verification_failed",
+                    "trace_ref": trace.relative_to(root).as_posix(),
+                    "checkpoint_ref": checkpoint_path.relative_to(root).as_posix(),
+                    "checkpoint_available": checkpoint_path.is_file(),
+                    "runtime_error": {"type": type(error).__name__, "message": str(error)[:1000]},
+                    "usable_as_final_evidence": False, "scientific_validated": False})
+    return failure
+
+
 def _contained(root: Path, reference: object, *, under: str) -> Path:
     if not isinstance(reference, str) or not reference or Path(reference).is_absolute():
         raise ValueError("research evidence requires a run-relative path")
@@ -162,7 +197,17 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
         report_text = report_path.read_text()
         if checkpoint.get("status") != "passed" or checkpoint.get("candidate") != report_text:
             raise ValueError("delegate candidate is not the checkpoint's passed document")
-        review_errors = research_review_errors(manifest, output, checkpoint, report_text)
+        request_record = None
+        if manifest.get("review_mode") == "per_insight_then_whole":
+            request_path = _contained(root, manifest.get("request_ref"), under=ROOT + "/" + delegation_id)
+            if request_path != manifest_path.parent / "request.json" or file_sha(request_path) != manifest.get("request_sha256"):
+                raise ValueError("research review request path/hash mismatch")
+            request_record = json.loads(request_path.read_text())
+            if (not isinstance(request_record, dict) or request_record.get("delegation_id") != delegation_id
+                    or request_record.get("min_sources") != manifest.get("min_sources")):
+                raise ValueError("research review request identity or evidence requirement mismatch")
+        review_errors = research_review_errors(manifest, output, checkpoint, report_text,
+                                              trace_root=checkpoint_path.parent, request_record=request_record)
         if review_errors:
             raise ValueError("; ".join(review_errors))
         report = parse(report_text).metadata
@@ -241,6 +286,7 @@ class ResearchSession:
         minimum = delegation_min_sources(args)
         policy = research_policy(self.config, require_review=self.require_review or bool(
             self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
+        review_mode = research_review_mode(self.config.raw.get("research", {}))
         self.attempted += 1
         identifier = uuid.uuid4().hex
         target = root / ROOT / identifier
@@ -307,10 +353,14 @@ class ResearchSession:
         if self.failures:
             messages.append(Message("user", "[untrusted prior failed delegation receipts; not accepted findings]\n"
                                     + json.dumps(self._recovery_context(), ensure_ascii=False)))
+        review_context = {"task": self.request.user_request, "project": self.context.project,
+                          "supplied_context": {ref: self.context.upstream[ref] for ref in refs}}
+        plan_request = ({"review_mode": review_mode, "review_context": review_context}
+                        if review_mode == "per_insight_then_whole" else {})
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,
             "parent_run_id": tool_context.run_id, "context_refs": refs, "min_sources": minimum,
-            "parent_invocation": str(self.context.metadata.get("loop_trace_root", ""))})
+            "parent_invocation": str(self.context.metadata.get("loop_trace_root", "")), **plan_request})
 
         async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
             try:
@@ -350,6 +400,11 @@ class ResearchSession:
                 reflection_rubric=RESEARCH_REVIEW_RUBRIC,
                 review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
                     supplied_context={ref: self.context.upstream[ref] for ref in refs}),
+                review_plan_factory=(partial(build_research_review_plan, task=self.request.user_request,
+                    project=self.context.project, gap=args, min_sources=minimum,
+                    supplied_context={ref: self.context.upstream[ref] for ref in refs})
+                    if review_mode == "per_insight_then_whole" else None),
+                review_plan_contract_id=REVIEW_PLAN_CONTRACT if review_mode == "per_insight_then_whole" else None,
                 required_review_tools=("search.fetch_sources",),
                 stop_contract_id=STOP_CONTRACT,
                 stop_condition=lambda view: evidence_stop(view, min_sources=minimum,
@@ -388,22 +443,46 @@ class ResearchSession:
             atomic_json(target / "failure.json", failure)
             self.failures.append(failure)
             return ToolResult(ok=False, error="research child " + str(failure["status"]), output=failure)
+        try:
+            return self._finish_report(result, root=root, target=target, trace=trace, identifier=identifier,
+                                       minimum=minimum, policy=policy, review_mode=review_mode)
+        except Exception as exc:
+            failure = postprocessing_failure(root=root, trace=trace, delegation_id=identifier, error=exc,
+                min_sources=minimum, policy=policy, gap=str(args.get("gap", "")), project=self.request.project)
+            try:
+                atomic_json(target / "failure.json", failure)
+            except OSError as archive_error:
+                failure["failure_archive_error"] = {"type": type(archive_error).__name__, "message": str(archive_error)[:1000]}
+            self.failures.append(failure)
+            return ToolResult(ok=False, error="research result verification failed", output=failure)
+
+    def _finish_report(self, result: LoopResult, *, root: Path, target: Path, trace: Path,
+                       identifier: str, minimum: int, policy: AgentLoopPolicy, review_mode: str) -> ToolResult:
         report_path = target / "report.md"
         report_path.write_text(result.text)
         report = parse(result.text).metadata
         checkpoint = trace / "checkpoint.json"
         manifest_path = target / "manifest.json"
+        plan_metadata: dict[str, Any] = {}
+        request_metadata: dict[str, Any] = {}
+        if review_mode == "per_insight_then_whole":
+            plan_metadata = {"review_mode": review_mode, "review_plan": review_plan_claim(
+                json.loads(checkpoint.read_text()), result.text, trace_root=trace,
+                checkpoint_ref=checkpoint.relative_to(root).as_posix())}
+            request_metadata = {"request_ref": (target / "request.json").relative_to(root).as_posix(),
+                                "request_sha256": file_sha(target / "request.json")}
         atomic_json(manifest_path, {"schema": "research.delegation.v1", "delegation_id": identifier,
             "status": "passed", "report_ref": report_path.relative_to(root).as_posix(),
             "report_sha256": file_sha(report_path), "checkpoint_ref": checkpoint.relative_to(root).as_posix(),
             "checkpoint_sha256": file_sha(checkpoint), "min_sources": minimum, "scientific_validated": False,
-            "model_review_required": policy.mode == "reflection", "model_review_passed": result.reflection_accepted})
+            "model_review_required": policy.mode == "reflection", "model_review_passed": result.reflection_accepted,
+            **plan_metadata, **request_metadata})
         excerpt_context = self.config.raw.get("research", {}).get("excerpt_context_chars", 600)
         excerpts = research_excerpts(report, result.observations, context_chars=int(excerpt_context))
         output = {"delegation_id": identifier, "report": report, "source_excerpts": excerpts,
                   "manifest_ref": manifest_path.relative_to(root).as_posix(), "manifest_sha256": file_sha(manifest_path),
                   "scientific_validated": False, "model_review_required": policy.mode == "reflection",
-                  "model_review_passed": result.reflection_accepted}
+                  "model_review_passed": result.reflection_accepted, **plan_metadata}
         receipt = {"tool": TOOL, "ok": True, "output": output}
         load_delegated_research(root, [receipt])
         self.receipts.append(receipt)

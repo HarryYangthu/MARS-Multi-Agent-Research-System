@@ -28,6 +28,8 @@ from app.harness.llm.provider_base import ReasoningEffort
 from app.harness.schema.validator import validate_document
 from app.harness.schema.frontmatter_parser import parse
 from app.agents.idea.research_dossier import dossier_errors
+from app.agents.idea.research_delegate import research_policy
+from app.agents.idea.research_review_plan import research_review_mode
 from app.settings import env_or_local, reset_settings_cache
 from scripts.idea_research_continuation import check_configuration, fork_continuation, load_continuation
 
@@ -85,12 +87,26 @@ def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
 
 def public_config(config: AgentConfig) -> dict[str, Any]:
     # Only credential variable names are exposed; never provider instances or secret values.
-    return {"name": config.name, "model_provider": config.model_provider, "model_name": config.model_name,
+    value = {"name": config.name, "model_provider": config.model_provider, "model_name": config.model_name,
             "api_key_env": config.api_key_env, "thinking_enabled": config.thinking_enabled,
             "reasoning_effort": config.reasoning_effort, "max_tokens": config.max_tokens,
             "temperature": config.temperature, "tools": list(config.tools),
             "request_timeout_seconds": config.request_timeout_seconds, "max_retries": config.max_retries,
             "loop": dict(config.raw.get("loop", {}))}
+    if config.name == "idea_research":
+        mode = research_review_mode(config.raw.get("research", {}))
+        if mode != "whole_report":
+            value["research_review_mode"] = mode
+    return value
+
+
+def child_research_config(original: dict[str, Any], override: object) -> dict[str, Any]:
+    """Only explicitly opt into a new review mode; preserve the default baseline."""
+    if not isinstance(override, dict) or set(override) - {"review_mode"}:
+        raise ValueError("child_research accepts only the explicit review_mode setting")
+    value = {**original, **override}
+    research_review_mode(value)
+    return value
 
 
 def aggregate_traces(root: Path) -> dict[str, Any]:
@@ -217,7 +233,10 @@ async def run(args: argparse.Namespace) -> int:
     child_policy = AgentLoopPolicy.from_mapping(scenario["child_loop"])
     child_tools = tuple(scenario["child_tools"])
     child = replace(author_model_config(child_original, child_model, child_policy), tools=child_tools,
-                    raw={**child_original.raw, "loop": asdict(child_policy)})
+                    raw={**child_original.raw, "loop": asdict(child_policy),
+                         "research": child_research_config(child_original.raw.get("research", {}),
+                                                           scenario.get("child_research", {}))})
+    research_policy(child, require_review=True)
     request.runtime["idea_research_config"] = child
     if not child.tools or set(child.tools) - CHILD_TOOLS:
         raise ValueError("research child must use only audited public research tools")
