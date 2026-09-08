@@ -63,3 +63,4 @@ child_loop:
   observation_chars: 16000
   protocol: native_tools
 child_tools: [search.openalex_search, search.fetch_sources, knowledge.kb_query]
+source_max_mib: 32

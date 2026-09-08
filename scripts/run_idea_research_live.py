@@ -37,6 +37,13 @@ def git_value(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
+def source_limit(scenario: dict[str, Any]) -> int:
+    value = scenario.get("source_max_mib", 12)
+    if type(value) is not int or not 1 <= value <= 64:
+        raise ValueError("source_max_mib must be an integer in [1, 64]")
+    return value
+
+
 def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
     if scenario.get("data_scope") != "public_research" or scenario.get("scope") != "method_proposal":
         raise ValueError("requires public_research method_proposal; private project inputs are not loaded")
@@ -132,14 +139,14 @@ def archive_report(root: Path, summary: dict[str, Any]) -> None:
     findings = research_findings(root)
     summary["research_counts"] = findings["counts"]
     atomic_json(root / "research_findings.json", findings)
-    lines += ["Research counts: `" + json.dumps(findings["counts"]) + "`", "",
-              "| Paper | Decision and reason | Original page / excerpt | Finding / transfer / limits |",
-              "|---|---|---|---|"]
+    lines += ["Research counts: `" + json.dumps(findings["counts"]) + "`", ""]
     def cell(value: Any) -> str:
         return str(value).replace("|", "\\|").replace("\n", " ")
     for report in findings["reports"]:
         metadata = report["metadata"]
-        lines += ["", "Selection principles: " + "; ".join(metadata.get("selection_principles", [])), ""]
+        lines += ["", "Selection principles: " + "; ".join(metadata.get("selection_principles", [])), "",
+                  "| Paper | Decision and reason | Original page / excerpt | Finding / transfer / limits |",
+                  "|---|---|---|---|"]
         for source in metadata.get("sources", []):
             insights = [item for item in metadata.get("insights", []) if item["source_id"] == source["source_id"]]
             quote = "; ".join(str(item["page"]) + ": " + item["quote"] for item in insights)
@@ -156,6 +163,7 @@ async def run(args: argparse.Namespace) -> int:
     scenario = yaml.safe_load(args.scenario.read_text())
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be an object")
+    maximum_source_mib = source_limit(scenario)
     run_id = "idea_research_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
     root = (args.runs_root / run_id).resolve()
     request = evaluation_request(scenario, root)
@@ -195,6 +203,7 @@ async def run(args: argparse.Namespace) -> int:
         if git_value("status", "--porcelain", "--", "backend/app", "configs", "scripts"):
             raise RuntimeError("commit source/config/script changes before real evaluation")
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["MARS_SOURCE_MAX_MIB"] = str(maximum_source_mib)
     os.environ["MARS_ENABLE_NETWORK_TOOLS"] = "true"
     os.environ["MARS_WEB_SEARCH_ALLOWLIST"] = ",".join(scenario["domains"])
     os.environ["MARS_MEMORY_PROFILE"] = "research"
@@ -209,6 +218,7 @@ async def run(args: argparse.Namespace) -> int:
         "run_id": run_id, "scenario": scenario, "source_commit": git_value("rev-parse", "HEAD"),
         "source_tree": git_value("rev-parse", "HEAD^{tree}"), "source_dirty": bool(git_value("status", "--porcelain")),
         "lead_config": public_config(config), "child_config": public_config(child),
+        "resource_limits": {"source_max_mib": maximum_source_mib},
         "credential_persisted": False, "development_bypass_bridge": True,
         "context_sources": context.metadata.get("context_sources"),
         "messages": [asdict(m) for m in agent._messages_for_context(request, context, purpose="live_preflight")]})

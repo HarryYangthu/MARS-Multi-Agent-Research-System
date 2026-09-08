@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal, Mapping
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -68,6 +69,7 @@ class Settings(BaseSettings):
     mars_default_project: str = "pimc"
     mars_llm_timeout_seconds: float = 90.0
     mars_enable_network_tools: bool = False
+    mars_source_max_mib: int = Field(default=12, ge=1, le=64)
     mars_web_search_allowlist: str = ""
     mars_web_search_provider: Literal["", "brave", "tavily", "serper", "zhipu"] = ""
     brave_search_api_key: str = ""
