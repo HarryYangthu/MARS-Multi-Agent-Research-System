@@ -1,0 +1,70 @@
+# Explicit service-start alternatives. The default remains configs/agents.yaml.
+# Experimental: configuration adoption is not API or scientific acceptance.
+# Keep product tools and project context; this is not an exact public-evaluation replay.
+schema: idea.runtime_profiles.v1
+profiles:
+  experimental_research_pro_per_insight_v1:
+    status: experimental
+    validated: false
+    lead:
+      model:
+        provider: deepseek
+        name: deepseek-v4-pro
+        max_tokens: 32768
+        temperature: 0.1
+        top_p: 1.0
+        thinking: true
+        reasoning_effort: low
+        timeout_seconds: 360
+        max_retries: 1
+        retry_base_delay_seconds: 1
+        api_key_env: DEEPSEEK_API_KEY
+        base_url: https://api.deepseek.com/v1
+        base_url_env: ""
+      loop:
+        mode: reflection
+        reflection_reasoning_effort: high
+        reflection_format_repair_enabled: true
+        reflection_thinking_enabled: true
+        trace: full
+        max_model_calls: 36
+        max_tool_steps: 5
+        max_protocol_repairs: 4
+        max_validation_repairs: 4
+        max_reflections: 3
+        input_token_budget: 256000
+        observation_chars: 16000
+        protocol: json_actions
+      research:
+        max_delegations: 3
+    child:
+      model:
+        provider: deepseek
+        name: deepseek-v4-pro
+        max_tokens: 32768
+        temperature: 0.1
+        top_p: 1.0
+        thinking: true
+        reasoning_effort: high
+        timeout_seconds: 360
+        max_retries: 1
+        retry_base_delay_seconds: 1
+        api_key_env: DEEPSEEK_API_KEY
+        base_url: https://api.deepseek.com/v1
+        base_url_env: ""
+      loop:
+        mode: reflection
+        reflection_thinking_enabled: true
+        reflection_reasoning_effort: high
+        reflection_format_repair_enabled: true
+        trace: full
+        max_model_calls: 16
+        max_tool_steps: 10
+        max_protocol_repairs: 2
+        max_validation_repairs: 3
+        max_reflections: 2
+        input_token_budget: 256000
+        observation_chars: 16000
+        protocol: json_actions
+      research:
+        review_mode: per_insight_then_whole

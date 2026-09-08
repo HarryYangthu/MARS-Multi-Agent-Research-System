@@ -10,7 +10,8 @@ from loguru import logger
 from app.agents.coding.agent import CodingAgent
 from app.agents.execution.agent import ExecutionAgent
 from app.agents.experiment.agent import ExperimentAgent
-from app.agents.idea.agent import IdeaAgent
+from app.agents.idea.runtime_profile import resolve_idea_profile
+from app.agents.idea.service_agent import ServiceIdeaAgent
 from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
@@ -53,7 +54,17 @@ from app.settings import get_settings
 
 def register_default_agents() -> None:
     reg = get_registry()
-    for cls in (IdeaAgent, ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent):
+    idea = ServiceIdeaAgent(profile=resolve_idea_profile(get_settings().mars_idea_runtime_profile))
+    if not reg.has(idea.name):
+        reg.register(idea.name, idea)
+    else:
+        existing = reg.get(idea.name)
+        if isinstance(existing, ServiceIdeaAgent):
+            if existing.service_profile_snapshot != idea.service_profile_snapshot:
+                raise ValueError("Idea runtime profile changed after registration; restart the service")
+        elif idea.service_profile_snapshot is not None:
+            raise ValueError("experimental Idea profile requires its service-start registered agent")
+    for cls in (ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent):
         agent = cls()
         if not reg.has(agent.name):
             reg.register(agent.name, agent)
