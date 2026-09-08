@@ -94,11 +94,12 @@ def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, A
                             required_tools: tuple[str, ...], *, observation_chars: int) -> list[str]:
     """Refuse review when required real tool evidence was compressed or omitted."""
     hidden = set(manifest.get("compressed_history", [])) | set(manifest.get("omitted_history", []))
+    preserved = set(manifest.get("preserved_review_history", []))
     missing: list[str] = []
     for index, group in enumerate(history_groups(history)):
         for item in group:
             if item.get("tool") in required_tools and item.get("ok"):
-                if index in hidden or compact(item, observation_chars) != item:
+                if index in hidden or (index not in preserved and compact(item, observation_chars) != item):
                     missing.append(str(item["tool"]) + " history group " + str(index))
     return missing
 
@@ -122,7 +123,7 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 6})
+                              "context_format_version": 7})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.required_review_tools:
@@ -247,15 +248,18 @@ class NativeAgentLoop:
                 feedback = state["feedback"]
                 if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
+                # Reflection sends no tools; reserve only schemas actually sent.
+                phase_schema_budget = 0 if reviewing else tool_schema_budget
                 messages, manifest = pack_context(
                     (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
                     state["history"], feedback, state["candidate"],
-                    budget=p.input_token_budget - tool_schema_budget, observation_chars=p.observation_chars,
+                    budget=p.input_token_budget - phase_schema_budget, observation_chars=p.observation_chars,
                     native=native, reviewing=reviewing, review_issues=state["review_issues"],
                     validation_issues=state["validation_issues"],
+                    required_review_tools=request.required_review_tools,
                 )
-                manifest["tool_schema_upper_bound_tokens"] = tool_schema_budget
-                manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + tool_schema_budget
+                manifest["tool_schema_upper_bound_tokens"] = phase_schema_budget
+                manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + phase_schema_budget
                 if reviewing:
                     missing = missing_review_evidence(state["history"], manifest, request.required_review_tools,
                                                       observation_chars=p.observation_chars)

@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,25 @@ def normalized_excerpt_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
     normalized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "-", normalized)
     return " ".join(normalized.split())
+
+
+def _quote_location_excerpt(quote: str, page_texts: list[str]) -> str:
+    """Locate at most 300 literal normalized page characters; infer no finding."""
+    needle = normalized_excerpt_text(quote)
+    best_text, best_start, best_size = "", 0, -1
+    for raw_text in page_texts:
+        text = normalized_excerpt_text(raw_text)
+        if not text:
+            continue
+        match = SequenceMatcher(None, needle, text, autojunk=False).find_longest_match()
+        if match.size > best_size:
+            best_text, best_start, best_size = text, match.b, match.size
+    if not best_text:
+        return ""
+    # Keep surrounding context without joining disjoint matches or page windows.
+    start = max(0, best_start - max(0, (300 - best_size) // 2))
+    start = min(start, max(0, len(best_text) - 300))
+    return best_text[start:start + 300]
 
 
 def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
@@ -48,8 +68,14 @@ def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
             return f"page {insight['page']} is not visible in this read_receipt; read that page or cite a visible page"
         quote = normalized_excerpt_text(insight["quote"])
         if not any(quote in normalized_excerpt_text(str(page.get("text", ""))) for page in pages):
-            return (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
-                    "from that page's actual visible text, preserving words and hyphens")
+            error = (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
+                     "from that page's actual visible text, preserving words and hyphens")
+            excerpt = _quote_location_excerpt(quote, [str(page.get("text", "")) for page in pages])
+            if excerpt:
+                error += (". Untrusted locator only; does not establish support for interpretations; "
+                          "candidate remains invalid. visible_page_excerpt="
+                          + json.dumps(excerpt, ensure_ascii=False))
+            return error
         return None
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return f"read_receipt or archived document is unreadable: {type(exc).__name__}"

@@ -74,6 +74,7 @@ def pack_context(
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
     reviewing: bool = False, review_issues: Sequence[str] = (),
     validation_issues: Sequence[str] = (),
+    required_review_tools: tuple[str, ...] = (),
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if validation_issues and not reviewing:
@@ -97,6 +98,16 @@ def pack_context(
             required.append(Message(role="user", content=(
                 "[untrusted source receipt index; addresses and visible page numbers only, not excerpts or findings; "
                 "if the actual page text is absent, reread its window before quoting]\n" + canonical(source_receipts))))
+    groups = history_groups(history)
+    preserved: list[int] = []
+    if reviewing:
+        for index, items in enumerate(groups):
+            if any(item.get("ok") and item.get("tool") in required_review_tools for item in items):
+                # These are the actual observations, including long reasons and
+                # page text. A reference or prefix cannot replace review evidence.
+                required.extend(Message(role="user", content="[untrusted complete review Observation]\n"
+                                        + canonical(item)) for item in items)
+                preserved.append(index)
     if candidate:
         required.append(Message(role="user", content="[untrusted current candidate; review or revise this document]\n"
                                 + (candidate if native else canonical({"candidate": candidate}))))
@@ -108,8 +119,9 @@ def pack_context(
     compressed: list[int] = []
     omitted: list[int] = []
     # Newer observations get priority, but output ordering remains chronological.
-    groups = history_groups(history)
     for index in reversed(range(len(groups))):
+        if index in preserved:
+            continue
         items = groups[index]
         # Rendering copies cap duplicated assistant commentary without touching
         # recorded history or native tool IDs/arguments required for pairing.
@@ -150,6 +162,7 @@ def pack_context(
     return messages, {"estimated_upper_bound_tokens": token_upper_bound(messages),
                       "estimator": "utf8_byte_upper_bound", "budget": budget,
                       "compressed_history": compressed, "omitted_history": omitted,
+                      "preserved_review_history": preserved,
                       "reviewing": reviewing,
                       "prior_review_issues_visible": bool(review_issues) and not reviewing,
                       "validation_issues_visible": bool(validation_issues) and not reviewing,
