@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
@@ -14,6 +14,7 @@ from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
+from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.registry import ToolContext, ToolRegistry
 
@@ -51,6 +52,8 @@ class LoopInput:
     review_messages: list[Message] | None = None
     final_schema: dict[str, Any] | None = None
     required_review_tools: tuple[str, ...] = ()
+    stop_condition: StopCondition | None = None
+    stop_contract_id: str | None = None
 
 
 @dataclass
@@ -132,6 +135,7 @@ class NativeAgentLoop:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:
             fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
+        fingerprint = stop_fingerprint(fingerprint, request.stop_condition, request.stop_contract_id)
         trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
         state: dict[str, Any] = {
             "fingerprint": fingerprint, "status": "running", "pending": None,
@@ -227,10 +231,26 @@ class NativeAgentLoop:
             trace.snapshot(state)
             return True
 
+        def stop_at_boundary(stage: Literal["before_model", "after_validation"]) -> bool:
+            decision = evaluate_stop(request.stop_condition, state, stage=stage)
+            if decision is None:
+                return False
+            state["termination"] = {"status": decision.status, "reason": decision.reason,
+                                    "details": decision.details, "stage": stage,
+                                    "contract_id": request.stop_contract_id}
+            state["status"] = decision.status
+            state["feedback"] = decision.reason
+            state["reflection_accepted"] = False
+            trace.emit("stopped", state["termination"])
+            trace.snapshot(state)
+            return True
+
         try:
             if request.resume:
                 recover_completion(state.get("last_model_error"))
             for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
+                if stop_at_boundary("before_model"):
+                    break
                 reviewing = state["next_phase"] == "reflect"
                 if counts["model_requests"] == 0:
                     await progress("started")
@@ -383,6 +403,8 @@ class NativeAgentLoop:
                         if counts["validation_repairs"] > p.max_validation_repairs:
                             state["status"] = "validation_exhausted"
                             break
+                    elif stop_at_boundary("after_validation"):
+                        break
                     elif p.mode == "reflection":
                         state["next_phase"] = "reflect"
                         state["feedback"] = ""
@@ -445,6 +467,8 @@ class NativeAgentLoop:
                     state["pending_batch"] = False
                 trace.snapshot(state)
             if state["status"] == "running":
+                stop_at_boundary("before_model")
+            if state["status"] == "running":
                 state["status"] = "budget_exhausted"
         except asyncio.CancelledError:
             state["status"] = "interrupted"
@@ -461,6 +485,6 @@ class NativeAgentLoop:
             trace.snapshot(state)
             await request.provider.close()
             cfg.attempt_observer = None
-            await progress("finished", status=state["status"])
+            await progress("finished", status=state["status"], reason=state.get("termination", {}).get("reason", ""))
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
                           request.trace_root, state["reflection_accepted"])

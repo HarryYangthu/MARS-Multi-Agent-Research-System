@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     mars_llm_timeout_seconds: float = 90.0
     mars_enable_network_tools: bool = False
     mars_source_max_mib: int = Field(default=12, ge=1, le=64)
+    mars_source_connect_timeout_seconds: float = Field(default=15, ge=1, le=60)
+    mars_source_read_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    mars_source_download_timeout_seconds: float = Field(default=180, ge=1, le=240)
+    mars_source_total_timeout_seconds: float = Field(default=240, ge=1, le=300)
+    mars_source_max_attempts: int = Field(default=2, ge=1, le=5)
     mars_web_search_allowlist: str = ""
     mars_web_search_provider: Literal["", "brave", "tavily", "serper", "zhipu"] = ""
     brave_search_api_key: str = ""

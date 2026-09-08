@@ -101,16 +101,16 @@ idea_research:
     provider: deepseek
     model: deepseek-v4-flash
     temperature: 0.2
-    max_tokens: 8192
+    max_tokens: 24576
     api_key_env: DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     base_url_env: DEEPSEEK_BASE_URL
     thinking:
       enabled: false
     reasoning_effort: null
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
-      max_retries: 0
+      max_retries: 1
       base_delay_seconds: 1
   research:
     excerpt_context_chars: 600
@@ -118,10 +118,13 @@ idea_research:
     enabled: false
   loop:
     protocol: native_tools
-    mode: react
+    mode: reflection
+    reflection_thinking_enabled: true
+    reflection_reasoning_effort: high
+    max_reflections: 2
     trace: full
-    input_token_budget: 48000
-    observation_chars: 12000
+    input_token_budget: 96000
+    observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12
     max_validation_repairs: 3

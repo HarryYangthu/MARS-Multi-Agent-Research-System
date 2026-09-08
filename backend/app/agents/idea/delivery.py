@@ -86,7 +86,8 @@ def progress_message(event: dict[str, Any]) -> str:
             return reason
         tool = str(event.get("tool", ""))
         descriptions = {"knowledge.kb_query": "查询相关历史记录", "knowledge.baseline_match": "查找可复用的基线记录",
-                        "search.arxiv_search": "检索相关论文", "search.web_search": "搜索相关资料",
+                        "search.arxiv_search": "检索相关论文", "search.openalex_search": "检索相关论文",
+                        "idea.research_delegate": "委派论文调研", "search.web_search": "搜索相关资料",
                         "search.local_docs": "查阅本地材料", "search.fetch_sources": "获取资料并读取指定页段",
                         "code.repo_reader": "阅读基线代码"}
         return "正在" + descriptions.get(tool, "执行研究工具 " + tool) + "。"
@@ -108,6 +109,11 @@ def progress_message(event: dict[str, Any]) -> str:
         issues = event.get("issues", [])
         detail = str(issues[0]) if issues and re.search(r"[\u4e00-\u9fff]", str(issues[0])) else "需要修订方案。"
         return f"审查发现 {len(issues)} 项待解决问题：" + detail[:220]
+    if event.get("status") == "evidence_unavailable":
+        reason = str(event.get("reason") or "").strip()
+        if reason and re.search(r"[\u4e00-\u9fff]", reason):
+            return "研究材料不足，已停止：" + reason[:320]
+        return "研究材料不足，当前无法继续取得所需正文；已保存尝试记录和待补充的问题，未生成合格方案。"
     return "本次方案生成已完成，正在整理交付材料。" if event.get("status") == "passed" else "本次运行已停止，未完成验收；进展和问题已保留。"
 
 

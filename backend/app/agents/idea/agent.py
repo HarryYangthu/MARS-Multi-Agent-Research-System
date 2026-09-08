@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.agents.idea.protocol import protocol_schema
 from app.agents.idea.research_links import research_link_errors, research_links_schema
 from app.agents.idea.research_assessment import assessment_errors, assessment_schema
 from app.harness.agent_loop.executor import ProgressSink
+from app.harness.agent_loop.stop import StopCondition
 from app.harness.llm.provider_base import Message
 from app.harness.tools.registry import ToolRegistry
 from app.harness.agent_loop.trace import atomic_json, digest
@@ -43,6 +45,24 @@ class IdeaAgent(BaseAgent):
         return bool(request.extra.get("idea_requirements", {}).get("require_research_dossier")) or (
             "idea.research_delegate" in self.config.tools
         )
+
+    def loop_stop_condition(self, request: RunRequest) -> StopCondition | None:
+        if not self.requires_research_dossier(request):
+            return None
+        from app.agents.idea.research_stop import lead_evidence_stop
+        from app.harness.tools.config import tool_config
+        return partial(lead_evidence_stop, run_root=Path(str(request.extra["run_root"])),
+                       min_sources=int(request.extra.get("idea_requirements", {}).get("min_sources", 1)),
+                       max_delegations=int(self.config.raw.get("research", {}).get("max_delegations", 2)),
+                       max_tool_steps=self.loop_policy.max_tool_steps,
+                       can_delegate=("idea.research_delegate" in self.config.tools
+                                     and tool_config("idea.research_delegate").enabled))
+
+    def loop_stop_contract_id(self, request: RunRequest) -> str | None:
+        if not self.requires_research_dossier(request):
+            return None
+        from app.agents.idea.research_stop import LEAD_STOP_CONTRACT
+        return LEAD_STOP_CONTRACT
 
     def load_approved_research_context(self, *, run_root: Path, proposal_text: str,
                                        project: str) -> dict[str, Any] | None:

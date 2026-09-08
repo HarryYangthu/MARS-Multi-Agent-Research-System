@@ -11,10 +11,14 @@ from typing import Any
 from loguru import logger
 
 from app.agents.base import ContextPack, RunRequest
-from app.agents.idea.research_dossier import dossier_errors, dossier_schema, normalized_excerpt_text
-from app.agents.idea.research import evidence_inventory
+from app.agents.idea.research_dossier import dossier_errors, normalized_excerpt_text
+from app.agents.idea.research_gap import (
+    GAP_SCHEMA, STOP_CONTRACT, evidence_stop, failure_record, gap_errors, research_submission_schema,
+)
+from app.agents.idea.research_review import RESEARCH_REVIEW_RUBRIC, research_review_messages
+from app.agents.idea.research_origin import ResearchOrigin, research_origins
 from app.harness.agent_loop import AgentLoopPolicy, LoopInput, NativeAgentLoop
-from app.harness.agent_loop.trace import atomic_json
+from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
 from app.harness.schema.frontmatter_parser import parse
@@ -23,6 +27,77 @@ from app.harness.tools.registry import ToolContext, ToolRegistry, ToolResult, To
 
 TOOL = "idea.research_delegate"
 ROOT = "idea/research_delegations"
+
+
+def research_policy(config: AgentConfig, *, require_review: bool) -> AgentLoopPolicy:
+    policy = AgentLoopPolicy.from_mapping(config.raw.get("loop", {}))
+    if policy.trace != "full":
+        raise ValueError("research delegation requires full auditable traces")
+    if require_review and policy.mode != "reflection":
+        raise ValueError("required research dossier needs an independent reflection review; react cannot bypass it")
+    return policy
+
+
+def research_review_errors(manifest: dict[str, Any], output: dict[str, Any],
+                           checkpoint: dict[str, Any], text: str) -> list[str]:
+    """Historical missing flags convey no review; new flags are receipt-bound."""
+    if "model_review_required" not in manifest:
+        if "model_review_required" in output or "model_review_passed" in output:
+            return ["historical manifest cannot gain a review claim from its output"]
+        return []
+    required = manifest["model_review_required"]
+    passed = manifest.get("model_review_passed")
+    if type(required) is not bool or type(passed) is not bool:
+        return ["research review flags must be booleans"]
+    if (type(output.get("model_review_required")) is not bool or type(output.get("model_review_passed")) is not bool
+            or output.get("model_review_required") != required or output.get("model_review_passed") != passed):
+        return ["research review flags differ between manifest and output"]
+    actual = checkpoint.get("reflection_accepted") is True and checkpoint.get("reviewed_candidate_sha") == digest(text)
+    if required and (not passed or not actual):
+        return ["required research review did not accept this exact candidate"]
+    if passed and not actual:
+        return ["claimed research review does not match the checkpoint candidate"]
+    return []
+
+
+def resumed_delegation_count(root: Path, history: list[dict[str, Any]], *,
+                             run_id: str, parent_invocation: str) -> int:
+    """Only count persisted child requests; never replay an unreconciled start."""
+    origins = research_origins(root, run_id=run_id, parent_invocation=parent_invocation, history=history)
+
+    def origin_of(saved: dict[str, Any]) -> ResearchOrigin | None:
+        return next((origin for origin in origins if saved.get("parent_run_id") == origin.run_id
+                     and (not saved.get("parent_invocation") or saved["parent_invocation"] == origin.invocation_path)), None)
+
+    known: set[str] = set()
+    for observation in history:
+        output = observation.get("output")
+        if observation.get("tool") != TOOL or not isinstance(output, dict) or not output.get("delegation_id"):
+            continue  # Invalid arguments/context_refs did not start a child.
+        identifier = output["delegation_id"]
+        if not isinstance(identifier, str) or len(identifier) != 32 or any(c not in "0123456789abcdef" for c in identifier):
+            raise ValueError("invalid started research delegation identity")
+        path = _contained(root, f"{ROOT}/{identifier}/request.json", under=ROOT)
+        saved = json.loads(path.read_text())
+        origin = origin_of(saved)
+        if (saved.get("delegation_id") != identifier or (saved.get("parent_run_id") != run_id and origin is None)
+                or saved.get("arguments") != observation.get("args")):
+            raise ValueError("started research request does not match parent observation")
+        if origin is not None:
+            origin.verify_request(path, f"{ROOT}/{identifier}/request.json")
+        elif saved.get("parent_invocation") and saved["parent_invocation"] != parent_invocation:
+            raise ValueError("research request belongs to a different parent invocation")
+        known.add(identifier)
+    for path in (root / ROOT).glob("*/request.json"):
+        saved = json.loads(path.read_text())
+        origin = origin_of(saved)
+        if saved.get("parent_run_id") != run_id and origin is None:
+            continue
+        if origin is None and saved.get("parent_invocation") and saved["parent_invocation"] != parent_invocation:
+            continue
+        if path.parent.name not in known:
+            raise ValueError("unreconciled started research delegation; inspect its actual trace/receipt before resuming; automatic replay forbidden")
+    return len(known)
 
 
 def delegation_min_sources(args: dict[str, Any]) -> int:
@@ -81,6 +156,9 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
         report_text = report_path.read_text()
         if checkpoint.get("status") != "passed" or checkpoint.get("candidate") != report_text:
             raise ValueError("delegate candidate is not the checkpoint's passed document")
+        review_errors = research_review_errors(manifest, output, checkpoint, report_text)
+        if review_errors:
+            raise ValueError("; ".join(review_errors))
         report = parse(report_text).metadata
         history = checkpoint.get("history")
         if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
@@ -133,13 +211,17 @@ class ResearchSession:
     max_delegations: int
     attempted: int = 0
     receipts: list[dict[str, Any]] = field(default_factory=list)
+    failures: list[dict[str, Any]] = field(default_factory=list)
+    require_review: bool = False
 
     async def dispatch(self, args: dict[str, Any], tool_context: ToolContext) -> ToolResult:
         root = Path(str(self.request.extra["run_root"])).resolve()
         if tool_context.run_id != str(self.request.extra.get("run_id", root.name)) or tool_context.project != self.request.project:
             return ToolResult(ok=False, error="delegate session does not match tool run/project")
         if self.attempted >= self.max_delegations:
-            return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap")
+            return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap",
+                              output={"failure_type": "delegation_budget_exhausted", "remaining_delegations": 0,
+                                      "previous_failures": self._recovery_context(), "usable_as_final_evidence": False})
         refs = args.get("context_refs", [])
         if any(ref not in self.context.upstream for ref in refs):
             return ToolResult(ok=False, error="context_refs must use available upstream keys: "
@@ -147,14 +229,13 @@ class ResearchSession:
                               + ". Use [] when none apply. The overall task is already passed automatically; do not invent keys.",
                               output={"available_context_refs": sorted(self.context.upstream)})
         minimum = delegation_min_sources(args)
+        policy = research_policy(self.config, require_review=self.require_review or bool(
+            self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
         self.attempted += 1
         identifier = uuid.uuid4().hex
         target = root / ROOT / identifier
         target.mkdir(parents=True, exist_ok=False)
         trace = root / "agent_traces" / "idea_research" / identifier
-        policy = AgentLoopPolicy.from_mapping(self.config.raw.get("loop", {}))
-        if policy.trace != "full":
-            raise ValueError("research delegation requires full auditable traces")
         tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
         if TOOL in tools:
             raise ValueError("researcher cannot recursively delegate")
@@ -167,7 +248,12 @@ class ResearchSession:
             "transfer ideas and limitations. Do not generate a full proposal or claim experiments. Every insight must point "
             "to an actual read receipt, document hash and page with an exact visible quote. Stop when evidence answers the gap; "
             "Do not repeat searches merely to increase counts after the explicit minimum evidence requirement is met. "
-            "Submit only using mars_submit_document(metadata, body). metadata must match research_report.v1. "
+            "Submit only using mars_submit_document(metadata, body). Use research_report.v1 for a grounded report. "
+            "If the gap cannot be resolved within available evidence and tools, submit research_gap.v1 instead: "
+            "give project, human_summary, reason, remaining_gaps and next_actions. This is an explicit failure, "
+            "not a successful report; do not invent sources or insights to fill required fields. The host attaches "
+            "actual attempts, receipts and remaining budgets. Never keep resubmitting a report when missing "
+            "pages cannot be acquired with the remaining tools. "
             "human_summary must be one or two short Chinese sentences. Copy human_summary exactly into body. "
             "Do not put a long report, headings, citations or tables in body; all detailed findings belong in metadata. "
             "Explain each important action briefly in Chinese.")),
@@ -196,14 +282,20 @@ class ResearchSession:
                     "For quotes, copy a short contiguous prose fragment from one actual visible page. Never "
                     "reconstruct a displayed equation or splice separated sentences into a purported exact quote.")]
         messages.extend(Message("user", "[untrusted supplied context:" + ref + "]\n" + self.context.upstream[ref]) for ref in refs)
+        if self.failures:
+            messages.append(Message("user", "[untrusted prior failed delegation receipts; not accepted findings]\n"
+                                    + json.dumps(self._recovery_context(), ensure_ascii=False)))
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,
-            "parent_run_id": tool_context.run_id, "context_refs": refs, "min_sources": minimum})
+            "parent_run_id": tool_context.run_id, "context_refs": refs, "min_sources": minimum,
+            "parent_invocation": str(self.context.metadata.get("loop_trace_root", ""))})
 
         async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
             try:
                 document = parse(text)
-                errors = dossier_errors(document.metadata, observations, min_sources=minimum)
+                errors = (gap_errors(document.metadata, project=self.request.project)
+                          if document.metadata.get("schema") == GAP_SCHEMA
+                          else dossier_errors(document.metadata, observations, min_sources=minimum))
                 if document.metadata.get("project") != self.request.project:
                     errors.append("research project must match delegated project")
                 if document.body.strip() != str(document.metadata.get("human_summary", "")).strip():
@@ -229,25 +321,23 @@ class ResearchSession:
             result = await NativeAgentLoop().run(LoopInput(messages=messages, provider=provider, config=model,
                 registry=self.registry, tool_context=ToolContext(run_id=tool_context.run_id, project=tool_context.project,
                     agent="idea_research", extra={"run_root": str(root)}), tools=tools, policy=policy,
-                trace_root=trace, validate=validate, final_schema=dossier_schema(), progress_sink=progress))
+                trace_root=trace, validate=validate, final_schema=research_submission_schema(), progress_sink=progress,
+                reflection_rubric=RESEARCH_REVIEW_RUBRIC,
+                review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
+                    supplied_context={ref: self.context.upstream[ref] for ref in refs}),
+                required_review_tools=("search.fetch_sources",),
+                stop_contract_id=STOP_CONTRACT,
+                stop_condition=lambda view: evidence_stop(view, min_sources=minimum,
+                    max_tool_steps=policy.max_tool_steps, tools=tools, project=self.request.project)))
         finally:
             await provider.close()
         if result.status != "passed":
             checkpoint_state = json.loads((trace / "checkpoint.json").read_text())
-            inventory = evidence_inventory(result.observations)
-            issues = checkpoint_state.get("validation_issues", [])
-            failure = {"delegation_id": identifier, "status": result.status,
-                       "trace_ref": trace.relative_to(root).as_posix(),
-                       "feedback": str(checkpoint_state.get("feedback", ""))[:2400],
-                       "validation_issues": [str(issue)[:600] for issue in issues[:6]],
-                       "validation_issue_count": len(issues),
-                       "observed_material_counts": inventory["counts"],
-                       "read_sources": [{"url": row.get("url"), "sha256": row.get("sha256"),
-                                         "pages": [page["page"] for page in row.get("visible_pages", [])]}
-                                        for row in inventory["reads"][:10]],
-                       "usable_as_final_evidence": False,
-                       "note": "Observed downloads/page windows are partial progress, not an accepted research report."}
+            failure = failure_record(delegation_id=identifier, trace_ref=trace.relative_to(root).as_posix(),
+                checkpoint=checkpoint_state, min_sources=minimum, max_tool_steps=policy.max_tool_steps,
+                max_model_calls=policy.max_model_calls, gap=str(args.get("gap", "")), project=self.request.project)
             atomic_json(target / "failure.json", failure)
+            self.failures.append(failure)
             return ToolResult(ok=False, error="research child " + result.status, output=failure)
         report_path = target / "report.md"
         report_path.write_text(result.text)
@@ -257,16 +347,35 @@ class ResearchSession:
         atomic_json(manifest_path, {"schema": "research.delegation.v1", "delegation_id": identifier,
             "status": "passed", "report_ref": report_path.relative_to(root).as_posix(),
             "report_sha256": file_sha(report_path), "checkpoint_ref": checkpoint.relative_to(root).as_posix(),
-            "checkpoint_sha256": file_sha(checkpoint), "min_sources": minimum, "scientific_validated": False})
+            "checkpoint_sha256": file_sha(checkpoint), "min_sources": minimum, "scientific_validated": False,
+            "model_review_required": policy.mode == "reflection", "model_review_passed": result.reflection_accepted})
         excerpt_context = self.config.raw.get("research", {}).get("excerpt_context_chars", 600)
         excerpts = research_excerpts(report, result.observations, context_chars=int(excerpt_context))
         output = {"delegation_id": identifier, "report": report, "source_excerpts": excerpts,
                   "manifest_ref": manifest_path.relative_to(root).as_posix(), "manifest_sha256": file_sha(manifest_path),
-                  "scientific_validated": False}
+                  "scientific_validated": False, "model_review_required": policy.mode == "reflection",
+                  "model_review_passed": result.reflection_accepted}
         receipt = {"tool": TOOL, "ok": True, "output": output}
         load_delegated_research(root, [receipt])
         self.receipts.append(receipt)
         return ToolResult(ok=True, output=output)
+
+    def _recovery_context(self) -> list[dict[str, Any]]:
+        """Give a new child failures without replaying entire search hit bodies."""
+        context: list[dict[str, Any]] = []
+        for failure in self.failures:
+            sources: dict[str, dict[str, Any]] = {}
+            for attempt in failure.get("attempts", []):
+                for row in attempt.get("source_results", []):
+                    key = str(row.get("resource_key") or row.get("download_url") or row.get("url"))
+                    sources[key] = row
+            context.append({"delegation_id": failure.get("delegation_id"), "status": failure.get("status"),
+                            "remaining_gaps": failure.get("remaining_gaps", failure.get("validation_issues", [])),
+                            "read_sources": failure.get("read_sources", []), "source_results": list(sources.values()),
+                            "tool_failures": [{key: attempt.get(key) for key in ("tool", "error", "error_code", "retryable")}
+                                              for attempt in failure.get("attempts", []) if not attempt.get("ok")],
+                            "usable_as_final_evidence": False})
+        return context
 
 
 def make_research_registry(agent_config: AgentConfig, request: RunRequest, context: ContextPack) -> ToolRegistry:
@@ -283,13 +392,20 @@ def make_research_registry(agent_config: AgentConfig, request: RunRequest, conte
     if not isinstance(config, AgentConfig) or config.name != "idea_research" or config.output_schema != "research_report.v1" or not config.enabled:
         raise ValueError("researcher requires an enabled independent idea_research AgentConfig")
     session = ResearchSession(request, context, config, registry, limit)
+    session.require_review = bool(request.extra.get("idea_requirements", {}).get("require_research_dossier")) or TOOL in agent_config.tools
+    research_policy(config, require_review=session.require_review)
     if request.extra.get("resume_invocation"):
         checkpoint = Path(str(context.metadata["loop_trace_root"])) / "checkpoint.json"
         previous = json.loads(checkpoint.read_text())
         previous_history = previous.get("history", [])
         load_delegated_research(Path(str(request.extra["run_root"])), previous_history)
         session.receipts = [row for row in previous_history if row.get("tool") == TOOL and row.get("ok")]
-        session.attempted = sum(row.get("tool") == TOOL for row in previous_history)
+        session.failures = [row["output"] for row in previous_history if row.get("tool") == TOOL
+                            and not row.get("ok") and isinstance(row.get("output"), dict)
+                            and row["output"].get("delegation_id")]
+        session.attempted = resumed_delegation_count(Path(str(request.extra["run_root"])), previous_history,
+            run_id=str(request.extra.get("run_id", Path(str(request.extra["run_root"])).name)),
+            parent_invocation=str(context.metadata["loop_trace_root"]))
     registry.register(TOOL, session.dispatch, spec=ToolSpec(name=TOOL, namespace="idea",
         description="Delegate a specific literature evidence gap to an independent researcher with its own tools and context."))
     request.runtime["idea_research_session"] = session
