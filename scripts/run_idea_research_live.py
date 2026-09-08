@@ -13,7 +13,7 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from loguru import logger
@@ -24,6 +24,7 @@ from app.agents.idea.research import canonical_source, evidence_inventory
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.llm.model_registry import AgentConfig, get_agent_config
+from app.harness.llm.provider_base import ReasoningEffort
 from app.harness.schema.validator import validate_document
 from app.harness.schema.frontmatter_parser import parse
 from app.agents.idea.research_dossier import dossier_errors
@@ -43,6 +44,31 @@ def source_limit(scenario: dict[str, Any]) -> int:
     if type(value) is not int or not 1 <= value <= 64:
         raise ValueError("source_max_mib must be an integer in [1, 64]")
     return value
+
+
+def author_model_config(original: AgentConfig, model: dict[str, Any],
+                        policy: AgentLoopPolicy) -> AgentConfig:
+    """Validate explicit author settings without creating a provider or request."""
+    if model.get("provider") != "deepseek":
+        raise ValueError("real research evaluation requires DeepSeek")
+    thinking = model.get("thinking")
+    effort = model.get("reasoning_effort")
+    if type(thinking) is not bool:
+        raise ValueError("author thinking must be an explicit boolean")
+    if policy.protocol == "native_tools":
+        if thinking is not False or effort is not None:
+            raise ValueError("native_tools author requires non-thinking DeepSeek without reasoning effort")
+    elif thinking:
+        if effort not in ("low", "medium", "high", "max"):
+            raise ValueError("thinking json_actions author requires an explicit valid reasoning_effort")
+    elif effort is not None:
+        raise ValueError("non-thinking author must not configure reasoning_effort")
+    return replace(original, model_provider="deepseek", model_name=str(model["name"]),
+                   api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
+                   thinking_enabled=thinking, reasoning_effort=cast(ReasoningEffort | None, effort),
+                   max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
+                   max_retries=int(model["max_retries"]),
+                   request_timeout_seconds=float(model["timeout_seconds"]))
 
 
 def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
@@ -188,29 +214,17 @@ async def run(args: argparse.Namespace) -> int:
         raise ValueError("lead must delegate research and may only additionally query memory")
     child_original = get_agent_config("idea_research")
     child_model = scenario["child_model"]
-    if child_model.get("provider") != "deepseek" or child_model.get("thinking") is not False or child_model.get("reasoning_effort") is not None:
-        raise ValueError("child must explicitly configure non-thinking DeepSeek")
     child_policy = AgentLoopPolicy.from_mapping(scenario["child_loop"])
     child_tools = tuple(scenario["child_tools"])
-    child = replace(child_original, tools=child_tools, model_provider="deepseek", model_name=str(child_model["name"]),
-                    api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
-                    thinking_enabled=False, reasoning_effort=None, max_tokens=int(child_model["max_tokens"]),
-                    temperature=float(child_model["temperature"]), max_retries=int(child_model["max_retries"]),
-                    request_timeout_seconds=float(child_model["timeout_seconds"]),
+    child = replace(author_model_config(child_original, child_model, child_policy), tools=child_tools,
                     raw={**child_original.raw, "loop": asdict(child_policy)})
     request.runtime["idea_research_config"] = child
     if not child.tools or set(child.tools) - CHILD_TOOLS:
         raise ValueError("research child must use only audited public research tools")
     model = scenario["model"]
-    if model.get("provider") != "deepseek" or model.get("thinking") is not False or model.get("reasoning_effort") is not None:
-        raise ValueError("scenario must explicitly use non-thinking DeepSeek without inherited reasoning effort")
     policy = AgentLoopPolicy.from_mapping(scenario["loop"])
     original = get_agent_config("idea")
-    config = replace(original, model_provider="deepseek", model_name=str(model["name"]),
-                     api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
-                     max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
-                     thinking_enabled=False, reasoning_effort=None, max_retries=int(model["max_retries"]),
-                     request_timeout_seconds=float(model["timeout_seconds"]), debate_enabled=False,
+    config = replace(author_model_config(original, model, policy), debate_enabled=False,
                      tools=selected_tools, raw={**original.raw, "loop": asdict(policy),
                                                "research": scenario["research"]})
     if source or not args.prepare_only:

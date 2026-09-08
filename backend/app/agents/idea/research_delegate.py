@@ -38,6 +38,12 @@ def research_policy(config: AgentConfig, *, require_review: bool) -> AgentLoopPo
     return policy
 
 
+def research_submission_instruction(policy: AgentLoopPolicy) -> str:
+    if policy.protocol == "native_tools":
+        return "Submit only using mars_submit_document(metadata, body). "
+    return "Submit only with the final JSON action containing final.metadata and final.body. "
+
+
 def research_review_errors(manifest: dict[str, Any], output: dict[str, Any],
                            checkpoint: dict[str, Any], text: str) -> list[str]:
     """Historical missing flags convey no review; new flags are receipt-bound."""
@@ -264,7 +270,7 @@ class ResearchSession:
             "as well as detailed findings; a caveat elsewhere does not qualify an unqualified claim. Every insight must point "
             "to an actual read receipt, document hash and page with an exact visible quote. Stop when evidence answers the gap; "
             "Do not repeat searches merely to increase counts after the explicit minimum evidence requirement is met. "
-            "Submit only using mars_submit_document(metadata, body). Use research_report.v1 for a grounded report. "
+            + research_submission_instruction(policy) + "Use research_report.v1 for a grounded report. "
             "If the gap cannot be resolved within available evidence and tools, submit research_gap.v1 instead: "
             "give project, human_summary, reason, remaining_gaps and next_actions. This is an explicit failure, "
             "not a successful report; do not invent sources or insights to fill required fields. The host attaches "

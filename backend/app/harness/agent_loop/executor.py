@@ -82,6 +82,17 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
                    "Do not invent evidence when resources are insufficient.")
 
 
+def action_instructions(specs: list[dict[str, Any]], *, native: bool,
+                        final_schema: dict[str, Any] | None) -> str:
+    """Expose the same submission contract through either action protocol."""
+    if native:
+        return NATIVE_INSTRUCTION
+    instructions = INSTRUCTION + "\nTools:\n" + canonical(specs)
+    if final_schema is not None:
+        instructions += "\nComplete final.metadata JSON Schema:\n" + canonical(final_schema)
+    return instructions
+
+
 def validate_reflection_format_repair(config: LLMConfig, policy: AgentLoopPolicy) -> None:
     if not policy.reflection_format_repair_enabled:
         return
@@ -189,7 +200,7 @@ class NativeAgentLoop:
             raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
         wire_tools = native_specs(specs, request.final_schema) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
-        instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
+        instructions = action_instructions(specs, native=native, final_schema=request.final_schema)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": p.fingerprint_data(),
                               "model": request.config.model, "provider": request.config.provider,

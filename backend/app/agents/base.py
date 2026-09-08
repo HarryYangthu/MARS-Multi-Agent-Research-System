@@ -196,6 +196,12 @@ class BaseAgent(ABC):
                 "Do not return a proposal in assistant text. Submission is followed by host validation and, "
                 "when configured, review; it does not claim approval or experimental success."
             )
+        elif self.native_structured_delivery:
+            schema_instruction = (
+                "Return final.metadata as a complete native JSON object and final.body as Markdown. "
+                "The loop supplies the complete final.metadata JSON Schema, including this request's requirements. "
+                "The host serializes the artifact's YAML frontmatter and validates it before review."
+            )
         messages = [Message(role="system", content=context.system),
                     Message(role="system", content=context.project),
                     Message(role="system", content=schema_instruction),
@@ -235,7 +241,7 @@ class BaseAgent(ABC):
         return None
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
-        if not self.native_structured_delivery or self.loop_policy.protocol != "native_tools":
+        if not self.native_structured_delivery:
             return None
         schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
         return schema
