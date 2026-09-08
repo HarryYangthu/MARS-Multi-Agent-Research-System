@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from app.harness.llm.provider_base import Message
+from app.harness.agent_loop.trace import digest
 
 INSTRUCTION = """
 Use the ReAct loop: choose an action, receive a host Observation, then decide again.
@@ -32,11 +33,33 @@ class ReviewConflictError(ValueError):
         super().__init__("review contains unresolved issues; revise the candidate before reviewing again")
 
 
-def invalid_output_context(text: str) -> Message:
-    """Preserve visible output as untrusted repair data, without parsing or executing it."""
+def invalid_output_context(text: str, *, native: bool = False) -> Message:
+    """Keep invalid arguments intact; bound duplicated native-call commentary only."""
+    payload: dict[str, Any] = {"invalid_output": text}
+    if native:
+        try:
+            envelope = json.loads(text)
+        except ValueError:
+            envelope = None
+        if (isinstance(envelope, dict) and set(envelope) == {"text", "tool_calls"}
+                and isinstance(envelope["text"], str)
+                and isinstance(envelope["tool_calls"], list) and envelope["tool_calls"]):
+            # The host serialized this envelope. Never parse, repair, truncate or
+            # execute its inner argument strings. The full response stays in trace.
+            commentary = envelope["text"]
+            visible_commentary: str | dict[str, Any] = commentary
+            if len(commentary) > 512:
+                visible_commentary = {"excerpt": commentary[:512], "original_chars": len(commentary),
+                                      "sha256": digest(commentary), "truncated": True}
+            payload = {"invalid_native_output": {"text": visible_commentary,
+                                                 "tool_calls": envelope["tool_calls"]},
+                       "original_sha256": digest(text), "original_chars": len(text),
+                       "note": "Only assistant commentary may be shortened; invalid tool arguments are complete. "
+                               "Full original output is retained in the run trace and checkpoint. "
+                               "No rejected action was executed; use actual Observations and the current candidate."}
     return Message(role="user", content=(
         "[untrusted previous model output; protocol validation failed; no action from it was executed]\n"
-        + json.dumps({"invalid_output": text}, ensure_ascii=False)))
+        + json.dumps(payload, ensure_ascii=False)))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

@@ -569,6 +569,235 @@
         "network_diagnosis.json": "75281d1c8daab77562df2b397079ad10958093289c6f29dd42fb5f80df258efa",
         "summary.json": "ca152d34f44f95cdc92588d4476207d482cd556a8d46ffe1901c811f38eb8672"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T101220_b52a63",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 512.697139625001,
+      "counts": {
+        "action_rounds": 24,
+        "model_requests": 22,
+        "model_responses": 22,
+        "observations": 24,
+        "protocol_repairs": 1,
+        "reflections": 0,
+        "sdk_attempts": 22,
+        "tool_dispatches": 24,
+        "validation_repairs": 5
+      },
+      "usage": {
+        "completion_tokens": 42179,
+        "prompt_tokens": 277118,
+        "total_tokens": 319297
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 5,
+        "unique_downloaded_contents": 3,
+        "unique_pdf_publications_with_visible_pages": 3,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 33
+      },
+      "source_commit": "99dcdd674fd112af3cd4ff1f476b7b2517cdf97b",
+      "source_tree": "c0fb1a02a2575e8fdc7d1a78aa1f2aea5a7f581b",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T101220_b52a63",
+      "separate_review_records": {
+        "manual_research_review.json": {
+          "reviewer": "Codex 独立离线复核（不是用户评审或人工科研同行评审）",
+          "review_kind": "independent_offline_research_report_fact_check",
+          "created_at_utc": "2026-09-08T10:24:01.174582+00:00",
+          "run_id": "idea_research_20260908T101220_b52a63",
+          "source_revision": "99dcdd6",
+          "scope": "仅复核成功研究委派 da97887d59a543a0b91d1c3fd47dadd1 的报告与本轮真实阅读收据内可见页。未复核或接受任何完整主方案。",
+          "canonical_proposal_present": false,
+          "candidate_digest": null,
+          "accepted_proposal": false,
+          "scientific_validated": false,
+          "runtime_review_replaced": false,
+          "runtime_status_note": "本轮主流程因 pinned rules/task/schema/upstream/candidate exceed input budget; nothing was silently dropped 终止。summary.json 标记 failed、schema_valid=false、model_review_passed=false、downstream_delivered=false；idea/idea_proposal.v1.md 不存在。本文件不是 runtime reflection、成功验收记录或完整方案质量判定。",
+          "excluded_delegations": [
+            {
+              "delegation_id": "1c9cab5b083d46fa8538d1437da919bc",
+              "reason": "该研究委派终态 validation_exhausted，未形成合格 report.md；不把其部分阅读材料计为成功报告或主方案采用证据。"
+            }
+          ],
+          "reports": {
+            "accepted_research_report": {
+              "path": "idea/research_delegations/da97887d59a543a0b91d1c3fd47dadd1/report.md",
+              "sha256": "d725da586bc4803bb3b29a9a5aee99ad07f4615ee48692440f82fc9ce2a4a46e",
+              "delegation_id": "da97887d59a543a0b91d1c3fd47dadd1",
+              "acceptance_boundary": "委派 passed 仅说明既有报告协议和证据检查通过，不代表本离线复核确认所有科学语义。"
+            }
+          },
+          "confirmed_errors": [
+            {
+              "id": "summary_merges_distinct_paper_results",
+              "report_lines": [
+                4,
+                73
+              ],
+              "severity": "material_research_summary_error",
+              "finding": "摘要把节点密度 |f_second|^(2/5) 和正交投影 L2 误差约为插值的 1/sqrt(6) 合并表述为两篇论文的同一结论，来源归属和适用范数不正确。",
+              "evidence": [
+                {
+                  "receipt": "idea_research/research/downloads/ad7d820cba1f4629827247419a82fb0c.read.json",
+                  "visible_pages": [
+                    4,
+                    5
+                  ],
+                  "source_id": "S1",
+                  "supported": "S1 第 4 页式 (13)/(14) 比较小区间、二阶导近似常数下的 L2 平方误差，比例为 1/6；第 5 页式 (16) 给出节点密度 2/5 次幂，式 (23) 给出渐近 L2 误差比例 1/sqrt(6)。"
+                },
+                {
+                  "receipt": "idea_research/research/downloads/02b0dbaf157145c39a824e277b83c6c5.read.json",
+                  "visible_pages": [
+                    2,
+                    3,
+                    4,
+                    5
+                  ],
+                  "source_id": "S2",
+                  "supported": "S2 对一维凸/凹函数讨论最大绝对误差；第 3 页 SAM 更新内部断点，第 4 页 Lemma 2 和第 5 页 Theorem 1 涉及区间最大绝对误差相等。这些实际可见页不提供 S1 的 L2 密度法则或正交投影比例。"
+                }
+              ],
+              "correction": "共同动机可表述为固定分段数下按误差配置断点；具体拆为 S1 的一维 L2 渐近密度/投影结论和 S2 的一维凸凹 L∞ SAM/均衡结论，并保留各自假设。",
+              "impact": "现有摘要不能作为两篇独立研究共同证明同一 2/5 或 sqrt(6) 结论的依据。报告第 66 行已区分 L2 与 L∞，因此这是摘要与详细报告之间的实质不一致；没有最终候选，不能声称主 Agent 最终沿用了错误。"
+            }
+          ],
+          "transfer_limits": [
+            {
+              "id": "asymptotic_suboptimal_partition_not_exact_finite_optimum",
+              "report_lines": [
+                18,
+                51,
+                52,
+                53,
+                56
+              ],
+              "insight_id": "I2",
+              "receipt": "idea_research/research/downloads/ad7d820cba1f4629827247419a82fb0c.read.json",
+              "visible_pages": [
+                4,
+                5
+              ],
+              "supported": "局部 L2 误差界、2/5 密度公式及 N^-2 渐近误差表达式与可见页一致。",
+              "limit": "原文第 5 页明确称 suboptimal partition 并要求分段数足够大、每段二阶导近似常数；报告将其称为最优节点间距及应显著降低误差，不能据此保证有限节点或二维双线性固定 256 参数下必然改进。",
+              "assessment": "报告第 56 行已披露渐近及每方向仅 16 个节点的限制。将此归为必须随迁移保留的限定，不据此单独判定不存在的主方案失败。"
+            },
+            {
+              "id": "bilinear_mixed_curvature_not_automatic_error",
+              "report_lines": [
+                38,
+                40,
+                53
+              ],
+              "insight_ids": [
+                "I1",
+                "I2"
+              ],
+              "receipt": "idea_research/research/downloads/ad7d820cba1f4629827247419a82fb0c.read.json",
+              "visible_pages": [
+                3,
+                4,
+                5
+              ],
+              "supported": "所引 S1 页段是单变量分段线性结果；报告也明确承认不能直接套用 h^(5/2) 指数。",
+              "limit": "这些页面不支持报告的二维双线性误差必然含混合二阶项或直接用 Hessian 范数设计密度的说法。双线性单元不是一般仿射平面，并能精确再现 a+b*x+c*y+d*x*y；混合二阶导非零不等于存在插值误差。",
+              "mathematical_check": {
+                "kind": "exact_identity_and_rational_arithmetic_no_model_or_experiment",
+                "function": "f(x,y)=x*y on [0,1]^2",
+                "mixed_second_derivative": 1,
+                "four_corner_values": [
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                "bilinear_interpolant": "x*y",
+                "check_point": [
+                  "1/4",
+                  "3/4"
+                ],
+                "interpolant_and_target": "3/16",
+                "interpolation_error": 0
+              },
+              "correction": "在二维迁移中应按实际双线性再现空间和目标范数说明误差机制；纯混合曲率或 Hessian 大小不能单独证明需要加密。可以包含混合导数的宽松界，但需明确条件，不能把其存在当作不可避免误差。",
+              "assessment": "这是迁移依据的具体限制和可复现反例；由于无最终候选，未判断主 Agent 是否采用了不适当的曲率指标。"
+            }
+          ],
+          "arithmetic_review": "报告没有给出一个完整候选的可训练参数展开式；16×16=256 算术正确。因无规范主方案，无法完成公式/边界/初始化/消融/共同数据预算/判别规则的方案级复核。",
+          "scope_limits": [
+            "仅使用已归档 read_receipt 的 visible_pages；extracted_pages 不等于模型可见完整页。S1 第 5 页和 S2 第 5 页收据均标 truncated，未将不可见部分当作已读证据。",
+            "没有调用模型、研究服务或执行真实科研实验；未把缺少实验结果或二维等价定理本身判为失败。",
+            "本文件不改写原始 report、read_receipt、summary、候选或模型审查记录，也不向正在运行的模型注入修正答案。"
+          ],
+          "original_artifact_sha256": {
+            "summary.json": "5d92ad3692c3dd4b7f372712da4925d1bdd707216cacbee6a36a5fad0cc0e5a4",
+            "idea/research_delegations/da97887d59a543a0b91d1c3fd47dadd1/report.md": "d725da586bc4803bb3b29a9a5aee99ad07f4615ee48692440f82fc9ce2a4a46e",
+            "idea_research/research/downloads/ad7d820cba1f4629827247419a82fb0c.read.json": "84c7b9ae3db42471844d6e6170505676b6384fa34355e629dbc44d1d2607099c",
+            "idea_research/research/downloads/02b0dbaf157145c39a824e277b83c6c5.read.json": "1773df4395dd169a7d34b4e4f599a08834d8e672fc5644063c1def79b262c5be"
+          }
+        },
+        "external_run_routing.json": {
+          "record_kind": "external_run_routing",
+          "configured_at": "2026-09-08T10:12:20.158582+00:00",
+          "direct_research_hosts": [
+            "api.openalex.org",
+            "export.arxiv.org",
+            "arxiv.org"
+          ],
+          "system_proxy_changed": false,
+          "other_routes": "inherited unchanged",
+          "preflight_paper_results_supplied_to_model": false
+        },
+        "protocol_repair_component_check.json": {
+          "record_kind": "codex_offline_component_check",
+          "check": "repair context using actual failed checkpoint, original task and actual tool observations",
+          "original_error_reproduced": "pinned rules/task/schema/upstream/candidate exceed input budget; nothing was silently dropped",
+          "repaired_context_manifest": {
+            "estimated_upper_bound_tokens": 73145,
+            "estimator": "utf8_byte_upper_bound",
+            "budget": 80096,
+            "compressed_history": [],
+            "omitted_history": [],
+            "preserved_review_history": [],
+            "reviewing": false,
+            "prior_review_issues_visible": false,
+            "validation_issues_visible": false,
+            "visible_sha256": "46152c0e2dccea269506810c34479d2f999a5ebf355b518f8298a50e7d67f2db"
+          },
+          "tool_schema_upper_bound_tokens": 15904,
+          "total_input_upper_bound_tokens": 89049,
+          "invalid_tool_arguments_unchanged": true,
+          "original_checkpoint_unchanged": true,
+          "model_called": false,
+          "candidate_accepted": false,
+          "scientific_validated": false
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/d7db8520bc3047519e51a7355ad1c9fb/checkpoint.json": "9f6619cc6480cb74e1cca06d20f9655c9ff22e9e44503569bf44a5d29df10be7",
+        "agent_traces/idea/d7db8520bc3047519e51a7355ad1c9fb/events.jsonl": "a0f8bfefcaeb9a50de650c337ed957619d4bc0e2220fcde88c2ab5da6bd42e8b",
+        "agent_traces/idea_research/1c9cab5b083d46fa8538d1437da919bc/checkpoint.json": "7374a4395fc2eaeac661b7f7f5cdda2ba23b64ae58d94a84e8c860ee2065247a",
+        "agent_traces/idea_research/1c9cab5b083d46fa8538d1437da919bc/events.jsonl": "0892a243befc7d2dd61420bd24bee7d74fdb5de3e0c22194e35f367dab54beba",
+        "agent_traces/idea_research/da97887d59a543a0b91d1c3fd47dadd1/checkpoint.json": "4dd7964b7a6a88787cc4343398b5ae769ed684afefe90cb7ea3a41e56e6ab8d9",
+        "agent_traces/idea_research/da97887d59a543a0b91d1c3fd47dadd1/events.jsonl": "e0dc13244838441772fec6f434b4b0d09e3ee891f50968a01e948383c18679c8",
+        "all_traces_audit.json": "d701c9e7ad7f09cb75b2a87e92d583e4558d3ee35afe5ef27873dc1633515465",
+        "external_run_routing.json": "61f52e2f2ab02e0d3757a57110947f9af2197c5e60393c134fd8e3fc4253d93c",
+        "input/request.json": "0b50cfa0afc07850ed96181f495048de26c0a071db52492c0564be048c3cde98",
+        "manual_research_review.json": "5f65adbc8af6f9dbc3db85c1cf98919e11148a235187855d1c9d3965b5bda92f",
+        "protocol_repair_component_check.json": "41e531db3d6faf4a4a3f5b60408f101a6f064d66c9c9562619ba0ddb4cdadeb9",
+        "summary.json": "5d92ad3692c3dd4b7f372712da4925d1bdd707216cacbee6a36a5fad0cc0e5a4"
+      }
     }
   ]
 }

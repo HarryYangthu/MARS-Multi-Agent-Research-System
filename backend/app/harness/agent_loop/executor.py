@@ -123,7 +123,7 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 7})
+                              "context_format_version": 8})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.required_review_tools:
@@ -236,7 +236,7 @@ class NativeAgentLoop:
                     await progress("started")
                 extra: list[Message] = [budget_message(p, counts)]
                 if state["protocol_output"]:
-                    extra.append(invalid_output_context(state["protocol_output"]))
+                    extra.append(invalid_output_context(state["protocol_output"], native=native))
                 if reviewing:
                     extra.append(Message(role="system", content=(
                         "You are reviewing the current candidate, not generating tool actions. "
