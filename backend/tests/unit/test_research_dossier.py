@@ -10,7 +10,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source
-from app.agents.idea.research_dossier import dossier_errors, dossier_schema, write_dossier_report
+from app.agents.idea.research_dossier import dossier_errors, dossier_schema, normalized_excerpt_text, write_dossier_report
 
 
 def document() -> dict[str, Any]:
@@ -83,5 +83,31 @@ def test_actual_archived_receipt_and_modified_quote() -> None:
     data["insights"][0].update(read_receipt=row["read_receipt"], document_sha256=row["sha256"],
                                page=page["page"], quote=page["text"].strip()[:200])
     assert dossier_errors(data, observations) == []
+    original = dict(data["insights"][0])
+    for field, value, message in (("document_sha256", "0" * 64, "does not match the archived document bytes"),
+                                  ("page", 100000, "is not visible"),
+                                  ("read_receipt", "/nonexistent/read.json", "not in actual tool observations")):
+        data["insights"][0] = {**original, field: value}
+        assert any(message in error for error in dossier_errors(data, observations))
+    data["insights"][0] = original
     data["insights"][0]["quote"] = "This deliberately absent quotation cannot match the archived page."
-    assert any("actual tool read receipt" in error for error in dossier_errors(data, observations))
+    assert any("quote is absent" in error for error in dossier_errors(data, observations))
+
+
+def test_pdf_typographic_normalization_preserves_hyphens_and_words() -> None:
+    assert normalized_excerpt_text("efﬁcient four-\n dimensional") == "efficient four-dimensional"
+    assert normalized_excerpt_text("four-dimensional") != normalized_excerpt_text("fourdimensional")
+    assert normalized_excerpt_text("x - y + 2 - 3") == "x - y + 2 - 3"
+    assert normalized_excerpt_text("first\nsecond") == "first second"
+
+
+def test_actual_failed_checkpoint_only_quote_provenance_repaired() -> None:
+    checkpoint = os.environ.get("MARS_TEST_RESEARCH_CHECKPOINT")
+    if not checkpoint:
+        pytest.skip("requires explicit actual failed research checkpoint")
+    from app.harness.schema.frontmatter_parser import parse
+    state = json.loads(Path(checkpoint).read_text())
+    metadata = parse(state["candidate"]).metadata
+    errors = dossier_errors(metadata, state["history"], min_sources=2)
+    assert not any("quote is absent" in error for error in errors)
+    assert any("require 2 distinct read publications; observed 1" in error for error in errors)

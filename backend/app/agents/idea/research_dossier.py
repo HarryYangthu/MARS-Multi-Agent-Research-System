@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -18,30 +20,39 @@ def dossier_schema() -> dict[str, Any]:
     return value
 
 
-def _normalized(value: str) -> str:
-    return " ".join(value.split())
+def normalized_excerpt_text(value: str) -> str:
+    """Normalize PDF typography without deleting hyphens or inventing text."""
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "-", normalized)
+    return " ".join(normalized.split())
 
 
-def _receipt_matches(insight: dict[str, Any], row: dict[str, Any]) -> bool:
-    """Only trust the receipt actually returned to this invocation by its tool."""
+def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
+    """Diagnose the exact provenance failure; never replace the model's quote."""
     try:
         receipt = json.loads(Path(insight["read_receipt"]).read_text())
+        if not isinstance(receipt, dict):
+            return "read_receipt must contain an object"
         for field in ("sha256", "download_path", "visible_pages", "url", "download_url"):
             if receipt.get(field) != row.get(field):
-                return False
+                return f"read_receipt {field} differs from the actual tool observation"
         if not receipt.get("ok") or receipt.get("source_type") != "pdf":
-            return False
+            return "read_receipt is not a successful PDF read"
         document = Path(receipt["download_path"]).read_bytes()
         if hashlib.sha256(document).hexdigest() != insight["document_sha256"]:
-            return False
+            return "document_sha256 does not match the archived document bytes"
         if receipt["sha256"] != insight["document_sha256"]:
-            return False
-        quote = _normalized(insight["quote"])
-        return any(page.get("page") == insight["page"] and
-                   quote in _normalized(str(page.get("text", "")))
-                   for page in receipt.get("visible_pages", []))
-    except (OSError, ValueError, TypeError, KeyError):
-        return False
+            return "document_sha256 does not match the actual read receipt"
+        pages = [page for page in receipt.get("visible_pages", []) if page.get("page") == insight["page"]]
+        if not pages:
+            return f"page {insight['page']} is not visible in this read_receipt; read that page or cite a visible page"
+        quote = normalized_excerpt_text(insight["quote"])
+        if not any(quote in normalized_excerpt_text(str(page.get("text", ""))) for page in pages):
+            return (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
+                    "from that page's actual visible text, preserving words and hyphens")
+        return None
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return f"read_receipt or archived document is unreadable: {type(exc).__name__}"
 
 
 def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], *,
@@ -97,10 +108,18 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
             errors.append(prefix + "/source_id: insight must refer to a used source")
             continue
         row = receipts.get(insight["read_receipt"])
-        if (row is None or canonical_source(str(row.get("url", ""))) != canonical_source(source["url"])
-                or canonical_source(str(row.get("download_url", ""))) not in download_urls.get(canonical_source(source["url"]), set())
-                or not _receipt_matches(insight, row)):
-            errors.append(prefix + ": quote/page/document must match an actual tool read receipt and unchanged document")
+        if row is None:
+            errors.append(prefix + "/read_receipt: receipt is not in actual tool observations; use an actual tool read receipt")
+            continue
+        if canonical_source(str(row.get("url", ""))) != canonical_source(source["url"]):
+            errors.append(prefix + "/source_id: read receipt belongs to a different source URL")
+            continue
+        if canonical_source(str(row.get("download_url", ""))) not in download_urls.get(canonical_source(source["url"]), set()):
+            errors.append(prefix + ": read receipt download URL does not match the retrieved source PDF")
+            continue
+        receipt_error = _receipt_error(insight, row)
+        if receipt_error:
+            errors.append(prefix + ": " + receipt_error)
             continue
         read_sources.add(canonical_source(source["url"]))
     for source in sources.values():

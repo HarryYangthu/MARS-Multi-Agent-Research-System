@@ -75,3 +75,18 @@ def test_untrusted_manifest_paths_are_rejected(tmp_path: Path, path: str) -> Non
 def test_no_receipts_does_not_count_as_research(tmp_path: Path) -> None:
     assert load_delegated_research(tmp_path, []) == ([], [])
     assert verified_delegated_evidence(RunRequest("p", "t")) == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_context_ref_reports_available_inputs_without_starting_child(tmp_path: Path) -> None:
+    from app.harness.tools.registry import ToolContext
+    context = ContextPack("", "", "", upstream={"baseline_code": "actual supplied code"})
+    request = RunRequest("p", "task", extra={"run_root": str(tmp_path), "run_id": "refs"})
+    registry = make_research_registry(get_agent_config("idea"), request, context)
+    result = await registry.dispatch(TOOL, {"gap": "Find evidence for the proposed method", "context_refs": ["guessed"],
+                                          "success_criteria": "Read a relevant method description"},
+                                    ToolContext(run_id="refs", project="p", agent="idea", extra={"run_root": str(tmp_path)}))
+    assert not result.ok
+    assert result.output == {"available_context_refs": ["baseline_code"]}
+    assert request.runtime["idea_research_session"].attempted == 0
+    assert not (tmp_path / "agent_traces" / "idea_research").exists()

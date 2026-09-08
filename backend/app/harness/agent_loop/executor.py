@@ -67,6 +67,18 @@ class AgentLoopExecutor(Protocol):
     async def run(self, request: LoopInput) -> LoopResult: ...
 
 
+def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
+    """Expose actual remaining local resources before choosing another action."""
+    remaining = {"model_calls": max(0, policy.max_model_calls - counts["model_requests"]),
+                 "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
+                 "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
+    return Message("system", "Host remaining budget for this agent loop: " + canonical(remaining)
+                   + ". The next model call is included. Each dispatched tool, including failures, consumes "
+                   "one tool call. Reserve tools for acquiring and checking evidence, and calls for submission "
+                   "and revision. These are local counters, not the total cost of any delegated loops. "
+                   "Do not invent evidence when resources are insufficient.")
+
+
 def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
                      native: bool, wire_tools: tuple[dict[str, Any], ...],
                      effort_overrides: dict[str, Any]) -> LLMConfig:
@@ -110,7 +122,7 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 3})
+                              "context_format_version": 4})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.required_review_tools:
@@ -221,7 +233,7 @@ class NativeAgentLoop:
                 reviewing = state["next_phase"] == "reflect"
                 if counts["model_requests"] == 0:
                     await progress("started")
-                extra: list[Message] = []
+                extra: list[Message] = [budget_message(p, counts)]
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"]))
                 if reviewing:

@@ -21,7 +21,7 @@ tools:
   idea.research_delegate:
     enabled: true
     runtime_bound: true
-    description: Delegate a concrete literature evidence gap to an independent tool-using researcher. Supply exact upstream context keys only.
+    description: Delegate a concrete literature evidence gap to an independent tool-using researcher. The overall task is passed automatically. context_refs must be exact available upstream keys; use [] when no additional context is supplied. Never invent task or background keys.
     mutation_level: read
     allowed_agents: [idea]
     timeout_seconds: 2400
@@ -32,6 +32,7 @@ tools:
       properties:
         gap: {type: string, minLength: 10, maxLength: 3000}
         context_refs:
+          description: Exact keys from the supplied upstream context, not concepts or file paths. Use [] if no keys are available; the overall research task is always passed automatically. Invalid references return the exact available keys.
           type: array
           maxItems: 12
           uniqueItems: true
