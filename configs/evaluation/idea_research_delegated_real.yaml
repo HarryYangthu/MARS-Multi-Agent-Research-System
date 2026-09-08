@@ -62,5 +62,5 @@ child_loop:
   input_token_budget: 64000
   observation_chars: 16000
   protocol: native_tools
-child_tools: [search.openalex_search, search.fetch_sources, knowledge.kb_query]
+child_tools: [search.openalex_search, search.arxiv_search, search.fetch_sources, knowledge.kb_query]
 source_max_mib: 32

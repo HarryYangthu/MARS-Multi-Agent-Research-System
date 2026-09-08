@@ -220,7 +220,13 @@ class IdeaAgent(BaseAgent):
                 "should be excluded, never attached to a dummy method field to meet a count. "
                 "Only distinct papers linked to actual method definitions count toward min_sources. "
                 "Explain why the research is sufficient for this decision and list unresolved gaps honestly. "
-                "Every claim in the human_summary must agree with the canonical method_spec and handoff."
+                "Every claim in the human_summary must agree with the canonical method_spec and handoff. "
+                "Give each delegation a bounded information gap; the overall minimum publication count is "
+                "aggregated across reports, not automatically the minimum for every child. Separate gaps may "
+                "each require one publication. Do not repeat an entire failed research assignment unchanged: "
+                "use its concrete failure to narrow the missing evidence or switch available search channels. "
+                "A relevant source need only inform a specific defensible method decision, not already solve "
+                "the complete target task with its exact budget. The final adaptation must meet all task constraints."
             )
         return context
 

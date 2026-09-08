@@ -185,7 +185,16 @@ class ResearchSession:
                     "Check arithmetic in any proposed transfer; every extra trainable component counts. "
                     "Record reject/defer for unsuitable inspected sources with concrete reasons. Do not broaden "
                     "the search to fill a paper quota with irrelevant sources; leave the gap explicit if no "
-                    "suitable evidence can be established within budget.")]
+                    "suitable evidence can be established within budget. "
+                    "An HTTP 429 is a service limit, not evidence that a topic lacks papers. Switch to another "
+                    "enabled search tool instead of sending query variants to the same limited service. "
+                    "An empty Memory result is not repaired by repeatedly querying the same empty collection. "
+                    "When candidate abstracts identify a useful mechanism, use the remaining calls to read and "
+                    "check its method before searching again. Papers need not match the entire task or its exact "
+                    "parameter budget: identify the specific transferable mechanism and account for all adaptation "
+                    "costs; do not claim the original large model itself fits the target budget. "
+                    "For quotes, copy a short contiguous prose fragment from one actual visible page. Never "
+                    "reconstruct a displayed equation or splice separated sentences into a purported exact quote.")]
         messages.extend(Message("user", "[untrusted supplied context:" + ref + "]\n" + self.context.upstream[ref]) for ref in refs)
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,

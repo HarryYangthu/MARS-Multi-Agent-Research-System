@@ -62,6 +62,7 @@ def test_preparation_uses_real_configs_without_calls(tmp_path: Path) -> None:
     assert request["lead_config"]["tools"] == ["idea.research_delegate", "knowledge.kb_query"]
     assert request["child_config"]["thinking_enabled"] is False
     assert request["child_config"]["reasoning_effort"] is None
+    assert {"search.arxiv_search", "search.openalex_search"} <= set(request["child_config"]["tools"])
 
 
 @pytest.mark.parametrize("value", [0, 65, True, 32.5, "32", None])
