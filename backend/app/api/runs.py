@@ -33,12 +33,19 @@ class CreateRunPayload(BaseModel):
     # that node — the run goes straight into HITL review.
     seed_artifact: str | None = None
     data_source: "DataSourceSelection | None" = None
-    idea_mode: Literal["auto", "fast", "deep"] | None = None
+    idea_mode: Literal["fast"] | None = Field(default=None, description="Only fast is available; omit to use the default.")
     idea_budget_profile: Literal["fast", "balanced", "thorough"] | None = None
     project_inputs: dict[str, Any] = Field(default_factory=dict)
     idea_context: dict[str, str] | None = None
     idea_scope: Literal["method_proposal", "project_proposal"] | None = None
     idea_requirements: IdeaRequirements | None = None
+
+    @field_validator("idea_mode", mode="before")
+    @classmethod
+    def validate_idea_mode(cls, value: Any) -> Any:
+        if isinstance(value, str) and value in {"auto", "deep"}:
+            raise ValueError(f"idea_mode={value} is not available; use fast or omit idea_mode")
+        return value
 
     @field_validator("idea_context", mode="before")
     @classmethod

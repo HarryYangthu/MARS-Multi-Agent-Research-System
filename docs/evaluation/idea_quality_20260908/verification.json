@@ -376,6 +376,199 @@
         "input/request.json": "f33a5d28903e3222705f095da9ab1af42c62ffc8d4710ff393157411c9e9ba81",
         "summary.json": "f8007df6e89cda1aadd2b332c4265f0ec8aa7a4fa35a7cf7b704d3c5c47db15a"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T095224_b6c7a8",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 671.6603849169987,
+      "counts": {
+        "action_rounds": 41,
+        "model_requests": 46,
+        "model_responses": 46,
+        "observations": 34,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 46,
+        "tool_dispatches": 34,
+        "validation_repairs": 14
+      },
+      "usage": {
+        "completion_tokens": 63140,
+        "prompt_tokens": 474388,
+        "total_tokens": 537528
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 0,
+        "unique_downloaded_contents": 0,
+        "unique_pdf_publications_with_visible_pages": 0,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 10
+      },
+      "source_commit": "edc7d34919a696d16eada553d5c697062c3fe706",
+      "source_tree": "e572e714d3848a1f97718613ef59fc5c1d2c4ec5",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T095224_b6c7a8",
+      "separate_review_records": {
+        "network_diagnosis.json": {
+          "record_kind": "development_network_diagnosis",
+          "recorded_at": "2026-09-08T10:06:30.198003+00:00",
+          "original_run_status": "failed",
+          "research_tool_errors": [
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "f37e6c4f517e4b37b58eb77ee8e9b9b2",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "b3f5f09fdf2548288e3912426118c38a",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.openalex_search",
+              "error": "ConnectError: "
+            },
+            {
+              "delegation": "1df3e764b7644832b8b4c2a3946698e1",
+              "tool": "search.arxiv_search",
+              "error": "arXiv request failed: ConnectError: "
+            }
+          ],
+          "outside_agent_probes": [
+            {
+              "host": "export.arxiv.org",
+              "inherited_proxy": "timed_out",
+              "direct_status": 200
+            },
+            {
+              "host": "api.openalex.org",
+              "inherited_proxy": "timed_out",
+              "direct_status": 200
+            },
+            {
+              "host": "arxiv.org",
+              "direct_pdf_head_status": 200
+            },
+            {
+              "host": "api.github.com",
+              "inherited_proxy": "TLS_connect_failed",
+              "direct_status": 200
+            }
+          ],
+          "preflight_results_supplied_to_model": false,
+          "system_proxy_changed": false,
+          "note": "Read-only connectivity probes after failed research. A future evaluation can use process-local NO_PROXY for the successful research hosts; no source results are injected."
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/970a9660093c4440a76c776aeb21aaaa/checkpoint.json": "4af570ecee42e1c6dcfc6df2787b47dfb6919ec6cd4f4d90b533edb66c34f802",
+        "agent_traces/idea/970a9660093c4440a76c776aeb21aaaa/events.jsonl": "b793738f863a486f0f4b24a07161ae37e838e52a340cc1b4412646d11ed3b9d6",
+        "agent_traces/idea_research/1df3e764b7644832b8b4c2a3946698e1/checkpoint.json": "f96d4d52606b58d6ac9aac65dfd223a9960a5fe7c70dff918c8379ad165660bb",
+        "agent_traces/idea_research/1df3e764b7644832b8b4c2a3946698e1/events.jsonl": "731f5db26071f71cb7eba008ec2c798a2c1747b2a29f36bf8dcc4428485ac580",
+        "agent_traces/idea_research/b3f5f09fdf2548288e3912426118c38a/checkpoint.json": "a84bd7d17b3712e6f7f2d7bd50c35451793eca1e5ef3f51aefb01791766b22d5",
+        "agent_traces/idea_research/b3f5f09fdf2548288e3912426118c38a/events.jsonl": "5a4e446353832a90b1532439d69b31f76b56e1bfe62a0905ca16586d1c75f2c2",
+        "agent_traces/idea_research/f37e6c4f517e4b37b58eb77ee8e9b9b2/checkpoint.json": "97e6842d4f76a0a4ef2630cf97b89681f4168c05e92e9e68cd59b809e16020c0",
+        "agent_traces/idea_research/f37e6c4f517e4b37b58eb77ee8e9b9b2/events.jsonl": "52ba082b5a4b053be5911452eb9e8c23789b3a2b170a4f9a5e6e011ec044374f",
+        "all_traces_audit.json": "4cb64d6b03fbbb9db033341e2868e26997eb4ccf3ced0dbbe9cf1cc4255199a5",
+        "input/request.json": "add632c3dc62f8ef3a420a4a8b34633d9a11f510c252437a8b2cd4848f766e61",
+        "network_diagnosis.json": "75281d1c8daab77562df2b397079ad10958093289c6f29dd42fb5f80df258efa",
+        "summary.json": "ca152d34f44f95cdc92588d4476207d482cd556a8d46ffe1901c811f38eb8672"
+      }
     }
   ]
 }
