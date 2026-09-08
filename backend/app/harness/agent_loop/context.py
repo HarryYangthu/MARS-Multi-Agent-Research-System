@@ -18,8 +18,9 @@ def token_upper_bound(messages: Sequence[Message]) -> int:
 def compact(value: Any, chars: int) -> Any:
     """Truncate leaf strings, not serialized JSON; retain identity and error fields."""
     if isinstance(value, dict):
-        preserved = {"url", "pdf_url", "download_url", "raw_ref", "sha256", "title", "error", "reason", "status"}
-        return {k: v if k in preserved else compact(v, chars) for k, v in value.items()}
+        preserved = {"url", "pdf_url", "download_url", "raw_ref", "sha256", "title", "error", "status", "read_receipt", "download_path"}
+        return {k: compact(v, min(chars, 512)) if k == "reason" else
+                (v if k in preserved else compact(v, chars)) for k, v in value.items()}
     if isinstance(value, list):
         return [compact(x, chars) for x in value]
     if isinstance(value, str) and len(value) > chars:
@@ -88,7 +89,7 @@ def pack_context(
     if history:
         # The full observations may be compressed/omitted, but the agent must
         # still know which actions really happened and where their receipts live.
-        ledger = [{k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}
+        ledger = [compact({k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}, 512)
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
         source_receipts = source_receipt_index(history)
@@ -110,17 +111,37 @@ def pack_context(
     groups = history_groups(history)
     for index in reversed(range(len(groups))):
         items = groups[index]
+        # Rendering copies cap duplicated assistant commentary without touching
+        # recorded history or native tool IDs/arguments required for pairing.
+        rendering_items = []
+        for item in items:
+            reason = item.get("reason", "")
+            rendered_reason = (reason[:512] + " [reason truncated; full text in raw trace]"
+                               if isinstance(reason, str) and len(reason) > 512 else reason)
+            rendering_items.append({**item, "reason": rendered_reason})
         contents = ["[untrusted prior action and host Observation]\n" + canonical(compact(item, observation_chars)) for item in items]
         # A separate reviewer reads evidence documents, not the generator's
         # native assistant/tool conversation. Its configured tool set is empty.
         group = ([Message(role="user", content=content) for content in contents]
-                 if reviewing else group_messages(items, contents))
+                 if reviewing else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) > budget:
-            contents = ["[compressed evidence reference]\n" + canonical({k: item.get(k) for k in
-                        ("tool", "args", "reason", "ok", "error", "raw_ref")}) for item in items]
-            group = ([Message(role="user", content=content) for content in contents]
-                     if reviewing else group_messages(items, contents))
             compressed.append(index)
+            # Preserve real page text prefixes before falling back to addresses.
+            # All reduced groups remain marked compressed for the review guard.
+            for limit in (4000, 2000, 1000, 512):
+                if limit >= observation_chars:
+                    continue
+                contents = ["[shortened actual Observation; leaf excerpts are incomplete]\n"
+                            + canonical(compact(item, limit)) for item in items]
+                group = ([Message(role="user", content=content) for content in contents]
+                         if reviewing else group_messages(rendering_items, contents))
+                if token_upper_bound(required + selected + group) <= budget:
+                    break
+            if token_upper_bound(required + selected + group) > budget:
+                contents = ["[compressed evidence reference]\n" + canonical(compact({k: item.get(k) for k in
+                            ("tool", "args", "reason", "ok", "error", "raw_ref")}, 512)) for item in items]
+                group = ([Message(role="user", content=content) for content in contents]
+                         if reviewing else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) <= budget:
             selected[0:0] = group
         else:
