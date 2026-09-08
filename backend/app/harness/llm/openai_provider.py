@@ -148,6 +148,10 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["stream"] = True
 
         reasoning_effort = config.reasoning_effort or self._default_reasoning_effort
+        if self.name == "deepseek" and thinking_enabled is False and config.extra.get("review_format_repair") is True:
+            # Host-only format repair marker; never forward it or inherit the
+            # provider's reasoning default for this explicitly non-thinking call.
+            reasoning_effort = None
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
 

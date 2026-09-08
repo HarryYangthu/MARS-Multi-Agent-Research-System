@@ -33,6 +33,15 @@ class ReviewConflictError(ValueError):
         super().__init__("review contains unresolved issues; revise the candidate before reviewing again")
 
 
+class DuplicateJSONKeyError(ValueError):
+    """Malformed JSON object; never silently choose one of the repeated values."""
+
+
+def is_review_format_error(error: ValueError) -> bool:
+    """Only JSON syntax/duplicate keys qualify, never a substantive review contract."""
+    return isinstance(error, (json.JSONDecodeError, DuplicateJSONKeyError))
+
+
 def invalid_output_context(text: str, *, native: bool = False) -> Message:
     """Keep invalid arguments intact; bound duplicated native-call commentary only."""
     payload: dict[str, Any] = {"invalid_output": text}
@@ -66,7 +75,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"duplicate JSON key: {key}")
+            raise DuplicateJSONKeyError(f"duplicate JSON key: {key}")
         result[key] = value
     return result
 

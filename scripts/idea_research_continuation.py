@@ -55,7 +55,7 @@ def remaining_seconds(initial: dict[str, Any], summary: dict[str, Any]) -> float
     if (not isinstance(maximum, (int, float)) or isinstance(maximum, bool)
             or not isinstance(elapsed, (int, float)) or isinstance(elapsed, bool)
             or not math.isfinite(maximum) or not math.isfinite(elapsed)
-            or not 0 <= elapsed < maximum <= 1200):
+            or not 0 <= elapsed < maximum <= 3600):
         raise ValueError("original runtime budget missing, invalid or exhausted; continuation cannot invent a new budget")
     return float(maximum - elapsed)
 

@@ -2,6 +2,7 @@
   "record_kind": "development_evaluation",
   "date": "2026-09-08",
   "evidence_scope": "Actual public-research runs; all failed delegations included.",
+  "accounting_note": "For totals across entries, use attempt_counts/attempt_known_usage where present; counts/usage of a continuation include its inherited lineage and must not be added again to the source run.",
   "raw_archives_in_repository": false,
   "raw_archive_note": "Full traces, downloaded PDFs and local component records remain in the indicated run directories; hashes identify them. This compact export does not substitute for those archives.",
   "runs": [
@@ -1513,6 +1514,338 @@
         "input/request.json": "d36ce0d1bcb1a51829da313dcff1f337914b3e67d4148e352b1f1e6f97c2e1c2",
         "network_diagnosis.json": "3fa5a746c02ce0d99b42bdcf86bc196061e5661258fd9df257c2fe02a7ea29f8",
         "summary.json": "58c676e0e63f85e13a75070a9fe2f0a4463e990365402e67ae9a67fcd2b07877"
+      }
+    },
+    {
+      "run_id": "idea_research_20260908T154916_cb38dc",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 1200.0181692499973,
+      "counts": {
+        "action_rounds": 10,
+        "model_requests": 20,
+        "model_responses": 19,
+        "observations": 10,
+        "protocol_repairs": 3,
+        "reflections": 3,
+        "sdk_attempts": 20,
+        "tool_dispatches": 10,
+        "validation_repairs": 3
+      },
+      "usage": {
+        "completion_tokens": 163871,
+        "prompt_tokens": 358378,
+        "total_tokens": 522249
+      },
+      "trace_consistent": true,
+      "usage_complete": false,
+      "research_counts": {
+        "read_windows": 4,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 10
+      },
+      "attempt_counts": {
+        "action_rounds": 10,
+        "model_requests": 20,
+        "model_responses": 19,
+        "observations": 10,
+        "protocol_repairs": 3,
+        "reflections": 3,
+        "sdk_attempts": 20,
+        "tool_dispatches": 10,
+        "validation_repairs": 3
+      },
+      "attempt_known_usage": {
+        "completion_tokens": 163871,
+        "prompt_tokens": 358378,
+        "total_tokens": 522249
+      },
+      "cumulative_duration_seconds": 1200.0181692499973,
+      "accounting_note": "counts/usage include inherited history once; attempt_counts/attempt_known_usage contain only this invocation's increments. Unknown earlier usage stays unknown.",
+      "source_commit": "e32d2871a0588fc58f9fefdc9b30f117cb23fa93",
+      "source_tree": "54d8364b0219ce4378293be0b5595e4dd0db7746",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T154916_cb38dc",
+      "separate_review_records": {
+        "manual_quality_review.json": {
+          "schema": "codex.offline_quality_review.v1",
+          "reviewer": {
+            "identity": "Codex independent offline review",
+            "role": "Codex 离线独立复核；不是用户、人工科研评审或原 runtime Reflection"
+          },
+          "created_at": "2026-09-08T16:13:18.911377+00:00",
+          "run_id": "idea_research_20260908T154916_cb38dc",
+          "source_commit": "e32d2871a0588fc58f9fefdc9b30f117cb23fa93",
+          "status": "candidate_only/unaccepted",
+          "scope": "终止 checkpoint 中最后一份未接受候选；不存在规范接受方案或下游交付。",
+          "scientific_validated": false,
+          "simulation_executed": false,
+          "runtime_records_modified": false,
+          "runtime_status": {
+            "run": "failed",
+            "error_type": "TimeoutError",
+            "lead_checkpoint": "interrupted",
+            "final_proposal_exists": false,
+            "model_review_passed": false,
+            "downstream_delivered": false
+          },
+          "candidate_digest": "db5b7ec4dd178732c59002f594e72f471f87e5ae90f2ca728454944d41d7dcc1",
+          "candidate_source": "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/checkpoint.json#/candidate",
+          "checkpoint_sha256": "442c7a3d7ede72c38cc4daffd3721633ef661e38275422c732cfbc2466bf02d5",
+          "location_note": "candidate_lines 是 checkpoint.candidate 字符串按换行计的一基行号，不是 JSON 文件行号。",
+          "conclusion": "未接受候选仍有正则梯度与损失定义不一致，以及节点联合约束投影未定义的实现缺口；此结论不替换 runtime 的 TimeoutError，也不制造自动最终方案。",
+          "issues": [
+            {
+              "id": "R10-Q1",
+              "priority": "P1",
+              "title": "正则梯度反号且首节点公式包含未进入损失的间距",
+              "locations": [
+                {
+                  "pointer": "/method_spec/training_objective_reg/loss",
+                  "candidate_lines": [
+                    83
+                  ]
+                },
+                {
+                  "pointer": "/method_spec/ablations/abl2_regpos/gradient_story",
+                  "candidate_lines": [
+                    135
+                  ]
+                }
+              ],
+              "evidence": "已定义 Δx_k=x_{k+1}−x_k，L_reg 从 k=1 到 13 求和；稿中却写梯度 2λ[(Δx_k−Δ̄)−(Δx_{k−1}−Δ̄)]。对内部 k=2..13，正确导数顺序相反；k=1 时 Δx_0 没有进入损失，导数也不能含该项。",
+              "reproduction": "按均匀节点将 x_7 增加 0.01，有限差分为 +0.0004000000000004536，而稿中式为 −0.00040000000000000257。对 x_1 同样扰动，有限差分为 +0.0002000000000057325，稿中式约 −0.0004。详见 derived/offline_math_check.json。",
+              "impact": "照手写梯度会朝与所定义惩罚相反的方向更新；用自动微分则与明写的梯度叙述不一致。Experiment 不能把两者同时实现为同一规范。",
+              "minimal_fix": "统一唯一损失与导数：明确是否对全部 14 个间距 k=0..13 惩罚，并以该选择推导边界和内部位置的梯度；允许仅指定正确损失及自动微分，不必手写错误梯度。"
+            },
+            {
+              "id": "R10-Q2",
+              "priority": "P2",
+              "title": "节点间距与边界需要明确的联合约束投影",
+              "locations": [
+                {
+                  "pointer": "/method_spec/candidate/order_constraint",
+                  "candidate_lines": [
+                    73
+                  ]
+                }
+              ],
+              "evidence": "只写升序排序、投影保证最小间距、再把内部节点截断到端点内侧，没有定义同时满足二者的投影映射。单独间距投影后逐坐标裁剪不保留间距。",
+              "reproduction": "13 个已排序内部位置 0.990,0.995,...,1.050 已相隔 0.005；仅最小间距集合的投影保持它们，随后裁剪到上界 0.995 则多个位置相同，最小间距变为 0，插值分母可退化。",
+              "impact": "当前叙述允许不同实现，其中顺序操作会破坏所声称的不退化约束；这是实现定义缺口，不是断言任何联合投影都无效。",
+              "minimal_fix": "给出同时包含固定端点、域内位置与正最小间距的可执行联合映射或明确约束优化投影。无需指定某一种算法，也不要求加入无效参数。"
+            }
+          ],
+          "research_report_review": {
+            "ref": "manual_research_review.json",
+            "sha256": "dff06354675be3a380d03d343c1946cc585151f32a055f5877bf5a84fac8a80b",
+            "report_sha256": "f9b0909eb27ad810ac89828180e1e0bcbe0e5ec59e956050396321d2adc49082",
+            "finding": "研究报告摘要和 i1 将多部件 FR-KAN 的整体比较过度归因为节点位置，并混同二维特定架构的匹配量与固定总训练参数 LUT；原文真实且方法相关，但该已知收益表述须收窄。最终候选已包含多项迁移限制，因此不机械地把报告问题全复制为最终方案缺陷。"
+          },
+          "resolved_or_not_defects": [
+            "旧稿 abl2 使用纯 MSE 的正式 objective 缺口已修复：最新 arm 引用 obj_smooth_reg，再指向 training_objective_reg；cmp_abl2 声明目标差异。",
+            "基线 256、主候选 225+13+13=251、固定 15 节点 225、仅 x 位置训练 238 的真实参数账本均自洽。",
+            "没有增加无效占位参数；冻结位置导致可训练计数减少并不使消融本身无效。",
+            "格点值 iid U(-0.1,0.1) 初始化、位置均匀初始化，没有额外目标查询或明显不等的初始化标签预算。",
+            "三种消融会在声明域内改变行为；最初的空洞 clamp-vs-reflect 等旧轮缺陷没有带入本轮。",
+            "未做真实实验或未证明普适/渐近收益，不单独构成本阶段失败。"
+          ],
+          "nonblocking_claim_corrections": [
+            {
+              "pointer": "/signal_contract/position_gradient_condition",
+              "finding": "N_train=20000 个 iid 均匀点不保证覆盖每个自适应单元。对允许的 0.005×0.005 单元，空单元概率约 0.8824965579；有样本也不保证梯度非零。应改为风险或覆盖检查，不宣称确定性保证。"
+            },
+            {
+              "pointer": "/method_spec/evaluation_targets/rationale",
+              "finding": "单预算下的 smooth 比较可判断该配置误差，不能区分渐近阶与常数因子。主稿已撤回渐近保证，因此不要求另做未授权实验来判本稿失败。"
+            }
+          ],
+          "runtime_reviewer_limitations": {
+            "source": "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/checkpoint.json#/review_issues/1",
+            "observation": "第一次有效 Reflection 将冻结 26/13 个节点位置后的参数下降本身视为不公平，要求同参数固定节点对照；该门槛过严。",
+            "interpretation": "冻结或移除参数块的消融可以诚实采用更少可训练参数，检验允许该块学习的总效果；不能因此要求 dummy trainables。更强的“一般额外自由度已排除”结论才需要另一种有意义对照。",
+            "boundary": "保留该原始审查记录；上述判断是 Codex 独立复核，不伪装为模型自己的新审查。"
+          },
+          "pure_math_verification": {
+            "script": "derived/offline_math_check.py",
+            "script_sha256": "5f2c016786148f8c09e9dddb2b551102a0eb1c90bfa8468fbb03f077ae90584d",
+            "result": "derived/offline_math_check.json",
+            "result_sha256": "31e1db9c562c46fbb5b787ba390bfa81dd19a20e59cfebf98fa9fc8c60d89265",
+            "candidate_sha256": "db5b7ec4dd178732c59002f594e72f471f87e5ae90f2ca728454944d41d7dcc1",
+            "type": "纯数学局部核对；非训练、非 PIMC 仿真、非服务或模型替身"
+          },
+          "original_files_sha256": {
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/checkpoint.json": "442c7a3d7ede72c38cc4daffd3721633ef661e38275422c732cfbc2466bf02d5",
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/events.jsonl": "18f7714e61182fe173176449a23c4cab42c3d845446ea8c1c83ff9f0ab7f84fa",
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/facts.json": "d52dbe2ed7af8dc22bd8e524cc2b0ee2346ddf8ba7ac851d51cbce982d68e96b",
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/tools/0001.json": "a79c6c467ef4ad1e288ede91f76f1f9cd33afb4ab049b4225fa82cceba0fc297",
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/tools/0002.json": "30ff1e590b0629dc18a5dfd16634bf323b0cbc0054496c64910c6e43a13c79f1",
+            "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/tools/0003.json": "14e11e2deedf0b9680b7e2be65283778652df046f1c473b986e425bfc2776e1f",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/checkpoint.json": "56060de526d09330faede27fb0c443f8e999c7aff6c8e35ef41ecdead07549b9",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/events.jsonl": "053903a7eb8de5d90e48231ac1233ae067b4ac62dcdaeea50f92a877165eb5b6",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/facts.json": "ca78fcd547886d0c225c4c8a84818ed5443cd6ae2c61c8999a758f56e2fc4e07",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0001.json": "150de8bb75c5a009bf4562ad58dfe0d63230cd486fea31aeebe34c269cf1f267",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0002.json": "0e38823df366d3b941980ea755685b0451140a6a6666201add761ff3334412aa",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0003.json": "dac78f1ec3eed80d7029e378c854500a6fda2fbd497be0d7164145aa4bfec8f5",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0004.json": "faf62ac1fdb9637b811ba5ef64049438bbf5d7d41ef4192cc353c11748688e54",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0005.json": "daef7fa4ce54ef7b5d477e73bbaa74c2e79189f63cf6b5615a6d68f2419a19b2",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0006.json": "c43b91e683721aa2e602d7285fa1c3e91793f85cb939e71103b734acd48a2b7e",
+            "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/tools/0007.json": "c4ad759302c51679aebecb84f39d06bfbfb2083f2c26453e5bf5bf25f0284c5a",
+            "all_traces_audit.json": "3d5573bb436776d21d339e8173192f737880b5d13818523d16ee359270881037",
+            "coding/tool_applications/1e20aeab26a241af93e3d495bc2cc7c5.json": "a3293a35bbacaad4f9128a3c994a5d11a3288c5288589c5ed29b9d80afb1b2ea",
+            "coding/tool_applications/25cf045735214f0390924899d7e368e2.json": "9f4567dad2b0eb05b7d54988f43c444cdcf04d589fe6847018302e7d2f555e96",
+            "coding/tool_applications/2d51d27e96f14aac8a88c3833a0e0f3c.json": "08392498eb898566e3c6584fae952a0e8036474924e7cdff85cd02eb9d180b30",
+            "coding/tool_applications/3a6dbc0d31e148b0b86d1b483f048a41.json": "cbd41070494800f225d73fc7d37f3dfafda81580bce04b78df288d7957c92555",
+            "coding/tool_applications/4878bbf2230741768dff8310a981fc31.json": "bcaf8b71267613874cd369631589df7af896e817a5c9597d4479e9fcdf4c24ea",
+            "coding/tool_applications/7003a9ab031a4911a18b7f3a46806b74.json": "43614a1a24acbd2d27cc1fa816ba71b6eba183f883991c51dfe397b1f937825f",
+            "coding/tool_applications/87d10156d05e423580e116f89e9550a5.json": "40dc59d12af2b74402ce7d7354ad3afdc930e23fc636c990f8a048fa23788b7b",
+            "coding/tool_applications/b87aa3f3f539430c848af3f451e4da0a.json": "445294fb2916c206374ccccba9e3574a4338f7a34861e188766d685fccda8ba2",
+            "coding/tool_applications/e804c269ab9446b5bd990d6307a222cc.json": "7e0913e22797b73a5cf2b60bc87a37bee05ef4fad7facff63b9dc2454be4e39c",
+            "coding/tool_applications/f86aa761432b4f8c87f2ea5e5eb0eafc.json": "56b69a5c949edaa7b68aebc47dece6e8dbfba22266d03941d4eba8cb34bc7e91",
+            "context/trace_manifest.v2.json": "4bc836ac00d917eb4ad873d000cea84bef2316caa846e69e841dda9e5642c267",
+            "events/tool_calls.jsonl": "2c97ba5366d8d146e517184daf0f76d763f24c98f9fdb4702396fb6f81660113",
+            "events/tool_events.jsonl": "e3ae5c76cdf3ae6df6ccbaf8f00abd5bb201138ba942c8255ef84526d935aaf4",
+            "idea/progress.jsonl": "51b23c1894baaa78aecc56baf2639399408d25c2d2f964e2c6a3ed7b87430443",
+            "idea/research/evidence_index.v1.json": "c61d3cd2c63cd2bfd86e32da520df52e62b258cdb7ae4872063f173073a82781",
+            "idea/research/tool_results.v1.json": "6422654f450f4661cda420bc0d6494906d945ecb10d220824ccbc45a298d3ebc",
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/manifest.json": "584d7984c3cd2e8636ec8ece214ec787008ee60715f29bc63c369951aa51d224",
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/progress.jsonl": "8547a048b1efc9718993dd6fc7611f16de213fac48d47b09bc5c1c4655a91690",
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/report.md": "f9b0909eb27ad810ac89828180e1e0bcbe0e5ec59e956050396321d2adc49082",
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/request.json": "82c9d977a0c616dc1259d0325eda0e556de18d88b635372464b293f5d23414dd",
+            "idea/validation/0c20af1dbe3c49619ac55f0fe93ea63f.json": "b323e31f65af70c079147b5c673c3eafd759a049501d2074f5753dee5c3e2714",
+            "idea/validation/0c57113836a84d2b82389255d677fa84.json": "e3b91bd3a7ab4f3b25986552d010975bce15073035cb5ddac0bfe25a1fb44616",
+            "idea/validation/5f21fcb6afcd4f61b729c6e691b3515b.json": "8971209121a48b986fff88335a025b7781c18cadc46c5ab89cb2fcfcc117e0fa",
+            "idea/validation/ae140f53e9084c46822a9c1a03700a71.json": "9b4a8be06a1fddbf87b1ad3457b068b00a10afa3b87c53588fda1cd56d4c7ddb",
+            "idea_research/research/downloads/06b57628fafe97e93eccbe9c27b31670b9b37dc9bc55f6880111aae99e15b0f7.pdf": "06b57628fafe97e93eccbe9c27b31670b9b37dc9bc55f6880111aae99e15b0f7",
+            "idea_research/research/downloads/5d2212d14cd54a6caebb48e8123527b4.read.json": "04e57abfbddb22466390f40e916b4ef7af461292f50e6694316978a6f0e48c58",
+            "idea_research/research/downloads/894b28d714204ea8b5c11bb9f050c317.read.json": "efe386d5211e9fe544f5250a1735c65fffbe778475ff2a148567e7243ea6e775",
+            "idea_research/research/downloads/9d61d41a519547babb1215ce70b1a2a4.read.json": "8f9a280aa37cf863078320dccbec8e9d8db63e6932362ab8442e8c79ae4bbffb",
+            "idea_research/research/downloads/b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b.pdf": "b35a6458203988c442468f0d8b3238dc2e9cf2629b25e8ab6af39ffdcf2a916b",
+            "idea_research/research/downloads/d9e0d3d178904ea7a465c60e97f1b9da.read.json": "311df4cafc421bf397c24ac11fb20131cfce2ae2ebc94534e9cf5feae72abf8f",
+            "idea_research/research/downloads/source_fetch_index.v1.json": "0cd7d1c5868f557dac2f951c1f955036422ad695a53b3c5bd9b2b9604a3846db",
+            "input/request.json": "ed0086a52fdc69dd7e577c35a722e3ca0723e94385e15da188525ba7619df43a",
+            "memory/_retrieval_receipts/5012734fa3eb4b7bb7449416c7710d57.json": "a74cd12ecc1bd527283210c05789030ae398b1a6457073d41bc1025cd8c7d2cc",
+            "memory/_retrieval_receipts/71363f640c5f4fb9a0870b4d016a5a26.json": "7c3362631a5c128693fc81354b744a09480b8289bf1ece510c648cc1ec833a18",
+            "memory/_retrieval_receipts/ad38f65099f34c2ea02f126582b81d98.json": "32946a5af5b586c366eba98f6485e85d97728d94aa05293299fe62ac99aa77a7",
+            "memory/_retrieval_receipts/bc1e51e0cf3b478d89f7c1939d725fed.json": "a9500e1b04084ab9674c98b6f802cda1fbdd94a786fbad250810f66a0cbe2a8d",
+            "memory/_retrieval_receipts/c3e795b74df742b787599e7e796785e9.json": "4953ece7b1e07f0c56e840fd527309983dc32471b7a944f4551ec1bc624e129f",
+            "memory/_retrieval_receipts/c448f891cae44e32a2d4baa5e9295731.json": "d67cb551a83956244fa4507bca9f789e25f6cb5994d9ab885f2d31301d7b8a33",
+            "memory/_retrieval_receipts/cc1256d7daba4a4482007c4fccd7e01f.json": "4d0fac33189db75ce19f6031eb2d43b52d2304acba5f2be279cbc709d055dcc1",
+            "memory/_retrieval_receipts/cf65824bbeca4db8adb4d81eb66c4970.json": "daefa7315507891aa2e041c7263f1f0ab0223299e4c6bc3da50f4b284f6331cd",
+            "memory/_retrieval_receipts/f0bdf81f4c154bdfb67b33420ed29130.json": "f54ed76ed5082cfcd9e8f61f079bcc315cd3c9f4231a8763137370faa9d2b642",
+            "memory/_retrieval_receipts/fe9dbee1ac9f41e48551ea064cb222ab.json": "df017fbc32edbf6fdd662737a29a6ce1560537aee660ae42eabec35fec4ba290",
+            "memory/_semantic_graph.json": "3b5c650ba06052fbd42e276964cfdd0220a407c6bb7b61886690b76ee7001dd5",
+            "memory/literature/_arxiv_cache/1ad18c3d71bd2b62fe25001c.json": "5caf1a192f5847e7ca67d325795b8babc8731111e840564a0fe228902746be15",
+            "memory/literature/_arxiv_cache/350b5043d29cba987d377924.json": "7c6dea139e9145c183d0ab0427e966d9500a9213aaa00584fe40370a758c5ccc",
+            "memory/literature/_arxiv_cache/7eca415578f4e0c320bb5544.json": "5af10ff95bf585426264437530d6f6241993f7ac2a06c884c5c531bf5723513a",
+            "memory/literature/_arxiv_cache/bf69be94c1c61c9e44ab1215.json": "57de08a12a1e4e55f1e1b447f2eb118b4424bb24d6337b5806362ed21d9677f8",
+            "memory/literature/_index.json": "87c953bed1bdd2b8cce0cc5bfc4a91e4a25124143077bce2a7b852919ee97412",
+            "research_findings.json": "dba8a39c0efbe3d1ef87689904f086d61ddfd5dd8cdf6ffb3b6d26fab082f6b9",
+            "review.md": "cab52b4242cfa7caa44b328babcf8e8a426dfd14770e943d5a8cfcdfc75701ba",
+            "summary.json": "37f9df377cafc8cf0c801ee93ad298579b5d148540b7a6e1226a82616dded48d"
+          },
+          "limitations": [
+            "只读实际报告、阅读收据与终止候选；没有将离线答案注入运行模型。",
+            "第二次主方案 Reflection 在超时时仍未完成，不能宣称它已接受或拒绝这份最后候选。"
+          ]
+        },
+        "manual_research_review.json": {
+          "schema": "codex.offline_research_review.v1",
+          "reviewer": {
+            "identity": "Codex independent offline review",
+            "role": "独立离线复核；不是用户评审、人工科研评审或原 runtime Reflection"
+          },
+          "created_at": "2026-09-08T15:55:53.146541+00:00",
+          "run_id": "idea_research_20260908T154916_cb38dc",
+          "source_commit": "e32d2871a0588fc58f9fefdc9b30f117cb23fa93",
+          "scope": "已结束且由 runtime 接受的研究报告；主 Agent 方案尚在生成。本文件只复核实际可见页段的理解与迁移，不是最终方案审查。",
+          "scientific_validated": false,
+          "runtime_records_modified": false,
+          "runtime_review_overridden": false,
+          "report_ref": "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/report.md",
+          "report_sha256": "f9b0909eb27ad810ac89828180e1e0bcbe0e5ec59e956050396321d2adc49082",
+          "runtime_research_status": "passed",
+          "runtime_model_review_passed": true,
+          "original_files_sha256": {
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/report.md": "f9b0909eb27ad810ac89828180e1e0bcbe0e5ec59e956050396321d2adc49082",
+            "idea/research_delegations/4279c29ffe1a4adf833a2feefabe71b6/manifest.json": "584d7984c3cd2e8636ec8ece214ec787008ee60715f29bc63c369951aa51d224",
+            "idea_research/research/downloads/5d2212d14cd54a6caebb48e8123527b4.read.json": "04e57abfbddb22466390f40e916b4ef7af461292f50e6694316978a6f0e48c58",
+            "idea_research/research/downloads/894b28d714204ea8b5c11bb9f050c317.read.json": "efe386d5211e9fe544f5250a1735c65fffbe778475ff2a148567e7243ea6e775",
+            "idea_research/research/downloads/9d61d41a519547babb1215ce70b1a2a4.read.json": "8f9a280aa37cf863078320dccbec8e9d8db63e6932362ab8442e8c79ae4bbffb",
+            "idea_research/research/downloads/d9e0d3d178904ea7a465c60e97f1b9da.read.json": "311df4cafc421bf397c24ac11fb20131cfce2ae2ebc94534e9cf5feae72abf8f"
+          },
+          "findings": [
+            {
+              "id": "R10-R1",
+              "severity": "substantive_claim_scope",
+              "status": "requires_qualification",
+              "location": {
+                "report_lines": [
+                  4,
+                  45,
+                  46,
+                  98
+                ],
+                "insight_id": "i1"
+              },
+              "claim": "将整体 FR-KAN 比较归因为节点位置本身，并在摘要称已发现固定参数预算下二维插值表达力提升。",
+              "evidence": [
+                {
+                  "receipt": "idea_research/research/downloads/9d61d41a519547babb1215ce70b1a2a4.read.json",
+                  "pages": [
+                    4,
+                    5,
+                    6
+                  ],
+                  "observation": "S1 的 I.26.2 RMSE 7.61e-3 与 9.50e-3 数值确实存在；实验控制相近参数量，但 FR-KAN 同时包含分组、权重共享、自由网格与稳定化机制，不是隔离可训练节点的同构消融。"
+                },
+                {
+                  "receipt": "idea_research/research/downloads/d9e0d3d178904ea7a465c60e97f1b9da.read.json",
+                  "pages": [
+                    2,
+                    6
+                  ],
+                  "observation": "S2 的二维 slit-domain 实验确实报告 L2 误差优于可比 FEM；比较按 cell / 线性系统大小匹配，其 POU 权重、多项式专家和 LSGD 不等同于纯双线性 LUT 的总可训练实参数账本。"
+                }
+              ],
+              "impact": "这两篇是真正相关的设计线索，但当前可见证据不能支持“节点位置单独带来固定总预算二维 LUT 提升”的已知结论；下游若直接复述则把迁移假设写成论文结果。",
+              "minimal_correction": "保留 FR-KAN 整体模型的具体实验结果与 S2 的二维自适应机制，明确 251/256 参数 LUT 的受控收益仅为待验证假设。",
+              "final_proposal_effect": "须以最终规范方案是否独立限定该推断判断，不能把报告此问题自动算为最终方案失败。"
+            }
+          ],
+          "confirmed_or_corrected": [
+            "最新报告固定每轴两端点，仅训练 13 个内部位置，225 + 13 + 13 = 251 算术正确。",
+            "i3 已明确有限尺度误差曲线观察不等于渐近逼近率定理，传递为待验证假设，首轮相关缺陷已修正。",
+            "S1 排序机制与 S2 自由节点/POU 的材料真实相关；研究报告阶段无需给出最终方案全部实现细节。"
+          ],
+          "final_method_review_focus": [
+            "Sort 仅保证非降序；最终 hat/bilinear 节点定义须处理端点、域内约束、碰撞和严格正间距，否则分母可能为零。这是迁移实现条件，尚不把未生成方案判为失败。",
+            "逐一检查最终初始化的数据依赖、所有对比的共同训练标签预算与真正改变域内行为的消融。"
+          ],
+          "limitations": [
+            "仅使用该 run 真正返回的可见页段；没有追加联网材料替模型补证据。",
+            "未运行科学实验；不要求该阶段已完成实验或证明普适收益。"
+          ]
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/checkpoint.json": "442c7a3d7ede72c38cc4daffd3721633ef661e38275422c732cfbc2466bf02d5",
+        "agent_traces/idea/018cd0a87fd144d4a1c0d9aea500975f/events.jsonl": "18f7714e61182fe173176449a23c4cab42c3d845446ea8c1c83ff9f0ab7f84fa",
+        "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/checkpoint.json": "56060de526d09330faede27fb0c443f8e999c7aff6c8e35ef41ecdead07549b9",
+        "agent_traces/idea_research/4279c29ffe1a4adf833a2feefabe71b6/events.jsonl": "053903a7eb8de5d90e48231ac1233ae067b4ac62dcdaeea50f92a877165eb5b6",
+        "all_traces_audit.json": "3d5573bb436776d21d339e8173192f737880b5d13818523d16ee359270881037",
+        "input/request.json": "ed0086a52fdc69dd7e577c35a722e3ca0723e94385e15da188525ba7619df43a",
+        "manual_quality_review.json": "7414f7907c7d3dab39229869c2185bf4b8fdc6267f4fdc311f018ca32e3e44de",
+        "manual_research_review.json": "dff06354675be3a380d03d343c1946cc585151f32a055f5877bf5a84fac8a80b",
+        "summary.json": "37f9df377cafc8cf0c801ee93ad298579b5d148540b7a6e1226a82616dded48d"
       }
     }
   ]

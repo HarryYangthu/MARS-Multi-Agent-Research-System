@@ -22,6 +22,7 @@ model:
 loop:
   mode: reflection
   reflection_reasoning_effort: high
+  reflection_format_repair_enabled: true
   reflection_thinking_enabled: true
   trace: full
   max_model_calls: 14
@@ -55,6 +56,7 @@ child_loop:
   mode: reflection
   reflection_thinking_enabled: true
   reflection_reasoning_effort: high
+  reflection_format_repair_enabled: true
   trace: full
   max_model_calls: 12
   max_tool_steps: 10

@@ -1,7 +1,7 @@
 """Validated budgets; no implicit provider/framework fallback."""
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -20,6 +20,7 @@ class AgentLoopPolicy:
     max_reflections: int = 3
     input_token_budget: int = 24000
     observation_chars: int = 6000
+    reflection_format_repair_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.protocol not in {"json_actions", "native_tools"}:
@@ -32,8 +33,11 @@ class AgentLoopPolicy:
             raise ValueError("unsupported reflection_reasoning_effort")
         if self.reflection_thinking_enabled is not None and not isinstance(self.reflection_thinking_enabled, bool):
             raise ValueError("reflection_thinking_enabled must be a boolean or null")
+        if not isinstance(self.reflection_format_repair_enabled, bool):
+            raise ValueError("reflection_format_repair_enabled must be a boolean")
         for item in fields(self):
-            if item.name in {"mode", "trace", "reflection_reasoning_effort", "reflection_thinking_enabled", "protocol"}:
+            if item.name in {"mode", "trace", "reflection_reasoning_effort", "reflection_thinking_enabled", "protocol",
+                             "reflection_format_repair_enabled"}:
                 continue
             value = getattr(self, item.name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -44,6 +48,15 @@ class AgentLoopPolicy:
             raise ValueError("input_token_budget must be in [4000,128000]")
         if self.observation_chars < 512 or self.max_reflections < 1:
             raise ValueError("observation_chars >=512 and max_reflections >=1 required")
+
+    def fingerprint_data(self) -> dict[str, Any]:
+        """Keep pre-feature checkpoints compatible when repair is not enabled."""
+        data = asdict(self)
+        if self.reflection_format_repair_enabled:
+            data["reflection_format_repair_contract_version"] = 1
+        else:
+            data.pop("reflection_format_repair_enabled")
+        return data
 
     @classmethod
     def from_mapping(cls, raw: object) -> AgentLoopPolicy:

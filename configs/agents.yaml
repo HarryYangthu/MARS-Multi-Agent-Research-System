@@ -80,6 +80,7 @@ idea:
     # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
     reflection_reasoning_effort: high
+    reflection_format_repair_enabled: true
     # Includes the submission schema, supplied context and visible paper excerpts.
     input_token_budget: 96000
     max_model_calls: 36
@@ -121,6 +122,7 @@ idea_research:
     mode: reflection
     reflection_thinking_enabled: true
     reflection_reasoning_effort: high
+    reflection_format_repair_enabled: true
     max_reflections: 2
     trace: full
     input_token_budget: 96000

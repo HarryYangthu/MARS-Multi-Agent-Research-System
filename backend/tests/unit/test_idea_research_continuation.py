@@ -41,7 +41,8 @@ def test_guards_preserve_candidate_history_and_unknown_usage() -> None:
 
 
 @pytest.mark.parametrize("maximum,elapsed", [(None, 12), (1200, None), (1200, 1200),
-                                             (1200, -1), (float("inf"), 10), (True, 0)])
+                                             (1200, -1), (float("inf"), 10), (True, 0),
+                                             (1800, 1800), (3601, 0)])
 def test_runtime_budget_cannot_be_invented_or_reset(maximum: Any, elapsed: Any) -> None:
     with pytest.raises(ValueError, match="runtime budget"):
         remaining_seconds({"resource_limits": {"max_seconds": maximum}}, {"duration_seconds": elapsed})
@@ -50,6 +51,10 @@ def test_runtime_budget_cannot_be_invented_or_reset(maximum: Any, elapsed: Any) 
 def test_chained_continuation_uses_cumulative_runtime() -> None:
     assert remaining_seconds({"resource_limits": {"max_seconds": 1200}},
                              {"duration_seconds": 300, "cumulative_duration_seconds": 1100}) == 100
+    # A longer newly declared run may continue, but the earlier 1200-second
+    # run above remains exhausted; the global ceiling never adds old budget.
+    assert remaining_seconds({"resource_limits": {"max_seconds": 1800}},
+                             {"duration_seconds": 1200}) == 600
 
 
 def test_copy_preserves_authored_file_bytes_and_rejects_source_changes(tmp_path: Path) -> None:

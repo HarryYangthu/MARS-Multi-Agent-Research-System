@@ -109,6 +109,8 @@ def progress_message(event: dict[str, Any]) -> str:
         issues = event.get("issues", [])
         detail = str(issues[0]) if issues and re.search(r"[\u4e00-\u9fff]", str(issues[0])) else "需要修订方案。"
         return f"审查发现 {len(issues)} 项待解决问题：" + detail[:220]
+    if kind == "review_format_repaired":
+        return "审查回复的格式已修复，正在重新进行内容审查；当前尚未通过验收。"
     if event.get("status") == "evidence_unavailable":
         reason = str(event.get("reason") or "").strip()
         if reason and re.search(r"[\u4e00-\u9fff]", reason):

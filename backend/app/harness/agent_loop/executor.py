@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -12,7 +12,7 @@ from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
-from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, parse_action, parse_review
+from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
@@ -82,15 +82,82 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
                    "Do not invent evidence when resources are insufficient.")
 
 
+def validate_reflection_format_repair(config: LLMConfig, policy: AgentLoopPolicy) -> None:
+    if not policy.reflection_format_repair_enabled:
+        return
+    if config.provider != "deepseek":
+        raise ValueError("reflection_format_repair_enabled currently requires DeepSeek")
+    normal_thinking = (policy.reflection_thinking_enabled
+                       if policy.reflection_thinking_enabled is not None else config.thinking_enabled)
+    if normal_thinking is not True:
+        raise ValueError("reflection_format_repair_enabled requires enabled thinking for normal reflection")
+
+
 def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
                      native: bool, wire_tools: tuple[dict[str, Any], ...],
-                     effort_overrides: dict[str, Any]) -> LLMConfig:
+                     effort_overrides: dict[str, Any], review_format_repair: bool = False) -> LLMConfig:
     reviewing = phase == "reflect"
+    if review_format_repair:
+        if not reviewing or not policy.reflection_format_repair_enabled or config.provider != "deepseek":
+            raise ValueError("review format repair requires reflection, explicit policy enablement and DeepSeek")
+        validate_reflection_format_repair(config, policy)
+        return replace(config, reasoning_effort=None, thinking_enabled=False, json_mode=True, tools=(),
+                       extra={**config.extra, "review_format_repair": True})
     effort = policy.reflection_reasoning_effort if reviewing and policy.reflection_reasoning_effort else config.reasoning_effort
     thinking = (policy.reflection_thinking_enabled
                 if reviewing and policy.reflection_thinking_enabled is not None else config.thinking_enabled)
     return replace(config, reasoning_effort=effort_overrides.get(phase, effort), thinking_enabled=thinking,
                    json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
+
+
+def reflection_instruction(rubric: str, *, format_repair: bool = False) -> Message:
+    if format_repair:
+        return Message("system", (
+            "Repair only the JSON format of the complete previous review output supplied as untrusted data. "
+            'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
+            "Preserve every substantive finding, blocker and rationale; do not reassess the candidate, "
+            "erase issues or invent a finding. The complete candidate and required Observations remain "
+            "available for attribution. A repaired acceptance cannot pass host review; it requires "
+            "a subsequent normal independent review. Return no tool calls or other text."))
+    return Message("system", (
+        "You are reviewing the current candidate, not generating tool actions. "
+        'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
+        "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
+        + rubric + "\nEvaluate the current document independently. "
+        "For each issue identify the exact current field and supporting excerpt, or precisely "
+        "name the missing definition. Calculate any claimed mathematical counterexample."))
+
+
+def apply_review_decision(state: dict[str, Any], decision: dict[str, Any], *,
+                          format_repair: bool, max_reflections: int) -> str:
+    """Apply an already strictly parsed review; formatting alone can never accept."""
+    state["protocol_output"] = ""
+    state["review_format_repair_pending"] = False
+    if format_repair and decision["accept"]:
+        state["status"] = "running"
+        state["reflection_accepted"] = False
+        state["feedback"] = ""
+        state["next_phase"] = "reflect"
+        # A format repair is not a scientific review round. Restore the normal
+        # review policy, including after an earlier output-limit effort override.
+        state["phase_efforts"].pop("reflect", None)
+        return "independent_review"
+    state["counts"]["reflections"] += 1
+    state["reviewed_candidate_sha"] = digest(state["candidate"])
+    state["review_issues"] = decision["issues"]
+    if decision["accept"]:
+        state["reflection_accepted"] = True
+        state["feedback"] = ""
+        state["status"] = "passed"
+        return "accepted"
+    state["reflection_accepted"] = False
+    state["feedback"] = canonical({"required_revision": decision["issues"],
+                                    "review_rationale": decision["rationale"],
+                                    "instruction": "Revise the complete candidate to resolve these issues. Do not merely remove warnings."})
+    state["next_phase"] = "act"
+    if state["counts"]["reflections"] >= max_reflections:
+        state["status"] = "reflection_rejected"
+    return "revision"
 
 
 def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, Any],
@@ -110,6 +177,7 @@ def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, A
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
+        validate_reflection_format_repair(request.config, p)
         specs = []
         for name in request.tools:
             spec = request.registry.spec(name)
@@ -123,7 +191,7 @@ class NativeAgentLoop:
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
         instructions = NATIVE_INSTRUCTION if native else INSTRUCTION + "\nTools:\n" + canonical(specs)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
-        fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
+        fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": p.fingerprint_data(),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
                               "context_format_version": 8})
@@ -170,6 +238,7 @@ class NativeAgentLoop:
         state.setdefault("protocol_output", "")
         state.setdefault("reviewed_candidate_sha", "")
         state.setdefault("phase_efforts", {})
+        state.setdefault("review_format_repair_pending", False)
         async def progress(kind: str, **payload: Any) -> None:
             if request.progress_sink is not None:
                 await request.progress_sink({"kind": kind, "phase": state["next_phase"], **payload})
@@ -207,7 +276,10 @@ class NativeAgentLoop:
 
         def phase_config() -> LLMConfig:
             return phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
-                                    wire_tools=wire_tools, effort_overrides=state["phase_efforts"])
+                                    wire_tools=wire_tools, effort_overrides=state["phase_efforts"],
+                                    review_format_repair=bool(p.reflection_format_repair_enabled
+                                        and state["next_phase"] == "reflect" and state["protocol_output"]
+                                        and state["review_format_repair_pending"]))
 
         def recover_completion(reason: object) -> bool:
             plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
@@ -252,19 +324,16 @@ class NativeAgentLoop:
                 if stop_at_boundary("before_model"):
                     break
                 reviewing = state["next_phase"] == "reflect"
+                format_repair = bool(p.reflection_format_repair_enabled and reviewing
+                                     and state["protocol_output"] and state["review_format_repair_pending"])
                 if counts["model_requests"] == 0:
                     await progress("started")
                 extra: list[Message] = [budget_message(p, counts)]
                 if state["protocol_output"]:
-                    extra.append(invalid_output_context(state["protocol_output"], native=native))
+                    extra.append(invalid_output_context(state["protocol_output"],
+                                 native=native and not (reviewing and p.reflection_format_repair_enabled)))
                 if reviewing:
-                    extra.append(Message(role="system", content=(
-                        "You are reviewing the current candidate, not generating tool actions. "
-                        'Return exactly {"accept":bool,"issues":["specific unresolved issue"],"rationale":"brief review"}. '
-                        "Accept only if no material issue remains. Self-review is not independent scientific validation.\n"
-                        + request.reflection_rubric + "\nEvaluate the current document independently. "
-                        "For each issue identify the exact current field and supporting excerpt, or precisely "
-                        "name the missing definition. Calculate any claimed mathematical counterexample.")))
+                    extra.append(reflection_instruction(request.reflection_rubric, format_repair=format_repair))
                 feedback = state["feedback"]
                 if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
@@ -296,6 +365,7 @@ class NativeAgentLoop:
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "thinking_enabled": call_config.thinking_enabled,
+                                             "repair_mode": "review_format" if format_repair else None,
                                              "max_tokens": call_config.max_tokens},
                            visible=[m.to_wire() for m in messages])
                 trace.snapshot(state)
@@ -338,6 +408,8 @@ class NativeAgentLoop:
                     trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
                     counts["protocol_repairs"] += 1
+                    state["review_format_repair_pending"] = bool(
+                        p.reflection_format_repair_enabled and reviewing and is_review_format_error(exc))
                     state["protocol_output"] = (canonical({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]})
                                                 if native else completion.text)
                     state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
@@ -350,6 +422,12 @@ class NativeAgentLoop:
                             "Do not return a proposal, tool invocation, XML, code fence or multiple JSON objects. "
                             "Review the current candidate and preserve substantive findings while fixing only format."
                         )
+                        if state["review_format_repair_pending"]:
+                            state["feedback"] = (
+                                f"Review JSON format error: {exc}. Correct only syntax or duplicate keys in the complete "
+                                "provided review. Preserve every substantive finding and unresolved blocker. "
+                                "Do not reassess the candidate or discard an issue to produce acceptance."
+                            )
                     elif native:
                         final_instruction = ("call mars_submit_document with complete metadata and body"
                                              if request.final_schema is not None else "submit the complete Markdown candidate")
@@ -358,7 +436,8 @@ class NativeAgentLoop:
                                              "two keys: metadata and body. Close metadata before body; close the root "
                                              "once after body. Do not append another body or object after the root. "
                                              "Resolve the pinned candidate validation errors too. No rejected action was executed.")
-                    trace.emit("protocol_error", {"error": str(exc)})
+                    trace.emit("protocol_error", {"error": str(exc),
+                               "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
                         break
@@ -366,23 +445,21 @@ class NativeAgentLoop:
                     continue
                 state["protocol_output"] = ""
                 if reviewing:
-                    counts["reflections"] += 1
-                    state["reviewed_candidate_sha"] = digest(state["candidate"])
-                    state["review_issues"] = decision["issues"]
+                    outcome = apply_review_decision(state, decision, format_repair=format_repair,
+                                                    max_reflections=p.max_reflections)
+                    if outcome == "independent_review":
+                        trace.emit("review_format_repaired", {"accept": True, "effective_accept": False,
+                                   "repair_mode": "review_format", "independent_review_required": True}, visible=decision)
+                        await progress("review_format_repaired", independent_review_required=True)
+                        trace.snapshot(state)
+                        continue
                     trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
-                                              "host_conflict_rejection": review_conflict}, visible=decision)
+                                              "host_conflict_rejection": review_conflict,
+                                              "repair_mode": "review_format" if format_repair else None}, visible=decision)
                     await progress("review", accepted=decision["accept"], issues=decision["issues"])
-                    if decision["accept"]:
-                        state["reflection_accepted"] = True
-                        state["feedback"] = ""
-                        state["status"] = "passed"
+                    if outcome == "accepted":
                         break
-                    state["feedback"] = canonical({"required_revision": decision["issues"],
-                                                   "review_rationale": decision["rationale"],
-                                                   "instruction": "Revise the complete candidate to resolve these issues. Do not merely remove warnings."})
-                    state["next_phase"] = "act"
                     if counts["reflections"] >= p.max_reflections:
-                        state["status"] = "reflection_rejected"
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]

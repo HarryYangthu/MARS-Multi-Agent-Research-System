@@ -168,8 +168,8 @@ def archive_report(root: Path, summary: dict[str, Any]) -> None:
 
 
 async def run(args: argparse.Namespace) -> int:
-    if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 1200:
-        raise ValueError("max-seconds must be finite and in (0, 1200]")
+    if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 3600:
+        raise ValueError("max-seconds must be finite and in (0, 3600]")
     source_commit, source_tree = git_value("rev-parse", "HEAD"), git_value("rev-parse", "HEAD^{tree}")
     source = (load_continuation(args.resume_from, source_commit=source_commit, source_tree=source_tree)
               if getattr(args, "resume_from", None) else None)
@@ -287,7 +287,9 @@ async def run(args: argparse.Namespace) -> int:
                        delivery_root=context.metadata.get("idea_delivery_root"),
                        model_review_passed=bool(context.metadata.get("reflection_accepted")))
     except (Exception, asyncio.CancelledError) as exc:
-        summary.update(status="failed", error_type=type(exc).__name__, error=str(exc)[:2000])
+        detail = (f"Run exceeded its {attempt_seconds:g}-second execution budget; no acceptance is inferred."
+                  if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__)
+        summary.update(status="failed", error_type=type(exc).__name__, error=detail[:2000])
         logger.error("Real delegated run stopped: {}", type(exc).__name__)
     finally:
         summary["duration_seconds"] = time.monotonic() - started

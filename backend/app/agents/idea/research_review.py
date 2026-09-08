@@ -8,9 +8,15 @@ from app.harness.llm.provider_base import Message
 
 
 RESEARCH_REVIEW_RUBRIC = (
-    "Review every paper_finding against the actual visible source pages, not merely the matching quote. "
+    "Review the whole report, including human_summary/body, selection reasons, paper_findings, transfers "
+    "and limitations, against the actual visible source pages, not merely the matching quote. A cautious "
+    "limitation does not repair an overclaim elsewhere. A summary must retain the evidence's actual scope. "
     "An exact quote and a valid receipt establish provenance, not entailment. For each insight, distinguish "
     "the source's stated result, the researcher's deduction, and a proposed transfer that remains a hypothesis. "
+    "A comparison of complete models with several changed components establishes an overall model result, "
+    "not the isolated causal benefit of one component; require the relevant controlled ablation for that "
+    "attribution, or explicitly limit it to a hypothesis. Check what a reported budget actually matches: "
+    "total trainable parameters, degrees of freedom and the size of one linear solve are different quantities. "
     "Check quantifiers, derivative order, norms, approximation order, asymptotic versus finite-size claims, "
     "and the assumptions on which a source result depends. A result on one-dimensional splines, triangles, "
     "tensor grids or a different loss cannot silently become a theorem for the target method. "
