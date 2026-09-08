@@ -78,6 +78,12 @@ def test_idea_tool_configuration_excludes_write_capabilities() -> None:
         assert spec.policy.mutation_level == "read"
     assert "code.write_file" not in agent.config.tools
     assert "code.apply_patch" not in agent.config.tools
+    assert not registry.has("idea.research_delegate")
+    request = RunRequest(project="pimc", user_request="Research", extra={"run_root": "/tmp/unused-research-catalogue"})
+    from app.agents.base import ContextPack
+    local_registry = agent.loop_registry(request, ContextPack("", "", ""))
+    assert local_registry.has("idea.research_delegate")
+    assert not registry.has("idea.research_delegate")
 
 
 @pytest.mark.asyncio

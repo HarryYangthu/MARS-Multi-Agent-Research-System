@@ -34,14 +34,16 @@ def test_idea_config_has_debate_participants() -> None:
 
 
 def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
+    flash_profiles = {"idea": ("high", 16_384), "idea_research": (None, 8_192)}
     for cfg in list_agent_configs():
         if not cfg.enabled:
             continue
         assert cfg.model_provider == "deepseek"
-        assert cfg.model_name == ("deepseek-v4-flash" if cfg.name == "idea" else "deepseek-v4-pro")
-        assert cfg.thinking_enabled is (cfg.name != "idea")
-        assert cfg.reasoning_effort == "high"
-        assert cfg.max_tokens >= 16_384
+        assert cfg.model_name == ("deepseek-v4-flash" if cfg.name in flash_profiles else "deepseek-v4-pro")
+        assert cfg.thinking_enabled is (cfg.name not in flash_profiles)
+        effort, minimum_tokens = flash_profiles.get(cfg.name, ("high", 16_384))
+        assert cfg.reasoning_effort == effort
+        assert cfg.max_tokens >= minimum_tokens
         if cfg.name in {"coding", "writing"}:
             assert cfg.max_tokens >= 32_768
 

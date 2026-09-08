@@ -445,7 +445,7 @@ def test_tool_catalogue_has_v2_specs_and_config_entries() -> None:
     assert required.issubset(catalogue)
     assert sorted(name for name in catalogue if name not in configs) == []
     assert sorted(
-        name for name, cfg in configs.items() if name not in registered and not cfg.bridge_only
+        name for name, cfg in configs.items() if name not in registered and not cfg.bridge_only and not cfg.runtime_bound
     ) == []
 
     for spec in catalogue.values():
@@ -463,16 +463,19 @@ def test_tool_catalogue_has_v2_specs_and_config_entries() -> None:
     assert catalogue["search.arxiv_search"].policy.network is True
     assert catalogue["search.web_search"].policy.network is True
     assert catalogue["run.status"].bridge_only is True
+    assert configs["idea.research_delegate"].runtime_bound is True
+    assert catalogue["idea.research_delegate"].policy.allowed_agents == ("idea",)
+    assert not reg.has("idea.research_delegate")
 
 
-def test_agent_tool_references_are_registered_or_bridge_only() -> None:
+def test_agent_tool_references_are_registered_or_explicitly_bound_later() -> None:
     reg = reset_for_tests()
     configs = load_tool_configs()
     missing: list[str] = []
     for agent in list_agent_configs():
         for tool_name in agent.tools:
             cfg = configs.get(tool_name)
-            if reg.has(tool_name) or (cfg is not None and cfg.bridge_only):
+            if reg.has(tool_name) or (cfg is not None and (cfg.bridge_only or cfg.runtime_bound)):
                 continue
             missing.append(f"{agent.name}:{tool_name}")
 
@@ -589,3 +592,14 @@ def _make_project_repo(tmp_path: Path, *, read_only: bool) -> Path:
         encoding="utf-8",
     )
     return repo
+
+
+@pytest.mark.asyncio
+async def test_runtime_catalogue_metadata_does_not_enable_dispatch(tmp_path: Path) -> None:
+    registry = reset_for_tests()
+    assert registry.spec("idea.research_delegate") is not None
+    assert not registry.has("idea.research_delegate")
+    result = await registry.dispatch("idea.research_delegate", {}, ToolContext(
+        run_id="unbound", project="pimc", agent="idea", extra={"run_root": str(tmp_path)}))
+    assert result.ok is False
+    assert result.status == "unknown_tool"

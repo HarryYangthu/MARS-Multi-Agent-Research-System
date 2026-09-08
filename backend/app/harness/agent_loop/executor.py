@@ -97,7 +97,7 @@ class NativeAgentLoop:
         specs = []
         for name in request.tools:
             spec = request.registry.spec(name)
-            if spec is None or spec.bridge_only:
+            if not request.registry.has(name) or spec is None or spec.bridge_only:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
         native = p.protocol == "native_tools"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.agents.idea.acceptance import (
 )
 from app.agents.idea.agent import IdeaAgent
 from app.harness.agent_loop.trace import digest
+from app.harness.llm.model_registry import get_agent_config
 from app.harness.schema.frontmatter_parser import dumps
 
 
@@ -140,7 +142,11 @@ async def test_project_validation_records_caller_input_even_when_delivery_is_inv
                          upstream_artifacts={"baseline_code": content},
                          extra={"scope": "project_proposal", "run_root": str(tmp_path),
                                 "idea_requirements": {"min_sources": 0, "min_pdfs": 0}})
-    errors = await IdeaAgent().validate_candidate(request, text, [])
+    # Exercise caller-input archival independently of the research link contract.
+    original = get_agent_config("idea")
+    agent = IdeaAgent(agent_config=replace(original, tools=tuple(
+        name for name in original.tools if name != "idea.research_delegate")))
+    errors = await agent.validate_candidate(request, text, [])
     assert errors and any("does not resolve" in error for error in errors)
     assert not any("/scope: project proposal requires" in error for error in errors)
     records = [json.loads(path.read_text()) for path in (tmp_path / "idea/validation").glob("*.json")]

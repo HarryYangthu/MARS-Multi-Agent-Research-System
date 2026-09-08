@@ -157,8 +157,8 @@ class ToolRegistry:
         from app.harness.tools.config import tool_config
 
         cfg = tool_config(name)
-        if cfg.bridge_only:
-            return _spec_from_config(_default_spec(name, bridge_only=True))
+        if cfg.bridge_only or cfg.runtime_bound:
+            return _spec_from_config(_default_spec(name, bridge_only=cfg.bridge_only))
         return None
 
     def specs(self, *, include_bridge_only: bool = False) -> list[ToolSpec]:
@@ -167,8 +167,8 @@ class ToolRegistry:
             from app.harness.tools.config import load_tool_configs
 
             for name, cfg in load_tool_configs().items():
-                if name not in self._specs and cfg.bridge_only:
-                    out.append(_spec_from_config(_default_spec(name, bridge_only=True)))
+                if name not in self._specs and (cfg.bridge_only or cfg.runtime_bound):
+                    out.append(_spec_from_config(_default_spec(name, bridge_only=cfg.bridge_only)))
         return sorted(out, key=lambda item: item.name)
 
     def install_gate(
