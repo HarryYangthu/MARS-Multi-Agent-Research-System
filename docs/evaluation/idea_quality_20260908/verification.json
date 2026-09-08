@@ -1076,6 +1076,263 @@
         "manual_quality_review.json": "1d5aed1aac575246799896890c4078cfbc27b2e2c015b5607c1c377bfd8dc3aa",
         "summary.json": "7458f1b6ecbfab3a1067f2a66d60c4025395c1898dc5c719b5d23cc0c9b3311c"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T111024_dde02d",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 689.9929449589981,
+      "counts": {
+        "action_rounds": 32,
+        "model_requests": 26,
+        "model_responses": 23,
+        "observations": 32,
+        "protocol_repairs": 1,
+        "reflections": 0,
+        "sdk_attempts": 26,
+        "tool_dispatches": 32,
+        "validation_repairs": 1
+      },
+      "usage": {
+        "completion_tokens": 37159,
+        "prompt_tokens": 249051,
+        "total_tokens": 286210
+      },
+      "trace_consistent": true,
+      "usage_complete": false,
+      "research_counts": {
+        "read_windows": 7,
+        "unique_downloaded_contents": 5,
+        "unique_pdf_publications_with_visible_pages": 5,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 46
+      },
+      "source_commit": "5b55044904f5065ea2c961f03e721debba70983b",
+      "source_tree": "574e0e6a1d9f724a715b70dc39372bc0393149de",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T111024_dde02d",
+      "separate_review_records": {
+        "manual_research_review.json": {
+          "reviewer": "Codex 独立离线复核（不是用户评审或人工科研同行评审）",
+          "review_kind": "independent_offline_research_report_fact_check",
+          "created_at_utc": "2026-09-08T12:25:36.214566+00:00",
+          "run_id": "idea_research_20260908T111024_dde02d",
+          "scope": "仅成功委派 d6c0d277d4df42c794d34fbde7d21faf 的实际研究报告及其真实阅读收据中的可见页。",
+          "canonical_proposal_present": false,
+          "candidate_digest": null,
+          "accepted_proposal": false,
+          "scientific_validated": false,
+          "runtime_review_replaced": false,
+          "runtime_status_note": "本轮主流程终态 model_error，checkpoint.candidate 为空，未生成 idea/idea_proposal.v1.md，未进行模型质量 reflection 或下游交付。本文件不是方案接受/拒绝判定，不把连接失败当作科学方法失败。",
+          "usage_boundary": {
+            "known_total_tokens": 286210,
+            "usage_complete": false,
+            "note": "仅引用本轮原 summary 的已知用量，不估算缺失响应用量。"
+          },
+          "excluded_delegations": [
+            "a6990411fb1144d397b218860954fae6",
+            "fbed50726cb442229426a4d596acf72e"
+          ],
+          "excluded_delegations_note": "两个早期研究委派以 model_error 结束，未形成合格报告；其部分检索/阅读不能冒充成功报告或主方案采用证据。",
+          "report": {
+            "path": "idea/research_delegations/d6c0d277d4df42c794d34fbde7d21faf/report.md",
+            "sha256": "7c5e78d39f7140c8399340cffeec82db9dd6a19f5acb96ffdd04a7f2f8f1a19f",
+            "delegation_id": "d6c0d277d4df42c794d34fbde7d21faf"
+          },
+          "supported_findings": [
+            {
+              "source_id": "s1",
+              "receipt": "idea_research/research/downloads/b4301bd0c3034a09a6bfda7a53e4d317.read.json",
+              "visible_pages": [
+                1,
+                2
+              ],
+              "report_lines": [
+                41,
+                45
+              ],
+              "finding": "可见第 2 页式 (1)–(3) 支持函数/离散张量链分解，式 (4) 支持交叉分解，式 (6) 支持截断 SVD 及已知矩阵固定秩 Frobenius 最优性；同页明确指出对非负矩阵做无约束低秩近似可能出现负值。"
+            },
+            {
+              "source_id": "s2",
+              "receipt": "idea_research/research/downloads/67d46ce64cb34bb29d12995dbc0eff91.read.json",
+              "visible_pages": [
+                2,
+                3,
+                4
+              ],
+              "report_lines": [
+                58,
+                59
+              ],
+              "finding": "可见第 3–4 页支持二进制网格索引及核心尺寸 2×r_(k-1)×r_k，端点秩为 1。第 2 页介绍随深度衰减的秩界与约 sqrt(Omega) 带限函数秩界，但本次可见页未包含 Corollary 10 的精确条件或证明，不能声称已完整核验该定理。"
+            }
+          ],
+          "confirmed_errors": [
+            {
+              "id": "offline_svd_requirements_do_not_prohibit_factor_training",
+              "severity": "material_transfer_error",
+              "report_lines": [
+                48,
+                49
+              ],
+              "insight_id": "i1",
+              "receipt": "idea_research/research/downloads/b4301bd0c3034a09a6bfda7a53e4d317.read.json",
+              "visible_page": 2,
+              "finding": "报告从对完整已知矩阵做截断 SVD 必须访问所有矩阵元素，推出训练时必须先构造完整矩阵且无法直接端到端训练因子。后半推断不成立。",
+              "source_scope": "原文讨论的是从已给矩阵 M 构造其最优秩 r 近似所需的数据访问，不是在证明所有因子化模型的训练不可能性。",
+              "mathematical_check": "固定网格的双线性权重记为 phi_i(x), psi_j(y)。若 M_ij=sum_k U_ik*s_k*V_jk，则预测 y_hat=sum_k s_k*(sum_i phi_i U_ik)*(sum_j psi_j V_jk)，是因子的可微多项式，可直接用训练样本的误差计算梯度；不要求先查询全部网格真值或先计算一次 SVD。",
+              "correction": "区分离线截断 SVD 压缩与自定义因子梯度训练。若改为因子训练，需要另定义初始化、约束及优化器，也不能继续把其训练结果称为已知矩阵的全局最优截断 SVD。",
+              "impact": "不能依据报告这一句排除端到端可训练的低秩 LUT，或声称必须额外查询完整网格标签。无最终候选，未判断主 Agent 是否继承该错误。"
+            },
+            {
+              "id": "qtt_reindexing_does_not_necessarily_change_interpolation",
+              "severity": "material_transfer_error",
+              "report_lines": [
+                61,
+                63
+              ],
+              "insight_id": "i2",
+              "receipt": "idea_research/research/downloads/67d46ce64cb34bb29d12995dbc0eff91.read.json",
+              "visible_pages": [
+                3,
+                4
+              ],
+              "finding": "报告称 QTT 位序重排会改变插值语义、不能直接套用基线评估流程；将表示的索引变换当成必然的插值变更，结论过强。",
+              "source_scope": "可见第 3 页明确将 dyadic 网格与比特序列作双射，并通过该对应把函数值识别为张量；第 4 页表示同一个张量的 TT 核乘积。",
+              "mathematical_check": "给原节点 M[i,j] 的 i,j 各取 4 位二进制，定义 T[bits(i),bits(j)]=M[i,j]。用同一已声明位序解码，即可恢复原节点索引，再使用原物理坐标 -1+2*i/15 与完全相同的双线性权重。已纯整数检查全部 256 个索引往返一致；没有调用或伪造 QTT 模型。",
+              "correction": "必须明确 8 个二元索引的位序、重构索引和物理网格映射。低秩截断可以改变节点值或受位序影响，但重排本身不强制改变插值语义。不能直接把论文 [0,1) 的 dyadic 物理坐标替换到含两端点的基线而不作映射说明。",
+              "impact": "不能仅以位序重排为由排除保持原网格和双线性评估的 QTT 参数化。报告提出的是可修正的表示限制，未形成任何最终方法实现。"
+            }
+          ],
+          "transfer_limits": [
+            {
+              "id": "grid_to_grid_resampling_noise_is_not_automatic_query_noise",
+              "report_lines": [
+                46,
+                47
+              ],
+              "insight_id": "i1",
+              "receipt": "idea_research/research/downloads/b4301bd0c3034a09a6bfda7a53e4d317.read.json",
+              "visible_pages": [
+                1,
+                2
+              ],
+              "supported": "原文确实讨论从一张网格向另一张网格插值在状态估计和后续张量近似中的量化噪声问题。",
+              "limit": "固定节点矩阵上的一次双线性查询与向新网格重采样后再次压缩是不同计算路径。原文这句话不能直接证明本任务所有低秩重构后的查询都会引入额外量化噪声，或相对原双线性基线必然更差。",
+              "required_condition": "若方案确实发生网格变换、量化或重复张量截断，才需把该噪声机制与具体操作对应；否则应分别描述低秩节点误差与本来就存在的插值逼近误差。"
+            },
+            {
+              "id": "smoothness_and_rank_are_not_interchangeable",
+              "report_lines": [
+                50,
+                62
+              ],
+              "receipt": "idea_research/research/downloads/67d46ce64cb34bb29d12995dbc0eff91.read.json",
+              "visible_pages": [
+                1,
+                2
+              ],
+              "supported": "报告对固定预算下高曲率/非光滑目标没有普适低秩保证的保留是合理的。",
+              "limit": "原文还明确强调某些尖锐特征或较差定量光滑性的函数依旧可有低 QTT 秩。不能把报告的需验证进一步升级为高曲率必然需要高秩或必然不适合 QTT。"
+            }
+          ],
+          "arithmetic_review": {
+            "svd_storage": "U,V 为 16×r 实数组、s 为 r 个实标量时，存储的可训练元素数可按 33r 计算，r=7 为 231，余量 25，算术正确。是否要求正交/非负及训练参数化尚需由最终方法声明。",
+            "qtt_count": "16×16 的按位张量共有 8 个二元索引，不是总共 4 个。报告明确每轴 4 位且要求逐核计数，未给出一个确定秩向量，因此未冒称已有满足预算的完整 QTT 主候选。",
+            "scope": "没有规范候选，无法复核最终训练预算、初始化、消融、独立比较或判别规则。"
+          },
+          "method_note": "只读取本轮真实报告与 read_receipt.visible_pages，进行文本比对、代数推导和纯整数索引往返检查；未调用模型/服务、未执行科研实验、未改写原始记录。没有因缺少实验结果或无等价定理而判失败。",
+          "original_artifact_sha256": {
+            "summary.json": "cedea9800984ea3ee210c4f75b500ac40b0f3e7a8b60b458c6be34de26970d69",
+            "idea/research_delegations/d6c0d277d4df42c794d34fbde7d21faf/report.md": "7c5e78d39f7140c8399340cffeec82db9dd6a19f5acb96ffdd04a7f2f8f1a19f",
+            "idea_research/research/downloads/b4301bd0c3034a09a6bfda7a53e4d317.read.json": "d77fdfb1a53ef291f5cde2336ed733137099f7baac8ff1d03362cf66ff13eab0",
+            "idea_research/research/downloads/67d46ce64cb34bb29d12995dbc0eff91.read.json": "b2c7b03ed9da70603c883af1fc0ffbc53437d986be4a125a7693e91bd2e3d609",
+            "agent_traces/idea/e4f3d9f2aee24904869b286af2c515bd/checkpoint.json": "1a7d8de92094a40586b7d66fb05ed371b1cb3152cd6663263a8d0fd0d1454fc5"
+          }
+        },
+        "external_run_routing.json": {
+          "record_kind": "external_run_routing",
+          "configured_at": "2026-09-08T11:10:24.677109+00:00",
+          "direct_research_hosts": [
+            "api.openalex.org",
+            "export.arxiv.org",
+            "arxiv.org"
+          ],
+          "system_proxy_changed": false,
+          "other_routes": "inherited unchanged",
+          "preflight_paper_results_supplied_to_model": false
+        },
+        "protocol_repair_execution_check.json": {
+          "record_kind": "codex_offline_actual_execution_check",
+          "invalid_arguments_unchanged": true,
+          "actual_repair_request_issued": true,
+          "total_input_upper_bound_tokens": 94981,
+          "input_budget": 96000,
+          "omitted_history": [
+            0
+          ],
+          "omitted_group_note": "Group 0 is the initial empty knowledge queries; action receipts remain visible. Required successful research report was retained.",
+          "outcome": "The actual repair request was issued and then failed with APIConnectionError after system sleep; no candidate was accepted.",
+          "additional_model_calls_made_by_check": false,
+          "scientific_validated": false
+        },
+        "environment_diagnosis.json": {
+          "record_kind": "codex_offline_environment_diagnosis",
+          "interpretation": "Actual clamshell/maintenance sleeps overlap this run. The parent connection error was logged seconds after waking from a 939-second sleep. This identifies an environmental interruption; it does not prove provider quality or proposal correctness. No power setting was changed.",
+          "system_power_settings_changed": false,
+          "model_generation_performed": false
+        },
+        "model_connectivity_probe.json": {
+          "record_kind": "separate_read_only_connectivity_probe",
+          "model_generation_performed": false,
+          "results_supplied_to_research_model": false,
+          "results": [
+            {
+              "route": "inherited_proxy",
+              "status": 200,
+              "models": [
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp"
+              ]
+            },
+            {
+              "route": "direct",
+              "status": 200,
+              "models": [
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp"
+              ]
+            }
+          ]
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/e4f3d9f2aee24904869b286af2c515bd/checkpoint.json": "1a7d8de92094a40586b7d66fb05ed371b1cb3152cd6663263a8d0fd0d1454fc5",
+        "agent_traces/idea/e4f3d9f2aee24904869b286af2c515bd/events.jsonl": "aa84c7c3c0e60484a44ec353217a27906e26a5b72589d5fa29c8a615080c5d91",
+        "agent_traces/idea_research/a6990411fb1144d397b218860954fae6/checkpoint.json": "44ca79833867cd35de113609e7fa41b2e1d2302607dd736fdd58f5ae826a7469",
+        "agent_traces/idea_research/a6990411fb1144d397b218860954fae6/events.jsonl": "917f4bbd7e4834cc4add3f10a0f88dcaf9bfeb74eee6d71db7189412a592b28a",
+        "agent_traces/idea_research/d6c0d277d4df42c794d34fbde7d21faf/checkpoint.json": "9803e44ea8effb7316c48f2ca08b8dc89b2fc2f29c2ba8a3d200ccadee92c803",
+        "agent_traces/idea_research/d6c0d277d4df42c794d34fbde7d21faf/events.jsonl": "ed63a49b8dba907fac8d4c6a34346cb4cfa69f2afe5b1a3f2f43ea6326c4b28f",
+        "agent_traces/idea_research/fbed50726cb442229426a4d596acf72e/checkpoint.json": "30ad570d863d713ce423be5c9faf5294e63d5e34332aa125c94c8eacd10f5199",
+        "agent_traces/idea_research/fbed50726cb442229426a4d596acf72e/events.jsonl": "4a3f1c515c89ea396fd46b65eed11582f7a91ad90ca198a42bb9bfde05ebba98",
+        "all_traces_audit.json": "37708d2550aa443237a482099e73ae35c92d589b68f522fe7c68fb142f827c1f",
+        "environment_diagnosis.json": "c5db807c36936a899d067c4c2b671fd0f2478b9472f169bed51f91967b345a92",
+        "external_run_routing.json": "626bb32402200343a7814145f2c4ca69ed37d8cb1259b24b5197aa6a212bdb7c",
+        "input/request.json": "ee6f7ac589c33045ed3b79c499fcb7c568107792eba014b5e19f1be0ab72e2cc",
+        "manual_research_review.json": "4cbbb2ddc5abff1460a10fe6994af59eecb9c1bfe59dd38d99180527b651d480",
+        "model_connectivity_probe.json": "1132f97ebcdc97b6c298d220f094e5742d6fdac426fe199a0e0a51c896131c94",
+        "protocol_repair_execution_check.json": "fad2e313aae8cee9d624103beeae3900754f474cc26a1946012cdf99fbdc3393",
+        "summary.json": "cedea9800984ea3ee210c4f75b500ac40b0f3e7a8b60b458c6be34de26970d69"
+      }
     }
   ]
 }
