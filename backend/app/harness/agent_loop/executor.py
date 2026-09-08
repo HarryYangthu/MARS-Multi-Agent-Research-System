@@ -122,7 +122,7 @@ class NativeAgentLoop:
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": asdict(p),
                               "model": request.config.model, "provider": request.config.provider,
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 4})
+                              "context_format_version": 5})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.required_review_tools:

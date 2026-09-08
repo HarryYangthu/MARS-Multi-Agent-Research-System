@@ -31,6 +31,12 @@ tools:
       required: [gap, context_refs, success_criteria]
       properties:
         gap: {type: string, minLength: 10, maxLength: 3000}
+        min_sources:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+          description: Minimum distinct read publications for THIS subproblem only; default 1. Separate completed delegations can contribute different papers to the final proposal, whose global evidence minimum remains enforced.
         context_refs:
           description: Exact keys from the supplied upstream context, not concepts or file paths. Use [] if no keys are available; the overall research task is always passed automatically. Invalid references return the exact available keys.
           type: array

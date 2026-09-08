@@ -27,6 +27,47 @@ def compact(value: Any, chars: int) -> Any:
     return value
 
 
+def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retain actual source addresses when full tool groups no longer fit."""
+    receipts: dict[str, dict[str, Any]] = {}
+    rejected = 0
+    for item in history:
+        output = item.get("output")
+        if not item.get("ok") or not isinstance(output, dict):
+            continue
+        rows = output.get("sources")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("ok") or not isinstance(row.get("read_receipt"), str):
+                continue
+            bounds = {"url": 2048, "title": 300, "sha256": 64, "read_receipt": 1024}
+            if any(not isinstance(row.get(key), str) or not 1 <= len(row[key]) <= limit
+                   for key, limit in bounds.items()):
+                rejected += 1
+                continue
+            if len(row["sha256"]) != 64 or any(character not in "0123456789abcdef" for character in row["sha256"]):
+                rejected += 1
+                continue
+            pages = row.get("visible_pages", [])
+            if not isinstance(pages, list) or len(pages) > 10:
+                rejected += 1
+                continue
+            raw_ref = item.get("raw_ref")
+            receipts[row["read_receipt"]] = {
+                **{key: row.get(key) for key in ("url", "title", "sha256", "read_receipt")},
+                "visible_page_numbers": [page["page"] for page in pages
+                                         if isinstance(page, dict) and type(page.get("page")) is int],
+                "tool_raw_ref": raw_ref if isinstance(raw_ref, str) and len(raw_ref) <= 1024 else None,
+            }
+    selected = list(receipts.values())[-16:]
+    omitted = rejected + max(0, len(receipts) - len(selected))
+    if omitted:
+        selected.append({"omitted_receipt_entries": omitted,
+                         "reason": "Metadata exceeds bounded receipt index; consult actual tool history."})
+    return selected
+
+
 def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
@@ -50,6 +91,11 @@ def pack_context(
         ledger = [{k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
+        source_receipts = source_receipt_index(history)
+        if source_receipts:
+            required.append(Message(role="user", content=(
+                "[untrusted source receipt index; addresses and visible page numbers only, not excerpts or findings; "
+                "if the actual page text is absent, reread its window before quoting]\n" + canonical(source_receipts))))
     if candidate:
         required.append(Message(role="user", content="[untrusted current candidate; review or revise this document]\n"
                                 + (candidate if native else canonical({"candidate": candidate}))))

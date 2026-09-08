@@ -90,3 +90,21 @@ async def test_unknown_context_ref_reports_available_inputs_without_starting_chi
     assert result.output == {"available_context_refs": ["baseline_code"]}
     assert request.runtime["idea_research_session"].attempted == 0
     assert not (tmp_path / "agent_traces" / "idea_research").exists()
+
+
+def test_subproblem_source_minimum_defaults_to_one() -> None:
+    from app.agents.idea.research_delegate import delegation_min_sources
+    assert delegation_min_sources({}) == 1
+    assert delegation_min_sources({"min_sources": 2}) == 2
+
+
+@pytest.mark.parametrize("minimum", [0, 11, True, "2", None, 1.5])
+def test_invalid_subproblem_source_minimum_rejected_by_contract(minimum: object) -> None:
+    from app.agents.idea.research_delegate import delegation_min_sources
+    from jsonschema import Draft202012Validator
+    with pytest.raises(ValueError, match="min_sources"):
+        delegation_min_sources({"min_sources": minimum})
+    schema = tool_config(TOOL).input_schema
+    assert schema is not None
+    assert list(Draft202012Validator(schema).iter_errors({"gap": "A concrete research gap",
+        "context_refs": [], "success_criteria": "Read an appropriate method", "min_sources": minimum}))

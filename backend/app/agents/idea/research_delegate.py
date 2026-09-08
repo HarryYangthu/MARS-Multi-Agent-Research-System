@@ -12,6 +12,7 @@ from loguru import logger
 
 from app.agents.base import ContextPack, RunRequest
 from app.agents.idea.research_dossier import dossier_errors, dossier_schema, normalized_excerpt_text
+from app.agents.idea.research import evidence_inventory
 from app.harness.agent_loop import AgentLoopPolicy, LoopInput, NativeAgentLoop
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -22,6 +23,14 @@ from app.harness.tools.registry import ToolContext, ToolRegistry, ToolResult, To
 
 TOOL = "idea.research_delegate"
 ROOT = "idea/research_delegations"
+
+
+def delegation_min_sources(args: dict[str, Any]) -> int:
+    """Each bounded subproblem has its own evidence floor; final totals are separate."""
+    minimum = args.get("min_sources", 1)
+    if type(minimum) is not int or not 1 <= minimum <= 10:
+        raise ValueError("delegation min_sources must be an integer in [1,10]")
+    return minimum
 
 
 def file_sha(path: Path) -> str:
@@ -137,9 +146,7 @@ class ResearchSession:
                               + json.dumps(sorted(self.context.upstream), ensure_ascii=False)
                               + ". Use [] when none apply. The overall task is already passed automatically; do not invent keys.",
                               output={"available_context_refs": sorted(self.context.upstream)})
-        minimum = self.request.extra.get("idea_requirements", {}).get("min_sources", 1)
-        if type(minimum) is not int or minimum < 0:
-            raise ValueError("research min_sources must be a nonnegative integer")
+        minimum = delegation_min_sources(args)
         self.attempted += 1
         identifier = uuid.uuid4().hex
         target = root / ROOT / identifier
@@ -167,7 +174,7 @@ class ResearchSession:
             Message("system", self.context.project),
             Message("user", "Overall research task:\n" + self.request.user_request),
             Message("user", "Delegated gap and completion criteria:\n" + json.dumps(args, ensure_ascii=False)),
-            Message("user", "Host evidence requirement: at least " + str(minimum)
+            Message("user", "This delegated subproblem requires at least " + str(minimum)
                     + " distinct publications with verified method-page insights. Overall task is already included above.")]
         messages.extend(Message("user", "[untrusted supplied context:" + ref + "]\n" + self.context.upstream[ref]) for ref in refs)
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
@@ -207,9 +214,22 @@ class ResearchSession:
         finally:
             await provider.close()
         if result.status != "passed":
-            atomic_json(target / "failure.json", {"status": result.status, "trace_ref": trace.relative_to(root).as_posix()})
-            return ToolResult(ok=False, error="research child " + result.status,
-                              output={"delegation_id": identifier, "trace_ref": trace.relative_to(root).as_posix()})
+            checkpoint_state = json.loads((trace / "checkpoint.json").read_text())
+            inventory = evidence_inventory(result.observations)
+            issues = checkpoint_state.get("validation_issues", [])
+            failure = {"delegation_id": identifier, "status": result.status,
+                       "trace_ref": trace.relative_to(root).as_posix(),
+                       "feedback": str(checkpoint_state.get("feedback", ""))[:2400],
+                       "validation_issues": [str(issue)[:600] for issue in issues[:6]],
+                       "validation_issue_count": len(issues),
+                       "observed_material_counts": inventory["counts"],
+                       "read_sources": [{"url": row.get("url"), "sha256": row.get("sha256"),
+                                         "pages": [page["page"] for page in row.get("visible_pages", [])]}
+                                        for row in inventory["reads"][:10]],
+                       "usable_as_final_evidence": False,
+                       "note": "Observed downloads/page windows are partial progress, not an accepted research report."}
+            atomic_json(target / "failure.json", failure)
+            return ToolResult(ok=False, error="research child " + result.status, output=failure)
         report_path = target / "report.md"
         report_path.write_text(result.text)
         report = parse(result.text).metadata
