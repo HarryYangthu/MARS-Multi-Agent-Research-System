@@ -798,6 +798,284 @@
         "protocol_repair_component_check.json": "41e531db3d6faf4a4a3f5b60408f101a6f064d66c9c9562619ba0ddb4cdadeb9",
         "summary.json": "5d92ad3692c3dd4b7f372712da4925d1bdd707216cacbee6a36a5fad0cc0e5a4"
       }
+    },
+    {
+      "run_id": "idea_research_20260908T102628_f02647",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 611.0455057500003,
+      "counts": {
+        "action_rounds": 8,
+        "model_requests": 15,
+        "model_responses": 15,
+        "observations": 8,
+        "protocol_repairs": 1,
+        "reflections": 1,
+        "sdk_attempts": 15,
+        "tool_dispatches": 8,
+        "validation_repairs": 6
+      },
+      "usage": {
+        "completion_tokens": 103357,
+        "prompt_tokens": 216913,
+        "total_tokens": 320270
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 2,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 14
+      },
+      "source_commit": "f840e1fb98e284388832f1e639ac6be86c85426f",
+      "source_tree": "16495321e2f63fcc2aa59d0be5cd11cc1fc095ff",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T102628_f02647",
+      "separate_review_records": {
+        "manual_quality_review.json": {
+          "reviewer": "Codex 独立离线复核（不是用户评审或人工科研同行评审）",
+          "review_kind": "offline_research_and_last_unaccepted_draft_review",
+          "created_at_utc": "2026-09-08T10:50:06.932341+00:00",
+          "run_id": "idea_research_20260908T102628_f02647",
+          "scope": "成功研究报告、真实阅读收据可见页，以及主流程终态 checkpoint 中最后一份未接受候选。没有规范最终 proposal 或下游交付。",
+          "canonical_proposal_present": false,
+          "candidate_source": "agent_traces/idea/138c433126394f199df265bf16493646/checkpoint.json#/candidate",
+          "candidate_digest": "797df524b1e8f60dbbd3e9e27e9e49b8fb6412ae1e78073d1f3c87aee8ff4c90",
+          "candidate_digest_algorithm": "SHA256 of canonical JSON string, matching harness.agent_loop.trace.digest",
+          "candidate_line_number_convention": "candidate_text_lines 是 checkpoint.candidate 解码后 Markdown 文本的一基行号，不是 checkpoint.json 的物理行号。",
+          "accepted_proposal": false,
+          "scientific_validated": false,
+          "runtime_review_replaced": false,
+          "runtime_status": {
+            "run_status": "failed",
+            "lead_status": "validation_exhausted",
+            "lead_counts": {
+              "action_rounds": 3,
+              "model_requests": 9,
+              "model_responses": 9,
+              "observations": 3,
+              "protocol_repairs": 0,
+              "reflections": 1,
+              "sdk_attempts": 9,
+              "tool_dispatches": 3,
+              "validation_repairs": 5
+            },
+            "last_validation_receipt": "idea/validation/728138192a424b5c85aa9cc1be72270b.json",
+            "last_candidate_schema_valid": true,
+            "last_candidate_material_ready": false,
+            "last_candidate_model_review_passed": false,
+            "prior_reviewed_candidate_digest": "ff86d3176c4d103bd3f6d87a4d5c5fa6a31082c456b3cba97b277fa682c31fe2",
+            "note": "最后候选 schema 本身通过，但参数算术检查失败；唯一一次 reflection 针对更早的 ff86d317... 候选并要求修订，不代表最后候选经过科学审查。summary 的 schema_valid=false 是本轮整体未交付状态。"
+          },
+          "research_report": {
+            "path": "idea/research_delegations/9cb358cd84344bc8945b817aa47632e8/report.md",
+            "sha256": "310665e7c0e2a9d6b2514d25f8369da703eec330a3678fa2f66df211b494a416",
+            "delegation_id": "9cb358cd84344bc8945b817aa47632e8"
+          },
+          "source_checks": [
+            {
+              "source_id": "knot-placement-dnn",
+              "receipt": "idea_research/research/downloads/52136141fda3411abe4d662101418462.read.json",
+              "visible_pages": [
+                1,
+                2,
+                3
+              ],
+              "report_lines": [
+                67,
+                74
+              ],
+              "assessment": "原文第 1 页给定节点后的 B 样条控制点最小二乘，第 2 页给自由节点数/位置/控制点的联合优化及非凸限制，第 3 页说明对节点间距采用 softmax 以维持次序。报告主体对此理解有可见原文依据。",
+              "transfer_boundary": "论文是通常 p=2/3 的一维曲线 B 样条与超参数化 DNN 求解器；两轴 softplus 间距、二维双线性节点值联合优化是本任务迁移设计，报告已声明不能移植整个 DNN，也没有声称原文证明 256 参数方案更优。"
+            },
+            {
+              "source_id": "lowrank-paaa",
+              "receipt": "idea_research/research/downloads/fc9c48ab552a481abb5d207525b26745.read.json",
+              "visible_pages": [
+                1,
+                2
+              ],
+              "report_lines": [
+                103,
+                128
+              ],
+              "assessment": "原文第 1–2 页支持对多元有理近似的重心系数张量作低秩分解，以及其与可分离函数表示的联系；报告所述 SVD 最小二乘也在第 2 页可见。",
+              "transfer_boundary": "将复重心系数的低秩思想迁移为实节点值 A=UV^T 是自定义变体，不是原论文的同一模型。报告将两者区分，U,V 为实 16×8 时 2×16×8=256 算术正确。实际可见页没有展开后续 Section 4/5 的低秩算法，不能声称已核查全文算法。"
+            }
+          ],
+          "resolved_report_issue": {
+            "id": "interior_knots_versus_gap_logits",
+            "report_lines": [
+              77,
+              79
+            ],
+            "report_error": "研究报告把 15×15 的每轴 14 个量称作内部节点；固定左右端点时每轴只有 13 个内部节点，直接独立坐标计数应为 225+13+13=251。",
+            "last_candidate_correction": "最后候选 /method_spec/candidate 明确内部 a_1..a_13，另以每轴 14 个正间距 logits 表示，实际优化张量计数 225+14+14=253 成立。归一化存在冗余不意味着可以从可训练标量账本删除这些张量元素。A2 每轴 13 个 gap logits 对应 196+26=222，也成立。",
+            "not_a_remaining_budget_defect": true,
+            "separate_issue": "通用 knots 公式仍另有重复右端点问题，见 issues/knot_endpoint_off_by_one，不能把两者混为同一个计数错误。"
+          },
+          "issues": [
+            {
+              "id": "knot_endpoint_off_by_one",
+              "severity": "blocking_method_definition",
+              "candidate_refs": [
+                "/method_spec/knot_param/knots",
+                "/method_spec/knot_param/monotonicity",
+                "/method_spec/candidate/grid_x",
+                "/method_spec/ablation_components/A2_grid14"
+              ],
+              "candidate_text_lines": [
+                33,
+                36,
+                37
+              ],
+              "finding": "归一化后的 p_i 总和为 1，j=1..n_gaps 的累加已生成 a_n_gaps=1，却再追加 a_(n_gaps+1)=1；因此两个右端点恒等，严格递增声明错误，位置数量比对应节点值矩阵多 1。",
+              "exact_arithmetic_checks": [
+                {
+                  "n_gaps": 14,
+                  "positions_emitted": 16,
+                  "required_node_count": 15,
+                  "last_two_positions": [
+                    "1",
+                    "1"
+                  ],
+                  "extra_last_cell_width": "0"
+                },
+                {
+                  "n_gaps": 13,
+                  "positions_emitted": 15,
+                  "required_node_count": 14,
+                  "last_two_positions": [
+                    "1",
+                    "1"
+                  ],
+                  "extra_last_cell_width": "0"
+                }
+              ],
+              "impact": "按完整通用公式实现会产生一个零宽额外单元及节点值索引不匹配；若实现者自行忽略最后节点，则是在补写原规范没有表达的修正。候选主网格与 A2 的唯一可执行定义尚不一致。",
+              "minimal_resolution": "n_gaps 个间距应生成 n_gaps+1 个节点，终点为 a_n_gaps=1；统一循环上界、端点编号及单元索引。",
+              "origin": "独立离线公式复核；不属于当前最后一次 host validation 的三条账本错误。"
+            },
+            {
+              "id": "heterogeneous_ablation_ledger_uses_primary_formula",
+              "severity": "blocking_delivery_contract",
+              "candidate_refs": [
+                "/parameter_budget/candidate_formula",
+                "/parameter_budget/evaluation_cases/1",
+                "/parameter_budget/evaluation_cases/2",
+                "/parameter_budget/evaluation_cases/3"
+              ],
+              "candidate_text_lines": [
+                269,
+                295,
+                304,
+                305,
+                314,
+                315,
+                324
+              ],
+              "finding": "A1/A2/A3 的 evaluation_cases 全部保留 c=15,k=14 与主公式 c*c+2*k，必算 253，却分别申报 225、222、256；c2/k2/r 声明未进入该公式。",
+              "calculation": {
+                "host_shared_formula": "15*15+2*14=253",
+                "intended_A1": "15*15=225",
+                "intended_A2": "14*14+2*13=222",
+                "intended_A3": "2*16*8=256"
+              },
+              "impact": "异构消融无法通过当前账本契约；这是实际 validation_exhausted 的终态原因。三个意图参数数本身均未超过 256，不应误报为模型超预算。",
+              "origin": "已归档 host validation 与独立算术复算一致；主线程负责契约调整，本文件不改源码。"
+            },
+            {
+              "id": "lowrank_factors_lack_executable_initialization",
+              "severity": "blocking_ablation_definition",
+              "candidate_refs": [
+                "/method_spec/ablation_components/A3_lowrank",
+                "/method_spec/initialization",
+                "/evaluation_protocol/comparison/differences_justification",
+                "/ablation_plan/2"
+              ],
+              "candidate_text_lines": [
+                40,
+                41,
+                82,
+                389
+              ],
+              "finding": "A3 要训练 U,V，但唯一初始化定义只给节点值 Q=0 与 gap logits 常数，没有定义因子 U,V 的取值、分布或尺度。零节点矩阵不能唯一决定两个因子。",
+              "conditional_math_check": "若把零节点值规则直接实现为 U=V=0，则对任意可微节点矩阵损失 L(A)，dL/dU=(dL/dA)V=0、dL/dV=(dL/dA)^T U=0；无动量历史的 Adam 将保持零，无法作为可学习低秩对照。",
+              "impact": "必须明确因子初始化后才能执行所称全部保留参数影响损失的 A3；不能将双零初始化下训练失败解释为低秩表达能力不足。没有实现或实验，因此不声称本轮已经发生零梯度失败。"
+            }
+          ],
+          "research_interpretation_limits": [
+            {
+              "id": "lowrank_negative_control_is_not_justified_by_curvature",
+              "candidate_refs": [
+                "/method_spec/targets/T_highcurv",
+                "/method_spec/alternatives/lowrank_separable/reason_rejected",
+                "/decision_rule/supporting_metrics/lowrank_constraint"
+              ],
+              "candidate_text_lines": [
+                72,
+                91,
+                106,
+                147
+              ],
+              "receipt": "idea_research/research/downloads/fc9c48ab552a481abb5d207525b26745.read.json",
+              "visible_pages": [
+                1,
+                2
+              ],
+              "finding": "把论文自身定位概括为仅利于可分离/光滑目标并不足以支撑当前低秩阴性对照；原文第 1 页还明确讨论有理近似对奇异行为的适用性，没有证明高曲率意味着高秩。",
+              "exact_identity": "当前 Gaussian 目标等于 exp(-(x-0.3)^2/(2*0.05^2))*exp(-(y+0.2)^2/(2*0.05^2))。在任意张量积节点上其真值矩阵秩为 1；秩上限 8 足以再现该真值节点矩阵对应的基线双线性插值。",
+              "limit": "这不保证有限样本 Adam 训练的低秩臂优于或等于训练后的完整基线，也不否定低秩属于函数类子集；它只说明此目标没有强制超出秩 8 的表示需求，不能用曲率高本身解释低秩结果更差。优化/泛化差异仍需与表示约束区分。"
+            }
+          ],
+          "other_checks": {
+            "primary_parameter_count": "253 <= 256，主节点值及 gap logits 已计入；没有在原文中发现额外主候选可训练标量。",
+            "common_data_and_initialization": "最后稿声明两臂共享 train_primary 与同一 MSE，验证与测试各有独立 role/spec_ref；零节点值初始化无需额外真值查询，未发现初始化预算外标注或已证实的 held-out 泄漏。这里只核查声明，未执行物理数据划分。",
+            "decision_partition": "主判据 Δ>=0.05、Δ<0.02、0.02<=Δ<0.05 对有限实数 Δ 互斥完备；百分比改善阈值本身不代表统计显著性检验。",
+            "early_draft_issues_not_repeated": "最后稿删除 A/C 主评估并明确记为 remaining gaps，已不再要求计算早期 Δ_A、Δ_B、Δ_C；不把早期跨 case 缺绑定重复当作最后稿问题。"
+          },
+          "method_note": "仅读取真实归档文件并作文本对照、精确分数计算和代数推导；未调用模型/服务、未执行科研实验、未修改原始档案或源码。未因无实验结果或无二维等价定理而判失败。",
+          "original_artifact_sha256": {
+            "summary.json": "7458f1b6ecbfab3a1067f2a66d60c4025395c1898dc5c719b5d23cc0c9b3311c",
+            "agent_traces/idea/138c433126394f199df265bf16493646/checkpoint.json": "14b93a21feca3526430086ff2fddb43304105722d8a7639de247ef9ec25b5abb",
+            "idea/research_delegations/9cb358cd84344bc8945b817aa47632e8/report.md": "310665e7c0e2a9d6b2514d25f8369da703eec330a3678fa2f66df211b494a416",
+            "idea_research/research/downloads/52136141fda3411abe4d662101418462.read.json": "6a784ba2d25e2c15005ad98c9ccadbc874437fb9533795e178057a4b1119214e",
+            "idea_research/research/downloads/fc9c48ab552a481abb5d207525b26745.read.json": "56c71734ce5664ef963d898cdd2f35b5e34f218f91970bcf9c3c673872883acc",
+            "idea/validation/728138192a424b5c85aa9cc1be72270b.json": "19de49307d22673ce940378661c62b6a659ae1921587625bd368385ce2f0b0fc"
+          }
+        },
+        "external_run_routing.json": {
+          "record_kind": "external_run_routing",
+          "configured_at": "2026-09-08T10:26:27.990271+00:00",
+          "direct_research_hosts": [
+            "api.openalex.org",
+            "export.arxiv.org",
+            "arxiv.org"
+          ],
+          "system_proxy_changed": false,
+          "other_routes": "inherited unchanged",
+          "preflight_paper_results_supplied_to_model": false
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/138c433126394f199df265bf16493646/checkpoint.json": "14b93a21feca3526430086ff2fddb43304105722d8a7639de247ef9ec25b5abb",
+        "agent_traces/idea/138c433126394f199df265bf16493646/events.jsonl": "5a02bb3292360291abb8cb42be24c0acfb6d19ad4ec6718efac25ea126479730",
+        "agent_traces/idea_research/9cb358cd84344bc8945b817aa47632e8/checkpoint.json": "cba19b43e7c4b1825fb5e1d0c3ed28954e63fb47ff0845a24bb7cdbc78fe5c42",
+        "agent_traces/idea_research/9cb358cd84344bc8945b817aa47632e8/events.jsonl": "9a33363979e1747d1c701b752adeeb010784a8a67478c5cf2d4637ea38133d20",
+        "all_traces_audit.json": "eb5df73a9cc2f9deece2314d2617297184b0b7f933bfacd495bdbef13f2947c7",
+        "external_run_routing.json": "d6eb6779b77cecfa8471ba6e72da0f14510653f84cabdf29e26006596bf39352",
+        "input/request.json": "8285669076ef7af538ec1241189ca4cf29a4f41f7393dd5198dc39b04ef72675",
+        "manual_quality_review.json": "1d5aed1aac575246799896890c4078cfbc27b2e2c015b5607c1c377bfd8dc3aa",
+        "summary.json": "7458f1b6ecbfab3a1067f2a66d60c4025395c1898dc5c719b5d23cc0c9b3311c"
+      }
     }
   ]
 }

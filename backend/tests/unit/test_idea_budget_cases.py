@@ -61,9 +61,60 @@ def test_primary_case_and_unique_names_required() -> None:
     assert any("unique" in e for e in parameter_errors(raw, max_ratio=1.2))
 
 
-def test_cases_cannot_override_formulas_or_limit() -> None:
+def test_candidate_override_requires_a_complete_formula_and_tensor_ledger() -> None:
     raw = ledger()
     raw["evaluation_cases"][1]["candidate_formula"] = "K*K"
+    assert parameter_errors(raw, max_ratio=1.2)
+
+
+def test_different_architectures_have_complete_independent_candidate_ledgers() -> None:
+    raw = ledger()
+    raw["evaluation_cases"] += [
+        {"name": "frozen_positions", "variables": {"K": 12}, "baseline_parameters": 144,
+         "candidate_parameters": 144, "candidate_formula": "K*K",
+         "candidate_components": [deepcopy(raw["baseline_components"][0])]},
+        {"name": "low_rank", "variables": {"K": 12, "R": 5}, "baseline_parameters": 144,
+         "candidate_parameters": 120, "candidate_formula": "2*K*R", "candidate_components": [
+             {"name": name, "formula": "K*R", "dtype": "real", "shape": ["K", "R"]}
+             for name in ("U", "V")]},
+    ]
+    assert parameter_errors(raw, max_ratio=1.2) == []
+    assert raw["candidate_formula"] == "K*K+2*(K-1)"
+    assert raw["candidate_parameters"] == 166
+    raw["evaluation_cases"][-1]["candidate_components"][1]["shape"] = ["K", "R+1"]
+    assert any("dtype/shape" in e for e in parameter_errors(raw, max_ratio=1.2))
+
+
+def test_candidate_override_cannot_evade_limit_or_omit_primary_configuration() -> None:
+    raw = ledger()
+    case = {"name": "oversized", "variables": {"K": 12}, "baseline_parameters": 144,
+            "candidate_parameters": 288, "candidate_formula": "2*K*K", "candidate_components": [
+                {"name": "complex_values", "formula": "2*K*K", "dtype": "complex", "shape": ["K", "K"]}]}
+    raw["evaluation_cases"].append(case)
+    assert any("/evaluation_cases/2" in e and "exceeds" in e for e in parameter_errors(raw, max_ratio=1.2))
+    raw["evaluation_cases"] = [case]
+    assert any("primary variables" in e for e in parameter_errors(raw, max_ratio=3))
+    case["baseline_formula"] = "2*K*K"
+    assert parameter_errors(raw, max_ratio=3)
+
+
+@pytest.mark.parametrize("missing", ["candidate_formula", "candidate_components"])
+def test_schema_and_host_both_require_complete_overrides(missing: str) -> None:
+    from jsonschema import Draft202012Validator
+    from app.agents.base import RunRequest
+    from app.agents.idea.agent import IdeaAgent
+
+    schema = IdeaAgent().submission_schema(RunRequest(project="pimc", user_request="arithmetic contract",
+        extra={"idea_requirements": {"require_parameter_budget": True}}))
+    assert schema is not None
+    raw = ledger()
+    raw["evaluation_cases"][1].update(candidate_formula="K*K", candidate_parameters=256,
+                                       candidate_components=deepcopy(raw["baseline_components"]))
+    budget_schema = schema["properties"]["parameter_budget"]
+    assert not list(Draft202012Validator(budget_schema).iter_errors(raw))
+    assert parameter_errors(raw, max_ratio=1.2) == []
+    del raw["evaluation_cases"][1][missing]
+    assert list(Draft202012Validator(budget_schema).iter_errors(raw))
     assert parameter_errors(raw, max_ratio=1.2)
 
 

@@ -12,11 +12,22 @@ def protocol_schema() -> dict[str, Any]:
     text = {"type": "string", "minLength": 1, "pattern": r"\S"}
     method_ref = {"type": "string", "pattern": "^/method_spec/.+"}
     refs = {"type": "array", "items": text, "minItems": 1, "uniqueItems": True}
-    arm = {"type": "object", "additionalProperties": False,
+    identifier = {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"}
+    arm: dict[str, Any] = {"type": "object", "additionalProperties": False,
+           "description": "One independently initialized and trained model per seed. Do not pool independent cases into one fit.",
            "required": ["training_data_refs", "assessment_data_refs", "objective_ref", "optimizer_ref", "initialization_ref"],
            "properties": {"training_data_refs": refs, "assessment_data_refs": refs,
                           "objective_ref": {"type": "string", "pattern": "^/evaluation_protocol/objectives/[A-Za-z][A-Za-z0-9_]*$"},
-                          "optimizer_ref": method_ref, "initialization_ref": method_ref}}
+                          "optimizer_ref": method_ref, "initialization_ref": method_ref,
+                          "method_spec_ref": method_ref}}
+    extra_arm = {**arm, "required": [*arm["required"], "method_spec_ref"]}
+    comparison: dict[str, Any] = {"type": "object", "additionalProperties": False,
+        "required": ["isolates_architecture", "differences_justification"],
+        "properties": {"isolates_architecture": {"type": "boolean"}, "differences_justification": {"type": "string"}}}
+    named_comparison = {**comparison,
+        "required": [*comparison["required"], "baseline_arm", "candidate_arm", "decision_rule_ref"],
+        "properties": {**comparison["properties"], "baseline_arm": identifier, "candidate_arm": identifier,
+            "decision_rule_ref": {"type": "string", "pattern": "^/decision_rule(?:/.+)?$"}}}
     return {
         "type": "object", "additionalProperties": False,
         "required": ["version", "datasets", "objectives", "arms", "randomness", "comparison"],
@@ -31,17 +42,18 @@ def protocol_schema() -> dict[str, Any]:
                 "additionalProperties": {"type": "object", "additionalProperties": False,
                     "required": ["spec_ref", "data_refs"],
                     "properties": {"spec_ref": method_ref, "data_refs": refs}}},
-            "arms": {"type": "object", "additionalProperties": False,
+            "arms": {"type": "object", "additionalProperties": extra_arm, "propertyNames": identifier,
                      "required": ["baseline", "candidate"], "properties": {"baseline": arm, "candidate": arm}},
+            "comparisons": {"type": "object", "minProperties": 1, "propertyNames": identifier,
+                "description": "Explicit pairs for additional independent cases or ablations; each pair uses its own decision rule reference.",
+                "additionalProperties": named_comparison},
             "randomness": {"type": "object", "additionalProperties": False,
                 "required": ["seeds", "sources"], "properties": {
                     "seeds": {"type": "array", "minItems": 1, "uniqueItems": True,
                               "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}},
                     "sources": {"type": "array", "items": {"type": "object", "additionalProperties": False,
                         "required": ["name", "spec_ref"], "properties": {"name": text, "spec_ref": method_ref}}}}},
-            "comparison": {"type": "object", "additionalProperties": False,
-                "required": ["isolates_architecture", "differences_justification"],
-                "properties": {"isolates_architecture": {"type": "boolean"}, "differences_justification": {"type": "string"}}},
+            "comparison": comparison,
         },
     }
 
@@ -111,6 +123,8 @@ def protocol_errors(metadata: dict[str, Any], *, required: bool = False) -> list
             errors.append(prefix + f"/arms/{name}/assessment_data_refs: must reference declared held-out datasets")
         for field in ("optimizer_ref", "initialization_ref", "objective_ref"):
             check_reference(arm[field], f"arms/{name}/{field}")
+        if "method_spec_ref" in arm:
+            check_reference(arm["method_spec_ref"], f"arms/{name}/method_spec_ref")
         objective = protocol["objectives"].get(arm["objective_ref"].rsplit("/", 1)[-1])
         if objective and not set(objective["data_refs"]) <= set(arm["training_data_refs"]):
             errors.append(prefix + f"/arms/{name}/objective_ref: objective data must belong to the arm's training data")
@@ -124,6 +138,34 @@ def protocol_errors(metadata: dict[str, Any], *, required: bool = False) -> list
             errors.append(prefix + "/arms: architecture isolation requires the same training datasets")
     elif not protocol["comparison"]["differences_justification"].strip():
         errors.append(prefix + "/comparison/differences_justification: explain intentional non-architecture differences")
+    compared: set[str] = set()
+    for name, pair in protocol.get("comparisons", {}).items():
+        location = prefix + f"/comparisons/{name}"
+        check_reference(pair["decision_rule_ref"], f"comparisons/{name}/decision_rule_ref")
+        pair_names = (pair["baseline_arm"], pair["candidate_arm"])
+        if pair_names[0] == pair_names[1]:
+            errors.append(location + ": baseline_arm and candidate_arm must be different arms")
+            continue
+        missing = [arm_name for arm_name in pair_names if arm_name not in protocol["arms"]]
+        if missing:
+            errors.append(location + ": unknown arm reference: " + ", ".join(missing))
+            continue
+        baseline, candidate = (protocol["arms"][arm_name] for arm_name in pair_names)
+        pair_errors: list[str] = []
+        if set(baseline["assessment_data_refs"]) != set(candidate["assessment_data_refs"]):
+            pair_errors.append(location + ": both arms must use the same held-out comparison datasets")
+        if pair["isolates_architecture"]:
+            if baseline["objective_ref"] != candidate["objective_ref"]:
+                pair_errors.append(location + ": architecture isolation requires the same canonical objective_ref for both arms")
+            if set(baseline["training_data_refs"]) != set(candidate["training_data_refs"]):
+                pair_errors.append(location + ": architecture isolation requires the same training datasets")
+        elif not pair["differences_justification"].strip():
+            pair_errors.append(location + "/differences_justification: explain intentional non-architecture differences")
+        errors.extend(pair_errors)
+        if not pair_errors:
+            compared.update(pair_names)
+    for name in sorted(set(protocol["arms"]) - {"baseline", "candidate"} - compared):
+        errors.append(prefix + f"/arms/{name}: additional arm must be referenced by a valid named comparison")
     randomness = protocol["randomness"]
     if len(randomness["seeds"]) > 1 and not randomness["sources"]:
         errors.append(prefix + "/randomness/sources: multiple seeds require an explicit random source; deterministic repetitions are not independent trials")

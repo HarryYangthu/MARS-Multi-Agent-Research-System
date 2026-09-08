@@ -101,13 +101,17 @@ class IdeaAgent(BaseAgent):
                 budget_properties[prefix + "_components"] = components
             budget_properties["evaluation_cases"] = {
                 "type": "array", "minItems": 1, "maxItems": 32,
-                "description": "Every proposed evaluated size, including primary variables; same formulas, tensors and host limit apply to all cases.",
+                "description": "Include the primary configuration unchanged. Other sizes inherit its tensor ledger; different candidate architectures may explicitly override BOTH candidate_formula and candidate_components. All cases retain the baseline ledger and host budget limit.",
                 "items": {"type": "object", "additionalProperties": False,
                           "required": ["name", "variables", "baseline_parameters", "candidate_parameters"],
                           "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120},
                                          "variables": {"type": "object", "additionalProperties": {"type": "number"}},
                                          "baseline_parameters": {"type": "integer", "minimum": 1},
-                                         "candidate_parameters": {"type": "integer", "minimum": 1}}}}
+                                         "candidate_parameters": {"type": "integer", "minimum": 1},
+                                         "candidate_formula": budget_properties["candidate_formula"],
+                                         "candidate_components": components},
+                          "dependentRequired": {"candidate_formula": ["candidate_components"],
+                                                "candidate_components": ["candidate_formula"]}}}
             schema["properties"]["parameter_budget"] = {"type": "object", "required": list(budget_properties),
                                                           "properties": budget_properties}
             schema["properties"]["signal_contract"] = {"type": "object", "minProperties": 1}
@@ -145,13 +149,19 @@ class IdeaAgent(BaseAgent):
             "and a distinct ablation. An ablation must actually change behavior on the specified evaluation domain. "
             "For each ablation explain how every retained trainable parameter affects the loss under its "
             "specified optimizer. A hard index alone does not provide a gradient to its selection parameters. "
+            "For factorized parameters define each factor's initialization and check that it permits a training signal. "
+            "Node formulas must produce exactly the declared number of distinct nodes; count endpoints and intervals once. "
             "If require_parameter_budget is true: parameter_budget uses unit real_scalar, variables, "
             "baseline_formula, candidate_formula, integer baseline_parameters/candidate_parameters, "
             "and baseline_components/candidate_components lists of {name,formula,dtype,shape}; "
             "Declare parameter_budget.evaluation_cases for every configuration proposed for evaluation, "
             "including the primary variables, with unique name, full variables map, baseline_parameters "
-            "and candidate_parameters. Each case uses the same formulas and tensor definitions and must "
-            "meet the host budget. Do not introduce additional evaluated dimensions only in free text. "
+            "and candidate_parameters. By default each case uses the primary formulas and tensor definitions. "
+            "For a different candidate architecture (e.g. frozen knots or low-rank factors), supply BOTH "
+            "candidate_formula and candidate_components in that case, with its complete actual tensor ledger; "
+            "assign all primary variables plus any additional numeric variables needed by the override. "
+            "The baseline ledger and host budget still apply. Include the primary configuration without overrides. "
+            "Do not force different architectures into one formula or introduce evaluated dimensions only in prose. "
             "dtype is real or complex (count twice), shape=[] means one scalar. Arithmetic formulas "
             "use only declared numeric variables and +,-,*,/,integer powers. Compare at least two "
             "feasible alternatives, each with name, feasible, parameters, components (same component format), "
@@ -169,6 +179,12 @@ class IdeaAgent(BaseAgent):
                 "contract. Declare datasets with IDs, train/validation/test roles and method_spec refs; "
                 "define objectives once with train-only data_refs and method_spec refs. Both arms reference "
                 "their training and held-out assessment IDs, objective, optimizer and initialization. "
+                "Keep arms.baseline and arms.candidate for the primary comparison. For other target cases or "
+                "ablations, declare additional named arms with method_spec_ref and named comparisons containing "
+                "baseline_arm, candidate_arm, decision_rule_ref, isolates_architecture and differences_justification. "
+                "Every extra arm must participate in a comparison. Each arm is trained independently for each seed; "
+                "do not pool different target cases into one training objective. Every dataset definition must bind "
+                "its target/labels and split, and every comparison must bind an explicit statistical decision rule. "
                 "For an architecture-isolating comparison share the training data and objective; any intentional "
                 "non-architecture differences require a justification. Declare actual seeds and the random "
                 "source(s) that change across seeds, with executable definitions under method_spec. "

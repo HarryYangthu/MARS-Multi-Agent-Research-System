@@ -149,7 +149,7 @@ def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
 
 
 def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str]:
-    """Check each declared configuration against the same tensor ledger and limit.
+    """Check shared or explicitly overridden candidate ledgers against the limit.
 
     No free-text dimensions are inferred and no passing cases are generated.
     Historical ledgers without evaluation_cases retain their original contract.
@@ -161,10 +161,13 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
     errors: list[str] = []
     names: set[str] = set()
     includes_primary = False
+    base_fields = {"name", "variables", "baseline_parameters", "candidate_parameters"}
+    override_fields = {"candidate_formula", "candidate_components"}
     for index, case in enumerate(cases):
         path = f"{prefix}/{index}"
-        if not isinstance(case, dict) or set(case) != {"name", "variables", "baseline_parameters", "candidate_parameters"}:
-            errors.append(path + ": require only name, variables, baseline_parameters, candidate_parameters")
+        if not isinstance(case, dict) or set(case) not in (base_fields, base_fields | override_fields):
+            errors.append(path + ": require name, variables, baseline_parameters, candidate_parameters; "
+                          "a different candidate architecture must supply both candidate_formula and candidate_components")
             continue
         name = case["name"]
         if not isinstance(name, str) or not name.strip() or len(name) > 120 or name in names:
@@ -172,12 +175,17 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
         else:
             names.add(name)
         variables = case["variables"]
-        if not isinstance(variables, dict) or set(variables) != set(raw["variables"]):
-            errors.append(path + "/variables: explicitly assign exactly the primary variable names")
+        overridden = override_fields <= set(case)
+        if (not isinstance(variables, dict) or not set(raw["variables"]) <= set(variables)
+                or (not overridden and set(variables) != set(raw["variables"]))):
+            errors.append(path + "/variables: explicitly assign all primary variable names; "
+                          "additional variables require a complete candidate formula/components override")
             continue
-        includes_primary = includes_primary or variables == raw["variables"]
+        includes_primary = includes_primary or (not overridden and variables == raw["variables"])
         ledger = {key: value for key, value in raw.items() if key != "evaluation_cases"}
         ledger.update({key: case[key] for key in ("variables", "baseline_parameters", "candidate_parameters")})
+        if overridden:
+            ledger.update({key: case[key] for key in override_fields})
         errors.extend(path + error.removeprefix("/parameter_budget")
                       for error in parameter_errors(ledger, max_ratio=max_ratio))
     if not includes_primary:
