@@ -1,0 +1,381 @@
+{
+  "record_kind": "development_evaluation",
+  "date": "2026-09-08",
+  "evidence_scope": "Actual public-research runs; all failed delegations included.",
+  "raw_archives_in_repository": false,
+  "raw_archive_note": "Full traces, downloaded PDFs and local component records remain in the indicated run directories; hashes identify them. This compact export does not substitute for those archives.",
+  "runs": [
+    {
+      "run_id": "idea_research_20260908T085620_50945b",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 450.85506629099837,
+      "counts": {
+        "action_rounds": 41,
+        "model_requests": 42,
+        "model_responses": 42,
+        "observations": 35,
+        "protocol_repairs": 4,
+        "reflections": 0,
+        "sdk_attempts": 42,
+        "tool_dispatches": 35,
+        "validation_repairs": 9
+      },
+      "usage": {
+        "completion_tokens": 38826,
+        "prompt_tokens": 438127,
+        "total_tokens": 476953
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 4,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 0,
+        "unique_retrieved_publications": 32
+      },
+      "source_commit": "2485304604ba6ced015f31770dec09834caa94bc",
+      "source_tree": "da2215ab1d24bd2a1e9ee1640d662514e13d0584",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T085620_50945b",
+      "separate_review_records": {},
+      "raw_file_sha256": {
+        "agent_traces/idea/50abfb89609f4069af061c3de83d9622/checkpoint.json": "4c89a4abf8e18dfe5a31717b4f1a797826ec12692c5a77689c38ed81ae72e61f",
+        "agent_traces/idea/50abfb89609f4069af061c3de83d9622/events.jsonl": "5760f5861ae5a3e5f693d955d136dfe04f48a8d3977710c7f4a54f239c5dc3bb",
+        "agent_traces/idea_research/3f45df9fe89945029bac0adad3b591d6/checkpoint.json": "ca8277e7c4eeb4f05a62d66209842368212eb0abc5c25e8cf521a9f6e78dabdd",
+        "agent_traces/idea_research/3f45df9fe89945029bac0adad3b591d6/events.jsonl": "ee6d8b5d94cbcfd231e664cab495cdc86ca6c7403ed771315f936aa38afdf6b4",
+        "agent_traces/idea_research/4bb14566d2284a42b0167090a6276fe4/checkpoint.json": "f795461412e130a613b1e4aa28ecb0f2ef04eee865cb00476b9926b659d5ba46",
+        "agent_traces/idea_research/4bb14566d2284a42b0167090a6276fe4/events.jsonl": "fd3b9e6342ddbc5a7eca283edcf4ab4fd2481dd36eebf95aa9408b210a6c36d1",
+        "agent_traces/idea_research/bc7f02d9bc6b4332af8ff3476757fbfc/checkpoint.json": "87e8e59b632215c41defc30de78e62cd460d330433189198c73904ce9256fc5b",
+        "agent_traces/idea_research/bc7f02d9bc6b4332af8ff3476757fbfc/events.jsonl": "c89f26036447153ca4b18ab4f18534d6e0c14f713cad7b003e595dfaefb9984e",
+        "all_traces_audit.json": "70604365e0869be835febc90acf56492c35ef1797dab42c988ac75e7903d8c6f",
+        "input/request.json": "a07b6d424d76910b4a9cebfe36f6fceba04da73cadf496d4c29bf2dfb53e0de8",
+        "summary.json": "0d74996315d3aac84ba31c0baabb976aa81d4b73fbc0abb331bfd6b12d9b03ef"
+      }
+    },
+    {
+      "run_id": "idea_research_20260908T090534_8ec0e7",
+      "status": "accepted_method_proposal",
+      "schema_valid": true,
+      "material_ready": true,
+      "model_review_passed": true,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 554.9969506250054,
+      "counts": {
+        "action_rounds": 13,
+        "model_requests": 17,
+        "model_responses": 17,
+        "observations": 12,
+        "protocol_repairs": 2,
+        "reflections": 2,
+        "sdk_attempts": 17,
+        "tool_dispatches": 12,
+        "validation_repairs": 2
+      },
+      "usage": {
+        "completion_tokens": 62736,
+        "prompt_tokens": 229188,
+        "total_tokens": 291924
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 4,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 13
+      },
+      "proposal_sha256": "0ee9579ee8d41c3064a93b732f8867502514bb8366dac58a7ffc1cc11211505e",
+      "human_summary": "将16×16均匀双线性LUT改为沿x方向自适应网格：15列由14个可学习gap生成列坐标并共享于各行，节点值降为15×16，总可训练参数254≤256，使分辨率可集中到高曲率区域；是否提升取决于待验证的高曲率假设，需在光滑与高曲率合成目标上判别。",
+      "source_commit": "8c469e7217ad68e2032cb42c9ce8fbfac353bd32",
+      "source_tree": "4be959eb95ad5296baf16ea83fcf2491b2a81e19",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T090534_8ec0e7",
+      "separate_review_records": {
+        "manual_quality_review.json": {
+          "candidate_digest": "0ee9579ee8d41c3064a93b732f8867502514bb8366dac58a7ffc1cc11211505e",
+          "reviewer": "Codex 独立离线复核（不是用户评审或人工科研同行评审）",
+          "issues": [
+            "/ablation_plan/0 frozen_coords 与 /ablation_plan/1 uniform_15x16 重复（候选原文第63–64、339–344行）：前者把14个gap冻结在均匀位置、只训练240个节点值；后者也是均匀15×16双线性网格、只训练240个节点值。按所述共同初始化、MSE和Adam，两者定义同一模型与优化问题，不能充当两个独立机制消融。candidate对uniform_15x16的比较隔离的是坐标可训练性；要判断16→15列的分辨率损失还需明确uniform_15x16对baseline_16x16的比较。",
+            "/ablation_plan/2 boundary_clamp_vs_reflect 在当前协议下无所声称的判别变化（第66、69–71、286、345–347行）：全部输入及train/val/test采样均限定在[-1,1]^2。通常的clamp和反射式域外扩展在域内均为恒等映射；当前双线性插值不需要域外模板节点。因此仅把输入边界处理从clamp改为reflect不会改变所述样本的前向值，无法检验文中声称的边界MSE/参数梯度机制。原文也没有定义任何域外输入实验或不同域内插值公式。",
+            "/method_spec/alternative_fixed_grid 缺少可判别的方法定义，却作为第二篇采用论文的实际方法链接（第74–75、119–123、140–141、163–176行）：同一句同时声称保持16×16网格并降为15×16=240节点值，未说明被保留的网格/节点如何对应；16个共享核形状参数没有核公式、参数作用位置或边界定义。故无法重建这项备选，也无法核对其弱于自适应列坐标的取舍理由。FI-KAN用于真实备选或否定性设计结论本身可以成立；现有research_links指向非空文本只能证明字段存在，尚不能支撑stopping_reason关于两种具体设计已足够完整的判断。",
+            "/ablation_plan/3 column_count_14 没有进入 /parameter_budget/evaluation_cases（第257–284、348–350行）：三个规范case全部使用Nx=15、Ny=16、K=14，候选254参数；另拟评估的Nx=14、Ny=16、K=13仅在消融描述中出现。14×16+13=237本身没有超过256预算，但该尺寸未纳入同一规范计数/形状校验，当前列举的evaluation_cases不能代表全部承诺评估的尺寸。",
+            "/method_spec/initialization 的额外目标值查询未纳入训练数据协议（第63–64、69–73、195–225行）：初始化直接查询各自网格上的目标真值，即baseline使用256个网格标签、candidate使用240个网格标签；这些确定性网格点没有列入定义为20000个独立均匀样本的synth_train。两臂共同引用synth_train只约束训练目标，未涵盖初始化已经获取的监督信息，因而不能仅据此声称信息条件完全相同。需明确这些查询的来源/预算和对照规则。本项不证明发生held-out泄漏，不证明收益方向，也不推断任何未运行的实验结果。"
+          ],
+          "scientific_validated": false,
+          "review_kind": "independent_offline_derived_record",
+          "candidate_path": "idea/idea_proposal.v1.md",
+          "runtime_review_replaced": false,
+          "runtime_status_observed": "accepted_method_proposal",
+          "runtime_model_review_passed_observed": true,
+          "scope_note": "仅依据当前候选文字进行方法与比较协议复核；不调用模型/研究工具，不执行实验，不回写已结束的运行或原始反思记录。"
+        },
+        "delivery_component_checks.json": {
+          "approved_artifact_created": false,
+          "delivery_audit": {
+            "delivery_bundle_valid": true,
+            "delivery_contract_valid": true,
+            "delivery_contract_versions": [
+              "idea.handoff.v1"
+            ],
+            "delivery_root": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/research_quality_20260908/idea_research_20260908T090534_8ec0e7/idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959",
+            "errors": [],
+            "research_decisions_checked": true,
+            "validation_receipts": [
+              "idea/validation/30e4c7173e9c4e9a8af8ce43d39289a9.json"
+            ]
+          },
+          "downstream_agent_executed": false,
+          "handoff_context_schema": "idea.research_handoff.v1",
+          "interpretation": "Component checks only; consult the separate manual quality review before any scientific acceptance.",
+          "native_errors": [],
+          "native_material_audit_passed": true,
+          "research_context_loaded": true,
+          "scientific_validated": false,
+          "verified_report_count": 1
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/8a07f2472a704c0bb1ec7d08b9731bc2/checkpoint.json": "90fb1f8a63fe7eb92c3cc764f0ec21c7b4090da23c53112e8ded22d6edbb83b1",
+        "agent_traces/idea/8a07f2472a704c0bb1ec7d08b9731bc2/events.jsonl": "8065f080c433749054d251b59ee7421adab26aa0ee6e128ed1c3702bcd3af80d",
+        "agent_traces/idea_research/5f37c86075614cc3ac630b6b3d3593d1/checkpoint.json": "10c52c459efb8f6ba16a9ce192b9a5d128231392c50d23849c3b952b1693ec33",
+        "agent_traces/idea_research/5f37c86075614cc3ac630b6b3d3593d1/events.jsonl": "51885a8b89274b125df65998ee18eea388cd9b3ec8b35bd2faf68e0368754115",
+        "all_traces_audit.json": "827114c251f98df726824653661f61a6a1b578637d6e2a0d8e1c75b38e4ecd88",
+        "delivery_component_checks.json": "aabda131e1c941ae034098f31f95bbbc6d8407da930352fa4af02ebde9306919",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/acceptance.json": "dd7df307291dd4bc933bb2eba26bf5ee209dc00ef81db40e6078544bd6cbd3e1",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/proposal.json": "f80a72aea97274559bb8eebefea5afbc66b876147b276e8a46cde800b5c39a09",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/proposal.md": "1fce3db1520d911ff2fa7329b24d79e85e7a8c301ac2ac07a04176f329b6cbab",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/research_brief.md": "5971c323f7a1cf7c1595e70ec198171ac7f0b6827842afe0b350f9f65f7b8025",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/research_evidence.json": "3881406ed7532e4b8c6290cd7a6d4a5bb305df39e0621b741c1519bf1e395403",
+        "idea/deliveries/8a07f2472a704c0bb1ec7d08b9731bc2/e86389ef12cc47a68fa87b2f6119c959/summary.txt": "50dad162d0f44ec5bdfcddb6aba7ad2eff88a07b2a7965df6e0305710cc9da03",
+        "input/request.json": "3b22e0bfc71e41adc81ca974f523cc04c2525202cb4e19e6b71beefc92f8d464",
+        "manual_quality_review.json": "9041bab529a27912a5808683d848012606ba4de6d09bcc7398115b77d45578f8",
+        "summary.json": "e7200bb832051972086fe4131a1ae2e0951ffa8806da69b3e97cbede9d81e7f5"
+      }
+    },
+    {
+      "run_id": "idea_research_20260908T091734_4fb343",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 601.1132677919959,
+      "counts": {
+        "action_rounds": 32,
+        "model_requests": 30,
+        "model_responses": 30,
+        "observations": 32,
+        "protocol_repairs": 1,
+        "reflections": 0,
+        "sdk_attempts": 30,
+        "tool_dispatches": 32,
+        "validation_repairs": 7
+      },
+      "usage": {
+        "completion_tokens": 60039,
+        "prompt_tokens": 376834,
+        "total_tokens": 436873
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 9,
+        "unique_downloaded_contents": 6,
+        "unique_pdf_publications_with_visible_pages": 6,
+        "unique_publications_with_verified_extractions": 4,
+        "unique_retrieved_publications": 65
+      },
+      "source_commit": "cb2cc8a4afd412942b92ed6d925ab00b2856283a",
+      "source_tree": "1b31ec33f3f3c5581658631c963fbf1238d5ed4a",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T091734_4fb343",
+      "separate_review_records": {
+        "manual_research_review.json": {
+          "reviewer": "Codex 独立离线复核（不是用户评审或人工科研同行评审）",
+          "review_kind": "independent_offline_research_report_fact_check",
+          "scope": "两份真实研究报告及其归档阅读收据中的可见页；未评审或接受主方案。",
+          "accepted_proposal": false,
+          "scientific_validated": false,
+          "runtime_review_replaced": false,
+          "runtime_status_note": "本轮因 review_evidence_unavailable 结束，未完成模型质量审查或方案交付；本文件仅保存已完成的离线报告事实复核。",
+          "reports": {
+            "siren_sasnet": {
+              "path": "idea/research_delegations/b6f0aa20c0634915a3babecf90ad0ae5/report.md",
+              "sha256": "bae3c33f248fff75a8aa6c7c77e4140d10f8203131c6040ad8c2e1f3ea965b8d"
+            },
+            "interpolation_rbf": {
+              "path": "idea/research_delegations/b8b8b0ae0d594baf9a8d1be15b35bf97/report.md",
+              "sha256": "dada642464b6cd2f38838ba4dda67d3517676756e17eab06dbe69f1d990479ad"
+            }
+          },
+          "confirmed_errors": [
+            {
+              "id": "siren_derivative_order",
+              "report": "siren_sasnet",
+              "insight_id": "i1",
+              "report_line": 37,
+              "reading_receipt": "idea_research/research/downloads/27b21485ad564e1085561ae47cab81b1.read.json",
+              "visible_page": 2,
+              "finding": "报告把原文的二阶导数误写成导数处处为零。",
+              "source_excerpt": "their second derivative is zero everywhere",
+              "correction": "ReLU网络在各线性区域内二阶导数为零；一阶导数并非处处为零，例如ReLU(x)在x>0处导数为1。折点处经典导数还需单独讨论。",
+              "impact": "这项误读不能用于否定ReLU的一阶梯度或训练能力，也不能作为选择正弦表示的正确机制论据。主方案是否继承该错误未作判断。"
+            },
+            {
+              "id": "siren_affine_parameter_count",
+              "report": "siren_sasnet",
+              "insight_id": "i1",
+              "report_line": 38,
+              "reading_receipt": "idea_research/research/downloads/27b21485ad564e1085561ae47cab81b1.read.json",
+              "visible_page": 4,
+              "finding": "报告称带偏置的2→n→n→1网络在n=14时约253参数并满足256上限，实际计数为267。",
+              "calculation": "输入层(2n+n) + 隐藏层(n²+n) + 输出层(n+1) = n²+5n+1；n=14为267，n=15为301，n=13为235。",
+              "correction": "报告最初展开式包含所有项，但示例代入时少了一组n；若保持所写三层仿射结构且权重/偏置均可训练，宽度14超预算，宽度13满足预算。",
+              "impact": "错误会把不可行的宽度14候选当作满足预算；不能用省略未声明的偏置补救原方案。主方案是否继承该错误未作判断。"
+            }
+          ],
+          "transfer_limits": [
+            {
+              "id": "p1_vs_bilinear",
+              "report": "interpolation_rbf",
+              "insight_id": "insight-1",
+              "report_lines": [
+                39,
+                45
+              ],
+              "reading_receipt": "idea_research/research/downloads/60ed1d1ccb394a4790a0770eaff42c77.read.json",
+              "visible_page": 4,
+              "supported": "原文定理4确实给出满足最小角等条件的三角形P1插值H1半范数误差界，常数依赖形状约束。",
+              "limit": "三角形P1不是矩形双线性。以单位正方形四角采样v(x,y)=xy、沿(0,0)到(1,1)切分为例，中心点双线性值为1/4，P1值为1/2。该H1界不能直接视为双线性LUT的L2/MSE保证，也不证明固定节点预算下非均匀布局必胜。",
+              "assessment": "报告limitations第43–45行已经说明核类型、范数及形状常数的差异，因此可保留为待论证动机；不能把transfer_idea中“视为两个三角形”理解为两种插值严格等价。"
+            },
+            {
+              "id": "sasnet_frequency_transfer",
+              "report": "siren_sasnet",
+              "insight_id": "i2",
+              "report_lines": [
+                50,
+                57
+              ],
+              "reading_receipt": "idea_research/research/downloads/e7363fb9870a4f24854f5012e2e0b14a.read.json",
+              "visible_pages": [
+                1,
+                2,
+                3
+              ],
+              "supported": "实际可见第1页支持SIREN频率初始化敏感性及过平滑/噪声描述，第2–3页支持冻结频率嵌入、hash-grid MLP空间掩码及逐层调制机制。",
+              "limit": "这些页面不证明256参数的2D标量问题上LUT比正弦网络更稳定或更优，也没有给出该预算的直接对照。",
+              "assessment": "报告明确把预算内LUT可能更稳健标成迁移推断，并列出未经直接比较的限制；目前不将其当作已证明优劣，也不另判为明确的原文事实错误。"
+            }
+          ],
+          "method_note": "只读取归档报告与已有可见页，进行文本比对和纯数学计数；未调用模型、研究服务或执行实验。"
+        },
+        "review_context_component_check.json": {
+          "component_only": true,
+          "manifest": {
+            "budget": 96000,
+            "compressed_history": [],
+            "estimated_upper_bound_tokens": 78346,
+            "estimator": "utf8_byte_upper_bound",
+            "omitted_history": [],
+            "preserved_review_history": [
+              1,
+              2
+            ],
+            "prior_review_issues_visible": false,
+            "reviewing": true,
+            "validation_issues_visible": false,
+            "visible_sha256": "796f1e0e8aa23457106fc50cbd61df952b4e2f0d4d4638ec9f354f51bb32d765"
+          },
+          "missing_evidence": [],
+          "model_called": false,
+          "note": "Actual failed history and exact complete task replayed through the packer; no model review or candidate acceptance performed.",
+          "original_run_status_unchanged": "review_evidence_unavailable"
+        }
+      },
+      "raw_file_sha256": {
+        "agent_traces/idea/cac15032250f497cac4334c353f9166e/checkpoint.json": "479cdc6a51931d70d5c6ef1833a994faec7bcb9dd539e2c04a148341f8d5732a",
+        "agent_traces/idea/cac15032250f497cac4334c353f9166e/events.jsonl": "61007af4c4ad0a420b07c5c1b087bce1c7de59bd0158c82e524668d212af9298",
+        "agent_traces/idea_research/126294a0d9494779983de80351192c4d/checkpoint.json": "958aadccc2029a7e224a25b142b4de995e7e3be170a23fa06af9b18dca217dc9",
+        "agent_traces/idea_research/126294a0d9494779983de80351192c4d/events.jsonl": "d6c684adbf17440eaa05b951e59d2764c74ad206cda4d246c9c9f1824b63274a",
+        "agent_traces/idea_research/b6f0aa20c0634915a3babecf90ad0ae5/checkpoint.json": "a5466b1c7cef1d75efa17cf5f18d5a3cf829dd51079f1d314b59afa43f6a7221",
+        "agent_traces/idea_research/b6f0aa20c0634915a3babecf90ad0ae5/events.jsonl": "7601bb03bf8f07f4b7b79f11ec310d2c15a15242b01e15a3a10a6af7f4b35024",
+        "agent_traces/idea_research/b8b8b0ae0d594baf9a8d1be15b35bf97/checkpoint.json": "5b4c0349bc0033a5fb94a29c182d4f8854431fa1b53e88150d42c13ae9f7db52",
+        "agent_traces/idea_research/b8b8b0ae0d594baf9a8d1be15b35bf97/events.jsonl": "3f00dbd2a35d7535883a3f8ab60d4a596c45174c8ff4aeab048883fd6aafa671",
+        "all_traces_audit.json": "b88e889f5eee857aacb610830b6207ca1ff97dce4d9a5efb1f2cfcf0c5cf7c44",
+        "input/request.json": "bf5f4c2e5aa8e85bb193a15b496baf3281a19259c6c73ef93c7f3076a2dd5775",
+        "manual_research_review.json": "4abc97f2fc68a4d54313cbdedc20ea078150d9ac62cd01cb3d337c5dd4235d6f",
+        "review_context_component_check.json": "26e53b4bfb7383f37743e3036aebfa322ea435cada28f279e074b7c752db5998",
+        "summary.json": "b728aa343b8c0d5dc8fc792689faebb16dd7d454a82bd29b4d47e40288780d03"
+      }
+    },
+    {
+      "run_id": "idea_research_20260908T093644_2ddad7",
+      "status": "failed",
+      "schema_valid": false,
+      "material_ready": false,
+      "model_review_passed": false,
+      "scientific_validated": false,
+      "simulation_executed": false,
+      "development_bypass_bridge": true,
+      "downstream_delivered": false,
+      "duration_seconds": 728.4651507919989,
+      "counts": {
+        "action_rounds": 26,
+        "model_requests": 29,
+        "model_responses": 29,
+        "observations": 23,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 29,
+        "tool_dispatches": 23,
+        "validation_repairs": 8
+      },
+      "usage": {
+        "completion_tokens": 88761,
+        "prompt_tokens": 368810,
+        "total_tokens": 457571
+      },
+      "trace_consistent": true,
+      "usage_complete": true,
+      "research_counts": {
+        "read_windows": 2,
+        "unique_downloaded_contents": 2,
+        "unique_pdf_publications_with_visible_pages": 2,
+        "unique_publications_with_verified_extractions": 2,
+        "unique_retrieved_publications": 26
+      },
+      "source_commit": "5c2b1e7c061827078506e0d2c2bc9878e7bdb45c",
+      "source_tree": "9d800076f7400aa945981bac811d718be942135b",
+      "source_dirty": false,
+      "local_raw_directory": "runs/research_quality_20260908/idea_research_20260908T093644_2ddad7",
+      "separate_review_records": {},
+      "raw_file_sha256": {
+        "agent_traces/idea/f2a4991b92d04ce190fc165ccf81a42c/checkpoint.json": "00cd74cbf447c17f330406856ca2033f9a675eb1a199d1215d421a6705ebeec6",
+        "agent_traces/idea/f2a4991b92d04ce190fc165ccf81a42c/events.jsonl": "9a6006fac78d84f1ea00fdd10874e3248d494cc7a50283a66790f5c7f22e4b7f",
+        "agent_traces/idea_research/51a4949e95a9404895aecaa8be73ada5/checkpoint.json": "161a3c78e0147594232b02064f747faf900f8b7ec3bf0710a83588f20c505c6c",
+        "agent_traces/idea_research/51a4949e95a9404895aecaa8be73ada5/events.jsonl": "ddcae4a00af05323d7a2e83dac2383d907de80d7fd97dccc4300ddc961e55828",
+        "agent_traces/idea_research/6c800d6412684e1eba9f286a5ebee0ae/checkpoint.json": "9831a65af3cdcbed67e3fbe796fe32e3a4568653b2a8d19a6bf4b8f544d425d9",
+        "agent_traces/idea_research/6c800d6412684e1eba9f286a5ebee0ae/events.jsonl": "50fd5b8d070fe7ba5687fba68302906b8c6cde850d1c3d87e23b2537e5455376",
+        "all_traces_audit.json": "7ad2d7277da171d87e5bcd0c32afa0a30127f53b2a9bf2412dfdab25f9105cb2",
+        "input/request.json": "f33a5d28903e3222705f095da9ab1af42c62ffc8d4710ff393157411c9e9ba81",
+        "summary.json": "f8007df6e89cda1aadd2b332c4265f0ec8aa7a4fa35a7cf7b704d3c5c47db15a"
+      }
+    }
+  ]
+}

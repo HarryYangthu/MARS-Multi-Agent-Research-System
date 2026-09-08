@@ -13,22 +13,22 @@ question: >-
 model:
   provider: deepseek
   name: deepseek-v4-flash
-  max_tokens: 16384
+  max_tokens: 32768
   temperature: 0.1
   thinking: false
   reasoning_effort: null
-  timeout_seconds: 180
+  timeout_seconds: 360
   max_retries: 0
 loop:
   mode: reflection
   reflection_reasoning_effort: high
   reflection_thinking_enabled: true
   trace: full
-  max_model_calls: 10
+  max_model_calls: 14
   max_tool_steps: 5
-  max_protocol_repairs: 2
-  max_validation_repairs: 3
-  max_reflections: 2
+  max_protocol_repairs: 4
+  max_validation_repairs: 4
+  max_reflections: 3
   input_token_budget: 96000
   observation_chars: 16000
   protocol: native_tools

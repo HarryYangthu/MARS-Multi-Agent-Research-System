@@ -82,7 +82,8 @@ class IdeaAgent(BaseAgent):
             schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
             component = {"type": "object", "required": ["name", "formula", "dtype", "shape"],
                          "properties": {"name": {"type": "string", "minLength": 1},
-                                        "formula": {"type": "string", "minLength": 1},
+                                        "formula": {"type": "string", "minLength": 1,
+                                                    "description": "Arithmetic expression for the real-scalar count, not tensor notation or prose. No equals sign; for example n*m."},
                                         "dtype": {"enum": ["real", "complex"]},
                                         "shape": {"type": "array", "maxItems": 8,
                                                   "items": {"anyOf": [{"type": "integer", "minimum": 1},
@@ -94,7 +95,8 @@ class IdeaAgent(BaseAgent):
                               "description": "Numeric values only. Put variable explanations in a different field."},
             }
             for prefix in ("baseline", "candidate"):
-                budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1}
+                budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1,
+                    "description": "Executable arithmetic expression only; no equals sign or appended result. Use variables declared in variables."}
                 budget_properties[prefix + "_parameters"] = {"type": "integer", "minimum": 1}
                 budget_properties[prefix + "_components"] = components
             budget_properties["evaluation_cases"] = {
@@ -133,6 +135,9 @@ class IdeaAgent(BaseAgent):
             "missing prerequisites, not hypothetical bureaucracy. Do not invent paths or data. "
             "Before important actions, give a short visible Chinese explanation of the information gap "
             "you are resolving. After finding enough relevant method evidence, draft rather than repeating searches. "
+            "Keep assistant commentary brief; spend the output allowance on one complete native submission. "
+            "Conciseness must not remove equations, concrete data definitions, sample counts, stopping rules "
+            "or the statistical decision procedure. A placeholder such as 'until convergence' is incomplete. "
             "Define baseline and candidate equations, input/output and phase semantics, all trainable/fixed "
             "quantities, initialization, boundary handling, training objective and limitations. "
             "All quantities must have a single definition and the equations must be implementable. "
