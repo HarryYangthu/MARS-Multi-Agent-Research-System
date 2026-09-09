@@ -9,7 +9,9 @@ from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
-from app.agents.idea.delivery import delivery_errors, progress_sink, write_delivery
+from app.agents.idea.delivery import (
+    STRUCTURED_REFERENCE_GUIDANCE, delivery_errors, progress_sink, write_delivery,
+)
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.protocol import protocol_schema
 from app.agents.idea.research_links import research_link_errors, research_links_schema
@@ -88,7 +90,8 @@ class IdeaAgent(BaseAgent):
                                "related_literature", "testable_predictions", "risk_register"]
         for field in ("method_spec", "decision_rule"):
             schema["properties"][field] = {"type": "object", "minProperties": 1,
-                "description": "Canonical complete structured definition; never put this only in body."}
+                "description": "Canonical complete structured definition; never put this only in body. "
+                               + STRUCTURED_REFERENCE_GUIDANCE}
         requirements = request.extra.get("idea_requirements", {})
         if self.requires_research_dossier(request):
             schema["required"].append("research_links")
@@ -154,6 +157,7 @@ class IdeaAgent(BaseAgent):
             "never present a hypothesis as a measured gain. The body must equal human_summary exactly; "
             "no headings, duplicated equations or extra sections in body. "
             "Put the full method in method_spec and refer to its fields through handoff.changes[].spec_ref. "
+            + STRUCTURED_REFERENCE_GUIDANCE + " "
             "handoff must follow idea.handoff.v1, target experiment, match the task scope, define next_step, "
             "changes, verification_requirements and required_context. Use blocks_execution for actual "
             "missing prerequisites, not hypothetical bureaucracy. Do not invent paths or data. "
@@ -176,6 +180,9 @@ class IdeaAgent(BaseAgent):
             "For automatic differentiation, define the canonical forward operation and scalar loss once, "
             "then explain gradient connectivity; redundant hand-expanded derivatives are unnecessary. If "
             "you supply an explicit derivative, verify its sign and summation endpoints against that loss. "
+            "Before claiming an initialization prevents learning, evaluate the loss-to-parameter path at "
+            "that initialization: zero output or zero coefficients alone do not imply zero gradients. "
+            "Distinguish linear readout coefficients from multiplicatively coupled parameter blocks. "
             "For constrained updates, define a single feasible set and an explicit parameterization or "
             "well-defined joint projection onto it. Sorting and clipping separately need not preserve "
             "minimum spacing and endpoints together. State behavior at ties and the final domain endpoint. "
@@ -278,6 +285,11 @@ class IdeaAgent(BaseAgent):
                 "a resolving method_spec_ref under /method_spec/, and adaptation_reason explaining how "
                 "that paper insight informs your chosen method and under what conditions. Cite its original "
                 "title and URL in related_literature. Do not copy source claims into universal guarantees. "
+                "Trace the source's specific operations to the proposed method: state what is retained, "
+                "what is changed and why the changed structure is a plausible hypothesis. Generic properties "
+                "such as differentiability or combining low-dimensional components alone do not establish "
+                "a paper-specific link. A cited background method can inform a concrete choice without "
+                "being the source's original contribution; do not mislabel either its origin or its use. "
                 "The researcher supplies evidence and possible transfers; you remain responsible for one "
                 "complete implementable proposal. Rejected candidates can be revised in this same loop. "
                 "Do not request new research simply to repeat an already answered question."
@@ -425,6 +437,10 @@ class IdeaAgent(BaseAgent):
             "For delegated research, check the original visible page excerpts against each paper_finding "
             "and the proposal's research_links. Exact quote matching proves provenance only, not that the "
             "paper supports the interpretation. Check transfer assumptions and explicitly untested claims. "
+            "Follow the actual operations from the extracted insight to the method. New transfers may "
+            "change structure, but must explain the bridge and resulting assumptions; generic trainability "
+            "or composition alone is insufficient. Do not require a novel hypothesis to have already been "
+            "experimentally proven, or mistake a correctly attributed background method for a new finding. "
             "Evaluate research_assessment against the original task, verified reports and method_spec: "
             "do the selection principles resolve concrete task gaps, are adopted papers genuinely relevant "
             "to the stated design decisions, and do the extracted findings support the proposed transfers "
@@ -455,6 +471,9 @@ class IdeaAgent(BaseAgent):
             "Check any explicit derivative against that canonical loss, including sign and boundary indices; "
             "automatic differentiation needs an executable loss, not a duplicate hand-written gradient. "
             "Validate any gradient or error-order assertion and list assumptions. "
+            "For initialization claims evaluate the Jacobian and loss gradient at the declared values; "
+            "a zero prediction or zero linear coefficient does not itself block learning. Treat coupled "
+            "multiplicative factors separately from a linear readout. "
             "Trace the loss-to-parameter path separately for every ablation. Distinguish hard selection "
             "indices from gathered or sorted values: a discontinuous index does not make the gradient of "
             "sorted values zero away from ties. Identify the exact operation that blocks a claimed update, "

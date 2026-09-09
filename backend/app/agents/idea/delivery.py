@@ -17,6 +17,16 @@ from app.harness.schema.frontmatter_parser import FrontmatterError, parse
 from app.harness.schema.validator import validate_document
 
 
+STRUCTURED_REFERENCE_GUIDANCE = (
+    "JSON Pointer references resolve from the metadata root through nested object fields. "
+    'Structure-only example: {"method_spec":{"section":{"value":1}}} makes '
+    '"/method_spec/section/value" resolve to 1. Store "section" and "value" as nested keys, '
+    "not the full reference path as a literal key. Array indices start at /0; escape a literal "
+    "~ in a key as ~0 and a literal / as ~1 in its reference token. This fragment only "
+    "illustrates structure; supply complete task-specific definitions."
+)
+
+
 def resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
     if not pointer.startswith("/"):
         raise ValueError("reference must be an absolute JSON pointer")
@@ -30,7 +40,9 @@ def resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
                 raise ValueError("array indices must be canonical nonnegative integers")
             value = value[int(key)] if isinstance(value, list) else value[key]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise ValueError(f"reference does not resolve: {pointer}") from exc
+            hint = ("; the full path is a literal object key here, not nested fields"
+                    if isinstance(value, dict) and pointer in value else "")
+            raise ValueError(f"reference does not resolve: {pointer}{hint}") from exc
     if value is None or value == "" or value == {} or value == []:
         raise ValueError(f"reference is empty: {pointer}")
     return value
