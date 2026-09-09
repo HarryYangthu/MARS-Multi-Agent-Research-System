@@ -1,0 +1,694 @@
+{
+  "record_kind": "idea_api_runtime_verification",
+  "schema": "idea.api_evidence_export.v1",
+  "exported_at": "2026-09-09T04:28:35.652621+00:00",
+  "date_of_execution_utc": "2026-09-09",
+  "global_attempt_number": 18,
+  "api_attempt_number": 3,
+  "evidence_scope": "Real API create/start through Bridge, v3 research acceptance with independently identified evidence-scope defects, unaccepted main candidate, and owned-run cancellation at the recorded driver deadline.",
+  "run_id": "2026-09-09T0323_api_idea_20260909t032310_496a95e7",
+  "local_raw_directory": "runs/2026-09-09T0323_api_idea_20260909t032310_496a95e7",
+  "driver_directory": "runs/verification/api_idea_20260909T032310_496a95e7",
+  "raw_archives_in_repository": false,
+  "raw_archive_note": "Only selected nonsecret summaries, repository-relative paths and complete file hashes are exported; no PDF, complete model messages, source excerpts, credentials or environment values are copied.",
+  "preserved_exports": {
+    "api_verification_20260909.json": {
+      "file_sha256": "e27f0d9dde43dff6b3fd03ec7ef2f5a7ded823454fe9dfe87be7c8c16c50f49a",
+      "byte_identical": true
+    },
+    "api_verification_20260909_attempt02.json": {
+      "file_sha256": "6c97230a7c2eec1b2a2e0d9a00aad6a60397857c14badbbee6332646fe7a174c",
+      "byte_identical": true
+    },
+    "review_evidence_scope_v4_20260909.json": {
+      "file_sha256": "a1d3c7df565854180e79f414a47623d7d0adabe972fc7b42e90db63814946db6",
+      "byte_identical": true
+    },
+    "verification.json": {
+      "file_sha256": "07a4852693056f5e6acdca76c13bddea3edf60d86115dd9ab43499a34c0cc0d0",
+      "byte_identical": true
+    },
+    "verification_errata_20260909.json": {
+      "file_sha256": "4fb1d2bb7e3f9376ca5458faa1c330217fb3f1d783924118dc776b379c105029",
+      "byte_identical": true
+    }
+  },
+  "preserved_readme_prefix": {
+    "bytes": 50090,
+    "sha256": "486634072fc2dc7a01fcc3517cc9ebdaad85659237833b5b28c54b704b6f17ed",
+    "byte_identical": true
+  },
+  "source": {
+    "commit": "a157e30e1f81112394894f5a3c873a775d7be41d",
+    "tree": "785980d1993f23bca798965fbda1755d86fe86df",
+    "dirty_paths": ""
+  },
+  "source_after": {
+    "commit": "a157e30e1f81112394894f5a3c873a775d7be41d",
+    "dirty_paths": ""
+  },
+  "entrypoint": {
+    "kind": "api",
+    "development_bypass_bridge": false,
+    "standalone": true,
+    "auto_approve": false,
+    "seed_artifact_supplied": false,
+    "scope": "method_proposal",
+    "mode": "fast",
+    "api_calls": [
+      {
+        "method": "POST",
+        "path": "/api/runs",
+        "http_status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0323_api_idea_20260909t032310_496a95e7/start",
+        "http_status": 202
+      },
+      {
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0323_api_idea_20260909t032310_496a95e7/stop",
+        "http_status": 202
+      }
+    ],
+    "claim_boundary": "Create/start and cleanup success do not demonstrate accepted content or completed delivery."
+  },
+  "profile": {
+    "id": "experimental_research_pro_per_insight_v2",
+    "status": "experimental",
+    "validated": false,
+    "configuration_sha256": "182d2baa2bcaddf004bd592616ba6644cc035b7465b59083022041a89f00e8a1",
+    "snapshot_sha256": "942f16f9cdd91749733a243468c5237c429bfd5d59b4da7172bc7685372484fe",
+    "lead_model": "deepseek-v4-pro",
+    "lead_reasoning_effort": "low",
+    "research_author_and_normal_reviews_effort": "high",
+    "thinking_enabled": true,
+    "protocol": "json_actions",
+    "research_review_mode": "per_insight_then_whole",
+    "research_review_contract_id": "idea.research_per_insight_then_whole.v3",
+    "author_empty_completion_repair_enabled": true,
+    "model_budgets": {
+      "lead": 36,
+      "child": 16
+    },
+    "tool_budgets": {
+      "lead": 5,
+      "child": 10
+    },
+    "max_delegations": 3,
+    "product_tools_retained": true,
+    "isolated_initial_memory": true,
+    "comparison_boundary": "Experimental v2 enabled bounded author empty-completion repair and retained product context/tools. Source guidance and behavior differ from earlier attempts; this is not a single-variable model comparison."
+  },
+  "status": "timeout",
+  "started_at": "2026-09-09T03:23:10.665584+00:00",
+  "finished_at": "2026-09-09T04:23:12.507847+00:00",
+  "duration_seconds": 3601.8305868339958,
+  "wall_seconds": 3601.8422689437866,
+  "driver_budget_seconds": 3600.0,
+  "driver_budget_provenance": "Explicitly recorded as 3600 in both the original preflight.json and result.json.",
+  "duration_note": "Elapsed monotonic duration includes polling and cleanup around the 3600-second driver budget; SDK read timeout is not a fixed total generation duration.",
+  "isolated_server_stopped": true,
+  "backend_exit_code": -15,
+  "persisted_run_status": "failed",
+  "persisted_main_checkpoint_status": "interrupted",
+  "owned_stop": {
+    "http_status": 202,
+    "response_status": "stopped",
+    "cleanup_confirmed": true,
+    "termination": {
+      "automatic_resume": false,
+      "cleanup_complete": true,
+      "finished_at": "2026-09-09T04:23:12.264110+00:00",
+      "interrupted_nodes": [
+        "idea"
+      ],
+      "reason": "user_request",
+      "requested_at": "2026-09-09T04:23:12.118056+00:00",
+      "scope": "owned_async_tasks",
+      "type": "cancelled"
+    },
+    "actual_trigger": "verification_driver_deadline",
+    "reason_note": "The endpoint records user_request; the actual caller was the deadline-driven verification driver, not a human stop action.",
+    "after_stop_get_http_status": 200,
+    "after_stop_get_status": "failed",
+    "claim_boundary": "Cleanup covers owned asyncio tasks only. Remote inference and final billing are unknown; the incomplete model request was not replayed."
+  },
+  "counts": {
+    "action_rounds": 8,
+    "model_requests": 24,
+    "model_responses": 23,
+    "observations": 8,
+    "protocol_repairs": 2,
+    "reflections": 3,
+    "sdk_attempts": 24,
+    "tool_dispatches": 8,
+    "validation_repairs": 4
+  },
+  "usage": {
+    "prompt_tokens": 409445,
+    "completion_tokens": 189635,
+    "total_tokens": 599080
+  },
+  "usage_complete": false,
+  "usage_is_known_lower_bound": true,
+  "usage_note": "All 23 completed responses are counted. Main reflect request 10 has no response, so 599080 is a known lower bound rather than a final bill.",
+  "checkpoint_accounting": [
+    {
+      "invocation": "242c1b815aad4724a9c810cfe564b89e",
+      "agent": "idea",
+      "checkpoint_ref": "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/checkpoint.json",
+      "checkpoint_sha256": "d17b9eac8a22ccd1d2ac119c0bf6b8fca2499f739dcfe5432b1a6b486f80ddac",
+      "status": "interrupted",
+      "pending": "model",
+      "counts": {
+        "action_rounds": 1,
+        "model_requests": 10,
+        "model_responses": 9,
+        "observations": 1,
+        "protocol_repairs": 2,
+        "reflections": 1,
+        "sdk_attempts": 10,
+        "tool_dispatches": 1,
+        "validation_repairs": 3
+      },
+      "usage": {
+        "completion_tokens": 116983,
+        "prompt_tokens": 161410,
+        "total_tokens": 278393
+      },
+      "usage_complete": false,
+      "reflection_accepted": false,
+      "candidate_utf8_sha256": "29709bb214d289d0b85230b23aacef95a1fd204781b486bddef69b9914bc286c"
+    },
+    {
+      "invocation": "3b99d035bf444966be5eb45cdda8a852",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/checkpoint.json",
+      "checkpoint_sha256": "961cc07a145bedea4079f95f4336f959b00109bcb4ff52361634614071e6ebf4",
+      "status": "passed",
+      "pending": null,
+      "counts": {
+        "action_rounds": 7,
+        "model_requests": 14,
+        "model_responses": 14,
+        "observations": 7,
+        "protocol_repairs": 0,
+        "reflections": 2,
+        "sdk_attempts": 14,
+        "tool_dispatches": 7,
+        "validation_repairs": 1
+      },
+      "usage": {
+        "completion_tokens": 72652,
+        "prompt_tokens": 248035,
+        "total_tokens": 320687
+      },
+      "usage_complete": true,
+      "reflection_accepted": true,
+      "candidate_utf8_sha256": "442f3547c56aeabc8a0aa1f4e09216f288a338bf1e00cdcbb54568566836c1e0"
+    }
+  ],
+  "research": {
+    "model_accepted_report_count": 1,
+    "used_source_count": 2,
+    "deferred_source_count": 1,
+    "insight_count": 2,
+    "inventory_counts": {
+      "cache_reuses": 2,
+      "network_downloads": 2,
+      "read_windows": 4,
+      "unique_download_contents": 2,
+      "unique_pdf_contents": 2,
+      "unique_search_sources": 8
+    },
+    "source_papers": [
+      {
+        "source_id": "arxiv:2201.05989:latest",
+        "title": "Instant neural graphics primitives with a multiresolution hash encoding",
+        "decision": "use"
+      },
+      {
+        "source_id": "arxiv:2209.01749:latest",
+        "title": "4D LUT: Learnable Context-Aware 4D Lookup Table for Image Enhancement",
+        "decision": "use"
+      },
+      {
+        "source_id": "arxiv:2111.14788:latest",
+        "title": "Comparing machine learning and interpolation methods for loop-level calculations",
+        "decision": "defer"
+      }
+    ],
+    "selection_principles_summary": [
+      "Read methods that specify trainable LUT/grid parameters, formulas and training.",
+      "Compare source assumptions with the two-dimensional scalar and real-parameter constraints.",
+      "Keep the source result distinct from an untested transfer and from multi-component causal attribution."
+    ],
+    "extracted_ideas_summary": [
+      "Multi-resolution hash-grid features and interpolation motivate a small scalar hash-grid candidate; removing the MLP and shrinking the tables remain new hypotheses.",
+      "Learnable basis-LUT fusion and interpolation motivate a second candidate; image-conditioned encoders and color-specific regularizers do not transfer automatically."
+    ],
+    "source_read_windows": [
+      {
+        "resource_key": "arxiv:2201.05989:latest",
+        "url": "http://arxiv.org/abs/2201.05989",
+        "sha256": "8e1950c40dbee009b37349c77a8858fbfb6a8e9dbf135b5ce2c986b7dac76790",
+        "pdf_pages": 15,
+        "extracted_pages": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "full_document_read": false,
+        "reused": false,
+        "network_download_performed": true,
+        "read_receipt": "idea_research/research/downloads/2ebf8cd87d794e308967f8025e278db0.read.json",
+        "read_receipt_sha256": "532a2d04ed46a5b42604d1932f1593a2dc809e06ec8a47eb953d4ec9f4cc2d5e",
+        "visible_pages": [
+          {
+            "page": 1,
+            "full_page_text_chars": 3546,
+            "visible_text_chars": 3546,
+            "visible_text_sha256": "d8a49526918f235b93f6fb6e7244b9cd2a9fcd858e6d1f4ec6f1b4e107f110fd",
+            "truncated": false
+          },
+          {
+            "page": 2,
+            "full_page_text_chars": 6907,
+            "visible_text_chars": 6907,
+            "visible_text_sha256": "1d4e1aa0134cfdbe289ae3c8428e019c5c6ebd7cd6668dfe888eae67136e2c8b",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "full_page_text_chars": 6006,
+            "visible_text_chars": 5547,
+            "visible_text_sha256": "ea8b16ed8668537298b8b5f74733124cbc87309181a7da1da55b4f0ab9791e85",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "resource_key": "arxiv:2201.05989:latest",
+        "url": "http://arxiv.org/abs/2201.05989",
+        "sha256": "8e1950c40dbee009b37349c77a8858fbfb6a8e9dbf135b5ce2c986b7dac76790",
+        "pdf_pages": 15,
+        "extracted_pages": [
+          4,
+          5,
+          6
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "read_receipt": "idea_research/research/downloads/73ab1fbafced487d9ab905ef0287193e.read.json",
+        "read_receipt_sha256": "41a5c5cfa24ae8a6c7691cba34a532b7b0bfe1750efad4aad247ae0bae806395",
+        "visible_pages": [
+          {
+            "page": 4,
+            "full_page_text_chars": 4735,
+            "visible_text_chars": 4735,
+            "visible_text_sha256": "fd0f07739dc75f57e6b4817fcddc16fb975e9f9852df50450db7a0c4232454b0",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "full_page_text_chars": 5291,
+            "visible_text_chars": 5291,
+            "visible_text_sha256": "ecb0a94d4537c730bad1d63ef54ac21fb02c0b01889e68ae3a3e5e42779b987b",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "full_page_text_chars": 7025,
+            "visible_text_chars": 5974,
+            "visible_text_sha256": "093629f54fd38368c55696ee6cf64f20dc38513e6d19ce911bbf8344b645293e",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "resource_key": "arxiv:2209.01749:latest",
+        "url": "http://arxiv.org/abs/2209.01749",
+        "sha256": "d8d6b1602d098ba50eed5ca583e1db54105bccf86c89416dc462e1c2da632af8",
+        "pdf_pages": 13,
+        "extracted_pages": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "full_document_read": false,
+        "reused": false,
+        "network_download_performed": true,
+        "read_receipt": "idea_research/research/downloads/e8d5bba3e0a840d0aee192458fac66d4.read.json",
+        "read_receipt_sha256": "7636d16a458912763879408cacb7f6dda9a9ca40c9ee901ee2b6526922693303",
+        "visible_pages": [
+          {
+            "page": 1,
+            "full_page_text_chars": 5274,
+            "visible_text_chars": 5274,
+            "visible_text_sha256": "456a40554800960141dab524431e84a0cb6ea56434841312885fb9a3ff3fcb22",
+            "truncated": false
+          },
+          {
+            "page": 2,
+            "full_page_text_chars": 6350,
+            "visible_text_chars": 6350,
+            "visible_text_sha256": "64462cb5f914543b4ba0cf3c68b58666920233f4144ace54d35e0f6b51a05772",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "full_page_text_chars": 6476,
+            "visible_text_chars": 4376,
+            "visible_text_sha256": "f782f0837928b7ccc9e4aeca70082495f0b74c133609972acd9ac7a5f14346a1",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "resource_key": "arxiv:2209.01749:latest",
+        "url": "http://arxiv.org/abs/2209.01749",
+        "sha256": "d8d6b1602d098ba50eed5ca583e1db54105bccf86c89416dc462e1c2da632af8",
+        "pdf_pages": 13,
+        "extracted_pages": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "read_receipt": "idea_research/research/downloads/cfabc7122f684900a664667ed48e4568.read.json",
+        "read_receipt_sha256": "4ea26435fd0cfb83130e22062e9f128365e4a63852493a559433817c0fd89eeb",
+        "visible_pages": [
+          {
+            "page": 4,
+            "full_page_text_chars": 4373,
+            "visible_text_chars": 4373,
+            "visible_text_sha256": "103c8315613e84e8cab6c92c7b1a67ae868e2e49d686900f2df78ba77e66b529",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "full_page_text_chars": 6028,
+            "visible_text_chars": 6028,
+            "visible_text_sha256": "f45fd9446d6f7992928f37f9b6d40a73ab9ebc005d40f54f6333c18feb17d16b",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "full_page_text_chars": 4985,
+            "visible_text_chars": 4985,
+            "visible_text_sha256": "3eac03fe224edea4372b17b515c13074ca481748c56b802802b2901d7abfaca1",
+            "truncated": false
+          },
+          {
+            "page": 7,
+            "full_page_text_chars": 5397,
+            "visible_text_chars": 614,
+            "visible_text_sha256": "3d7e5218b5ecbd7b32c1005b9bfbe42fe9f8582c74c5c5ec2fa27ae0eccf4747",
+            "truncated": true
+          }
+        ]
+      }
+    ],
+    "model_review_passed": true,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "binding": {
+      "delegation_id": "3b99d035bf444966be5eb45cdda8a852",
+      "report_ref": "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/report.md",
+      "report_sha256": "442f3547c56aeabc8a0aa1f4e09216f288a338bf1e00cdcbb54568566836c1e0",
+      "candidate_digest": "f269606ee1d50d6180de596fd88240d9683f2d778d5905dff2e892cf8483bec0",
+      "checkpoint_ref": "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/checkpoint.json",
+      "checkpoint_sha256": "961cc07a145bedea4079f95f4336f959b00109bcb4ff52361634614071e6ebf4",
+      "manifest_ref": "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/manifest.json",
+      "manifest_sha256": "89930c30c677d36ab0a99ec67b7f265b125092ccfb88c566807b851ea4adc15d",
+      "review_contract_id": "idea.research_per_insight_then_whole.v3",
+      "review_plan_sha256": "8fa1d049808d6177d5580a7049333881d8c4124d1b54f4218c9def242c2fadda"
+    },
+    "final_review_units": [
+      {
+        "unit_id": "I1",
+        "request": 12,
+        "accept": true
+      },
+      {
+        "unit_id": "I2",
+        "request": 13,
+        "accept": true
+      },
+      {
+        "unit_id": "__whole_report__",
+        "request": 14,
+        "accept": true
+      }
+    ],
+    "independent_review": {
+      "file_ref": "manual_research_review.json",
+      "file_sha256": "e49243b1f720ac3b1c12a3a364c8acfb2f594d8000b9f9a18f61ef9d8466b28b",
+      "status": "requires_source_scope_correction",
+      "independent_quality_passed": false,
+      "review_type": "Codex independent offline review; no model/tool/training execution and no runtime feedback",
+      "issues": [
+        {
+          "id": "R1",
+          "severity": "requires_correction",
+          "category": "source_scope_overclaim",
+          "location": "/insights/I2/limitations/1",
+          "finding": "The report states that the paper does not provide a particular parameter-matched mechanism comparison. The actual reading stops at page7 shortly after the Experimental Settings heading; page2 explicitly announces an ablation study in sectionIV and component/parameter discussion in sectionV. These excerpts neither establish that the specific comparison exists nor establish that the whole paper lacks it.",
+          "impact": "A negative claim about the whole paper is stronger than the available evidence and is subsequently inherited as a selection/transfer assumption by the main candidate. This review does not assert that the missing comparison actually exists."
+        }
+      ],
+      "core_method_findings_supported": true,
+      "scope_notes": [
+        "The actual visible 4D LUT text ends at page 7 near the start of Experimental Settings; absent-from-paper claims are not established by these windows.",
+        "The original image-conditioned model and the proposed feasible simplified basis fusion have different costs and assumptions; the summary should distinguish them.",
+        "The corrected I1 report calls T*L*F an upper bound rather than an actual experimental total. The earlier reviewer upper-bound objection is not treated as proof of the original reported quantity."
+      ]
+    }
+  },
+  "main_proposal": {
+    "candidate_scope": "candidate_only_unaccepted",
+    "model_review_passed": false,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "candidate_binding": {
+      "checkpoint_ref": "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/checkpoint.json",
+      "checkpoint_sha256": "d17b9eac8a22ccd1d2ac119c0bf6b8fca2499f739dcfe5432b1a6b486f80ddac",
+      "candidate_field": "/candidate",
+      "candidate_chars": 26674,
+      "candidate_utf8_sha256": "29709bb214d289d0b85230b23aacef95a1fd204781b486bddef69b9914bc286c",
+      "candidate_digest": "e82939fe38849f836b115002bed21bf978b24e7a00961c0fe15bf63a06af5b3f",
+      "candidate_model_request": 9,
+      "candidate_response_event_seq": 55,
+      "last_validation_event_seq": 56,
+      "last_validation_passed": true,
+      "reviewed_candidate_sha": "6fc2fcc090d13e906a9632eadaee79347b478730086e70a3882085044c55b656",
+      "reflection_accepted": false,
+      "last_completed_review_request": 8,
+      "last_completed_review_event_seq": 50,
+      "last_inflight_request": 10,
+      "last_inflight_phase": "reflect",
+      "final_proposal_file_exists": false
+    },
+    "resolved_history": [
+      "Request 5 corrected the dataset reference and alternative tensor-shape errors from request 4.",
+      "Requests 4-6 were rejected for an exact duplicate primary ledger; the old host used field presence rather than unchanged-ledger identity. Request 7 removed the redundant fields and passed structure checks.",
+      "Request 8 reviewer rejected the redundant case variable T=62 differing from the method constant T=253. The old formula/components already used literal 253 and shape [253], without referencing T; both T assignments passed parameter arithmetic with 253 parameters. Independent review found no actual parameter miscount here. Request 9 unified T=253 and referenced T in the formula, improving handoff consistency before passing structure checks."
+    ],
+    "independent_review": {
+      "file_ref": "manual_quality_review.json",
+      "file_sha256": "52479c69de2153da38bf191ac92d19273be398711ba5696e845d4fecc5e47006",
+      "status": "unaccepted_candidate_requires_source_scope_correction",
+      "independent_quality_passed": false,
+      "review_type": "Codex independent offline review; no model/tool/training execution and no runtime feedback",
+      "issues": [
+        {
+          "id": "Q1",
+          "severity": "requires_correction",
+          "category": "inherited_source_scope_overclaim",
+          "locations": [
+            "/research_assessment/source_decisions/1/transfer_assumptions/1",
+            "/alternatives/1/rejection_reason"
+          ],
+          "finding": "The main candidate inherits the report claim that the whole4D LUT paper lacks a fixed-total-parameter isolation experiment. The actual read windows do not cover the experiments. It may state that the supplied material does not establish the mechanism-specific benefit; it cannot claim the experiment is absent from the whole paper.",
+          "impact": "This affects the evidence and selection explanation, not the arithmetic or executability of the hash-LUT forward. It does not prove that the paper contains the proposed control or that the selected method cannot improve error."
+        }
+      ],
+      "core_forward_and_allocated_parameter_arithmetic_verified": true,
+      "pure_math_binding": {
+        "classification": "Codex offline exact arithmetic; no model, training, benchmark or PIMC simulation",
+        "candidate_utf8_sha256": "29709bb214d289d0b85230b23aacef95a1fd204781b486bddef69b9914bc286c",
+        "parameter_counts": {
+          "baseline": 256,
+          "candidate_allocated": 253,
+          "candidate_table_allocated": 248,
+          "candidate_reachable_table_coordinates": 126,
+          "candidate_never_reachable_table_coordinates": 122,
+          "fixed_weights_allocated": 248,
+          "single_level_allocated": 253,
+          "shared_table_allocated": 67,
+          "basis2_allocated": 131
+        },
+        "verifier_script_sha256": "1accef964602b93bb6ba0540a853292339f6ebd81578799863e56236e5bf2c06",
+        "result_utf8_sha256": "e870c6bde2a84e0060b646350ee1c233df8d18633d00c22d173a223bb401fe1e",
+        "complete_verifier_location": "manual_quality_review.json#/pure_mathematical_checks/verifier_source"
+      },
+      "definition_risks_not_empirical_failures": [
+        {
+          "id": "M1",
+          "category": "capacity_risk",
+          "finding": "Four 62-slot hash tables reach 8, 16, 40 and 62 slots over the full domain: 126 reachable and 122 unreachable table coordinates. Training points reach all reachable coordinates. The 253 allocated-variable count remains correct; 126 is not a proven function-space dimension or a training-failure verdict."
+        },
+        {
+          "id": "M2",
+          "category": "ablation_interpretation",
+          "finding": "Trainable level weights and bias can be absorbed into unrestricted table values, so the fixed-weight ablation has the same function class. The five extra parameter coordinates may change optimization but do not establish five independent function degrees of freedom."
+        },
+        {
+          "id": "M3",
+          "category": "rejected_alternative_interpretation",
+          "finding": "The 131-variable two-basis alternative folds to a single 64-coefficient 8x8 bilinear table. It was rejected as the main choice and makes no demonstrated function-class expansion. Its knots are not nested in the 16x16 grid, so no subspace relation is asserted."
+        },
+        {
+          "id": "M4",
+          "category": "boundary_wording",
+          "finding": "A boundary on one axis leaves interpolation along the other edge; both axes collapse to one vertex only at corners. The actual formulas are correct; this is a wording limitation."
+        },
+        {
+          "id": "M5",
+          "category": "experimental_scope",
+          "finding": "The proposed deterministic grid, single synthetic target and initialization seeds would support a limited comparison, not measured real-PIMC benefit or a general high-curvature mechanism claim. No experiment was executed."
+        }
+      ]
+    },
+    "claim_boundary": "Definition-level concerns are not observations of failed training or measured performance. No scientific experiment was run."
+  },
+  "delivery": {
+    "accepted_main_artifact": false,
+    "human_readable_and_structured_delivery": false,
+    "waiting_review_observed": false,
+    "pending_artifact_observed": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "scientific_validated": false,
+    "restart_tested": false,
+    "in_memory_review_session_persistence_claimed": false
+  },
+  "subsequent_fixes": {
+    "applied_to_this_run": false,
+    "scope_guidance": {
+      "commit": "bcf6ae4",
+      "review_contract": "v4",
+      "component_export": "review_evidence_scope_v4_20260909.json",
+      "claim_boundary": "One independent same-input I2 component rejected the unsupported absence claim; it was not fed back into run 18 or counted in its usage."
+    },
+    "exact_primary_ledger": {
+      "commit": "c57ec24",
+      "claim_boundary": "Pure archived arithmetic replay removes only the false ledger rejection; no result is backfilled into the frozen run."
+    },
+    "next_complete_run": {
+      "global_attempt_number": 19,
+      "source_commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+      "quality_acceptance_claimed": false,
+      "status_recorded": "started_separate_evaluation_results_not_in_this_export"
+    }
+  },
+  "manual_review_hashes": {
+    "manual_research_review.json": "e49243b1f720ac3b1c12a3a364c8acfb2f594d8000b9f9a18f61ef9d8466b28b",
+    "manual_quality_review.json": "52479c69de2153da38bf191ac92d19273be398711ba5696e845d4fecc5e47006"
+  },
+  "original_file_hashes": {
+    "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/checkpoint.json": "d17b9eac8a22ccd1d2ac119c0bf6b8fca2499f739dcfe5432b1a6b486f80ddac",
+    "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/events.jsonl": "6eb3d31feea3e214729e023234cb9980edf062e823ceae620d63641528696506",
+    "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/facts.json": "6aacbeab32a8f6ff7d4dfeb3fdd6c6d6db5635c1baec4bf39817723c2e6ada24",
+    "agent_traces/idea/242c1b815aad4724a9c810cfe564b89e/tools/0001.json": "f73fd977c7c192a66552a3f8f8ce83410a73fc3e2e4bf26bea41d22e4249095b",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/checkpoint.json": "961cc07a145bedea4079f95f4336f959b00109bcb4ff52361634614071e6ebf4",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/events.jsonl": "e37874c8b24569e348522ce1335589688d1c8aba5909cf68ba0d80389e686389",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/facts.json": "341c5bedd542cb4a09fa6c9c958b8fb6a024312576f04c8ccadf919909d98fee",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0001.json": "5dbaed169e6a87e8d9982fe6de701a38cf44ff69e0536464065a2da85b465d19",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0002.json": "c65269613256d8b03ced0cddbb2eb6bd81f9fdaf7e444fb7423a06e1450273e8",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0003.json": "a4396b005652899d65fadf53da4897e55e941ac58c60cfd9ed58d9da6cdad704",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0004.json": "184d554c257d4cc73c81d630d661ba0c5a90b4f33f2785907887f33d3af952a6",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0005.json": "c19f480bafedc5379b2f363732b58fa00e703621ad689399c70df76618f57cbd",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0006.json": "d161d5f0a8a749e379cc1ad1b171acb697cae9f2334b3aa4162e9fb94422d83b",
+    "agent_traces/idea_research/3b99d035bf444966be5eb45cdda8a852/tools/0007.json": "ee479160a4f3cd1733fcf0ddd9fa255fa4eaad06c0b612cff47ae92279893431",
+    "coding/tool_applications/63862c9d006c46b9a5f29effd185a4e8.json": "90fe3f14ebb2aab6fe8cf31027bd11db416db123f8ac4814630fc7635a292f17",
+    "coding/tool_applications/63ec5988146a403bbb2e17c9a287eff0.json": "75be45343120c6c579617b02318b67b1dbba9d5b5d7a991f2cc91e61dff5767d",
+    "coding/tool_applications/7f34b491934a4b79a2c247c1f642f504.json": "e64f5ac2261681d45e702325cc8f353dd4ba51bc6a549524f9abf3db7eb6b25f",
+    "coding/tool_applications/bc226f440bef48b1b01be1482ff0b2d5.json": "60cb3ebed2325de2a1ad34201455915f8c3d1f0e5ba8c919f046c14d67083757",
+    "coding/tool_applications/da28e427a3db47bbbbfc137ac16302ae.json": "9086d141757e8b4748a541c92a29335eb82da0d28b762db651bc1d4a9dd8789e",
+    "coding/tool_applications/e5cbd3b4173b4f7c8bec2c2196d57e24.json": "2ad04e72849ac4b9fc5ba0c5de2e5069c192c775aa495ccadea5c28dc57f961a",
+    "coding/tool_applications/e84bfa52db5744e3815eb2a18f81f7f3.json": "eaf1a594689bca497b63ffeac2de4d940bacb2393df563dc50a1d320f8a5f558",
+    "coding/tool_applications/e997bce455324551b048fdb02441b60e.json": "e3fa9e39300ad3b076cf4c82bc82429106c0f52f8f04a256f2b8837cb19d667d",
+    "context/langgraph_runtime.v2.json": "a9cb241d27a0a5658dc59b98746cc2bbe8779f33d1c76f2b1137bfdab3b9a270",
+    "context/trace_manifest.v2.json": "da9dd975c6ff2fcbfb4112df3f521a962d063dadde0e1801d274d2e433f68de2",
+    "events/agent_events.jsonl": "729c2b1c2a3c12d27633c8903cc61bb988cbce8ab0f650464c2b8d0183fec97b",
+    "events/langgraph_events.jsonl": "3db0f54dcdf19fdd8d3d086ec377961e3549e4f4e5096c4def9bdb648b8f1cb5",
+    "events/run_lifecycle.jsonl": "39d7cb238015b5e8b0de9cd88fff44ccda5cbd6dedee7e3e155c288c9dffd2ab",
+    "events/tool_calls.jsonl": "32af4846c8c40d17c4cc7f6a8a07613f73e1bbd88d82cb4237bf09c8773f410b",
+    "events/tool_events.jsonl": "2193e98e73ce74a8dfcc2ea3099ad57eb1844785953bf49409c03bee9c04708d",
+    "events/websocket_events.jsonl": "5ebeed8b14479523af6efb2916a908bdd42468a47b48c8c36ea2d57910695079",
+    "idea/progress.jsonl": "981eaa7bf23b1078d3da79f63eb00ecd19ea1655d35cc711e34d26da32f92b5e",
+    "idea/research/evidence_index.v1.json": "133806c2baf99552d6321d31861b7823a0b762e4209a75cbcbd4795e706f64e5",
+    "idea/research/tool_results.v1.json": "73837627c0c898981596a3fc1c1a600542b683d35242661b605aa33678f5c371",
+    "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/manifest.json": "89930c30c677d36ab0a99ec67b7f265b125092ccfb88c566807b851ea4adc15d",
+    "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/progress.jsonl": "b9ca8eaba7d67bbb5498517c084a4fb9c9ad9ac551abc30e840b409ce6313550",
+    "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/report.md": "442f3547c56aeabc8a0aa1f4e09216f288a338bf1e00cdcbb54568566836c1e0",
+    "idea/research_delegations/3b99d035bf444966be5eb45cdda8a852/request.json": "8d0f6961cb9fd84586c38e7b47510af9842e17e9b8004fa40d0c6b3b43fee622",
+    "idea/validation/35fa92abbc4b45199aba7fbb2205f91c.json": "5ffdb60c8384dd11b2da69cce4e56941a663272363946e7e96479ad44d3eb875",
+    "idea/validation/3e38522764134b788b081a14ae548b29.json": "9087fc5c309ec7bacaca1fcb27f42fb5469985c93ff51c29c535d637fcebfbc5",
+    "idea/validation/47363604b75344c6a4892ab171aff5a3.json": "83e63d8080bc98e3f6e7ecef8ed15df2042dd32018e0846d080f11dc1382e934",
+    "idea/validation/550da85a3c824519ba4c0297a90af118.json": "238d29773575cfb67e3ebb8f1f973226675b10821e2a515c4e6cc6bc462c9b74",
+    "idea/validation/b37a9b719ac34ea3bd445eaee7e60407.json": "d0e62e9fc55ea03e7861196c1f313c22714c141bebe16d37a7dd87baa9476283",
+    "idea_research/research/downloads/2ebf8cd87d794e308967f8025e278db0.read.json": "532a2d04ed46a5b42604d1932f1593a2dc809e06ec8a47eb953d4ec9f4cc2d5e",
+    "idea_research/research/downloads/73ab1fbafced487d9ab905ef0287193e.read.json": "41a5c5cfa24ae8a6c7691cba34a532b7b0bfe1750efad4aad247ae0bae806395",
+    "idea_research/research/downloads/8e1950c40dbee009b37349c77a8858fbfb6a8e9dbf135b5ce2c986b7dac76790.pdf": "8e1950c40dbee009b37349c77a8858fbfb6a8e9dbf135b5ce2c986b7dac76790",
+    "idea_research/research/downloads/cfabc7122f684900a664667ed48e4568.read.json": "4ea26435fd0cfb83130e22062e9f128365e4a63852493a559433817c0fd89eeb",
+    "idea_research/research/downloads/d8d6b1602d098ba50eed5ca583e1db54105bccf86c89416dc462e1c2da632af8.pdf": "d8d6b1602d098ba50eed5ca583e1db54105bccf86c89416dc462e1c2da632af8",
+    "idea_research/research/downloads/e8d5bba3e0a840d0aee192458fac66d4.read.json": "7636d16a458912763879408cacb7f6dda9a9ca40c9ee901ee2b6526922693303",
+    "idea_research/research/downloads/source_fetch_index.v1.json": "4b1ded9407f80967305c78e21743f30d4fe295d7887201aa40adf0fe1245a436",
+    "idea_research/research/searches/af348cfbfcd14fb90fd2120bfafc6615dfd314b085ddad91d4a2343065e4a38c.json": "12b6e08a5ebc7b7ec7ade5eb61473dd776c2db7c8362a3d67aef12105822b692",
+    "input/idea_runtime_profile.v1.json": "942f16f9cdd91749733a243468c5237c429bfd5d59b4da7172bc7685372484fe",
+    "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+    "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+    "manual_quality_review.json": "52479c69de2153da38bf191ac92d19273be398711ba5696e845d4fecc5e47006",
+    "manual_research_review.json": "e49243b1f720ac3b1c12a3a364c8acfb2f594d8000b9f9a18f61ef9d8466b28b",
+    "run_meta.json": "14ce7f8390080cc9e46302602db4ecf8212c24509eb97a6cd22b7ccd2d78179a",
+    "run_state.json": "b45a8ab1541d0b04b4657b25f6d93bd9633a6d208e366ec69ee0f1d9d19032b3"
+  },
+  "driver_file_hashes": {
+    "backend.log": "419620a9636056f84aa8ac5f9459dfd7659384ace12b9244192a5d2f7c28c9cb",
+    "http.jsonl": "434de2be6086cdf3a113ccdf85a3a69579cd9ece49d64331312517504fc082a1",
+    "preflight.json": "0c05fd26d8704ecd75c7c27ab4d966088ac4f2616b94a1253b686f95e04bc9b0",
+    "result.json": "f5533520ca6e5017989b8ce56a059f4197bfb21026f663bd0fc6cfc0a8b20eb9"
+  },
+  "archive_integrity": {
+    "original_run_file_count": 55,
+    "manual_sidecar_count": 2,
+    "total_run_file_count": 57,
+    "driver_file_count": 4,
+    "original_files_unchanged": true,
+    "manual_files_unchanged": true,
+    "driver_files_unchanged": true,
+    "old_exports_byte_identical": true,
+    "readme_original_prefix_preserved": true,
+    "terminal_audit_sha256": "a7e5c01c55c3cdfedc2e6db84eebf8c31839d62a6b7295df9f885b1ce471df99"
+  }
+}
