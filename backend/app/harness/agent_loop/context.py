@@ -29,7 +29,7 @@ def compact(value: Any, chars: int) -> Any:
 
 
 def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Retain actual source addresses when full tool groups no longer fit."""
+    """Retain source addresses and text-window limits, never inferred findings."""
     receipts: dict[str, dict[str, Any]] = {}
     rejected = 0
     for item in history:
@@ -54,11 +54,28 @@ def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if not isinstance(pages, list) or len(pages) > 10:
                 rejected += 1
                 continue
+            visibility = []
+            for page in pages:
+                if not isinstance(page, dict) or type(page.get("page")) is not int or page["page"] < 1:
+                    continue
+                text, total, truncated = page.get("text"), page.get("full_page_text_chars"), page.get("truncated")
+                shown = len(text) if isinstance(text, str) else None
+                coherent = (shown is not None and type(total) is int and 0 < shown <= total
+                            and type(truncated) is bool and truncated == (shown < total))
+                visibility.append({"page": page["page"], "shown_text_chars": shown,
+                    "extracted_page_text_chars": total if type(total) is int and total >= 0 else None,
+                    "text_window": ("partial" if truncated else "complete_extracted_text") if coherent else "unknown"})
+            visible_numbers = [page["page"] for page in visibility]
+            extracted = row.get("extracted_pages")
+            unshown = ([number for number in extracted if number not in visible_numbers]
+                       if isinstance(extracted, list) and len(extracted) <= 10
+                       and all(type(number) is int and number >= 1 for number in extracted) else None)
             raw_ref = item.get("raw_ref")
             receipts[row["read_receipt"]] = {
                 **{key: row.get(key) for key in ("url", "title", "sha256", "read_receipt")},
-                "visible_page_numbers": [page["page"] for page in pages
-                                         if isinstance(page, dict) and type(page.get("page")) is int],
+                "visible_page_numbers": visible_numbers,
+                "page_text_visibility": visibility,
+                "extracted_pages_without_visible_text": unshown,
                 "tool_raw_ref": raw_ref if isinstance(raw_ref, str) and len(raw_ref) <= 1024 else None,
             }
     selected = list(receipts.values())[-16:]
@@ -96,8 +113,10 @@ def pack_context(
         source_receipts = source_receipt_index(history)
         if source_receipts:
             required.append(Message(role="user", content=(
-                "[untrusted source receipt index; addresses and visible page numbers only, not excerpts or findings; "
-                "if the actual page text is absent, reread its window before quoting]\n" + canonical(source_receipts))))
+                "[untrusted source receipt index; addresses and original text-window coverage, not excerpts or findings; "
+                "partial/unknown and unshown pages cannot support claims about complete page ranges or the whole paper. "
+                "Complete extracted text does not verify figures, formulas, supplements, or full-document reading. "
+                "If actual text is absent or shortened in this context, reread its window before quoting]\n" + canonical(source_receipts))))
     groups = history_groups(history)
     preserved: list[int] = []
     if reviewing:

@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from app.harness.agent_loop.trace import atomic_json
 from app.agents.idea.protocol import protocol_errors
-from app.agents.idea.source_identity import SourceIdentityIndex, document_key
+from app.agents.idea.source_identity import SourceIdentityIndex, document_key, search_metadata_rows
 
 
 def canonical_source(url: str) -> str:
@@ -206,14 +206,13 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
         output = obs.get("output")
         if not obs.get("ok") or not isinstance(output, dict):
             continue
-        if obs.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
-            for hit in output.get("hits", []):
-                if isinstance(hit, dict) and hit.get("title") and hit.get("url"):
-                    identity = canonical_source(hit["url"])
-                    previous_titles = papers.get(identity, {}).get("observed_titles", [])
-                    titles = list(dict.fromkeys([*previous_titles, hit["title"]]))
-                    papers[identity] = {**hit, "identity": identity, "observed_titles": titles,
-                                        "selection_reason": obs.get("reason", ""), "tool": obs["tool"]}
+        for hit in search_metadata_rows(obs):
+            if hit.get("title") and hit.get("url"):
+                identity = canonical_source(hit["url"])
+                previous_titles = papers.get(identity, {}).get("observed_titles", [])
+                titles = list(dict.fromkeys([*previous_titles, hit["title"]]))
+                papers[identity] = {**hit, "identity": identity, "observed_titles": titles,
+                                    "selection_reason": obs.get("reason", ""), "tool": obs["tool"]}
         if obs.get("tool") == "search.fetch_sources":
             for source in output.get("sources", []):
                 if not source.get("ok"):

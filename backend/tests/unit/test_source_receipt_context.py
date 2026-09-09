@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -94,3 +95,54 @@ def test_actual_late_child_keeps_true_page_prefixes_within_original_budget() -> 
     assert preserved  # Some genuine prefixes remain; no claim every required passage is visible.
     assert manifest["estimated_upper_bound_tokens"] <= budget
     assert missing_review_evidence(state["history"], manifest, ("search.fetch_sources",), observation_chars=16000)
+
+
+def test_actual_partial_page_receipts_do_not_turn_into_complete_read_ranges() -> None:
+    archive = os.environ.get("MARS_TEST_PARTIAL_PAGE_CHECKPOINT")
+    if not archive:
+        pytest.skip("requires actual second child checkpoint from API attempt four")
+    path = Path(archive)
+    original = path.read_bytes()
+    history = json.loads(original)["history"]
+    rows = [row for observation in history if observation.get("tool") == "search.fetch_sources"
+            and observation.get("ok") for row in observation["output"]["sources"] if row.get("ok")]
+    receipts = {row["read_receipt"]: row for row in source_receipt_index(history)}
+    assert len(receipts) == len(rows) == 6
+    partial_fourier = []
+    for row in rows:
+        receipt_path = Path(row["read_receipt"])
+        raw = receipt_path.read_bytes()
+        archived = json.loads(raw)
+        assert row["visible_pages"] == archived["visible_pages"]
+        index = receipts[row["read_receipt"]]
+        for indexed, page in zip(index["page_text_visibility"], archived["visible_pages"], strict=True):
+            assert indexed["page"] == page["page"]
+            assert indexed["shown_text_chars"] == len(page["text"])
+            assert indexed["extracted_page_text_chars"] == page["full_page_text_chars"]
+            assert indexed["text_window"] == ("partial" if page["truncated"] else "complete_extracted_text")
+            if "2006.10739" in row["url"] and page["page"] == 6:
+                partial_fourier.append(indexed)
+                assert index["extracted_pages_without_visible_text"] == [7]
+        assert receipt_path.read_bytes() == raw
+    assert len(partial_fourier) == 2  # Original read and subsequent cached read.
+    assert all(page["shown_text_chars"] == 356 and page["extracted_page_text_chars"] == 4099
+               and page["text_window"] == "partial" for page in partial_fourier)
+    messages, manifest = pack_context([Message("system", "Use only actually visible evidence.")], history, "", "",
+                                      budget=22000, observation_chars=16000)
+    index_message = next(message.content for message in messages if "[untrusted source receipt index;" in message.content)
+    assert "partial/unknown and unshown pages" in index_message
+    assert "figures, formulas, supplements" in index_message
+    assert '"shown_text_chars":356' in index_message
+    assert manifest["compressed_history"] or manifest["omitted_history"]
+    assert path.read_bytes() == original
+
+    # Malformed metadata derived from the real Observation must remain unknown;
+    # these negative transformations are not new tool results or research facts.
+    altered = deepcopy(history)
+    observation = next(item for item in altered if item.get("tool") == "search.fetch_sources" and item.get("ok"))
+    page = observation["output"]["sources"][0]["visible_pages"][0]
+    page["truncated"] = True  # Contradicts the complete extracted text length.
+    first = source_receipt_index(altered)[0]
+    assert first["page_text_visibility"][0]["text_window"] == "unknown"
+    page.pop("full_page_text_chars")
+    assert source_receipt_index(altered)[0]["page_text_visibility"][0]["text_window"] == "unknown"

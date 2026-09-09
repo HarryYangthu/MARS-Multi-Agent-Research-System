@@ -18,7 +18,7 @@ from app.harness.agent_loop.review_plan import (
     prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
     start_review_unit, validate_review_plan_resume, validate_review_provider,
 )
-from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, invalid_output_context, is_review_format_error, parse_action, parse_review
+from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
@@ -555,9 +555,7 @@ class NativeAgentLoop:
                         p.reflection_format_repair_enabled and reviewing and is_review_format_error(parse_error))
                     state["protocol_output"] = (canonical({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]})
                                                 if native else completion.text)
-                    state["feedback"] = (f"Protocol error: {parse_error}. Correct the provided invalid output and return "
-                                         "exactly one required JSON object. No extra braces, prose or second action. "
-                                         "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
+                    state["feedback"] = action_protocol_feedback(str(parse_error))
                     if reviewing:
                         state["feedback"] = (
                             f"Review protocol error: {parse_error}. Return exactly one JSON object with "

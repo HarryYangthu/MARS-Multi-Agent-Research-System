@@ -145,7 +145,7 @@ def test_real_run17_author_assembly_changes_only_added_guidance(run17: dict[str,
     assert not session.receipts and session.attempted == 0
 
 
-def test_real_run17_whole_review_retains_every_other_message(run17: dict[str, Any]) -> None:
+def test_real_run17_whole_review_retains_evidence_and_declares_receipt_index_change(run17: dict[str, Any]) -> None:
     state, context = run17["state"], run17["context"]
     original = deepcopy(state)
     recorded = next(event["visible"] for event in run17["events"]
@@ -161,8 +161,22 @@ def test_real_run17_whole_review_retains_every_other_message(run17: dict[str, An
         reviewing=True, required_review_tools=("search.fetch_sources",))
     wire = [message.to_wire() for message in messages]
     changed = [index for index, (new, old) in enumerate(zip(wire, recorded, strict=True)) if new != old]
-    assert changed == [5]
+    # The scope rubric and the explicit text-window index are intentional changes.
+    # Actual source Observations, candidate, task and every other message stay exact.
+    assert changed == [5, 14]
     assert wire[5]["content"].replace(" " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE, "", 1) == recorded[5]["content"]
+    assert wire[14]["content"].startswith("[untrusted source receipt index;")
+    old_index = json.loads(recorded[14]["content"].split("\n", 1)[1])
+    new_index = json.loads(wire[14]["content"].split("\n", 1)[1])
+    for old, new in zip(old_index, new_index, strict=True):
+        assert {key:new[key] for key in old} == old
+        assert set(new) - set(old) == {"page_text_visibility", "extracted_pages_without_visible_text"}
+        receipt = json.loads(Path(new["read_receipt"]).read_text())
+        for indexed, page in zip(new["page_text_visibility"], receipt["visible_pages"], strict=True):
+            assert indexed["page"] == page["page"]
+            assert indexed["shown_text_chars"] == len(page["text"])
+            assert indexed["extracted_page_text_chars"] == page["full_page_text_chars"]
+            assert indexed["text_window"] == ("partial" if page["truncated"] else "complete_extracted_text")
     assert manifest["omitted_history"] == [] and manifest["compressed_history"] == []
     assert state == original
 

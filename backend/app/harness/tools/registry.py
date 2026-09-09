@@ -33,6 +33,13 @@ DEFAULT_REDACT_KEYS: frozenset[str] = frozenset(
 DEFAULT_INPUT_SCHEMA: dict[str, Any] = {"type": "object", "additionalProperties": True}
 
 
+@dataclass(frozen=True)
+class ConfiguredReadToolScope:
+    """Host-selected read tools; model arguments and context.extra cannot grant access."""
+    agent: str
+    tools: tuple[str, ...]
+
+
 @dataclass
 class ToolContext:
     run_id: str
@@ -47,6 +54,7 @@ class ToolContext:
     project_repo_root: str = ""
     dry_run: bool = False
     approval_mode: str = "auto"
+    configured_read_scope: ConfiguredReadToolScope | None = None
 
 
 @dataclass
@@ -145,6 +153,25 @@ class ToolRegistry:
         child._gates = list(self._gates)
         return child
 
+    def scope_for_read_tools(self, agent: str, tools: tuple[str, ...]) -> ConfiguredReadToolScope:
+        """Validate the effective host configuration without changing global permissions."""
+        from app.harness.llm.model_registry import get_agent_config
+        from app.harness.tools.config import load_tool_configs
+
+        configuration = get_agent_config(agent)
+        if not configuration.enabled or not tools or len(set(tools)) != len(tools):
+            raise ValueError("configured read scope requires an enabled agent and unique tools")
+        configured = load_tool_configs()
+        for name in tools:
+            settings, spec = configured.get(name), self.spec(name)
+            if (not self.has(name) or settings is None or spec is None or not settings.enabled
+                    or settings.runtime_bound or settings.bridge_only or spec.bridge_only
+                    or settings.mutation_level != "read" or spec.policy.mutation_level != "read"
+                    or settings.requires_approval or spec.policy.requires_approval
+                    or agent not in settings.allowed_agents or agent not in spec.policy.allowed_agents):
+                raise ValueError("configured read scope cannot authorize tool: " + name)
+        return ConfiguredReadToolScope(agent, tuple(tools))
+
     def has(self, name: str) -> bool:
         return name in self._tools
 
@@ -212,7 +239,7 @@ class ToolRegistry:
             _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
             return result
 
-        if not _allowed_for_agent(tool_name, ctx.agent, spec):
+        if not _allowed_for_agent(tool_name, ctx.agent, spec, configured_scope=ctx.configured_read_scope):
             result = ToolResult(
                 ok=False,
                 error=f"tool '{tool_name}' is not allowed for agent '{ctx.agent}'",
@@ -360,6 +387,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.reporting import report_bundle_tool
     from app.harness.tools.search import (
         arxiv_search_tool,
+        cvf_search_tool,
         openalex_search_tool,
         fetch_sources_tool,
         local_docs_tool,
@@ -369,6 +397,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     # search.*
     reg.register("search.local_docs", local_docs_tool)
     reg.register("search.arxiv_search", arxiv_search_tool)
+    reg.register("search.cvf_search", cvf_search_tool)
     reg.register("search.openalex_search", openalex_search_tool)
     reg.register("search.web_search", web_search_tool)
     reg.register("search.fetch_sources", fetch_sources_tool)
@@ -419,7 +448,22 @@ def _validate_agent_tool_references(reg: ToolRegistry) -> None:
         )
 
 
-def _allowed_for_agent(tool_name: str, agent_name: str, spec: ToolSpec) -> bool:
+def _allowed_for_agent(tool_name: str, agent_name: str, spec: ToolSpec, *,
+                       configured_scope: ConfiguredReadToolScope | None = None) -> bool:
+    if configured_scope is not None:
+        from app.harness.llm.model_registry import get_agent_config
+        from app.harness.tools.config import tool_config
+        try:
+            configured_agent = get_agent_config(agent_name)
+        except KeyError:
+            return False
+        configuration = tool_config(tool_name)
+        return (isinstance(configured_scope, ConfiguredReadToolScope) and configured_scope.agent == agent_name
+                and configured_agent.enabled and tool_name in configured_scope.tools and agent_name in spec.policy.allowed_agents
+                and agent_name in configuration.allowed_agents and configuration.enabled
+                and not configuration.runtime_bound and not configuration.bridge_only and not spec.bridge_only
+                and configuration.mutation_level == spec.policy.mutation_level == "read"
+                and not configuration.requires_approval and not spec.policy.requires_approval)
     if agent_name in {"system", "bridge"}:
         return True
     if spec.policy.allowed_agents and agent_name not in spec.policy.allowed_agents:

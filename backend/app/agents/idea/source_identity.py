@@ -10,6 +10,43 @@ from urllib.parse import urlparse
 from app.harness.tools.search.source_fetch import SourceFetchError, resource_aliases, resource_key
 
 
+def search_metadata_rows(observation: dict[str, Any]) -> list[dict[str, Any]]:
+    """CVF identities require archived original metadata, never output assertions."""
+    output = observation.get("output")
+    if not observation.get("ok") or not isinstance(output, dict):
+        return []
+    tool = observation.get("tool")
+    if tool not in {"search.arxiv_search", "search.web_search", "search.openalex_search", "search.cvf_search"}:
+        return []
+    hits = output.get("hits", [])
+    if not isinstance(hits, list):
+        return []
+    rows = [hit for hit in hits if isinstance(hit, dict) and isinstance(hit.get("url"), str)
+            and isinstance(hit.get("title"), str)]
+    if tool != "search.cvf_search":
+        return rows
+    from app.harness.tools.search.cvf import verified_cvf_hit
+    try:
+        raw_ref = observation["raw_ref"]
+        raw = json.loads(Path(raw_ref).read_text())
+        if ({**raw, "raw_ref": raw_ref} != observation or output.get("source") != "cvf"
+                or not isinstance(output.get("search_receipt"), str)):
+            return []
+        args = observation["args"]
+        receipt_data = Path(output["search_receipt"]).read_bytes()
+        receipt = json.loads(receipt_data)
+        expected = {"query": args["query"].strip(), "venue": args["venue"],
+                    "year": args["year"], "top_k": args.get("top_k", 3)}
+        if (hashlib.sha256(receipt_data).hexdigest() != output.get("search_receipt_sha256")
+                or any(receipt["request"].get(key) != value for key, value in expected.items())
+                or any(output.get(key) != args.get(key) for key in ("query", "venue", "year"))):
+            return []
+        return [hit for hit in rows if hit.get("search_receipt") == output["search_receipt"]
+                and hit.get("search_receipt_sha256") == output.get("search_receipt_sha256") and verified_cvf_hit(hit)]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return []
+
+
 def document_key(url: str) -> str:
     """Preserve explicit versions, legacy arXiv categories and generic URL queries."""
     try:
@@ -79,10 +116,7 @@ class SourceIdentityIndex:
             output = observation.get("output")
             if not observation.get("ok") or not isinstance(output, dict):
                 continue
-            if observation.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
-                self.hits.extend(hit for hit in output.get("hits", [])
-                                 if isinstance(hit, dict) and isinstance(hit.get("url"), str)
-                                 and isinstance(hit.get("title"), str))
+            self.hits.extend(search_metadata_rows(observation))
             if observation.get("tool") == "search.fetch_sources":
                 for row in output.get("sources", []):
                     if isinstance(row, dict) and row.get("ok") and isinstance(row.get("read_receipt"), str):

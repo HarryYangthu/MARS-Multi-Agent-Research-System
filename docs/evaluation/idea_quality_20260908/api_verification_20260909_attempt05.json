@@ -1,0 +1,430 @@
+{
+  "schema": "idea.api_terminal_public_summary.v1",
+  "api_attempt": 5,
+  "overall_attempt": 20,
+  "run_root": "runs/2026-09-09T0521_api_idea_20260909t052155_16895f9e",
+  "driver_root": "runs/verification/api_idea_20260909T052155_16895f9e",
+  "source_commit": "38181209670e4314b27fd19b372702f0917dd913",
+  "source_tree": "a3b885c4b182563a1d764b3008e31371a8f4b8a9",
+  "source_clean_before_and_after": true,
+  "profile": "experimental_research_pro_per_insight_v3",
+  "profile_receipt_sha256": "cd5ae00bf8550da07e5443773d43e308d31272a3c70ef0fc4149d9ea916dd66b",
+  "status": "failed",
+  "reason": "evidence_unavailable",
+  "deadline_triggered": false,
+  "started_at": "2026-09-09T05:21:55.655026+00:00",
+  "finished_at": "2026-09-09T05:52:33.575442+00:00",
+  "driver_budget_seconds": 5400,
+  "elapsed_monotonic_seconds": 1837.8925577089976,
+  "counts": {
+    "action_rounds": 15,
+    "model_requests": 18,
+    "model_responses": 18,
+    "observations": 15,
+    "protocol_repairs": 3,
+    "reflections": 0,
+    "sdk_attempts": 18,
+    "tool_dispatches": 15,
+    "validation_repairs": 0
+  },
+  "usage": {
+    "prompt_tokens": 269643,
+    "completion_tokens": 44559,
+    "total_tokens": 314202
+  },
+  "usage_complete": true,
+  "traces": [
+    {
+      "agent": "idea",
+      "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+      "checkpoint_ref": "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/checkpoint.json",
+      "checkpoint_sha256": "3d8ab00ac0708938cf12c6cb516425549045e366dafb048e69b5ea3da1f7839a",
+      "status": "evidence_unavailable",
+      "pending": null,
+      "counts": {
+        "action_rounds": 5,
+        "model_requests": 8,
+        "model_responses": 8,
+        "observations": 5,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 8,
+        "tool_dispatches": 5,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 116228,
+        "completion_tokens": 21355,
+        "total_tokens": 137583
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "reflection_accepted": false,
+      "review_plan_contract_id": null
+    },
+    {
+      "agent": "idea_research",
+      "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+      "checkpoint_ref": "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/checkpoint.json",
+      "checkpoint_sha256": "d6c39ac4c8aef6ee2a6f019c024681cccdc24cd6d83aadde22905b1446fb98ae",
+      "status": "evidence_unavailable",
+      "pending": null,
+      "counts": {
+        "action_rounds": 10,
+        "model_requests": 10,
+        "model_responses": 10,
+        "observations": 10,
+        "protocol_repairs": 0,
+        "reflections": 0,
+        "sdk_attempts": 10,
+        "tool_dispatches": 10,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 153415,
+        "completion_tokens": 23204,
+        "total_tokens": 176619
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "reflection_accepted": false,
+      "review_plan_contract_id": "idea.research_per_insight_then_whole.v5"
+    }
+  ],
+  "research_scope": {
+    "unique_search_urls": 14,
+    "distinct_pdf_contents": 0,
+    "read_windows": 0,
+    "accepted_research_reports": 0,
+    "main_candidates": 0,
+    "reflections": 0,
+    "search_urls": [
+      "http://arxiv.org/abs/2009.14468v1",
+      "http://arxiv.org/abs/2108.08697v1",
+      "http://arxiv.org/abs/2204.13983",
+      "http://arxiv.org/abs/2204.13983v1",
+      "http://arxiv.org/abs/2207.08351v1",
+      "http://arxiv.org/abs/2209.01749v1",
+      "http://arxiv.org/abs/2304.07039",
+      "http://arxiv.org/abs/2306.09334",
+      "http://arxiv.org/abs/2308.06749v1",
+      "http://arxiv.org/abs/2310.17190v2",
+      "http://arxiv.org/abs/2408.11055",
+      "http://arxiv.org/abs/2507.02270v1",
+      "http://arxiv.org/abs/2508.16121v1",
+      "http://arxiv.org/abs/2510.11613"
+    ],
+    "fetch_and_tool_failures": [
+      {
+        "agent": "idea",
+        "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+        "tool": "idea.research_delegate",
+        "error": "research child evidence_unavailable"
+      },
+      {
+        "agent": "idea",
+        "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+        "tool": "search.fetch_sources",
+        "error": "source fetch failed; see individual errors"
+      },
+      {
+        "agent": "idea",
+        "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/1804.02391v2",
+        "pdf_url": null,
+        "resource_key": "arxiv:1804.02391:v2",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 6389760,
+        "download_expected_bytes": 30840721,
+        "download_elapsed_seconds": 180.003,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea",
+        "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/1711.08920v2",
+        "pdf_url": null,
+        "resource_key": "arxiv:1711.08920:v2",
+        "error_code": "total_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 1835008,
+        "download_expected_bytes": 4463154,
+        "download_elapsed_seconds": 59.989,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "error": "source fetch failed; see individual errors"
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/2204.13983v1",
+        "pdf_url": null,
+        "resource_key": "arxiv:2204.13983:v1",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 2932280,
+        "download_expected_bytes": 40863938,
+        "download_elapsed_seconds": 180.002,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/2207.08351v1",
+        "pdf_url": null,
+        "resource_key": "arxiv:2207.08351:v1",
+        "error_code": "total_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 1012449,
+        "download_expected_bytes": 20195465,
+        "download_elapsed_seconds": 59.987,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "error": "source fetch failed; see individual errors"
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/2508.16121v1",
+        "pdf_url": null,
+        "resource_key": "arxiv:2508.16121:v1",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 7241274,
+        "download_expected_bytes": 48365225,
+        "download_elapsed_seconds": 180.001,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.web_search",
+        "error": "domains must include at least one allowlisted domain"
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.web_search",
+        "error": "domains are not allowlisted: ['openaccess.thecvf.com']"
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "error": "source fetch failed; see individual errors"
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c5ccce99a759403eb15fb2e91e3cdd63",
+        "tool": "search.fetch_sources",
+        "url": "http://arxiv.org/abs/2009.14468v1",
+        "pdf_url": null,
+        "resource_key": "arxiv:2009.14468:v1",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "network_download_attempted": true,
+        "download_bytes_received": 6569175,
+        "download_expected_bytes": 14831188,
+        "download_elapsed_seconds": 180.002,
+        "archive_complete": false
+      }
+    ]
+  },
+  "protocol_errors": [
+    {
+      "agent": "idea",
+      "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+      "error": "JSON Extra data at line 2, column 1",
+      "time": "2026-09-09T05:40:52.432833+00:00"
+    },
+    {
+      "agent": "idea",
+      "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+      "error": "JSON Extra data at line 2, column 1",
+      "time": "2026-09-09T05:42:29.706108+00:00"
+    },
+    {
+      "agent": "idea",
+      "invocation": "0044b2cc45a24ca0bec5293753ed5ea6",
+      "error": "JSON Extra data at line 1, column 368",
+      "time": "2026-09-09T05:50:26.050978+00:00"
+    }
+  ],
+  "quality": {
+    "status": "not_assessable_no_main_candidate",
+    "independent_quality_passed": null,
+    "collect_review_exercised": false,
+    "full_agent_delivery_passed": false,
+    "reason": "No successful body read or candidate was produced. The collect review mechanism never entered semantic review."
+  },
+  "api": {
+    "request_count": 922,
+    "method_counts": {
+      "GET": 919,
+      "POST": 3
+    },
+    "mutations": [
+      {
+        "line": 4,
+        "method": "POST",
+        "path": "/api/runs",
+        "http_status": 200
+      },
+      {
+        "line": 5,
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0521_api_idea_20260909t052155_16895f9e/start",
+        "http_status": 202
+      },
+      {
+        "line": 921,
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0521_api_idea_20260909t052155_16895f9e/stop",
+        "http_status": 409
+      }
+    ],
+    "stop_http_status": 409,
+    "stop_status": "not_owned",
+    "stop_cleanup_confirmed": false,
+    "durable_status": "failed",
+    "termination": null,
+    "post_stop_get_status": "failed",
+    "post_stop_get_preceded_server_shutdown": true,
+    "isolated_server_stopped": true,
+    "backend_exit_code": -15,
+    "server_pid_absent_when_audited": true,
+    "waiting_review": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "scientifically_validated": false,
+    "service_restart_tested": false
+  },
+  "independent_reviews": {
+    "manual_research_review.json": {
+      "path": "manual_research_review.json",
+      "sha256": "34285985816cd4eafa1365d388a1a700b86019d4471a846c0fc878f1dec1da0e"
+    },
+    "manual_quality_review.json": {
+      "path": "manual_quality_review.json",
+      "sha256": "052dbaa207ec026cafbbd9026aea2a2491f4edcaf348f9d62c767a2147e56ce8"
+    }
+  },
+  "archive": {
+    "original_run_files": 60,
+    "added_review_files": 2,
+    "driver_files": 19,
+    "original_files_unchanged": true,
+    "run_file_sha256": {
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/checkpoint.json": "3d8ab00ac0708938cf12c6cb516425549045e366dafb048e69b5ea3da1f7839a",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/events.jsonl": "e6efd623832222125113be651318b8ac9e6d2b824bad8964f1e2243b34b9cec1",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/facts.json": "5efd71ffea29feddaac8123ae5cf199a5fce74456181f2d460cb9efb39216575",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/tools/0001.json": "2d5cda65faa766a3bb5f18600364b3d13dff305ac1bfbf33163ee93327b07bdc",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/tools/0002.json": "58507a748a7adecc47cfbf4304b803010b7fffdeb8a9f2db1c917d27c02bdb3b",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/tools/0003.json": "e4a59c688c5557e7a9a1d756fbcb6b320a269702c8b5fabf1d1592558c5ada84",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/tools/0004.json": "c966760a5809a0c9ff875bec7c9a53cbf0064ee1014fa090f9eb742a501e1406",
+      "agent_traces/idea/0044b2cc45a24ca0bec5293753ed5ea6/tools/0005.json": "89a43419e5cad1713886d4e52c59215613e488f410e6d44e93780b3643de1b13",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/checkpoint.json": "d6c39ac4c8aef6ee2a6f019c024681cccdc24cd6d83aadde22905b1446fb98ae",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/events.jsonl": "b815464631ab24b9a9754fec721ba9d98813f62ace8d05e076bc4aa0edf8a3c0",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/facts.json": "678946d5e8b3338d0a69e427b5b652ae9a02bf5615a29105f594b1ac2ce1cc4b",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0001.json": "b074f9c8272848bae042070d9ef834a40fe1c8f766a4a89af0f50650730a2fe6",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0002.json": "b024f24583b7d55e128a4426d2534ec86638bfdbd61dcd233350d9ede693787e",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0003.json": "27068a6c55851597b18c0a72beb09c8b06a26ff6aff411285f1085ceb6d762a4",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0004.json": "05cbd67cb377ed773c751e740bc10208ee75dc4d9a6dddd4c7ce813abaf62bb1",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0005.json": "ae4705bb75dc0a9903cd18eb08516329f663d13f5ccb9b0c9c15fadd1a4c3310",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0006.json": "12a6bd319bccb8acd0129a652a1b0520b40fece3fbe8a2b6d59d4025d03da2d1",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0007.json": "21a0ce2a8681d1b747711f5ea01aa1191200fe8f1e278d4178b7a4c416f87ba9",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0008.json": "93b6705d1718d09200c0aa71bcb30b5f5b5546e3149816ace860e1d4b9254617",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0009.json": "dfd1335bbfddea94e32d06924d0c2f3005d908e154b0289d96e87807625005ff",
+      "agent_traces/idea_research/c5ccce99a759403eb15fb2e91e3cdd63/tools/0010.json": "41cd49856b8964f6401b4ce3376ff5eb35318259e7df8cf8d65f52cf33a87bc0",
+      "coding/tool_applications/02dde91616fb40b7a0fd157340106244.json": "df4d6b3a32966b0aa74a0ada935ce25a88eefd43e62e3ed3f44af844f5914552",
+      "coding/tool_applications/031f5e6c440745cfbfbe594cb5b3524e.json": "d423b517c9644ea2a6178dba629dca72cf8d915dc92dc360d6d7239ba64732b9",
+      "coding/tool_applications/271b6bae91904c1690e7688addd24aed.json": "56a264f70da9accec84e6bfbc3d58301e5c1e3e5221fbd5bbb67ea748aaf51f5",
+      "coding/tool_applications/31da10b28b6f4c289b1702e803c2510a.json": "e1efbbd86406595cd32c464573b4f51a506220af7abfc2edefbe343676a97f62",
+      "coding/tool_applications/42d6a17cddd74dc4bf53cbef01904990.json": "6fae56a2ce3e735165ded8b46f730d5fc5607a5d91e614d4b012925b53176e82",
+      "coding/tool_applications/46217fcac0694e39a079ad29af3bd58c.json": "c98e0b9da25936b91105bc562f0c45da876c5503fc57019ca806419f1559f8bf",
+      "coding/tool_applications/4b7fc1823c284097bf5ca74407995a9e.json": "2086dc62441112e39113fe4835a4298d967abb53052b47f1b3c03d4508769db7",
+      "coding/tool_applications/91a83b8ade6849ae8c8da398510a952a.json": "d0efad34744c80ac584bbacd63a842b46b151b10b52bea9aa191f922f34a1ce7",
+      "coding/tool_applications/95970207576245248431b778693e626c.json": "11d2f323e43344774fcac94ad3e965c3baae824ac90b23d7616297bfba6f2d7c",
+      "coding/tool_applications/9afe47d0a92645db8a1e35e330fcc6dd.json": "f5c31d54c808e2e225bd960ce4385cddbf299408b80fe6e766fe2bb6107869d9",
+      "coding/tool_applications/aed5c428be7f4ca4ab9ef02d4919e93d.json": "27a6361ab826621c10fc64756febcb996b98e530f086b8ce47c3b09002c2cf2e",
+      "coding/tool_applications/c873e89882f64a91914e773b8556f6a0.json": "932ecb8a9f5cd54cd1dc502d413629874583527c034118b81eac4328a603fa2f",
+      "coding/tool_applications/cecc110d027642cbac87335138ae6bf4.json": "30942a17a4dbc2769f923b5590a7d5248437f4bdf712af328bdfeb434a85f313",
+      "coding/tool_applications/d303f67be8b7462f986f05d050343124.json": "1835f726fe0d18907c5849c563234457f043757b324434df463e139310fc007a",
+      "coding/tool_applications/d5f25c2f24664bacb5275d82a0284791.json": "3343f79cd7978983b5c439c3012f283f553c1494ae7e647912c95396b018d483",
+      "context/langgraph_runtime.v2.json": "1c578e4d27aee65f3ef16425131746dd27026568cf57efd9540a72d19a83938f",
+      "context/trace_manifest.v2.json": "614cafe00a96dfa063b979e53c0f6ed9692d46d57819aa36a8afe38ef9c9e500",
+      "events/agent_events.jsonl": "b7e85dece528140a0d9d770a618335197f723eb8654f577fc3eac0dd8c2d2ed7",
+      "events/evaluation_events.jsonl": "3209c74a85382734d56e4f7bcf16bd897ea7cf4ef2231693672187d0b823810e",
+      "events/evaluation_quality_gate.json": "eda6472b09f9a55bdd7a664f8fbe814d130972c2773c0832da94e18c8904a9f1",
+      "events/evaluation_scorecard.json": "e7bebbfe1b06a49f6a82a324770b34f4dab9ba82b2fc8126d6a3813d12ef4173",
+      "events/langgraph_events.jsonl": "e0fd9dab9f81e0383b755226896a331a4710a3075b47f9f503e819d3fc485483",
+      "events/tool_calls.jsonl": "adbba07b4de064aebfa2c59faa9719c91270a2d472084c1fe3caa3f76204dee7",
+      "events/tool_events.jsonl": "312aff688a0030a031b1a7a4df136875324d7ee2ee93b0056d52038935400d98",
+      "events/websocket_events.jsonl": "9586378bb0f45328971af1630308b55f86cdc9d621a9c469ce746d4a24e2c76c",
+      "idea/progress.jsonl": "cee0d4face1554c947edd3e6170f06a5971c44cbac8383bb8bee733a3d2c443f",
+      "idea/research/downloads/source_fetch_index.v1.json": "94c40200ce5f5721b41b26d1c1f34283278047c86f75d02c98e8e6bc9c0453dd",
+      "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+      "idea/research/tool_results.v1.json": "9d47127597820a11944cebe70004ad68501c5a012a3e2bc5dbaba5c8b54ff4dd",
+      "idea/research_delegations/c5ccce99a759403eb15fb2e91e3cdd63/failure.json": "0e5f04458130d1d60fcb03213e0f4c9d61054e99864ac74dacb19c19e9fec7ae",
+      "idea/research_delegations/c5ccce99a759403eb15fb2e91e3cdd63/progress.jsonl": "c9885c32c44cd6714d801bac9df5fb6b3a39e7adfdd5ff913401204e72aa4539",
+      "idea/research_delegations/c5ccce99a759403eb15fb2e91e3cdd63/request.json": "c8464f1b9c7545e0816fa8afd4bf3db5617c114ee4c68e4c9d2214d0d01cf1c0",
+      "idea_research/research/downloads/source_fetch_index.v1.json": "04d29d9d2125fff165095ccefa1e7366958c5978e02946653b2c7eeb1ea7d549",
+      "idea_research/research/searches/912d1456df07704d968344d221b41fbe8973979d98b055048ad8e7b06dabc297.json": "81b57f2519d2f2d197b5c9ec455595db8707c83ef0a596accf25bf352fdfa283",
+      "input/idea_runtime_profile.v1.json": "cd5ae00bf8550da07e5443773d43e308d31272a3c70ef0fc4149d9ea916dd66b",
+      "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+      "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+      "manual_quality_review.json": "052dbaa207ec026cafbbd9026aea2a2491f4edcaf348f9d62c767a2147e56ce8",
+      "manual_research_review.json": "34285985816cd4eafa1365d388a1a700b86019d4471a846c0fc878f1dec1da0e",
+      "run_meta.json": "8e346796a7ca000133c8fe960ad31ae5a1a2efca9d2a67b9a3728cb36502ff9c",
+      "run_state.json": "06b97159a3015223da59048fdcce72413804c0700c3b62a88d59f531dec141b6"
+    },
+    "driver_file_sha256": {
+      "backend.log": "812e17e837128a346f1a01b3db471b735a0436af706a146cd2c618fa85c72531",
+      "http.jsonl": "0ee42f3040f3533e5b1c8e0daa56cf5b8448b75471a4ddafb58ee66ddb38606f",
+      "isolated_memory/_retrieval_receipts/008465f8ccdf4bd59910e2eb46288ee7.json": "2796675b85c67126c8ea6ca86315664be5811a1fe702512f9fe90dc5a1e05791",
+      "isolated_memory/_retrieval_receipts/328de6e1b350419ab3913b574384c1a7.json": "c9418c1643b5cc54390732fe0b0c44cb70491768188f3a3d9b54cbeffeb1804e",
+      "isolated_memory/_retrieval_receipts/497cfeaf99714127907c2fb8fb19d709.json": "b260d69e1e34289091558aad6203a0965e8f66f95c623f78b329b76ec6d92ab7",
+      "isolated_memory/_retrieval_receipts/51cb69ad6abe461b932858aaed5163de.json": "1b3f7654d1bbb9cde3b76c012064591eb67c303704bff38ce40ed6a926559b79",
+      "isolated_memory/_retrieval_receipts/7e50249c93f74287b0ffce5d5a87a39d.json": "a793b3ad67bc85eb0ba6775bbe54278634df28a7398780d7b8a621cda1c15953",
+      "isolated_memory/_retrieval_receipts/882a8b9cfe794d0a869f6feb6d8e96a6.json": "53598f49777997dafcf42f51671b53121f52cd91babd1ea1bac437eef362edac",
+      "isolated_memory/_retrieval_receipts/a048af3142f54e2c81101c131010d89b.json": "b1fff3ce787fa398fc300404274bc3aa3495f9375bf6df149f0640b4e933fed2",
+      "isolated_memory/_retrieval_receipts/da76b42d62db4182a27bd2610929af2b.json": "bb38c054918dde634a6458402b51b111ca9324802db4c02f070cfe6512ac6a9b",
+      "isolated_memory/_retrieval_receipts/fcaa0834b0724f76a45a2073a61f7426.json": "bc80ed560e33702c85d1c22036012a8b38893829d9b69e486aca31b7884d2b92",
+      "isolated_memory/_semantic_graph.json": "6ee14ac50c23be5e902778313cc1012f6b6d7847205a63a9cb6aa5286c3cf6ac",
+      "isolated_memory/literature/_arxiv_cache/87f47c9da35e107a79f1b5d5.json": "38108a8300d7fb8d5c7701b107396f75d8e9e8decc78954fe2cdd58819d06831",
+      "isolated_memory/literature/_arxiv_cache/892b6be1f4938ce667bd0f2b.json": "c909c35adad1789b2b895992fc951e0f852253508a5a74b9ec0792b872f50fd8",
+      "isolated_memory/literature/_arxiv_cache/bed16a79b3b0469189a7b963.json": "36e2312e6a38a6bfe760ac6be430bd4521a49561ad84f5698295499da68f95ae",
+      "isolated_memory/literature/_arxiv_cache/e17d9b2c2559674b3df3ecdb.json": "025068f88f14167406f51f1b4d88aac1f7132ba6c9a12cc61f5d125f86d710da",
+      "isolated_memory/literature/_index.json": "cc4363e3f227cc3b6adbeebbb98df79ce9fffe76d92b0a9eaa74fe27c9e0c335",
+      "preflight.json": "b030abf0dcafe94ee314821a5a6c80f776fda95a690667262957998a7ddf34da",
+      "result.json": "68b4156c2f529d55bcf687b93a32e28bcf077d981fefecb6cf262ef37baa3a80"
+    },
+    "driver_script_sha256": "600a88a3640a273fc62504523da929f0c47069654236496cf185a474ff81ee6c"
+  },
+  "limitations": [
+    "Retrieved search URLs do not mean papers read or accepted.",
+    "No development CVF PDF or other-run findings were injected into this run.",
+    "v3 changed collect review and the external deadline changed separately from 3600 to 5400 seconds; this is not a strict single-variable performance comparison.",
+    "All requests have recorded usage, but provider billing was not separately reconciled.",
+    "No candidate exists to judge scientific correctness; the required delivery remains unsuccessful."
+  ]
+}

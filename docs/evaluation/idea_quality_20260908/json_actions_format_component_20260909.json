@@ -1,0 +1,100 @@
+{
+  "schema": "idea.json_actions_format_component.v1",
+  "component_root": "runs/verification/json_actions_format_20260909T053614Z_62dcc65b",
+  "source_run": "runs/2026-09-09T0425_api_idea_20260909t042501_62477bd6",
+  "source_child": "c1137639a1f44c2fbcfff62b10536699",
+  "source_request": 7,
+  "source_commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+  "component_commit": "69cc6829c32b65b486917a06cc96c26287952c1b",
+  "started_at": "2026-09-09T05:36:14.554953+00:00",
+  "finished_at": "2026-09-09T05:36:31.589810+00:00",
+  "elapsed_seconds": 17.034954957998707,
+  "comparison": {
+    "changed_message_indices": [
+      16
+    ],
+    "message_count": 17,
+    "other_messages_and_invalid_output_unchanged": true,
+    "new_input_sha256": "0ed73aa22dd5166c32731a5828b0eddb298868fc0050d15c577972c57a4e0a1a",
+    "configuration_differences": {
+      "max_retries": {
+        "original": 1,
+        "component": 0
+      }
+    },
+    "original_outer_deadline_seconds": 726.0,
+    "component_outer_deadline_seconds": 365.0,
+    "original_and_component_actual_sdk_attempts": 1,
+    "strict_single_variable_configuration_comparison": false,
+    "feedback_change": "Explicit complete JSON object examples, sibling tool/args/reason keys, and no XML; original invalid output and evidence remain visible."
+  },
+  "model_configuration": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.1,
+    "max_tokens": 32768,
+    "top_p": 1.0,
+    "response_schema": null,
+    "thinking_enabled": true,
+    "reasoning_effort": "high",
+    "request_timeout_seconds": 360.0,
+    "max_retries": 0,
+    "retry_base_delay_seconds": 1.0,
+    "json_mode": true,
+    "tools": [],
+    "extra": {}
+  },
+  "outcome": {
+    "status": "response_received",
+    "parse_action_valid": true,
+    "tool_args_schema_valid": true,
+    "tool": "search.fetch_sources",
+    "sdk_attempts_started": 1,
+    "sdk_attempts_succeeded": 1,
+    "sdk_attempts_failed": 0,
+    "usage_complete": true,
+    "tool_execution_performed": false,
+    "full_agent_acceptance": false,
+    "source_run_updated": false,
+    "automatic_retry_after_unknown_outcome": false
+  },
+  "usage": {
+    "completion_tokens": 757,
+    "prompt_tokens": 23147,
+    "total_tokens": 23904,
+    "completion_tokens_details": {
+      "reasoning_tokens": 594
+    },
+    "prompt_tokens_details": {
+      "cached_tokens": 22912
+    },
+    "prompt_cache_hit_tokens": 22912,
+    "prompt_cache_miss_tokens": 235
+  },
+  "action_preservation": {
+    "preserved": false,
+    "original_paper": "arxiv:1607.01668",
+    "returned_paper": "arxiv:1405.5713",
+    "original_max_pages": 6,
+    "returned_max_pages": 5,
+    "returned_start_page": 4,
+    "interpretation": "One syntactically valid replacement action, not lossless repair of the original action. The returned action was not executed."
+  },
+  "independent_archive_recheck": {
+    "passed": true,
+    "immutable_source_files": 25,
+    "component_artifact_files": 7,
+    "loaded_source_files_checked_against_frozen_git_commit": 22
+  },
+  "artifact_sha256": {
+    "request.json": "697694ee990517ef041a90438d1c6aaadf3302c30e2dc844b63f858b4a39570d",
+    "result.json": "2793fd2e2b14189b3c03f2f30a42303e376f46c092f46d93eb7c0c7d38ffb0b2",
+    "raw_output.txt": "b5b78f196eb65e9be7cc13b68954f206d0dc5d3d91bdb7d8b7a89313953a6d55",
+    "attempts.json": "cee24c77664f4d19a5a7715a5f476a0a7ae1a3f02403872b885b5605ea1ebb9a",
+    "original_request.json": "f2c82c10655efe6d2921949b13f296483a0013b7da502daa9d458797f4472bfe",
+    "original_response.json": "a7935495c0d8660b1296f6fbdda5a86ab2acfb96cfc1abe4fffbd1315812aaa1",
+    "response.json": "32834eeb82628200fa048eb560448246afa9149c74bff894b9702de77663dbd5",
+    "artifact_hashes.json": "1b5b845d491fd975dfc10ee59fde21187f79ff8841c53a6efe120a4cccc2b3d3"
+  },
+  "claim_boundary": "A single real response supports this format-recovery case only. No measured reliability rate, source acceptance, research quality, full Idea Agent delivery, or original-action preservation is established."
+}

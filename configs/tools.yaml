@@ -1,4 +1,29 @@
 tools:
+  search.cvf_search:
+    enabled: true
+    description: Search the official CVF proceedings directory for a specified venue and year using short title keywords. Supports the /content/{VENUE}{YEAR}/ layout; older layouts or unavailable years fail explicitly. Returns only actual directory entries with verified landing-page citation metadata and original PDF links; does not download or read PDFs. Use search.fetch_sources for body evidence.
+    mutation_level: read
+    allowed_agents: [idea_research]
+    # Covers the configurable metadata budget (maximum 180s) plus local archival.
+    timeout_seconds: 185
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [query, venue, year]
+      properties:
+        query: {type: string, minLength: 1, maxLength: 200, pattern: '\S'}
+        venue: {type: string, enum: [CVPR, ICCV, WACV]}
+        year: {type: integer, minimum: 2000, maximum: 2100}
+        top_k: {type: integer, minimum: 1, maximum: 3, default: 3}
+    output_schema:
+      type: object
+      required: [source, query, venue, year, hits, search_receipt]
+      additionalProperties: true
+      properties:
+        source: {const: cvf}
+        hits: {type: array, maxItems: 3, items: {type: object}}
+
   search.openalex_search:
     enabled: true
     description: Search OpenAlex metadata for papers with original PDF locations inside configured source domains. Returns explicit OpenAlex provenance; not MCP.

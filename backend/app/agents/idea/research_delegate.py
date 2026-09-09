@@ -272,6 +272,14 @@ class ResearchSession:
     failures: list[dict[str, Any]] = field(default_factory=list)
     require_review: bool = False
 
+    def research_tool_context(self, *, run_id: str, project: str, root: Path) -> ToolContext:
+        """Use the same validated effective child tools at dispatch as in its prompt."""
+        scope = None
+        if self.config.tools != get_agent_config("idea_research").tools:
+            scope = self.registry.scope_for_read_tools(self.config.name, self.config.tools)
+        return ToolContext(run_id=run_id, project=project, agent="idea_research",
+                           extra={"run_root": str(root)}, configured_read_scope=scope)
+
     def author_messages(self, args: dict[str, Any], *, refs: list[str], minimum: int,
                         policy: AgentLoopPolicy) -> list[Message]:
         """Assemble real author inputs without dispatching tools or a provider."""
@@ -423,8 +431,8 @@ class ResearchSession:
         try:
             provider, model = select_provider(self.config)
             result = await NativeAgentLoop().run(LoopInput(messages=messages, provider=provider, config=model,
-                registry=self.registry, tool_context=ToolContext(run_id=tool_context.run_id, project=tool_context.project,
-                    agent="idea_research", extra={"run_root": str(root)}), tools=tools, policy=policy,
+                registry=self.registry, tool_context=self.research_tool_context(run_id=tool_context.run_id,
+                    project=tool_context.project, root=root), tools=tools, policy=policy,
                 trace_root=trace, validate=validate, final_schema=research_submission_schema(), progress_sink=progress,
                 reflection_rubric=RESEARCH_REVIEW_RUBRIC,
                 review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
