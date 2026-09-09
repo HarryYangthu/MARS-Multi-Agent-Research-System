@@ -118,7 +118,8 @@ def parse_action(text: str) -> dict[str, Any]:
     if not isinstance(action.get("args"), dict):
         raise ValueError("args must be an object")
     if not isinstance(action.get("reason"), str) or not action["reason"].strip():
-        raise ValueError("reason must state why this tool call is needed")
+        raise ValueError("reason must be a non-empty top-level string stating why this tool call is needed; "
+                         "it must be a sibling of tool and args, not only inside args")
     return action
 
 
