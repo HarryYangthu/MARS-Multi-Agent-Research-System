@@ -211,3 +211,33 @@ JSON 动作修复整合后的全量回归为 **1,690 passed、20 skipped（128.3
 | 驱动 result.json | `8c2c3572f0528b7a7ee32ee59f909a13131f8b6095addda7212a987fcc2a6531` |
 
 完整路径、原始收据与 checkpoint 摘要、逐 trace 用量和冻结超时源码摘要均在独立 API 汇总中。入仓内容只有文档及小型证据摘要，没有复制 PDF、密钥或整份请求记录。
+
+
+## 第十七次：第二个真实 API 运行与受控停止
+
+本次独立结果见 [api_verification_20260909_attempt02.json](api_verification_20260909_attempt02.json)。以上 README 原文完整保留；原十五次 CLI 的 `verification.json` 与第十六次 API 的 `api_verification_20260909.json` 全部字节不变。
+
+| 独立 API 尝试 / 冻结源码 | 模型请求 / 响应 / 工具调用 | 已知 token | 总预算 / 实际耗时 | 终态 |
+|---|---:|---:|---:|---|
+| 第 2 次 API，即总第 17 次 / `e25317d` | 25 / 24 / 14 | ≥490,859，用量不完整 | 3600 / 3602.2526 秒 | 驱动 `timeout`；受控清理完成，主方案未接受 |
+
+原运行目录为 `runs/2026-09-09T0217_api_idea_20260909t021738_232250a3/`，驱动目录为 `runs/verification/api_idea_20260909T021738_232250a3/`。实际 API 创建、启动和停止分别返回 200、202、202；使用实验 profile `experimental_research_pro_per_insight_v1`，主作者 Pro/low、子作者及正常审查 high、JSON actions，保留产品工具和项目上下文。真实研究审查合同为 v3；源码开始至结束保持干净，后续源码修复没有回填本次运行。
+
+首委派请求 2 得到已完成但正文为空的响应，`empty_final_content`、`finish_reason=stop`，已知用量 8,954 token，故终态 `model_error`；它不算接受报告。父作者自主另行委派后，`575b2ab6bd2c443bab5cb4c0b1a54ee6` 的两篇论文、两项洞察实际通过 I1、I2 与 whole report 审查（请求 12–14），独立离线材料复核也通过。报告支持固定中心 RBF 与单变量 B 样条机制参照，并保留可训练 knot 的证据缺口；未声称已验证二维任务收益。
+
+主作者先遇到完整 JSONPointer 被写成字面键、随后重复 JSON 键的失败，继续修订。请求 7 的真实审查拒绝旧稿对 I2 的 rank-8 归因及未定义 Fourier 备选；请求 8 已改成明确的 32 参数加性 B 样条参照，补全 Fourier 定义，并通过宿主完整校验。上述已修问题不能继续计为当前稿缺陷。然而最新 24,572 字符候选仍误称零 RBF 权重会导致初始零梯度，并把夹持三次 B 样条的所有支撑宽度都写成 8/13；真实边缘宽度是 2/13、4/13、6/13。按标准 Cox–de Boor 零分母整项置零约定，实际训练点仍覆盖每个基的支撑，错误在理由，不能夸大成覆盖失败或已测训练失败；递归约定及初始化随机源重置说明另有实现澄清项，详见独立审阅。当前候选的主审查请求 9 尚未返回便被取消，因此没有主方案接受、双重交付、人工批准或下游实验。
+
+本次启动指令明确指定 `--max-seconds 3600`，但原 preflight/result 未持久化该参数；3600 不是脚本默认值。3602.2526 秒是驱动记录的单调时钟耗时，包含轮询与清理。到达期限后，驱动只发一次停止请求，再读取真实状态并关闭自己的隔离服务。API 的 `reason=user_request` 是停止接口的固定原因，本次实际触发者是验证驱动的期限。保存结果为 run `failed`、Idea checkpoint `interrupted`、`pending=model`、`usage_complete=false`；清理只证明本进程拥有的异步任务已退出，不保证远端推理或计费停止，也没有自动重放未知请求。
+
+已知输入 334,978、输出 155,881，共 490,859 token，包含首子任务的已知空响应；请求 9 未知用量仍未计入。主作者 `low` 确实通过正确字段传递，但它没有固定 token 或延时保证；请求 4 实际约 615.85 秒完成，不能把 SDK 的 360 秒配置当整次生成硬期限。[DeepSeek 官方说明](https://api-docs.deepseek.com/guides/thinking_mode/)
+
+导出前后，73 个原运行文件与 5 个驱动文件全部哈希不变；两份新增独立审阅单独绑定。它们是 Codex 离线复核，不是运行时接受或人工科研验收。完整文件哈希仅作来源索引，没有复制 PDF、长模型输出或凭证。
+
+| 证据 | SHA256 |
+|---|---|
+| 接受的子报告 UTF-8 | `1dfe3c9564a6d0e000a8649032b3bfe6f17ab08f621afecafd69b39d41dad619` |
+| 未接受主候选 UTF-8 | `9d56655e19cbe804e05ab7124ff8ba7b49772223887bda8ef7c0106a6cdeaf91` |
+| 未接受主候选宿主摘要 | `66cf64696c98a4c42bb09333b4db39ddd43724e656e10c5ceba74800ed0f72d3` |
+| manual_research_review.json | `9409f9fe617a74c16e636976215f576262328d67420980cd66940d03b3780a19` |
+| manual_quality_review.json | `efbd8824366ef8048c699a8989ad5f04eed9b05cedc26f7b5cb97a9ffd2e7dc8` |
+| 驱动 result.json | `9fab0afa8a6fc75724539e49d2aeeb3f29a3700bd29c46b9935cc2e682a85fe0` |

@@ -1,0 +1,517 @@
+{
+  "record_kind": "idea_api_runtime_verification",
+  "schema": "idea.api_evidence_export.v1",
+  "exported_at": "2026-09-09T03:25:29.714322+00:00",
+  "date_of_execution_utc": "2026-09-09",
+  "global_attempt_number": 17,
+  "api_attempt_number": 2,
+  "evidence_scope": "Real API create/start through Bridge, real research and main revision, and owned-run cancellation at the driver deadline; independent offline research review passed, but the main candidate was never accepted.",
+  "preserved_exports": {
+    "verification.json": {
+      "file_sha256": "07a4852693056f5e6acdca76c13bddea3edf60d86115dd9ab43499a34c0cc0d0",
+      "byte_identical": true
+    },
+    "api_verification_20260909.json": {
+      "file_sha256": "e27f0d9dde43dff6b3fd03ec7ef2f5a7ded823454fe9dfe87be7c8c16c50f49a",
+      "byte_identical": true
+    }
+  },
+  "preserved_readme_prefix": {
+    "bytes": 43232,
+    "sha256": "6d78ee0994df8295950f8cdbb6cdf8b0a2daf23330bed00ab85c847772eacc4f",
+    "byte_identical": true
+  },
+  "raw_archives_in_repository": false,
+  "raw_archive_note": "Only a compact summary and file hashes are exported; no PDFs, full model messages, keys, credential values or full raw observations are copied.",
+  "run_id": "2026-09-09T0217_api_idea_20260909t021738_232250a3",
+  "local_raw_directory": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-09T0217_api_idea_20260909t021738_232250a3",
+  "driver_directory": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/verification/api_idea_20260909T021738_232250a3",
+  "source": {
+    "commit": "e25317dfd896fff529397e0c4a681396b9692c3d",
+    "tree": "0f6ff1aded8c16c689b2838abd6cc21a77d10e89",
+    "dirty_paths": ""
+  },
+  "source_after": {
+    "commit": "e25317dfd896fff529397e0c4a681396b9692c3d",
+    "dirty_paths": ""
+  },
+  "entrypoint": {
+    "kind": "api",
+    "development_bypass_bridge": false,
+    "api_create": {
+      "method": "POST",
+      "path": "/api/runs",
+      "http_status": 200
+    },
+    "api_start": {
+      "method": "POST",
+      "path": "/api/runs/2026-09-09T0217_api_idea_20260909t021738_232250a3/start",
+      "http_status": 202
+    },
+    "auto_approve": false,
+    "seed_artifact_supplied": false,
+    "claim_boundary": "Create/start success demonstrates actual API execution, not a delivered proposal or completed project."
+  },
+  "profile": {
+    "id": "experimental_research_pro_per_insight_v1",
+    "status": "experimental",
+    "validated": false,
+    "configuration_sha256": "c66565fcb6f6a16745b2c15d3fecec9120f186bdfe26b6b95df40514df330d72",
+    "snapshot_sha256": "618da08e4e4ad69103a0027ac874c0607efa585302408bae44663bab5073d287",
+    "lead_model": "deepseek-v4-pro",
+    "lead_reasoning_effort": "low",
+    "research_author_and_normal_reviews_effort": "high",
+    "protocol": "json_actions",
+    "research_review_mode": "per_insight_then_whole",
+    "research_review_contract_id": "idea.research_per_insight_then_whole.v3",
+    "model_budgets": {
+      "lead": 36,
+      "child": 16
+    },
+    "tool_budgets": {
+      "lead": 5,
+      "child": 10
+    },
+    "max_delegations": 3,
+    "product_tools_retained": true,
+    "isolated_initial_memory": true,
+    "comparison_boundary": "Same experimental v1 model/protocol profile; frozen code includes v3 research review and owned-run cancellation. This is not a single-variable model or prompt comparison."
+  },
+  "status": "timeout",
+  "termination_authority": "driver/result.json plus actual POST stop / GET run and persisted checkpoint/run_state",
+  "started_at": "2026-09-09T02:17:38.647417+00:00",
+  "finished_at": "2026-09-09T03:17:40.819673+00:00",
+  "duration_seconds": 3602.252640666993,
+  "wall_seconds": 3602.1722581386566,
+  "driver_budget_seconds": 3600,
+  "driver_budget_provenance": "The original execution tool invocation explicitly supplied --max-seconds 3600. Original preflight/result JSON did not persist this argument; it is not inferred from the script default (1800) or allowed upper bound (3600).",
+  "duration_note": "3602.252640666993 seconds is the recorded monotonic elapsed duration including polling and cleanup around the 3600-second driver budget, not a changed model budget.",
+  "isolated_server_stopped": true,
+  "backend_exit_code": -15,
+  "persisted_run_status": "failed",
+  "persisted_main_checkpoint_status": "interrupted",
+  "owned_stop": {
+    "http_status": 202,
+    "response_status": "stopped",
+    "cleanup_confirmed": true,
+    "termination": {
+      "automatic_resume": false,
+      "cleanup_complete": true,
+      "finished_at": "2026-09-09T03:17:40.688000+00:00",
+      "interrupted_nodes": [
+        "idea"
+      ],
+      "reason": "user_request",
+      "requested_at": "2026-09-09T03:17:40.647076+00:00",
+      "scope": "owned_async_tasks",
+      "type": "cancelled"
+    },
+    "actual_trigger": "verification_driver_deadline",
+    "reason_note": "The API records the endpoint reason user_request; the caller here was the verification driver reaching its deadline, not an explicit human stop request.",
+    "after_stop_get_http_status": 200,
+    "after_stop_get_status": "failed",
+    "claim_boundary": "Cleanup covers this process owned asyncio tasks only. It does not prove that remote inference, billing or other external work stopped. Pending model usage remains unknown; no automatic replay or resume occurred."
+  },
+  "timeout_layers": {
+    "sdk_timeout_seconds": 360,
+    "sdk_timeout_semantics": "SDK/network timeout including read inactivity, not a fixed 360-second total completion duration.",
+    "author_outer_deadline_seconds": 726,
+    "author_outer_deadline_formula": "360*(1+1)+1+5=726",
+    "review_unit_retry_policy": "Per-insight and whole ReviewPlan calls use max_retries=0.",
+    "driver_total_budget_seconds": 3600,
+    "frozen_source_blob_sha256": {
+      "backend/app/harness/llm/provider_base.py": "13cdd543d3ca0235c3a6b17d39c26896f7006eca90cbab2939392f2852db9f1a",
+      "backend/app/harness/llm/openai_provider.py": "709dff2e5fbd7559cc23ef8b013d14bc17b474f8b2163feb674318e82ff5284f",
+      "backend/app/harness/agent_loop/executor.py": "231848ce62c9fba2426db6de23f7f505f9c00aceb5fc9ba93e509eaa8593a5e2",
+      "backend/app/bridge/owned_run_tasks.py": "42324bbce470835a584e85f5b6ccecd8a9a491210fb130c1c06ae8cb45414c6f"
+    }
+  },
+  "reasoning_effort_audit": {
+    "configured_and_request_trace": "low for main author; high for main review",
+    "wire_field": "reasoning_effort",
+    "wire_value": "low",
+    "thinking_extra_body": {
+      "thinking": {
+        "type": "enabled"
+      }
+    },
+    "method": "Read-only inspection of the frozen actual adapter plus offline request serialization; no extra model call.",
+    "server_echo_verification": false,
+    "claim_boundary": "DeepSeek documents low for v4-pro; it supplies no fixed low-effort token or latency cap. Correct field delivery does not prove a backend internal effort setting from a response echo.",
+    "actual_author_request_durations_seconds": {
+      "1": 256.262598,
+      "4": 615.848347
+    },
+    "official_sources": [
+      "https://api-docs.deepseek.com/guides/thinking_mode/",
+      "https://api-docs.deepseek.com/api/create-chat-completion/"
+    ]
+  },
+  "counts": {
+    "action_rounds": 14,
+    "model_requests": 25,
+    "model_responses": 24,
+    "observations": 14,
+    "protocol_repairs": 1,
+    "reflections": 2,
+    "sdk_attempts": 25,
+    "tool_dispatches": 14,
+    "validation_repairs": 1
+  },
+  "usage": {
+    "prompt_tokens": 334978,
+    "completion_tokens": 155881,
+    "total_tokens": 490859
+  },
+  "usage_complete": false,
+  "usage_is_known_lower_bound": true,
+  "usage_note": "All known responses, including the completed but empty first-child response, are counted. Main review request 9 was in flight when cancelled and has no response; 490859 is a known lower bound, not a final bill.",
+  "checkpoint_accounting": [
+    {
+      "invocation": "3d204d6eb073492baa4c688067463d4d",
+      "agent": "idea",
+      "checkpoint_ref": "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/checkpoint.json",
+      "checkpoint_sha256": "2da36cebc709569c8d5795d6b9462e8845bc5dc3921916003c9f47fbc38f8266",
+      "persisted_status": "interrupted",
+      "pending": "model",
+      "counts": {
+        "action_rounds": 3,
+        "model_requests": 9,
+        "model_responses": 8,
+        "observations": 3,
+        "protocol_repairs": 1,
+        "reflections": 1,
+        "sdk_attempts": 9,
+        "tool_dispatches": 3,
+        "validation_repairs": 1
+      },
+      "usage": {
+        "completion_tokens": 110254,
+        "prompt_tokens": 156237,
+        "total_tokens": 266491
+      },
+      "persisted_usage_complete": false,
+      "reflection_accepted": false,
+      "candidate_utf8_sha256": "9d56655e19cbe804e05ab7124ff8ba7b49772223887bda8ef7c0106a6cdeaf91"
+    },
+    {
+      "invocation": "575b2ab6bd2c443bab5cb4c0b1a54ee6",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/checkpoint.json",
+      "checkpoint_sha256": "9595eef50f475d26f0da0f0fcce4aa00fe137880cdda44f1dc1e73da00012fc9",
+      "persisted_status": "passed",
+      "pending": null,
+      "counts": {
+        "action_rounds": 10,
+        "model_requests": 14,
+        "model_responses": 14,
+        "observations": 10,
+        "protocol_repairs": 0,
+        "reflections": 1,
+        "sdk_attempts": 14,
+        "tool_dispatches": 10,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "completion_tokens": 44227,
+        "prompt_tokens": 166800,
+        "total_tokens": 211027
+      },
+      "persisted_usage_complete": true,
+      "reflection_accepted": true,
+      "candidate_utf8_sha256": "1dfe3c9564a6d0e000a8649032b3bfe6f17ab08f621afecafd69b39d41dad619"
+    },
+    {
+      "invocation": "58ff4c98c3cc423bba8909ce746f8ec9",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/58ff4c98c3cc423bba8909ce746f8ec9/checkpoint.json",
+      "checkpoint_sha256": "0e4f3b558560ab25b800c6cea573c5ab77826cfeff35462e352a08d62acf8421",
+      "persisted_status": "model_error",
+      "pending": null,
+      "counts": {
+        "action_rounds": 1,
+        "model_requests": 2,
+        "model_responses": 2,
+        "observations": 1,
+        "protocol_repairs": 0,
+        "reflections": 0,
+        "sdk_attempts": 2,
+        "tool_dispatches": 1,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "completion_tokens": 1400,
+        "prompt_tokens": 11941,
+        "total_tokens": 13341
+      },
+      "persisted_usage_complete": true,
+      "reflection_accepted": false,
+      "candidate_utf8_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "research": {
+    "accepted_report_count": 1,
+    "accepted_source_count": 2,
+    "accepted_insight_count": 2,
+    "source_papers": [
+      {
+        "source_id": "arxiv:2405.06721",
+        "report_title": "Kolmogorov-Arnold Networks are Radial Basis Function Networks"
+      },
+      {
+        "source_id": "arxiv:2405.08790",
+        "report_title": "Kolmogorov-Arnold Networks (KANs) for Time Series Analysis"
+      }
+    ],
+    "deferred_source_ids": [
+      "arxiv:2404.19756",
+      "arxiv:1906.04032"
+    ],
+    "model_review_passed": true,
+    "independent_quality_passed": true,
+    "scientific_validated": false,
+    "independent_review_status": "passed_with_scope_limits",
+    "scope_limits": [
+      "The second paper describes general KAN machinery while studying time-series prediction; its independent contribution to this proposal is the spline alternative and its limitations, not a new theorem or an independent RBF performance result.",
+      "KAN v2 page 3 and page 6 text windows are truncated. The quoted differentiability statement and the method details relied on are visible; pages 4 and 5 cover the experiment configuration and parameter table. Negative claims about omitted formulas should remain bounded to the retrieved material.",
+      "The research report offers zero weights or baseline-node values as possible initialization. Zero coefficient initialization is not generically gradient-dead for a linear RBF expansion. A warm-start implementation would need to specify the source and budget of node values; the main candidate instead selects data-independent Gaussian initialization.",
+      "Adaptive or learnable knot locations remain explicitly unresolved. Failed downloads of the original KAN and Neural Spline Flows were deferred and were not treated as read evidence."
+    ],
+    "binding": {
+      "delegation_id": "575b2ab6bd2c443bab5cb4c0b1a54ee6",
+      "report_ref": "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/report.md",
+      "report_sha256": "1dfe3c9564a6d0e000a8649032b3bfe6f17ab08f621afecafd69b39d41dad619",
+      "candidate_digest": "abc9ff63d9bf68be3bc5e9c6d858b6af64b6455eb66be52c89d49868cd7b4ba9",
+      "checkpoint_ref": "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/checkpoint.json",
+      "checkpoint_sha256": "9595eef50f475d26f0da0f0fcce4aa00fe137880cdda44f1dc1e73da00012fc9",
+      "manifest_ref": "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/manifest.json",
+      "manifest_sha256": "12143f7d1ad9f954164012f22fb76bfecda84b31208676b142d583fe983fb865",
+      "model_review_passed": true,
+      "review_contract_id": "idea.research_per_insight_then_whole.v3",
+      "review_plan_sha256": "b5f886f39eda546934698fcabb12469875b1b490b76878e66e811771515e425a"
+    },
+    "final_review_units": [
+      {
+        "unit_id": "I1",
+        "request": 12,
+        "accept": true
+      },
+      {
+        "unit_id": "I2",
+        "request": 13,
+        "accept": true
+      },
+      {
+        "unit_id": "__whole_report__",
+        "request": 14,
+        "accept": true
+      }
+    ],
+    "scope_note": "The original report offers evidence and exploratory transfers. I2 legitimately discusses trainable univariate B-spline functions; it does not establish a rank-8 node-matrix factorization. Main-author misuse must not be attributed to the report.",
+    "first_delegation": {
+      "id": "58ff4c98c3cc423bba8909ce746f8ec9",
+      "status": "model_error",
+      "request": 2,
+      "reason": "empty_final_content",
+      "finish_reason": "stop",
+      "response_usage_complete": true,
+      "response_total_tokens": 8954,
+      "accepted_report": false,
+      "recovery_note": "The parent autonomously made a separate delegation; the new optional empty-response repair was not applied to this frozen run."
+    }
+  },
+  "main_proposal": {
+    "candidate_scope": "candidate_only_unaccepted",
+    "candidate_binding": {
+      "checkpoint_ref": "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/checkpoint.json",
+      "checkpoint_sha256": "2da36cebc709569c8d5795d6b9462e8845bc5dc3921916003c9f47fbc38f8266",
+      "candidate_field": "/candidate",
+      "candidate_chars": 24572,
+      "candidate_utf8_sha256": "9d56655e19cbe804e05ab7124ff8ba7b49772223887bda8ef7c0106a6cdeaf91",
+      "candidate_digest": "66cf64696c98a4c42bb09333b4db39ddd43724e656e10c5ceba74800ed0f72d3",
+      "candidate_model_request": 8,
+      "candidate_response_event_seq": 51,
+      "last_validation_event_seq": 52,
+      "last_validation_passed": true,
+      "reviewed_candidate_sha": "4be1fa69a48f9de9a075ba252d0a1e621ee6a9964f005cb1a572632b7b627908",
+      "reflection_accepted": false,
+      "last_completed_review_request": 7,
+      "last_completed_review_event_seq": 46,
+      "last_inflight_request": 9,
+      "last_inflight_phase": "reflect",
+      "final_proposal_file_exists": false
+    },
+    "model_review_passed": false,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "independent_review_status": "unaccepted_candidate_requires_correction",
+    "scope_and_clarity_notes": [
+      {
+        "category": "implementation_clarity",
+        "location": "/method_spec/additive_bspline/basis",
+        "note": "The phrase 0/0 is zero is narrower than the standard repeated-knot convention: a whole summand with zero denominator must be zero, including nonzero numerator multiplied by a zero lower-degree basis. A literal quotient-first implementation can produce infinity/NaN. The offline exact calculation explicitly uses the conventional whole-term rule; no working implementation is claimed."
+      },
+      {
+        "category": "randomness_clarity",
+        "location": "/method_spec/randomness/init_rng",
+        "note": "The text says reset a generator for each arm and also says different arms read it sequentially. Choose one explicit arm-reset rule for implementation. This does not establish unequal observed data or a currently executed comparison."
+      },
+      {
+        "category": "inference_scope",
+        "note": "One synthetic target, fixed spatial sample sets and eight training seeds test a restricted empirical hypothesis. Seed bootstrap uncertainty does not establish generalization across functions, global approximation rates or real PIMC performance."
+      },
+      {
+        "category": "comparison_scope",
+        "note": "Changing basis with a shared optimizer compares the specified training procedures as well as representations. The 32-versus-256 additive comparison is a legitimate structured alternative, but cannot by itself separate parameter-count effects, additive restrictions and spline-family effects."
+      },
+      {
+        "category": "finite_precision_scope",
+        "note": "Declared float32 RBFs can underflow for remote centers at narrow widths; this does not imply every coefficient has zero support. No finite-precision training or endpoint implementation has been executed here."
+      },
+      {
+        "category": "clarity",
+        "location": "/method_spec/coverage_generator/overlap_check",
+        "note": "The fragment n=16*i+r<i' is malformed explanatory text. Disjointness nevertheless follows from the actual distinct residue classes and was checked directly."
+      }
+    ],
+    "resolved_in_current_candidate": [
+      "The literal full-path method_spec keys from request 4 were replaced by nested fields; final host validation passed.",
+      "The I2 source link now points to an explicitly defined 32-parameter additive univariate cubic B-spline alternative, with transfer assumptions stated; the unsupported rank-8 link is not retained.",
+      "The previously named Fourier alternative now has an explicit frequency set and forward definition."
+    ],
+    "confirmed_remaining_issues": [
+      {
+        "id": "R17-Q1",
+        "field": "/method_spec/initialization/candidate_rbf/trainable_signal_check",
+        "finding": "The assertion that zero RBF weights cause a zero initial loss gradient is incorrect for this fixed-basis linear readout. The actual nonzero random initialization remains executable; the stated reason is wrong."
+      },
+      {
+        "id": "R17-Q2",
+        "field": "/method_spec/additive_bspline/training_signal_check",
+        "finding": "The declared clamped cubic knot vector gives boundary support widths 2/13, 4/13, 6/13, then ten interior widths 8/13 and symmetric trailing widths. The claim that every basis has width 8/13 is false.",
+        "coverage_boundary": "The actual training points still cover every basis support; this is a false justification, not a demonstrated failure of coverage or training."
+      }
+    ],
+    "prior_review_boundary": "Request 7 rejected the earlier candidate. The current request-8 revision repaired those named issues and passed host validation, but its request-9 review never returned. Old review_issues are retained history, not a completed review of this candidate."
+  },
+  "delivery": {
+    "final_proposal_delivered": false,
+    "dual_output_delivered": false,
+    "waiting_review_reached": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "simulation_executed": false,
+    "scientific_validated": false
+  },
+  "separate_review_records": {
+    "manual_research_review.json": {
+      "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-09T0217_api_idea_20260909t021738_232250a3/manual_research_review.json",
+      "sha256": "9409f9fe617a74c16e636976215f576262328d67420980cd66940d03b3780a19",
+      "reviewer": "Codex independent offline review; not runtime or human scientific acceptance"
+    },
+    "manual_quality_review.json": {
+      "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-09T0217_api_idea_20260909t021738_232250a3/manual_quality_review.json",
+      "sha256": "efbd8824366ef8048c699a8989ad5f04eed9b05cedc26f7b5cb97a9ffd2e7dc8",
+      "reviewer": "Codex independent offline review; not runtime or human scientific acceptance"
+    }
+  },
+  "driver_file_sha256": {
+    "backend.log": "ccd3050703400e656fede637a9f0643217bdf2ea40786ccdeefcfc1d693f9c25",
+    "http.jsonl": "916936e4c254ad3dacec17f8092cbd9be9da9478e47494e4d105a5180854d75d",
+    "isolated_memory/literature/_arxiv_cache/88e554d557a5bf39c65fa160.json": "cdbeb370f0b676fca13ed7afeb97421aa56c8c2759ef46028f1ed0ee4944b4d6",
+    "preflight.json": "4d5a24bfb6ee9b892397fff3aa37cfd18f39be07e088d3d6972849c5154a54a4",
+    "result.json": "9fab0afa8a6fc75724539e49d2aeeb3f29a3700bd29c46b9935cc2e682a85fe0"
+  },
+  "driver_source_record": {
+    "path": "/private/tmp/mars-idea-20260909-api-owned-stop-live.py",
+    "sha256": "6aee9f26de58591dc94c9bab782d53293bdd1adf333f620ff4a4eccb7956d45d"
+  },
+  "raw_file_sha256": {
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/checkpoint.json": "2da36cebc709569c8d5795d6b9462e8845bc5dc3921916003c9f47fbc38f8266",
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/events.jsonl": "05a7b9cfc0fe113e5559186e3c50ca61c8e0e71fea0bb4c371b00a9271a8c160",
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/facts.json": "19c603da27de2f97d5526dc077277d3120a12f803592aeafc166fec0071245d2",
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/tools/0001.json": "52f2268e2c5a536f283bebb7b4a7343f9efae41c0a1cbe95af7385c5b223725a",
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/tools/0002.json": "0a6499404353a3968716b81e6163413bb70e20e618dfbc7208987696858919a9",
+    "agent_traces/idea/3d204d6eb073492baa4c688067463d4d/tools/0003.json": "de25a10378e939f17eefc5e6738fbd733936d80af50ce0c03c478ada7ab9c008",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/checkpoint.json": "9595eef50f475d26f0da0f0fcce4aa00fe137880cdda44f1dc1e73da00012fc9",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/events.jsonl": "db4cca6641431916fa1293e309c82b306b574c6c2cce1d24e7a0709b314f9d21",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/facts.json": "1c83a53c4df0c4c99b63be74f83170a5fd58f2689a95df53f9446315f64da5ca",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0001.json": "a3025f5e159164cecf5be4cd05c9987560227493766640e4daee1de7b236eb5b",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0002.json": "f59330f2fc47eac618dea7f7612e73201e9ea477f77e4e91a7054741e8020315",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0003.json": "7e261b73b3cb04c995b7bd5ca7aac6a4366d1004ab397cf514cdbc7799785b41",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0004.json": "ad84454f072b98b7c14cd7be3de131a53e7ce30047cda1d806dd46e33286ecef",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0005.json": "bd3f37dff5213afdb0588bc04b5c8f73732c4f3f603091476d272e55acda561f",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0006.json": "5295583d33eeda0f6e5f8c7f4f57e81bcaac1251dbe6b794f6829d889e3c9b0e",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0007.json": "df29b33d0897e2ce86ab70f5bd60765086b221b10f352fcadcec9b869175b3a1",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0008.json": "d06dc20d63bc3289517c037bc875d75363347527ed3a38fc2885d88a2f049faa",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0009.json": "0b8b8f92343b1d7c3b0fee69ae4e0538d4bcd39cd5637d36781015bc2daad595",
+    "agent_traces/idea_research/575b2ab6bd2c443bab5cb4c0b1a54ee6/tools/0010.json": "622d4e66da3f6381a62731e5cc1c0996e4b6d3074e82f184ce2ecdfbcdd8d44d",
+    "agent_traces/idea_research/58ff4c98c3cc423bba8909ce746f8ec9/checkpoint.json": "0e4f3b558560ab25b800c6cea573c5ab77826cfeff35462e352a08d62acf8421",
+    "agent_traces/idea_research/58ff4c98c3cc423bba8909ce746f8ec9/events.jsonl": "f46e13c292c118fab7a4b12761aa8cc9f68040c1153635d55afa67c84ff8a6fc",
+    "agent_traces/idea_research/58ff4c98c3cc423bba8909ce746f8ec9/facts.json": "fa9573a9817c4990579bb4c67c57b9eda51cf554aad297ed9407b6941500319c",
+    "agent_traces/idea_research/58ff4c98c3cc423bba8909ce746f8ec9/tools/0001.json": "aba2d29ffae477e9c3c37e4342392b9cfc765b54931c41fbd3ae9576e5b57edb",
+    "coding/tool_applications/02e8fb9529f8484a81aa410b9fa67fdf.json": "df9c008f39dc40951a496e4607230b00e2ff3286b6466b6eb60507bb7f2f101e",
+    "coding/tool_applications/11b189bdf39d448d9ac8d84a199bddf3.json": "b0c2fbb82967f14c00ff1d8e4492118ccbbc2a5ea2af5786f468a245f81e5952",
+    "coding/tool_applications/24643f0e16494e748a5c3eb29c82b8f2.json": "e826745a94c7884b8e488f4a4f8c9b937423008df780409d5edc65e1cef12dee",
+    "coding/tool_applications/273c09acbfb4455797c89c366bcaf957.json": "bb36e5dace867e1edacf19259556e4b6fb753764eeddfae1e1361cef05fc4764",
+    "coding/tool_applications/37d76fe3d1104dc58b3ae4a150495eeb.json": "9108bd7fa51fa44c8d64592a5d81dc9c203d690deb476c2df32423d4e4ef93a5",
+    "coding/tool_applications/560ae4e8c3644863b50fb1ae9ef728ea.json": "ea3f1ef684f0103d1316413c47b3d1ac51aac709c27d3e854183113cdef5af48",
+    "coding/tool_applications/5bee5d219344421ebda342d899aa2327.json": "af0cf745c21c50ca72fbaaebc392773f67ad6cc760dec27ac24a42bcb100f7f8",
+    "coding/tool_applications/7b506fa45bfb44f1aba8a10250883d94.json": "689b227d177118cd38d259b69f76b6363b079b8320d6edfb14fd84233735bf00",
+    "coding/tool_applications/8d2606e8545b4959bd9103a5ff6e5d12.json": "73eba14d5c873ee5f2c63714a2e3ab8b7045fe2a95d1e1c81b1118d645545d34",
+    "coding/tool_applications/a9069c1241074000aed8d110c4698872.json": "b05a7821f18f129d8f8196ca56a7d06345acacdfa2bc6f52137863dc434b9f6d",
+    "coding/tool_applications/aba9572457064dbb979e1565495ff201.json": "2e071f24c9de14d3ae80a56eda419384898cdcb4e9202d78e13a57f2027f14da",
+    "coding/tool_applications/b13c0e4605ae4ac8a3c778d5f03f4604.json": "9764db3e1e769d346bce76e02b3907a3e56da50362e91c03967775705c81bec4",
+    "coding/tool_applications/c0fdadf7431545f0b3f192d49c84f9e5.json": "6cfdaab1497ff27dff817604dc6bda566420ee61374c4919efd49860de985a66",
+    "coding/tool_applications/cbf793a49cd44dc583508d0b4e6eb419.json": "b651a644d3770f1ca57535f78d6af12a83a96288c1449769b42a8ad7471299cf",
+    "context/langgraph_runtime.v2.json": "3c0a7e21bb1e3da95df8a182dd2c136695831c7a15d93c5d7c3689d1c819ec53",
+    "context/trace_manifest.v2.json": "1833d081e34a0b0ed6bdc70e5198ce21a534540fc1512cdea021babc1014c6e9",
+    "events/agent_events.jsonl": "170b39c7b0b38a5a4e7f32d09ad12617d65b6f284fbc4acbb97e46450783c186",
+    "events/langgraph_events.jsonl": "749fbc25eb56ebc6e112f98b378058a892baedd0788440d7a4bea4f37a0b47e8",
+    "events/run_lifecycle.jsonl": "1a57aa68185e6979aef1760702510a9176dbe5a8de02b926a614498728e6f4ed",
+    "events/tool_calls.jsonl": "ad6b4a36ade4100cb606a0f440ae266ba9b2e3a7c3cacf200b11e8ed8b5309b1",
+    "events/tool_events.jsonl": "a6f0e4085d53763503849d5e923a027f11b705a7fddb6106360f2d7150c659b7",
+    "events/websocket_events.jsonl": "db936e1c0268c2d448318897a6f0f65a6086160d9070e32f6f7810ea2d8f9e92",
+    "idea/progress.jsonl": "a2124e1cc37d824f95e4861735451c5903e39365c33baec9fa9ca48783235b66",
+    "idea/research/evidence_index.v1.json": "3ac71ee2ba21e6c7fb8ffc8fdd7ebb8f7537e0437ec13a6ef3838ac8cd98ccf9",
+    "idea/research/tool_results.v1.json": "98ae414c41bba3d34e872592974041ac6894efcac19ed5f4df05b103b07a1361",
+    "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/manifest.json": "12143f7d1ad9f954164012f22fb76bfecda84b31208676b142d583fe983fb865",
+    "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/progress.jsonl": "19be396a6879be9a7d5aea87469357cd3bbe72fc3e532442f840ee78a422ba0e",
+    "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/report.md": "1dfe3c9564a6d0e000a8649032b3bfe6f17ab08f621afecafd69b39d41dad619",
+    "idea/research_delegations/575b2ab6bd2c443bab5cb4c0b1a54ee6/request.json": "ba1b71d06d04124b11d7f270d4c1e62eb062db69e724169e9448cfc7e5342200",
+    "idea/research_delegations/58ff4c98c3cc423bba8909ce746f8ec9/failure.json": "b8d1282a6169bc7b958e2551fec7900c5130296041376704d75bedc82ffa2fb5",
+    "idea/research_delegations/58ff4c98c3cc423bba8909ce746f8ec9/progress.jsonl": "770709cb3d80ea950af0be9b28518403d6f16aa1197e2b9e5f19ae4946297e3c",
+    "idea/research_delegations/58ff4c98c3cc423bba8909ce746f8ec9/request.json": "b530a56898f77cefa2bc901260c3f6e19430202a6d8886b9b22b7580375bae45",
+    "idea/validation/08b0208bc22c49ffad0cc59c2cc82fde.json": "d33a98d490b8af3c5b4ae62a8c81b23ae2b2ca864da09754b6ffae2fda3fa07e",
+    "idea/validation/a308d1c8d2ce4610849ba36f1f6b5723.json": "8f3eff30418c4f65050fa6a08153601a059ec68e1623c694decfb9b9f57e5ad7",
+    "idea/validation/d1125285b64645d4b3406c3aa3e62373.json": "96fc9805198efe6b01c4205c9658a2fe667eed371134d7d903c8f96fc010f6fa",
+    "idea_research/research/downloads/381dd06bb3214bdba071f2ce58d98509.read.json": "2e6f9b10581e52db8a0ab762c877217bda6429987fded29d04741b50567a9bcf",
+    "idea_research/research/downloads/6bd0ab2eb5ae4626841ffbb08fa12439.read.json": "e3eb61142bbb0f7278a0dc93fafd807844c438c83e6598404d29644762fd8534",
+    "idea_research/research/downloads/9643bdb59b3734e4c07a72ed4a1e5b3a6bcc79cff0a5a6a203bb5c869730c96f.pdf": "9643bdb59b3734e4c07a72ed4a1e5b3a6bcc79cff0a5a6a203bb5c869730c96f",
+    "idea_research/research/downloads/cbe6e13e328341088613e2ec432a4dd5.read.json": "53a2682b52830abf4329717e0976995de5402b196ac8586e7a757a0ba7f65ff5",
+    "idea_research/research/downloads/cf5747481b4efc8a51fa730fa528812a884811d8dbdd5bff07095335ab94c94c.pdf": "cf5747481b4efc8a51fa730fa528812a884811d8dbdd5bff07095335ab94c94c",
+    "idea_research/research/downloads/source_fetch_index.v1.json": "15b143c4f4a6076083ed7739cee4692c36af96f7333a915b9f1c8a7468e3505b",
+    "idea_research/research/searches/0ca94d76613a705fc9de0816302238c21a91a1a03f2a506c5696ef1453464747.json": "083eefa433f1aef189724d68d7d9ea129864eefce57bb91455a3de53503fe26d",
+    "idea_research/research/searches/240d568d3312fbddd43b354ec1772bfbd2071d76b896562ac40e6aff4b026376.json": "4a7a42811499efed5c35a8c078c87e478d62185adb921b7085d940617684ff33",
+    "idea_research/research/searches/6775f00d7960a9ae38f95eec59bb9c03ce61f9a2add1d8b7df1f4d8bc1c567f9.json": "dea13e4bbfed9f501b9955328ca864f6b10b8294e26d984ad79f49cea9b4d438",
+    "idea_research/research/searches/c4d53f8bda06255ce56c539f822328ab259bf4d4daa91c939de4a524bc1e6173.json": "a589ef824dadc53e7ccb73e00f8794e918134047affbf2a207e6ecd1c1a604f3",
+    "input/idea_runtime_profile.v1.json": "618da08e4e4ad69103a0027ac874c0607efa585302408bae44663bab5073d287",
+    "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+    "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+    "manual_quality_review.json": "efbd8824366ef8048c699a8989ad5f04eed9b05cedc26f7b5cb97a9ffd2e7dc8",
+    "manual_research_review.json": "9409f9fe617a74c16e636976215f576262328d67420980cd66940d03b3780a19",
+    "run_meta.json": "23b9de89bfef3bcb9447867902fffd05750c3be25eacc0ed77a43242a6df12e6",
+    "run_state.json": "69ed0ba533775d93343624aa2f4f5cc8c5f0aee17951e32784d3a0e5dc55b25e"
+  },
+  "integrity": {
+    "original_run_files_checked_unchanged": 73,
+    "separate_manual_reviews_bound": 2,
+    "all_run_files_checked_unchanged_during_export": 75,
+    "all_driver_files_checked_unchanged": 5,
+    "legacy_cli_export_byte_identical": true,
+    "legacy_api_attempt01_export_byte_identical": true,
+    "readme_original_prefix_byte_identical": true,
+    "source_archives_modified": false,
+    "new_models_called_for_export": false
+  }
+}
