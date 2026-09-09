@@ -1,0 +1,151 @@
+{
+  "schema": "idea.review_component_summary.v1",
+  "component_id": "insight_evidence_scope_v4_20260909T035801Z_6e7f4888",
+  "component_archive_ref": "runs/verification/insight_evidence_scope_v4_20260909T035801Z_6e7f4888",
+  "component_started_at": "2026-09-09T03:58:01.133722+00:00",
+  "component_finished_at": "2026-09-09T04:01:30.179795+00:00",
+  "source": {
+    "run_ref": "runs/2026-09-09T0323_api_idea_20260909t032310_496a95e7",
+    "child_invocation": "3b99d035bf444966be5eb45cdda8a852",
+    "request": 13,
+    "unit_id": "I2",
+    "source_commit": "a157e30e1f81112394894f5a3c873a775d7be41d",
+    "event_prefix_end_seq": 89,
+    "event_prefix_file_sha256": "06dfc405fa02b01a480d2bd72e08659b36e04f25f4521c23730b91be89d6ef46",
+    "candidate_utf8_sha256": "442f3547c56aeabc8a0aa1f4e09216f288a338bf1e00cdcbb54568566836c1e0",
+    "candidate_trace_digest": "f269606ee1d50d6180de596fd88240d9683f2d778d5905dff2e892cf8483bec0"
+  },
+  "execution": {
+    "source_commit": "bcf6ae4b6b05897f17e8ec06b76c7aac4a63e433",
+    "source_worktree_clean_before_and_after": true,
+    "loaded_source_file_count": 47,
+    "loaded_sources_match_frozen_git_commit": true,
+    "recorded_before_after_loaded_source_hashes_equal": true,
+    "driver_sha256": "c54fb5879e9becd1dcf74969d36b47459e6055261cada56c7020685547296cef",
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "thinking_enabled": true,
+    "reasoning_effort": "high",
+    "json_mode": true,
+    "max_output_tokens": 32768,
+    "input_token_budget": 256000,
+    "provider_timeout_seconds": 360.0,
+    "host_deadline_seconds": 365.0,
+    "provider_max_retries": 0,
+    "sdk_max_retries": 0,
+    "sdk_attempts_started": 1,
+    "sdk_attempts_succeeded": 1,
+    "tool_calls": 0,
+    "elapsed_seconds": 209.0497256660019
+  },
+  "input_comparison": {
+    "original_contract": "idea.research_per_insight_then_whole.v3",
+    "component_contract": "idea.research_per_insight_then_whole.v4",
+    "changed_message_indices": [
+      0
+    ],
+    "changed_role": "system",
+    "all_other_messages_identical": true,
+    "non_system_messages_identical": true,
+    "response_schema_identical": true,
+    "original_budget_message_identical": true,
+    "original_input_trace_digest": "6cf7c171d69759ddf63e5e823cb99878d8d463857a1bc2669f526e4b10c40925",
+    "component_input_trace_digest": "ddb9607b1fcfb940edf875062bc5e3bc0a747586acff8753b8914adbc6e6c09a",
+    "response_schema_trace_digest": "9f8bb22f46554ccf84b84758002696d6128edc1c609b2cc95afbaf944f4667ee",
+    "old_plan_trace_digest": "8fa1d049808d6177d5580a7049333881d8c4124d1b54f4218c9def242c2fadda",
+    "new_plan_trace_digest": "5fb841f397848b886891e0c023d1eb9fae29fab82465dee9862d1dac5502313e",
+    "evidence_bindings_trace_digest": "ffa78bf1cbac05420ede93bffdee12aa578af79156872aa62e35fb6df5730828",
+    "input_compressed": false,
+    "input_omitted": false,
+    "prior_review_or_external_audit_added_to_input": false
+  },
+  "observed_evidence_scope": {
+    "source_observation_count": 7,
+    "verified_source_file_count": 16,
+    "tool_receipt_count": 7,
+    "read_receipt_count": 4,
+    "document_file_count": 2,
+    "target_document_page_count": 13,
+    "target_visible_page_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "target_truncated_pages": [
+      3,
+      7
+    ],
+    "target_read_windows": 2,
+    "full_document_read_established": false
+  },
+  "review_outcome": {
+    "original_v3_accept": true,
+    "component_v4_accept": false,
+    "component_review_json_valid": true,
+    "blocking_issue_count": 1,
+    "blocking_fields": [
+      "limitations[1]"
+    ],
+    "blocking_verdict": "unverifiable",
+    "field_count": 6,
+    "claim_verdict_counts": {
+      "supported": 9,
+      "hypothesis": 3,
+      "unverifiable": 1
+    },
+    "conclusion_zh": "新审查识别到论文级消融缺失断言超出了实际可见页段的证据范围，并因此拒绝该条 insight。",
+    "required_resolution_zh": "需要补充能够支持该缺失断言的来源依据，或由作者显式将断言限定为已检查材料；审查员不能只在自己的解释中缩窄范围后接受原断言。"
+  },
+  "usage": {
+    "prompt_tokens": 14120,
+    "completion_tokens": 13385,
+    "total_tokens": 27505,
+    "usage_complete": true
+  },
+  "integrity": {
+    "artifact_manifest_entry_count": 8,
+    "artifact_manifest_verified": true,
+    "source_file_hashes_verified": true,
+    "original_event_prefix_unchanged": true,
+    "component_result_file_sha256": "40e97b3b778df7b22d102871ab2ec3d5be44d9131fa7fe589e77fec1f6fdae62",
+    "component_response_file_sha256": "ce63c1dfaa706ed95145e31d5607db9a08563661921b0feb0c5e2b32048a37c8",
+    "component_response_text_utf8_sha256": "50772ebc5ca82e9f4060747ad33d4d534d8565273309305df8b64454e0537033",
+    "component_response_trace_digest": "a7b74c6dab3000be6b59dbba78023cb2a0f62790fa1d7776e4cbbfa87f04316f",
+    "artifact_manifest_file_sha256": "0139c95f9707ff5f061ec94baefb06fb25c0e82f66854edb25538ef4a652c777",
+    "artifact_file_hashes": {
+      "request.json": "66eeddbb97080b123bb41c4306d01f7ae28a179c4b3406836b45e2de7b2df48f",
+      "result.json": "40e97b3b778df7b22d102871ab2ec3d5be44d9131fa7fe589e77fec1f6fdae62",
+      "attempts.json": "0860fe1a674b0c929684aaf4e901cde0030a3ec719bc66e3ca92843f65a06dfc",
+      "original_review_request.json": "f588f157cd56b7414ddd5b2b7fb3042e4362439c674a1d31164b0a218d16a2ac",
+      "original_review_response.json": "88217089ce3b5aae2a3cdc07b8679ba0ceb6bfbdf499f83c0cef79a7cbf9dece",
+      "response.json": "ce63c1dfaa706ed95145e31d5607db9a08563661921b0feb0c5e2b32048a37c8",
+      "original_event_prefix.jsonl": "06dfc405fa02b01a480d2bd72e08659b36e04f25f4521c23730b91be89d6ef46",
+      "original_review_result_event.json": "37d2694027c58c28fa5a6f1f5d70669be9ed145e7bd97a4eae3bebcc24bb1edf"
+    }
+  },
+  "boundaries": {
+    "single_case_component_comparison": true,
+    "reliable_detection_rate_established": false,
+    "full_agent_acceptance": false,
+    "scientific_validated": false,
+    "source_review_replaced": false,
+    "original_child_contract_remains_v3": true,
+    "original_child_model_requests": 14,
+    "original_child_model_responses": 14,
+    "original_child_status": "passed",
+    "original_child_I2_accept_remains": true,
+    "original_child_requests_after_component_start": 0,
+    "automatic_retry_after_unknown_outcome": false,
+    "paper_full_text_included": false,
+    "full_model_inputs_or_outputs_included": false,
+    "credentials_included": false
+  },
+  "hash_conventions": {
+    "file_and_utf8_sha256": "SHA-256 of exact bytes; UTF-8 for explicitly named text fields",
+    "trace_digest": "SHA-256 of canonical JSON, including JSON quoting for strings"
+  }
+}
