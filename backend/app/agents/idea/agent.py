@@ -125,7 +125,7 @@ class IdeaAgent(BaseAgent):
                 budget_properties[prefix + "_components"] = components
             budget_properties["evaluation_cases"] = {
                 "type": "array", "minItems": 1, "maxItems": 32,
-                "description": "Include the primary configuration unchanged. Other sizes inherit its tensor ledger; different candidate architectures may explicitly override BOTH candidate_formula and candidate_components. All cases retain the baseline ledger and host budget limit.",
+                "description": "Include the primary configuration unchanged: inherit or exactly repeat its candidate_formula and candidate_components. Other sizes inherit its tensor ledger; different candidate architectures may explicitly override BOTH candidate_formula and candidate_components. All cases retain the baseline ledger and host budget limit.",
                 "items": {"type": "object", "additionalProperties": False,
                           "required": ["name", "variables", "baseline_parameters", "candidate_parameters"],
                           "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -204,7 +204,8 @@ class IdeaAgent(BaseAgent):
             "For a different candidate architecture (e.g. frozen knots or low-rank factors), supply BOTH "
             "candidate_formula and candidate_components in that case, with its complete actual tensor ledger; "
             "assign all primary variables plus any additional numeric variables needed by the override. "
-            "The baseline ledger and host budget still apply. Include the primary configuration without overrides. "
+            "The baseline ledger and host budget still apply. For the primary configuration, "
+            "either inherit or exactly repeat its candidate_formula and candidate_components. "
             "Do not force different architectures into one formula or introduce evaluated dimensions only in prose. "
             "dtype is real or complex (count twice), shape=[] means one scalar. Arithmetic formulas "
             "use only declared numeric variables and +,-,*,/,integer powers. Compare at least two "

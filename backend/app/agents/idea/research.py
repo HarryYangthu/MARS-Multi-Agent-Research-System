@@ -183,7 +183,8 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
             errors.append(path + "/variables: explicitly assign all primary variable names; "
                           "additional variables require a complete candidate formula/components override")
             continue
-        includes_primary = includes_primary or (not overridden and variables == raw["variables"])
+        same_candidate = (not overridden or all(case[key] == raw.get(key) for key in override_fields))
+        includes_primary = includes_primary or (same_candidate and variables == raw["variables"])
         ledger = {key: value for key, value in raw.items() if key != "evaluation_cases"}
         ledger.update({key: case[key] for key in ("variables", "baseline_parameters", "candidate_parameters")})
         if overridden:
@@ -191,7 +192,9 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
         errors.extend(path + error.removeprefix("/parameter_budget")
                       for error in parameter_errors(ledger, max_ratio=max_ratio))
     if not includes_primary:
-        errors.append(prefix + ": primary variables must be included explicitly")
+        errors.append(prefix + ": primary variables must be included explicitly with the unchanged "
+                      "primary candidate formula/components (inherited or exactly repeated); a different candidate ledger "
+                      "cannot replace the primary configuration")
     return errors
 
 
