@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from app.harness.agent_loop.context import compact, pack_context
+from app.harness.agent_loop.completion_recovery import apply_author_empty_completion_recovery, validate_author_empty_recovery_resume
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
@@ -266,6 +267,7 @@ class NativeAgentLoop:
                 review_revision(state, request.external_review, p)
             if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
+            validate_author_empty_recovery_resume(state, p)
             if request.review_plan_contract_id is not None:
                 validate_review_plan_resume(state, request.trace_root, contract_id=request.review_plan_contract_id)
             if state.get("pending_batch"):
@@ -338,27 +340,38 @@ class NativeAgentLoop:
                 configured = review_unit_config(configured)
             return configured
 
-        def recover_completion(reason: object) -> bool:
+        def recover_completion(reason: object, *, error: Exception | None = None,
+                               response: dict[str, Any] | None = None) -> bool:
             if request.review_plan_factory is not None and state["next_phase"] == "reflect":
                 return False  # An attempted unit cannot receive a second draw.
-            plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
-                                       limit=p.max_protocol_repairs, effort=phase_config().reasoning_effort)
+            plan = apply_author_empty_completion_recovery(error, response=response, state=state, policy=p,
+                                                          effort=phase_config().reasoning_effort)
+            if plan is None:
+                plan = truncation_recovery(reason, repairs=counts["protocol_repairs"],
+                                           limit=p.max_protocol_repairs, effort=phase_config().reasoning_effort)
             if plan is None:
                 return False
             phase = state["next_phase"]
-            counts["protocol_repairs"] += 1
-            state["phase_efforts"][phase] = plan["reasoning_effort"]
+            empty_recovery = plan.get("recovery_kind") == "author_empty_completed_response"
+            if not empty_recovery:
+                counts["protocol_repairs"] += 1
+                state["phase_efforts"][phase] = plan["reasoning_effort"]
             final_description = ("mars_submit_document call with complete metadata and body"
                                  if request.final_schema is not None else "Markdown document beginning with YAML frontmatter, without preamble or code fences")
-            state["feedback"] = (plan["feedback"].replace("JSON response", final_description)
-                                 if native and state["next_phase"] != "reflect" else plan["feedback"])
+            if not empty_recovery:
+                state["feedback"] = (plan["feedback"].replace("JSON response", final_description)
+                                     if native and state["next_phase"] != "reflect" else plan["feedback"])
             state["pending"] = None
             state["status"] = "running"
             state["last_model_error"] = None
-            trace.emit("completion_recovery", {"phase": phase, "code": "output_truncated",
+            trace.emit("completion_recovery", {"phase": phase, "code": plan.get("code", "output_truncated"),
                                                "previous_effort": plan["previous_effort"],
                                                "reasoning_effort": plan["reasoning_effort"],
-                                               "remaining_model_calls": p.max_model_calls-counts["model_requests"]})
+                                               "remaining_model_calls": p.max_model_calls-counts["model_requests"],
+                                               **({"recovery_kind": plan["recovery_kind"],
+                                                   "response_event_seq": plan["response_event_seq"],
+                                                   "response_metadata_sha256": plan["response_metadata_sha256"],
+                                                   "protocol_repairs": counts["protocol_repairs"]} if empty_recovery else {})})
             trace.snapshot(state)
             return True
 
@@ -469,16 +482,18 @@ class NativeAgentLoop:
                         request.provider.complete(messages, call_config), timeout=llm_call_deadline_seconds(call_config))
                 except Exception as exc:
                     usage(getattr(exc, "usage", None))
+                    rejected_response: dict[str, Any] | None = None
                     if isinstance(exc, LLMCompletionError):
                         counts["model_responses"] += 1
-                        trace.emit("model_response", {"request": counts["model_requests"],
-                                                      "rejected": True, "reason": exc.reason,
-                                                      "usage": exc.usage})
+                        response_payload = {"request": counts["model_requests"], "rejected": True,
+                                            "reason": exc.reason, "usage": exc.usage}
+                        trace.emit("model_response", response_payload)
+                        rejected_response = {"event_seq": trace.seq, "kind": "model_response", **response_payload}
                         state["pending"] = None
                     state["status"] = "model_error"
                     state["last_model_error"] = getattr(exc, "reason", None)
                     trace.emit("model_error", {"error_type": type(exc).__name__, "reason": getattr(exc, "reason", None)})
-                    if recover_completion(state["last_model_error"]):
+                    if recover_completion(state["last_model_error"], error=exc, response=rejected_response):
                         continue
                     break
                 if completion.is_mock or completion.provider in {"mock", "fake"}:

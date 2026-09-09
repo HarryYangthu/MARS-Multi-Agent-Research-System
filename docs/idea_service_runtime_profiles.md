@@ -1,10 +1,14 @@
 # Idea 服务启动配置方案
 
-默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1` 目前标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
+默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1` 和 `experimental_research_pro_per_insight_v2` 均标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
 
 服务启动前显式设置 `MARS_IDEA_RUNTIME_PROFILE=experimental_research_pro_per_insight_v1`，再用正常的 Uvicorn 入口 `app.main:app` 启动。选择器只接受上述本地已知名称，不能指定文件路径或 URL。运行时不修改环境、YAML、全局 memory 或已注册 Agent 的配置；改变方案需要重新启动服务。当前不是逐请求选择功能，前端及 `POST /api/runs` 均未增加配置入口。模型设置页仍展示/编辑原 agents.yaml，不表示实验方案的有效设置。
 
 实验方案在 `configs/idea_runtime_profiles.yaml` 定义。主、子 Agent 均为 DeepSeek Pro、JSON actions、32768 输出上限；主作者 thinking low，子作者与独立审查 thinking high。主/子模型调用预算 36/16，工具调用预算 5/10，最多委派 3 次。调研子 Agent 使用每个 insight 单独审查后再整份审查的既有运行时；审查仍计入原预算，调用未知或预算不足不能被配置方案转换为通过。字段审查和整份审查的零重试规则由既有 ReviewPlan 运行时执行。
+
+v2 仅额外启用主、子作者的 `author_empty_completion_repair_enabled`。如果服务已返回明确的空正文错误、正常停止原因和完整的本次用量，并且真实响应已记入 trace，作者可在原有协议修复及模型调用预算内继续一次有效动作生成。既有观察、候选、审查意见和用量都保留，模型和 thinking 不变。该路径不处理未知结果、超时或输出截断，不增加审查次数，也不重抽任何单条或整份审查。它的 v2 名称是服务配置版本，与逐项审查合同 v3 不是同一编号。
+
+v1 保留未启用此功能的行为，baseline 默认值也不变。新增目录条目和配置字段会改变配置收据哈希，因此新服务不能接管旧服务已保存的配置收据；即使名称仍选 v1，也不应宣称旧运行可原样续跑。旧档案保持原始源码、配置和调用记录。恢复只接受已在原循环中记账并持久化的修复状态；旧的终态空响应或结果未知的模型请求不能借新开关获得额外调用。
 
 它保留 agents.yaml 中的全部产品工具，包括本地文档、代码仓、baseline 检索及网页搜索，也保留项目规则、代码仓和数据源的产品默认装载。公开评估的问题、两篇论文门槛、256 参数限制及参数比值没有写入产品方案；调用者继续通过已有需求字段表达任务约束。工具增加、项目上下文和 memory 不同，意味着它不是公开评估的严格复现；5/10 工具预算也可能被项目工具消耗，需要新的真实 API 验证。
 

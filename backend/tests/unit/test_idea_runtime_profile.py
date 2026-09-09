@@ -97,6 +97,32 @@ def test_raw_model_and_typed_configuration_are_consistent(profile: ResolvedIdeaP
         assert not config.debate_enabled and not config.raw["debate"]["enabled"]
 
 
+def test_v2_only_enables_author_empty_completion_repair_with_original_budgets(profile: ResolvedIdeaProfile) -> None:
+    selected = resolve_idea_profile("experimental_research_pro_per_insight_v2")
+    assert selected is not None
+    settings = Settings(_env_file=None, mars_idea_runtime_profile="experimental_research_pro_per_insight_v2")  # type: ignore[call-arg]
+    assert settings.mars_idea_runtime_profile == selected.profile_id
+    old, new = profile.snapshot(), selected.snapshot()
+    for role in ("lead", "child"):
+        expected = deepcopy(old["configuration"][role])
+        assert expected["loop"]["author_empty_completion_repair_enabled"] is False
+        expected["loop"]["author_empty_completion_repair_enabled"] = True
+        assert new["configuration"][role] == expected
+    assert old["configuration_sha256"] != new["configuration_sha256"]
+    assert new["status"] == "experimental" and new["validated"] is False
+
+
+def test_v1_receipt_cannot_silently_adopt_v2_repair(tmp_path: Path, profile: ResolvedIdeaProfile) -> None:
+    bind_profile_snapshot(tmp_path, profile)
+    path = tmp_path / SNAPSHOT_FILE
+    before = path.read_bytes()
+    selected = resolve_idea_profile("experimental_research_pro_per_insight_v2")
+    assert selected is not None
+    with pytest.raises(ValueError, match="configuration"):
+        bind_profile_snapshot(tmp_path, selected, resume=True)
+    assert path.read_bytes() == before
+
+
 def test_catalog_contract_cannot_include_question_tools_or_untrusted_endpoint() -> None:
     definition = yaml.safe_load((repo_root() / PROFILE_FILE).read_text())["profiles"]["experimental_research_pro_per_insight_v1"]
     for section, key, value in ((None, "question", "injected answer"), ("lead", "tools", [])):

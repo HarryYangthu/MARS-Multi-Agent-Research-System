@@ -25,7 +25,8 @@ from app.harness.tools.config import ToolConfig, load_tool_configs
 from app.settings import repo_root
 
 
-ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1"]
+ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2"]
+EXPERIMENTAL_PROFILES = ("experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2")
 PROFILE_FILE = "configs/idea_runtime_profiles.yaml"
 SNAPSHOT_FILE = "input/idea_runtime_profile.v1.json"
 
@@ -111,7 +112,13 @@ def public_agent_configuration(config: AgentConfig) -> dict[str, Any]:
 def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
     model = configured.model
     policy = AgentLoopPolicy.from_mapping(configured.loop)
-    if set(configured.loop) != set(asdict(policy)):
+    declared = set(configured.loop)
+    required = set(asdict(policy))
+    # This opt-in feature did not exist in the original v1 catalog. Its omitted
+    # false default preserves that behavior; all prior settings stay explicit.
+    if not policy.author_empty_completion_repair_enabled and "author_empty_completion_repair_enabled" not in declared:
+        required.discard("author_empty_completion_repair_enabled")
+    if declared != required:
         raise ValueError("experimental profile must explicitly declare every loop setting")
     if policy.protocol != "json_actions" or policy.mode != "reflection" or policy.trace != "full":
         raise ValueError("experimental profile requires json_actions, reflection and full trace")
@@ -159,14 +166,14 @@ def resolve_idea_profile(selector: str) -> ResolvedIdeaProfile | None:
     """Read one known local profile. Baseline does not acquire any override."""
     if selector == "baseline":
         return None
-    if selector != "experimental_research_pro_per_insight_v1":
+    if selector not in EXPERIMENTAL_PROFILES:
         raise ValueError("unknown Idea runtime profile; arbitrary paths are not accepted")
     path = repo_root() / PROFILE_FILE
     content = path.read_bytes()
     data = yaml.safe_load(content)
     if (not isinstance(data, dict) or set(data) != {"schema", "profiles"}
             or data["schema"] != "idea.runtime_profiles.v1" or not isinstance(data["profiles"], dict)
-            or set(data["profiles"]) != {"experimental_research_pro_per_insight_v1"}):
+            or set(data["profiles"]) != set(EXPERIMENTAL_PROFILES)):
         raise ValueError("invalid local Idea runtime profile catalog")
     definition = _Definition.model_validate(data["profiles"][selector])
     original_lead, original_child = get_agent_config("idea"), get_agent_config("idea_research")
