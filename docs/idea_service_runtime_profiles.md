@@ -1,6 +1,6 @@
 # Idea 服务启动配置方案
 
-默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1`、`experimental_research_pro_per_insight_v2`、`experimental_research_pro_per_insight_v3` 和 `experimental_research_pro_per_insight_v4` 均标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
+默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1`、`experimental_research_pro_per_insight_v2`、`experimental_research_pro_per_insight_v3`、`experimental_research_pro_per_insight_v4` 和 `experimental_research_pro_per_insight_v5` 均标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
 
 服务启动前显式设置 `MARS_IDEA_RUNTIME_PROFILE=experimental_research_pro_per_insight_v1`，再用正常的 Uvicorn 入口 `app.main:app` 启动。选择器只接受上述本地已知名称，不能指定文件路径或 URL。运行时不修改环境、YAML、全局 memory 或已注册 Agent 的配置；改变方案需要重新启动服务。当前不是逐请求选择功能，前端及 `POST /api/runs` 均未增加配置入口。模型设置页仍展示/编辑原 agents.yaml，不表示实验方案的有效设置。
 
@@ -10,7 +10,13 @@ v2 仅额外启用主、子作者的 `author_empty_completion_repair_enabled`。
 
 v3 相对 v2 只把调研子 Agent 的 `research.review_mode` 改为 `per_insight_collect_then_whole`，使用显式逐项审查合同 v5；模型、工具和全部预算相同。它顺序收集同一候选各 insight 的有效审查意见，再把全部拒绝项一次交作者修订，合计一次 reflection。各单元仍只看到原始任务、自己的 insight 和完整匹配材料，不会收到先前单元的判定；即使最后一项通过，前面存在拒绝时整轮仍拒绝。只有所有 insight 均通过才执行整份审查。作者改稿后每项都重新审查，不沿用上一稿的通过结果。
 
-v4 相对 v3 仅为子研究配置显式增加 `search.cvf_search`，主工具、模型、审查模式及内部预算不变。profile 的工具覆盖只允许已注册、已启用、允许该 Agent 的无审批只读工具，并保留 `search.fetch_sources`。ResearchSession 将经宿主校验的工具范围传给 ToolContext 独立字段；模型参数及 `extra` 不能声明该权限。默认路径与 v1/v2/v3 仍按原工具集合执行，跨 Agent、写操作及禁用工具不能借新范围获权。
+v4 相对 v3 仅为子研究配置显式增加 `search.cvf_search`，主工具、模型、审查模式及内部预算不变。子工具覆盖只允许已注册、已启用、允许该 Agent 的无审批只读工具，并保留 `search.fetch_sources`。ResearchSession 将经宿主校验的工具范围传给 ToolContext 独立字段；模型参数及 `extra` 不能声明该权限。默认路径与 v1/v2/v3 仍按原工具集合执行，跨 Agent、写操作及禁用工具不能借新范围获权。
+
+v5 相对 v4 仅将主 Agent 工具显式收窄为 `idea.research_delegate` 和 `knowledge.kb_query`。子工具、模型、审查合同和全部预算保持 v4 原值；不修改网络配置或调用者的来源数量要求。选择器为 `MARS_IDEA_RUNTIME_PROFILE=experimental_research_pro_per_insight_v5`。主 Agent 负责决定调研缺口、组合合格报告和提出方案，具体检索与 PDF 阅读交给子 Agent。此前 API v4 沿用完整产品工具集，CLI 调研场景则只给主 Agent 委派与记忆查询工具，二者并非相同的工具实验。第 21 次真实 API 运行在首次委派失败后由主 Agent 直接取文献，最终仅启动 1 次委派却耗尽 5 次工具预算，合格报告仍为零；现有验收正确停止了交付。v5 针对这条行动路径提供独立开关，尚无新的完整真实运行证明它改善了成功率。
+
+主工具覆盖只能选择原 `idea` 工具的安全子集，必须保留委派，不能增加未知、禁用、未获该 Agent 权限、需要审批或具有写操作的工具。普通工具必须已注册；精确的 `idea.research_delegate` 必须符合现有运行时绑定合同，由真实 ResearchSession 注册实例，循环在模型调用前继续检查实际工具及 schema。它不会被错误地当作全局静态工具，也不复用要求保留 PDF 工具的子 Agent 校验器。工具清单同时进入有效配置快照、实际动作提示 schema 和既有循环指纹。v1–v4 未声明主工具覆盖，继续使用原清单。
+
+`max_delegations=3` 是委派上限，所有工具仍共享主循环的 5 次调用预算，并非预留三个委派名额。v5 不自动派发工具、补造研究答案或允许直接读取替代合格报告；最终仍要求真实接受的调研报告及对应方法引用。纯配置与真实第 21 次档案回放只验证清单、schema、拒绝跨配置恢复和旧记录不变，不能据此认定论文相关性、调研恢复能力或完整 Idea 交付已经通过。
 
 CVF 工具要求部署允许 `openaccess.thecvf.com`，使用官方会议目录及论文页元数据，不需要通用搜索 API key；当前仅支持现代 `/content/{venue}{year}/` 布局。元数据和实际 PDF 阅读分别记账。公开验证场景为 `configs/evaluation/idea_research_publisher_real.yaml`；API 只采用其中的问题与要求，有效模型及工具来自显式服务 profile，不能把场景文件中的 CLI 模型配置误认为服务配置。
 
@@ -18,7 +24,7 @@ CVF 工具要求部署允许 `openaccess.thecvf.com`，使用官方会议目录�
 
 v1 保留未启用此功能的行为，baseline 默认值也不变。新增目录条目和配置字段会改变配置收据哈希，因此新服务不能接管旧服务已保存的配置收据；即使名称仍选 v1，也不应宣称旧运行可原样续跑。旧档案保持原始源码、配置和调用记录。恢复只接受已在原循环中记账并持久化的修复状态；旧的终态空响应或结果未知的模型请求不能借新开关获得额外调用。
 
-它保留 agents.yaml 中的全部产品工具，包括本地文档、代码仓、baseline 检索及网页搜索，也保留项目规则、代码仓和数据源的产品默认装载。公开评估的问题、两篇论文门槛、256 参数限制及参数比值没有写入产品方案；调用者继续通过已有需求字段表达任务约束。工具增加、项目上下文和 memory 不同，意味着它不是公开评估的严格复现；5/10 工具预算也可能被项目工具消耗，需要新的真实 API 验证。
+baseline 和 v1–v4 保留 agents.yaml 中的全部主 Agent 产品工具，包括本地文档、代码仓、baseline 检索及网页搜索；v5 仅在显式选择时收窄主工具。各方案仍保留项目规则、代码仓和数据源的产品默认装载，v5 子 Agent 工具与 v4 相同。公开评估的问题、两篇论文门槛、256 参数限制及参数比值没有写入产品方案；调用者继续通过已有需求字段表达任务约束。项目上下文、子工具和 memory 仍可能不同，v5 也不是公开评估的严格复现；需要新的真实 API 验证。
 
 网络开关、允许域、下载上限、凭证与 memory 仍由正常服务部署设置提供。本方案不会自动打开网络、扩大下载、重置知识库或读取并持久化凭证。服务启动前需检查这些条件；若要对照公开调研，应明确记录允许域及 64 MiB 下载配置。实验方案固定官方 DeepSeek endpoint，关闭 `DEEPSEEK_BASE_URL` 间接覆盖，只保留 `DEEPSEEK_API_KEY` 环境变量名称。360 秒是传给流式 SDK 的超时配置，包括等待流数据，不是完整生成的固定墙钟期限。第十六次冻结版本 `41fb00c` 的作者外层期限按重试和余量计算为 726 秒；ReviewPlan 审查关闭重试。该次外部驱动另设 3600 秒总预算，不能据此声称 API 自带相同运行期限。
 

@@ -1,0 +1,83 @@
+{
+  "schema": "mars.arxiv_transport_component.v1",
+  "source_commit": "94222a52bac739e9f92fc0683d12f5a1c08bb953",
+  "source_dirty": "",
+  "source_file_sha256": "443a1df84f36842a39eff2a6aa13d79246c6453bdd266af1de240d421c3fe69b",
+  "source_trace_sha256": "49c51e1255534aac2d6753f0c4a26a519eb44ba0dcaa6194b0b4a2387cd71c2a",
+  "actual_fetch_event_seq": 70,
+  "url": "https://arxiv.org/pdf/2006.10739v1.pdf",
+  "per_path_deadline_seconds": 45,
+  "connect_timeout_seconds": 15,
+  "read_timeout_seconds": 30,
+  "models": 0,
+  "agent_tools": 0,
+  "finished_at": "2026-09-09T06:39:46.233281+00:00",
+  "component_root": "runs/verification/arxiv_transport_20260909T063933Z",
+  "source_trace": "runs/2026-09-09T0613_api_idea_20260909t061329_67384114/agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/events.jsonl",
+  "paths": [
+    {
+      "label": "direct_environment_disabled",
+      "trust_env": false,
+      "started_at": "2026-09-09T06:39:34.024798+00:00",
+      "telemetry": {
+        "download_bytes_received": 9922740,
+        "download_wire_bytes_received": 9922740,
+        "download_elapsed_seconds": 9.364,
+        "download_complete": true,
+        "final_url": "https://arxiv.org/pdf/2006.10739v1",
+        "redirect_count": 1,
+        "http_status": 200,
+        "download_expected_bytes": 9922740
+      },
+      "ok": true,
+      "mime": "application/pdf",
+      "final_url": "https://arxiv.org/pdf/2006.10739v1",
+      "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+      "bytes": 9922740,
+      "elapsed_seconds": 9.388836917001754
+    },
+    {
+      "label": "current_environment",
+      "trust_env": true,
+      "started_at": "2026-09-09T06:39:43.414485+00:00",
+      "telemetry": {
+        "download_bytes_received": 9922740,
+        "download_wire_bytes_received": 9922740,
+        "download_elapsed_seconds": 2.789,
+        "download_complete": true,
+        "final_url": "https://arxiv.org/pdf/2006.10739v1",
+        "redirect_count": 1,
+        "http_status": 200,
+        "download_expected_bytes": 9922740
+      },
+      "ok": true,
+      "mime": "application/pdf",
+      "final_url": "https://arxiv.org/pdf/2006.10739v1",
+      "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+      "bytes": 9922740,
+      "elapsed_seconds": 2.8182557910040487
+    }
+  ],
+  "archived_files_sha256": {
+    "current_environment.pdf": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+    "direct_environment_disabled.pdf": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+    "result.json": "5b07cc302844aed0f92c25434c9dd792567a1532b3ee1cee6965a3e748aa9b3c"
+  },
+  "independent_review": {
+    "path": "mars-arxiv-transport-independent-review.json",
+    "sha256": "f2ad3694df05b4480e7ae25b7442380f701e1e30a9fa86342f568c60de1e04ff",
+    "pdf_page_count_each": 24,
+    "all_pages_parseable": true,
+    "original_run_files_unchanged": true
+  },
+  "driver_script_sha256": "cfbb7cfccd1a5804580897722e2e06cfc08760b460c758e5a11ceabf267dbc98",
+  "limitations": [
+    "Sequential one-request-per-path development transport check, not an unbiased benchmark or whole Idea run.",
+    "Production download function and actual archived source URL; 45s outer cap is lower than production 180s.",
+    "No PDF read receipt or accepted research is created; no output is injected into any Agent.",
+    "trust_env=False changes proxy/environment transport behavior in this component only; global settings are unchanged.",
+    "The current shell environment is not the recorded service environment of run21. Its driver already bypassed proxy configuration for arxiv.org. Actual proxy routing was not observed.",
+    "These two successes do not establish the cause of earlier timeouts, stable network availability, or a validated proxy fix. Sequential order, endpoint caching and time-varying connectivity are uncontrolled.",
+    "The developer-selected URL comes from run21 observations. These files are not supplied as seed evidence to any new Agent run."
+  ]
+}

@@ -26,9 +26,10 @@ from app.harness.tools.registry import get_registry
 from app.settings import repo_root
 
 
-ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4"]
+ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5"]
 EXPERIMENTAL_PROFILES = ("experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2",
-                         "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4")
+                         "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4",
+                         "experimental_research_pro_per_insight_v5")
 PROFILE_FILE = "configs/idea_runtime_profiles.yaml"
 SNAPSHOT_FILE = "input/idea_runtime_profile.v1.json"
 
@@ -65,6 +66,7 @@ class _Lead(_StrictModel):
     model: _Author
     loop: dict[str, Any]
     research: _LeadResearch
+    tools: list[str] | None = Field(default=None, min_length=1, max_length=32)
 
 
 class _Child(_StrictModel):
@@ -132,6 +134,37 @@ def _profile_tools(original: AgentConfig, declared: list[str] | None) -> tuple[s
     return tuple(declared)
 
 
+def _lead_profile_tools(original: AgentConfig, declared: list[str] | None) -> tuple[str, ...]:
+    """Narrow an Idea lead's existing tools without granting new capabilities.
+
+    The exact delegation tool is bound to its real ResearchSession later; its
+    catalog/spec is checked here and the loop checks actual registration before
+    any model call. Other tools must already have a registered read handler.
+    """
+    if declared is None:
+        return original.tools
+    delegate = "idea.research_delegate"
+    if (original.name != "idea" or not original.enabled or not declared
+            or len(set(declared)) != len(declared) or delegate not in declared
+            or not set(declared) <= set(original.tools)):
+        raise ValueError("lead profile tools must be a unique subset of the enabled Idea tools retaining delegation")
+    registry, configurations = get_registry(), load_tool_configs()
+    for name in declared:
+        configuration, spec = configurations.get(name), registry.spec(name)
+        if (configuration is None or spec is None or not configuration.enabled
+                or configuration.bridge_only or spec.bridge_only
+                or configuration.mutation_level != "read" or spec.policy.mutation_level != "read"
+                or original.name not in configuration.allowed_agents or original.name not in spec.policy.allowed_agents
+                or configuration.requires_approval or spec.policy.requires_approval):
+            raise ValueError("lead profile tool is not an enabled permitted read tool: " + name)
+        if name == delegate:
+            if not configuration.runtime_bound:
+                raise ValueError("lead delegation must use the existing runtime-bound ResearchSession")
+        elif configuration.runtime_bound or not registry.has(name):
+            raise ValueError("lead profile tool has no registered read handler: " + name)
+    return tuple(declared)
+
+
 def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
     model = configured.model
     policy = AgentLoopPolicy.from_mapping(configured.loop)
@@ -158,8 +191,9 @@ def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
                     "retry": {"max_retries": model.max_retries, "base_delay_seconds": model.retry_base_delay_seconds},
                     "api_key_env": model.api_key_env, "base_url": model.base_url, "base_url_env": model.base_url_env}
     raw["debate"] = {**raw.get("debate", {}), "enabled": False}
-    tools = _profile_tools(original, configured.tools if isinstance(configured, _Child) else None)
-    if isinstance(configured, _Child) and configured.tools is not None:
+    tools = (_profile_tools(original, configured.tools) if isinstance(configured, _Child)
+             else _lead_profile_tools(original, configured.tools))
+    if configured.tools is not None:
         raw["tools"] = list(tools)
     return replace(original, model_provider=model.provider, model_name=model.name, max_tokens=model.max_tokens,
                    temperature=model.temperature, top_p=model.top_p, thinking_enabled=model.thinking,
@@ -202,8 +236,10 @@ def resolve_idea_profile(selector: str) -> ResolvedIdeaProfile | None:
             or set(data["profiles"]) != set(EXPERIMENTAL_PROFILES)):
         raise ValueError("invalid local Idea runtime profile catalog")
     definition = _Definition.model_validate(data["profiles"][selector])
-    if definition.child.tools is not None and selector != "experimental_research_pro_per_insight_v4":
-        raise ValueError("explicit research tools require the separate v4 profile")
+    if definition.child.tools is not None and selector not in {"experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5"}:
+        raise ValueError("explicit research tools require the separate v4 or v5 profile")
+    if definition.lead.tools is not None and selector != "experimental_research_pro_per_insight_v5":
+        raise ValueError("explicit lead tools require the separate v5 profile")
     original_lead, original_child = get_agent_config("idea"), get_agent_config("idea_research")
     if (not original_lead.enabled or not original_child.enabled
             or original_lead.output_schema != "proposal.v1" or original_child.output_schema != "research_report.v1"
