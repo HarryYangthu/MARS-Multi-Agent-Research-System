@@ -24,6 +24,9 @@ from app.agents.idea.research_review_plan import (
     build_research_review_plan, research_plan_errors, research_review_contract, research_review_mode, review_plan_claim,
 )
 from app.agents.idea.research_origin import ResearchOrigin, research_origins
+from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_contract
+from app.agents.idea.source_identity import SourceIdentityIndex
+from app.agents.idea.research import title_key
 from app.harness.agent_loop import AgentLoopPolicy, LoopInput, LoopResult, NativeAgentLoop
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -217,12 +220,17 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
         history = checkpoint.get("history")
         if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
             raise ValueError("delegate history must contain real observation objects")
-        errors = dossier_errors(report, history, min_sources=int(manifest.get("min_sources", 1)))
+        errors = dossier_errors(report, history, min_sources=int(manifest.get("min_sources", 1)),
+                                publication_count_contract=count_contract(manifest, output))
         if errors:
             raise ValueError("delegated dossier no longer validates: " + "; ".join(errors))
         if output.get("report") != report:
             raise ValueError("delegate returned report differs from verified document")
-        reports.append({"delegation_id": delegation_id, "report": report})
+        identity_index = SourceIdentityIndex(history)
+        publication_metadata = [{"source_id": source["source_id"], "url": source["url"], "title": hit["title"]}
+            for source in report["sources"] for hit in identity_index.matching_hits(source["url"])
+            if title_key(source["title"]) == title_key(hit["title"])]
+        reports.append({"delegation_id": delegation_id, "report": report, "publication_metadata": publication_metadata})
         evidence.extend(history)
     return reports, evidence
 
@@ -521,12 +529,14 @@ class ResearchSession:
             "report_sha256": file_sha(report_path), "checkpoint_ref": checkpoint.relative_to(root).as_posix(),
             "checkpoint_sha256": file_sha(checkpoint), "min_sources": minimum, "scientific_validated": False,
             "model_review_required": policy.mode == "reflection", "model_review_passed": result.reflection_accepted,
+            "publication_count_contract": PUBLICATION_COUNT_CONTRACT,
             **plan_metadata, **request_metadata})
         excerpt_context = self.config.raw.get("research", {}).get("excerpt_context_chars", 600)
         excerpts = research_excerpts(report, result.observations, context_chars=int(excerpt_context))
         output = {"delegation_id": identifier, "report": report, "source_excerpts": excerpts,
                   "manifest_ref": manifest_path.relative_to(root).as_posix(), "manifest_sha256": file_sha(manifest_path),
                   "scientific_validated": False, "model_review_required": policy.mode == "reflection",
+                  "publication_count_contract": PUBLICATION_COUNT_CONTRACT,
                   "model_review_passed": result.reflection_accepted, **plan_metadata}
         receipt = {"tool": TOOL, "ok": True, "output": output}
         load_delegated_research(root, [receipt])

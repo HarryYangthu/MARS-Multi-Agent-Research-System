@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.agents.idea.research_brief import render_research_brief
+from app.agents.idea.research_links import research_link_errors
 
 
 def documents() -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -67,6 +68,28 @@ def test_brief_preserves_declared_content_and_does_not_mutate_inputs() -> None:
     assert (metadata, reports) == before
 
 
+def test_same_title_channels_keep_display_records_but_withhold_independent_credit() -> None:
+    # Reuse human-authored display/reference contracts, never fabricated execution.
+    metadata, reports = documents()
+    other = deepcopy(reports[0])
+    other["delegation_id"] = "reading-b"
+    other["report"]["sources"][0]["url"] = "https://another.example/paper-a"
+    reports.append(other)
+    link = {**metadata["research_links"][0], "delegation_id": "reading-b"}
+    metadata["research_links"].append(link)
+    metadata["research_assessment"]["source_decisions"].append({
+        **metadata["research_assessment"]["source_decisions"][0], "delegation_id": "reading-b"})
+    metadata["related_literature"] = [{key: item["report"]["sources"][0][key] for key in ("url", "title")}
+                                       for item in reports]
+    brief = render_research_brief(metadata, reports, reviewed=False)
+    assert "来源 URL 记录（去重）：2 条" in brief and "按来源 URL 去重的记录数" in brief
+    assert "可计入的已读论文为 1 篇" in brief and "用于方案的论文为 1 篇" in brief
+    assert "可能重复或独立性待澄清" in brief and "不改变历史审查判定" in brief
+    for require_linked in (False, True):
+        errors = research_link_errors(metadata, reports, min_sources=2, require_linked_sources=require_linked)
+        assert len(errors) == 1 and "observed 1" in errors[0] and "Source independence unresolved" in errors[0]
+
+
 def test_repeated_readings_are_deduplicated_and_unused_reads_are_not_adoptions() -> None:
     metadata, reports = documents()
     duplicate = deepcopy(reports[0])
@@ -84,8 +107,11 @@ def test_repeated_readings_are_deduplicated_and_unused_reads_are_not_adoptions()
                     "insight_ids": [], "transfer_assumptions": []}
         metadata["research_assessment"]["source_decisions"].append(excluded)
     brief = render_research_brief(metadata, reports, reviewed=True)
-    assert "已读来源（去重）：2 篇" in brief
-    assert "用于方案的来源（去重）：1 篇" in brief
+    # This fixture reuses the same full title at a second URL. Preserve two URL
+    # records while making the conservative independence quota explicit.
+    assert "来源 URL 记录（去重）：2 条" in brief
+    assert "用于方案的来源 URL 记录（去重）：1 条" in brief
+    assert "可计入的已读论文为 1 篇" in brief
     assert "第 7 页" in brief and "第 9 页" in brief
     assert "方案决定：排除" in brief
 

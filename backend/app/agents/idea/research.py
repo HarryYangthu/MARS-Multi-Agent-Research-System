@@ -7,26 +7,11 @@ import math
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from app.harness.agent_loop.trace import atomic_json
 from app.agents.idea.protocol import protocol_errors
-from app.agents.idea.source_identity import SourceIdentityIndex, document_key, search_metadata_rows
-
-
-def canonical_source(url: str) -> str:
-    """Publication-level deduplication only; never use this to bind PDF evidence."""
-    p = urlparse(url.strip())
-    host = (p.hostname or "").lower()
-    path = p.path.rstrip("/")
-    key = document_key(url)
-    if key.startswith("arxiv:"):
-        return key.rsplit(":", 1)[0]
-    if host == "ieeexplore.ieee.org":
-        match = re.search(r"(?:document|abstract/document)/([0-9]+)", path)
-        if match:
-            return "ieee:" + match.group(1)
-    return host + path
+from app.agents.idea.source_identity import SourceIdentityIndex, search_metadata_rows
+from app.agents.idea.publication_count import canonical_source as canonical_source, count_publications
 
 
 def title_key(value: str) -> str:
@@ -245,21 +230,23 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
     citations = metadata.get("related_literature", [])
     if not isinstance(citations, list):
         citations = []
-    cited: set[str] = set()
     cited_urls: set[str] = set()
+    cited_metadata: list[dict[str, Any]] = []
     for index, citation in enumerate(citations):
         if not isinstance(citation, dict):
             errors.append(f"/related_literature/{index}: object required")
             continue
-        identity = canonical_source(str(citation.get("url", "")))
         matches = identities.matching_hits(str(citation.get("url", "")))
         if title_key(str(citation.get("title", ""))) not in {title_key(source["title"]) for source in matches}:
             errors.append(f"/related_literature/{index}: URL/title not matched to a real search result at the declared document version")
         else:
-            cited.add(identity)
             cited_urls.add(str(citation["url"]))
-    if len(cited) < min_sources:
-        errors.append(f"/related_literature: need {min_sources} distinct retrieved cited sources; observed {len(cited)}")
+            cited_metadata.extend({"url": citation["url"], "title": hit["title"]} for hit in matches
+                                  if title_key(str(citation.get("title", ""))) == title_key(hit["title"]))
+    publications = count_publications(cited_metadata)
+    if publications.count < min_sources:
+        errors.append(f"/related_literature: need {min_sources} distinct retrieved cited sources; observed {publications.count}"
+                      + publications.diagnostic())
     valid_pdfs = set()
     for row in inventory["reads"]:
         cited_read = any(identities.matching_hits(url, read_receipt=str(row.get("read_receipt", "")))

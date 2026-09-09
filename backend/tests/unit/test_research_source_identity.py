@@ -60,8 +60,8 @@ def test_pdf_redirect_cannot_turn_one_publication_into_two_source_declarations()
 
 
 def test_new_identity_validation_cannot_resume_under_old_stop_fingerprints() -> None:
-    assert STOP_CONTRACT == "idea.research_evidence_stop.v2"
-    assert LEAD_STOP_CONTRACT == "idea.lead_research_stop.v2"
+    assert STOP_CONTRACT == "idea.research_evidence_stop.v3"
+    assert LEAD_STOP_CONTRACT == "idea.lead_research_stop.v3"
 
 
 @pytest.fixture

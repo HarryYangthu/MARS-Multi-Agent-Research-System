@@ -13,6 +13,7 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source, title_key
+from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_publications
 from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.schema.validator import SCHEMAS_DIR
@@ -153,7 +154,12 @@ def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
 
 
 def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], *,
-                   min_sources: int = 1) -> list[str]:
+                   min_sources: int = 1,
+                   publication_count_contract: str | None = PUBLICATION_COUNT_CONTRACT) -> list[str]:
+    # None is only for rereading historical manifests; live validation defaults
+    # to the current contract and cannot take this flag from author metadata.
+    if publication_count_contract not in (None, PUBLICATION_COUNT_CONTRACT):
+        return ["/sources: unknown publication count contract"]
     errors = [f"/{'/'.join(str(p) for p in error.absolute_path)}: {error.message}"
               for error in Draft202012Validator(dossier_schema()).iter_errors(metadata)]
     if errors:
@@ -187,6 +193,7 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
         if not set(source["gap_ids"]) <= gaps:
             errors.append(prefix + "/gap_ids: unknown research gap")
     read_sources: set[str] = set()
+    read_metadata: list[dict[str, Any]] = []
     insight_ids: set[str] = set()
     for index, insight in enumerate(metadata["insights"]):
         prefix = f"/insights/{index}"
@@ -210,11 +217,16 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
             errors.append(prefix + ": " + receipt_error)
             continue
         read_sources.add(canonical_source(source["url"]))
+        read_metadata.extend({"url": source["url"], "title": hit["title"]} for hit in matches
+                             if title_key(source["title"]) == title_key(hit["title"]))
     for source in sources.values():
         if source["decision"] == "use" and canonical_source(source["url"]) not in read_sources:
             errors.append(f"/sources/{source['source_id']}: used source requires a verified extracted insight")
-    if len(read_sources) < min_sources:
-        errors.append(f"/sources: require {min_sources} distinct read publications; observed {len(read_sources)}")
+    publications = count_publications(read_metadata)
+    count = publications.count if publication_count_contract is not None else len(read_sources)
+    if count < min_sources:
+        errors.append(f"/sources: require {min_sources} distinct read publications; observed {count}"
+                      + (publications.diagnostic() if publication_count_contract is not None else ""))
     return errors
 
 

@@ -6,7 +6,7 @@ import re
 from typing import Any, cast
 from urllib.parse import quote, urlsplit
 
-from app.agents.idea.research import canonical_source
+from app.agents.idea.publication_count import canonical_source, count_report_publications
 from app.agents.idea.research_assessment import assessment_errors
 
 
@@ -115,18 +115,30 @@ def render_research_brief(metadata: dict[str, Any], reports: list[dict[str, Any]
         source_links.setdefault((link["delegation_id"], insight["source_id"]), []).append(link)
     read_count = len({canonical_source(sources[key]["url"]) for key in source_insights})
     linked_count = len({canonical_source(sources[key]["url"]) for key in source_links})
+    read_publications = count_report_publications(reports, selected=set(source_insights))
+    linked_publications = count_report_publications(reports, selected=set(source_links))
+    unresolved = bool(read_publications.conflicts or linked_publications.conflicts)
+    count_line = (f"成功研究报告中有引用页段的已读来源（去重）：{read_count} 篇；"
+                  f"真正通过研究链接用于方案的来源（去重）：{linked_count} 篇。")
+    if unresolved:
+        count_line = (f"成功研究报告中有引用页段的来源 URL 记录（去重）：{read_count} 条；"
+                      f"真正通过研究链接用于方案的来源 URL 记录（去重）：{linked_count} 条。")
 
     lines = [_escape(summary), "", "## 研究问题", "", _escape(assessment["task_question"]),
              "", "## 选择原则", ""]
     for item in assessment["selection_principles"]:
         lines.append(f"- {_escape(item['id'])}：{_escape(item['criterion'])}；任务依据：{_escape(item['task_basis'])}")
     lines += ["", "## 为何停止", "", _escape(assessment["stopping_reason"]), "",
-              f"成功研究报告中有引用页段的已读来源（去重）：{read_count} 篇；"
-              f"真正通过研究链接用于方案的来源（去重）：{linked_count} 篇。",
+              count_line,
               "统计仅覆盖已验证的成功报告及方案链接；页码表示实际引用页段，不表示全文阅读或全部检索、下载数量。",
               "模型审查状态：" + ("已完成模型审查。" if reviewed else "未标记为已完成模型审查。")
-              + "该状态不代表实验结果或科学结论已验证。",
-              "", "## 逐篇论文与方案关系", "",
+              + "该状态不代表实验结果或科学结论已验证。"]
+    if unresolved:
+        lines += [f"上述是按来源 URL 去重的记录数；按独立性计数规则可计入的已读论文为 {read_publications.count} 篇，"
+                  f"用于方案的论文为 {linked_publications.count} 篇。",
+                  "不同渠道的规范化完整标题相同，可能重复或独立性待澄清，未给予第二篇额度；"
+                  "这不表示已合并出版物实体、正文或版本，也不改变历史审查判定。"]
+    lines += ["", "## 逐篇论文与方案关系", "",
               "| 论文与来源 | 选择与任务关系 | 实际引用页码与提取内容 | 迁移限制与假设 | 方案位置与迁移理由 |",
               "|---|---|---|---|---|"]
     decision_names = {"adopt": "采纳", "exclude": "排除", "defer": "暂缓"}

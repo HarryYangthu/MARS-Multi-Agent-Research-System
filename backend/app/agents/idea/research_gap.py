@@ -9,12 +9,13 @@ from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source, evidence_inventory
 from app.agents.idea.research_dossier import dossier_schema
+from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_publications
 from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.stop import LoopStop, LoopStopView
 from app.harness.schema.frontmatter_parser import parse
 
 GAP_SCHEMA = "research_gap.v1"
-STOP_CONTRACT = "idea.research_evidence_stop.v2"
+STOP_CONTRACT = "idea.research_evidence_stop.v3"
 
 
 def gap_schema() -> dict[str, Any]:
@@ -59,14 +60,15 @@ def material_state(observations: list[dict[str, Any]]) -> dict[str, Any]:
     inventory = evidence_inventory(observations)
     documents = SourceIdentityIndex(observations)
     reads: list[dict[str, Any]] = []
-    identities: set[str] = set()
+    metadata: list[dict[str, Any]] = []
     for row in inventory["reads"]:
         pages = row.get("visible_pages", [])
         visible = [page for page in pages if isinstance(page, dict) and str(page.get("text", "")).strip()]
         if row.get("source_type") != "pdf" or not visible or not row.get("read_receipt"):
             continue
         identity = canonical_source(str(row.get("url", "")))
-        if not documents.matching_hits(str(row.get("url", "")), read_receipt=str(row["read_receipt"])):
+        matches = documents.matching_hits(str(row.get("url", "")), read_receipt=str(row["read_receipt"]))
+        if not matches:
             continue
         try:
             receipt = json.loads(Path(row["read_receipt"]).read_text())
@@ -76,11 +78,15 @@ def material_state(observations: list[dict[str, Any]]) -> dict[str, Any]:
                 continue
         except (OSError, ValueError, TypeError):
             continue
-        identities.add(identity)
+        metadata.extend({"url": row["url"], "title": hit["title"]} for hit in matches)
         reads.append({"url": row["url"], "sha256": row["sha256"], "read_receipt": row["read_receipt"],
                       "pages": [page["page"] for page in visible], "publication": identity})
-    return {"counts": {**inventory["counts"], "distinct_read_publications": len(identities)},
+    publications = count_publications(metadata)
+    return {"counts": {**inventory["counts"], "distinct_read_publications": publications.count},
             "read_sources": reads,
+            "publication_count_contract": PUBLICATION_COUNT_CONTRACT,
+            "publication_count_conflicts": list(publications.conflicts),
+            "publication_count_note": publications.diagnostic(),
             "note": "Visible, source-matched pages are potential evidence, not verified interpretations or an accepted report."}
 
 
@@ -102,7 +108,8 @@ def evidence_stop(view: LoopStopView, *, min_sources: int, max_tool_steps: int,
         # Existing pages can still support a corrected report without more tools.
         return None
     reason = (f"Need {min_sources} distinct publications with source-matched visible PDF pages; "
-              f"observed {observed}, and no reading tool budget is available. Report formatting cannot supply missing evidence.")
+              f"observed {observed}, and no reading tool budget is available. Report formatting cannot supply missing evidence."
+              + state["publication_count_note"])
     return LoopStop("evidence_unavailable", reason,
                     {"origin": "host_material_floor", "min_sources": min_sources,
                      "observed_read_publications": observed, "remaining_gaps": [reason]})
@@ -146,7 +153,8 @@ def failure_record(*, delegation_id: str, trace_ref: str, checkpoint: dict[str, 
     remaining = list(declaration["remaining_gaps"]) if declaration else []
     observed = material["counts"]["distinct_read_publications"]
     if observed < min_sources:
-        remaining.append(f"Need {min_sources} distinct source-matched visible PDF publications; observed {observed}.")
+        remaining.append(f"Need {min_sources} distinct source-matched visible PDF publications; observed {observed}."
+                         + material["publication_count_note"])
     if not remaining:
         remaining = [str(issue) for issue in issues] or ["No accepted report resolving the delegated gap was produced: " + gap]
     attempts = actual_attempts(observations)
@@ -160,6 +168,8 @@ def failure_record(*, delegation_id: str, trace_ref: str, checkpoint: dict[str, 
             "validation_issues": [str(issue)[:600] for issue in issues[:6]],
             "validation_issue_count": len(issues), "termination": termination,
             "observed_material_counts": material["counts"], "read_sources": material["read_sources"],
+            "publication_count_contract": material["publication_count_contract"],
+            "publication_count_conflicts": material["publication_count_conflicts"],
             "attempts": attempts, "remaining_gaps": remaining,
             "remaining_budget": {"tool_calls": max(0, max_tool_steps-counts["tool_dispatches"]),
                                  "model_calls": max(0, max_model_calls-counts["model_requests"])},

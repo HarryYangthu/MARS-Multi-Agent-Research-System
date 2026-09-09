@@ -6,7 +6,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.delivery import resolve_pointer
-from app.agents.idea.research import canonical_source
+from app.agents.idea.publication_count import count_report_publications
 from app.agents.idea.source_identity import document_key
 
 
@@ -33,14 +33,14 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
     if not reports:
         return ["/research_links: complete a real research delegation before submitting; no verified report exists"]
     indexed = {str(item["delegation_id"]): item["report"] for item in reports}
-    read_sources = {canonical_source(source["url"]) for report in indexed.values()
-                    for source in report.get("sources", []) if source.get("decision") == "use"}
-    if not require_linked_sources and len(read_sources) < min_sources:
-        errors.append(f"/research_links: require findings from {min_sources} distinct read publications; observed {len(read_sources)}")
+    read_sources = count_report_publications(reports)
+    if not require_linked_sources and read_sources.count < min_sources:
+        errors.append(f"/research_links: require findings from {min_sources} distinct read publications; observed {read_sources.count}"
+                      + read_sources.diagnostic())
     citations = {document_key(str(item.get("url", "")))
                  for item in metadata.get("related_literature", []) if isinstance(item, dict)}
     seen: set[tuple[str, str, str]] = set()
-    linked_sources: set[str] = set()
+    linked_sources: set[tuple[str, str]] = set()
     for index, link in enumerate(links):
         errors_before = len(errors)
         prefix = f"/research_links/{index}"
@@ -66,8 +66,10 @@ def research_link_errors(metadata: dict[str, Any], reports: list[dict[str, Any]]
         except ValueError as exc:
             errors.append(prefix + ": " + str(exc))
         if insight is not None and len(errors) == errors_before:
-            linked_sources.add(canonical_source(str(source["url"])))
-    if require_linked_sources and len(linked_sources) < min_sources:
+            linked_sources.add((link["delegation_id"], str(source["source_id"])))
+    linked = count_report_publications(reports, selected=linked_sources)
+    if require_linked_sources and linked.count < min_sources:
         errors.append(f"/research_links: require {min_sources} distinct publications linked to actual method definitions; "
-                      f"observed {len(linked_sources)}. Reading or citing an unused paper does not satisfy this requirement.")
+                      f"observed {linked.count}. Reading or citing an unused paper does not satisfy this requirement."
+                      + linked.diagnostic())
     return errors
