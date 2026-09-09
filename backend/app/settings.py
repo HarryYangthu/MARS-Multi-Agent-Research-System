@@ -67,9 +67,23 @@ class Settings(BaseSettings):
     ] = "opencode"
     mars_log_level: str = "INFO"
     mars_default_project: str = "pimc"
+    # Explicit service-start alternative; baseline remains configs/agents.yaml.
+    mars_idea_runtime_profile: Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5", "experimental_research_pro_per_insight_v6"] = "baseline"
     mars_llm_timeout_seconds: float = 90.0
     mars_enable_network_tools: bool = False
     mars_source_max_mib: int = Field(default=12, ge=1, le=64)
+    mars_source_connect_timeout_seconds: float = Field(default=15, ge=1, le=60)
+    mars_source_read_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    mars_source_download_timeout_seconds: float = Field(default=180, ge=1, le=240)
+    mars_source_total_timeout_seconds: float = Field(default=240, ge=1, le=300)
+    mars_source_max_attempts: int = Field(default=2, ge=1, le=5)
+    # CVF metadata only; connection/read waits also obey the source limits above.
+    mars_cvf_total_timeout_seconds: float = Field(default=60, ge=1, le=180)
+    mars_cvf_directory_max_mib: int = Field(default=8, ge=1, le=16)
+    mars_cvf_landing_max_kib: int = Field(default=256, ge=1, le=1024)
+    mars_neurips_total_timeout_seconds: float = Field(default=60, ge=1, le=180)
+    mars_neurips_directory_max_mib: int = Field(default=8, ge=1, le=16)
+    mars_neurips_landing_max_kib: int = Field(default=256, ge=1, le=1024)
     mars_web_search_allowlist: str = ""
     mars_web_search_provider: Literal["", "brave", "tavily", "serper", "zhipu"] = ""
     brave_search_api_key: str = ""

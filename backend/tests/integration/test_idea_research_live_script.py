@@ -57,11 +57,12 @@ def test_preparation_uses_real_configs_without_calls(tmp_path: Path) -> None:
     assert summary["status"] == "prepared" and not summary["material_ready"]
     request = json.loads(next(tmp_path.rglob("request.json")).read_text())
     assert request["credential_persisted"] is False and request["development_bypass_bridge"] is True
-    assert request["resource_limits"]["source_max_mib"] == 32
+    assert request["resource_limits"]["source_max_mib"] == 64
     assert request["child_config"]["name"] == "idea_research"
     assert request["lead_config"]["tools"] == ["idea.research_delegate", "knowledge.kb_query"]
     assert request["child_config"]["thinking_enabled"] is False
     assert request["child_config"]["reasoning_effort"] is None
+    assert {"search.arxiv_search", "search.openalex_search"} <= set(request["child_config"]["tools"])
 
 
 @pytest.mark.parametrize("value", [0, 65, True, 32.5, "32", None])
@@ -72,4 +73,4 @@ def test_invalid_source_limit_rejected(value: Any) -> None:
 
 def test_source_limit_default_and_explicit_budget() -> None:
     assert source_limit({}) == 12
-    assert source_limit(scenario()) == 32
+    assert source_limit(scenario()) == 64

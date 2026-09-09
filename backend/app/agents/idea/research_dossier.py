@@ -5,12 +5,16 @@ import hashlib
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.research import canonical_source, title_key
+from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_publications
+from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.schema.validator import SCHEMAS_DIR
 
@@ -20,11 +24,99 @@ def dossier_schema() -> dict[str, Any]:
     return value
 
 
+def _normalized_page(value: str) -> tuple[str, frozenset[int], frozenset[int]]:
+    """Preserve legacy text while mapping eligible real line-end hyphens into it."""
+    normalized = unicodedata.normalize("NFKC", value)
+    parts: list[str] = []
+    optional: set[int] = set()
+    paragraph_boundaries: set[int] = set()
+    previous, previous_end, length = "", 0, 0
+    for token in re.finditer(r"\S+", normalized):
+        word = token.group()
+        whitespace = normalized[previous_end:token.start()]
+        join_hyphen = bool(re.search(r"[A-Za-z]-$", previous) and re.match(r"[A-Za-z]", word))
+        if previous and not join_hyphen:
+            parts.append(" ")
+            length += 1
+        if previous and re.search(r"\n[ \t]*\n", whitespace.replace("\r\n", "\n").replace("\r", "\n")):
+            paragraph_boundaries.add(length)
+        if (join_hyphen and re.search(r"[a-z]{2}-$", previous) and re.match(r"[a-z]{2}", word)
+                and re.fullmatch(r"[ \t]*(?:\r\n|[\r\n])[ \t]*", whitespace)):
+            # Only the actual page can authorize an omission. Ordinary inline
+            # hyphens, blank lines, single-letter symbols and digits never do.
+            optional.add(length - 1)
+        parts.append(word)
+        length += len(word)
+        previous, previous_end = word, token.end()
+    return "".join(parts), frozenset(optional), frozenset(paragraph_boundaries)
+
+
 def normalized_excerpt_text(value: str) -> str:
     """Normalize PDF typography without deleting hyphens or inventing text."""
-    normalized = unicodedata.normalize("NFKC", value)
-    normalized = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "-", normalized)
-    return " ".join(normalized.split())
+    return _normalized_page(value)[0]
+
+
+@dataclass(frozen=True)
+class QuoteMatch:
+    start: int
+    end: int
+    normalization_mode: Literal["exact_normalized", "pdf_line_end_hyphen"]
+    omitted_hyphen_offsets: tuple[int, ...] = ()
+
+
+def locate_quote(quote: str, page_text: str) -> QuoteMatch | None:
+    """Match one continuous page span, optionally omitting verified line-end hyphens.
+
+    All offsets refer to the original normalized page, which retains its hyphens.
+    This is a typographic match, not verification of a finding or a formula.
+    """
+    needle = normalized_excerpt_text(quote)
+    text, optional, paragraph_boundaries = _normalized_page(page_text)
+    if not needle:
+        return None
+    start = text.find(needle)
+    if start >= 0:
+        return QuoteMatch(start, start + len(needle), "exact_normalized")
+    if not optional:
+        return None
+    start = text.find(needle[0])
+    while start >= 0:
+        position, matched = start, 0
+        omitted: list[int] = []
+        while position < len(text) and matched < len(needle):
+            if position != start and position in paragraph_boundaries:
+                break
+            if text[position] == needle[matched]:
+                position += 1
+                matched += 1
+            elif position in optional:
+                omitted.append(position)
+                position += 1
+            else:
+                break
+        if matched == len(needle):
+            return QuoteMatch(start, position, "pdf_line_end_hyphen", tuple(omitted))
+        start = text.find(needle[0], start + 1)
+    return None
+
+
+def _quote_location_excerpt(quote: str, page_texts: list[str]) -> str:
+    """Locate at most 300 literal normalized page characters; infer no finding."""
+    needle = normalized_excerpt_text(quote)
+    best_text, best_start, best_size = "", 0, -1
+    for raw_text in page_texts:
+        text = normalized_excerpt_text(raw_text)
+        if not text:
+            continue
+        match = SequenceMatcher(None, needle, text, autojunk=False).find_longest_match()
+        if match.size > best_size:
+            best_text, best_start, best_size = text, match.b, match.size
+    if not best_text:
+        return ""
+    # Keep surrounding context without joining disjoint matches or page windows.
+    start = max(0, best_start - max(0, (300 - best_size) // 2))
+    start = min(start, max(0, len(best_text) - 300))
+    return best_text[start:start + 300]
 
 
 def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
@@ -46,36 +138,40 @@ def _receipt_error(insight: dict[str, Any], row: dict[str, Any]) -> str | None:
         pages = [page for page in receipt.get("visible_pages", []) if page.get("page") == insight["page"]]
         if not pages:
             return f"page {insight['page']} is not visible in this read_receipt; read that page or cite a visible page"
-        quote = normalized_excerpt_text(insight["quote"])
-        if not any(quote in normalized_excerpt_text(str(page.get("text", ""))) for page in pages):
-            return (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
-                    "from that page's actual visible text, preserving words and hyphens")
+        quote = insight["quote"]
+        if not any(locate_quote(quote, str(page.get("text", ""))) is not None for page in pages):
+            error = (f"quote is absent from visible page {insight['page']}; copy a short contiguous excerpt "
+                     "from that page's actual visible text, preserving words and hyphens")
+            excerpt = _quote_location_excerpt(quote, [str(page.get("text", "")) for page in pages])
+            if excerpt:
+                error += (". Untrusted locator only; does not establish support for interpretations; "
+                          "candidate remains invalid. visible_page_excerpt="
+                          + json.dumps(excerpt, ensure_ascii=False))
+            return error
         return None
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return f"read_receipt or archived document is unreadable: {type(exc).__name__}"
 
 
 def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], *,
-                   min_sources: int = 1) -> list[str]:
+                   min_sources: int = 1,
+                   publication_count_contract: str | None = PUBLICATION_COUNT_CONTRACT) -> list[str]:
+    # None is only for rereading historical manifests; live validation defaults
+    # to the current contract and cannot take this flag from author metadata.
+    if publication_count_contract not in (None, PUBLICATION_COUNT_CONTRACT):
+        return ["/sources: unknown publication count contract"]
     errors = [f"/{'/'.join(str(p) for p in error.absolute_path)}: {error.message}"
               for error in Draft202012Validator(dossier_schema()).iter_errors(metadata)]
     if errors:
         return errors
     if type(min_sources) is not int or min_sources < 0:
         return ["/sources: min_sources must be a nonnegative integer"]
-    hits: dict[str, set[str]] = {}
-    download_urls: dict[str, set[str]] = {}
+    documents = SourceIdentityIndex(observations)
     receipts: dict[str, dict[str, Any]] = {}
     for observation in observations:
         output = observation.get("output")
         if not observation.get("ok") or not isinstance(output, dict):
             continue
-        if observation.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
-            for hit in output.get("hits", []):
-                if isinstance(hit, dict) and isinstance(hit.get("url"), str) and isinstance(hit.get("title"), str):
-                    identity = canonical_source(hit["url"])
-                    hits.setdefault(identity, set()).add(title_key(hit["title"]))
-                    download_urls.setdefault(identity, set()).add(canonical_source(str(hit.get("pdf_url") or hit["url"])))
         if observation.get("tool") == "search.fetch_sources":
             for row in output.get("sources", []):
                 if isinstance(row, dict) and row.get("ok") and isinstance(row.get("read_receipt"), str):
@@ -92,11 +188,12 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
             errors.append(prefix + ": duplicate source id or publication")
         sources[source["source_id"]] = source
         identities.add(identity)
-        if title_key(source["title"]) not in hits.get(identity, set()):
-            errors.append(prefix + ": title/URL must match a retrieved search result")
+        if title_key(source["title"]) not in {title_key(hit["title"]) for hit in documents.matching_hits(source["url"])}:
+            errors.append(prefix + ": title/URL must match a retrieved search result at the declared document version")
         if not set(source["gap_ids"]) <= gaps:
             errors.append(prefix + "/gap_ids: unknown research gap")
     read_sources: set[str] = set()
+    read_metadata: list[dict[str, Any]] = []
     insight_ids: set[str] = set()
     for index, insight in enumerate(metadata["insights"]):
         prefix = f"/insights/{index}"
@@ -111,22 +208,25 @@ def dossier_errors(metadata: dict[str, Any], observations: list[dict[str, Any]],
         if row is None:
             errors.append(prefix + "/read_receipt: receipt is not in actual tool observations; use an actual tool read receipt")
             continue
-        if canonical_source(str(row.get("url", ""))) != canonical_source(source["url"]):
-            errors.append(prefix + "/source_id: read receipt belongs to a different source URL")
-            continue
-        if canonical_source(str(row.get("download_url", ""))) not in download_urls.get(canonical_source(source["url"]), set()):
-            errors.append(prefix + ": read receipt download URL does not match the retrieved source PDF")
+        matches = documents.matching_hits(source["url"], read_receipt=insight["read_receipt"])
+        if title_key(source["title"]) not in {title_key(hit["title"]) for hit in matches}:
+            errors.append(prefix + ": read receipt download URL does not match the retrieved source PDF at the declared document version; use the observed version and its receipt")
             continue
         receipt_error = _receipt_error(insight, row)
         if receipt_error:
             errors.append(prefix + ": " + receipt_error)
             continue
         read_sources.add(canonical_source(source["url"]))
+        read_metadata.extend({"url": source["url"], "title": hit["title"]} for hit in matches
+                             if title_key(source["title"]) == title_key(hit["title"]))
     for source in sources.values():
         if source["decision"] == "use" and canonical_source(source["url"]) not in read_sources:
             errors.append(f"/sources/{source['source_id']}: used source requires a verified extracted insight")
-    if len(read_sources) < min_sources:
-        errors.append(f"/sources: require {min_sources} distinct read publications; observed {len(read_sources)}")
+    publications = count_publications(read_metadata)
+    count = publications.count if publication_count_contract is not None else len(read_sources)
+    if count < min_sources:
+        errors.append(f"/sources: require {min_sources} distinct read publications; observed {count}"
+                      + (publications.diagnostic() if publication_count_contract is not None else ""))
     return errors
 
 

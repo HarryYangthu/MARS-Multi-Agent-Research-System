@@ -39,10 +39,9 @@ idea:
     provider: deepseek
     model: deepseek-v4-flash
     temperature: 0.7
-    # DeepSeek thinking shares this bound between reasoning and visible output.
-    # 16K leaves room for high-effort reasoning plus one complete proposal.v1
-    # document while remaining far below the provider's 384K output ceiling.
-    max_tokens: 16384
+    # Actual dossier reviews exhausted 16K entirely on reasoning. The complete
+    # proposal and review share this larger, still bounded output allowance.
+    max_tokens: 32768
     top_p: 1.0
     api_key_env: DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
@@ -50,7 +49,7 @@ idea:
     thinking:
       enabled: false
     reasoning_effort: high
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
       max_retries: 3
       base_delay_seconds: 1
@@ -76,13 +75,14 @@ idea:
     web_search: true
   loop:
     protocol: native_tools
-    mode: react
+    mode: reflection
     trace: full
     # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
-    reflection_reasoning_effort: low
+    reflection_reasoning_effort: high
+    reflection_format_repair_enabled: true
     # Includes the submission schema, supplied context and visible paper excerpts.
-    input_token_budget: 96000
+    input_token_budget: 256000
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
@@ -102,27 +102,32 @@ idea_research:
     provider: deepseek
     model: deepseek-v4-flash
     temperature: 0.2
-    max_tokens: 8192
+    max_tokens: 24576
     api_key_env: DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     base_url_env: DEEPSEEK_BASE_URL
     thinking:
       enabled: false
     reasoning_effort: null
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
-      max_retries: 0
+      max_retries: 1
       base_delay_seconds: 1
   research:
     excerpt_context_chars: 600
+    review_mode: whole_report
   debate:
     enabled: false
   loop:
     protocol: native_tools
-    mode: react
+    mode: reflection
+    reflection_thinking_enabled: true
+    reflection_reasoning_effort: high
+    reflection_format_repair_enabled: true
+    max_reflections: 2
     trace: full
-    input_token_budget: 48000
-    observation_chars: 12000
+    input_token_budget: 256000
+    observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12
     max_validation_repairs: 3

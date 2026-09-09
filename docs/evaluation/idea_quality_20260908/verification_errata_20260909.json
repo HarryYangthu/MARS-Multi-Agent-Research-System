@@ -1,0 +1,20 @@
+{
+  "schema": "idea.verification_errata.v1",
+  "corrections": [
+    {
+      "target": "api_verification_20260909_attempt02.json",
+      "target_file_sha256": "6c97230a7c2eec1b2a2e0d9a00aad6a60397857c14badbbee6332646fe7a174c",
+      "json_pointer": "/main_proposal/resolved_in_current_candidate/2",
+      "original_text": "The previously named Fourier alternative now has an explicit frequency set and forward definition.",
+      "corrected_text": "Request 8 removes the previously undefined Fourier alternative; it does not supply a Fourier frequency set or forward definition. The final candidate retains the explicit 32-parameter additive cubic B-spline alternative.",
+      "reason": "Correction of a derived export summary, not a new model revision. The original final candidate contains no Fourier alternative; the original independent review already recorded its removal.",
+      "evidence": {
+        "run_ref": "runs/2026-09-09T0217_api_idea_20260909t021738_232250a3",
+        "candidate_utf8_sha256": "9d56655e19cbe804e05ab7124ff8ba7b49772223887bda8ef7c0106a6cdeaf91",
+        "manual_quality_review_sha256": "efbd8824366ef8048c699a8989ad5f04eed9b05cedc26f7b5cb97a9ffd2e7dc8"
+      },
+      "original_export_unchanged": true,
+      "original_run_unchanged": true
+    }
+  ]
+}

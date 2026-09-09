@@ -1,7 +1,9 @@
 """Contract and real-file tests; authored documents are parser inputs, not Agent results."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +95,9 @@ async def test_reviewer_has_separate_instructions_and_supplied_context() -> None
     assert "Idea acceptance scope: method_proposal" in text
     assert "Missing measured improvement" in text
     assert "Judge this document independently" in text
+    # The independent reviewer must receive the actual candidate contract,
+    # not only the caller's shorter question with the host requirements omitted.
+    assert context.task in text
 
 
 def test_candidate_progress_never_claims_acceptance() -> None:
@@ -102,6 +107,41 @@ def test_candidate_progress_never_claims_acceptance() -> None:
 
 def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
     assert progress_message({"kind": "action", "tool": "search.arxiv_search", "reason": "Search more papers"}) == "正在检索相关论文。"
+
+
+@pytest.mark.parametrize("accepted,expected", [
+    (True, "当前审查项通过模型检查。"),
+    (False, "当前审查项有待解决问题。"),
+    (None, "当前审查项尚未确认结果。"),
+    ("false", "当前审查项尚未确认结果。"),
+])
+@pytest.mark.parametrize("phase", ["act", "reflect"])
+def test_review_unit_progress_describes_only_the_current_item(accepted: object, expected: str, phase: str) -> None:
+    # Authored rendering inputs; no review or provider execution is represented.
+    # A rejected item may remain in reflect while other items are collected.
+    event = {"kind": "review_unit", "unit_id": "item", "accepted": accepted, "phase": phase}
+    message = progress_message(event)
+    assert message == expected
+    assert all(word not in message for word in ("已停止", "已完成", "开始修订", "整份报告通过"))
+
+
+def test_real_run19_review_unit_progress_no_longer_reports_stopped() -> None:
+    configured = os.environ.get("MARS_TEST_IDEA_REVIEW_UNIT_PROGRESS")
+    if not configured:
+        pytest.skip("requires actual run-19 child progress; no replacement is generated")
+    path = Path(configured)
+    with path.open("rb") as stream:
+        prefix = b"".join(stream.readline() for _ in range(21))
+    assert hashlib.sha256(prefix).hexdigest() == "d6ea18dc8e9689706245d545b831a0b39cec7aef8b353e91b47a7cc39b0ac382"
+    rows = [json.loads(line) for line in prefix.splitlines()]
+    units = [row for row in rows if row["kind"] == "review_unit"]
+    assert [row["accepted"] for row in units] == [False, True, False]
+    assert all("本次运行已停止" in row["message"] for row in units)
+    assert [progress_message(row) for row in units] == [
+        "当前审查项有待解决问题。", "当前审查项通过模型检查。", "当前审查项有待解决问题。",
+    ]
+    with path.open("rb") as stream:
+        assert stream.read(len(prefix)) == prefix
 
 
 def test_repeated_delivery_preserves_exact_prior_artifact(tmp_path: Path) -> None:
@@ -138,6 +178,7 @@ def test_submission_schema_requires_full_method_without_changing_legacy_parser()
     schema = IdeaAgent().submission_schema(request)
     assert schema is not None
     assert {"human_summary", "handoff", "method_spec", "parameter_budget", "ablation_plan"} <= set(schema["required"])
+    assert {"research_assessment", "research_links"} <= set(schema["required"])
     assert schema["properties"]["alternatives"]["minItems"] == 2
     budget = schema["properties"]["parameter_budget"]
     assert budget["properties"]["variables"]["additionalProperties"] == {"type": "number"}
@@ -161,3 +202,41 @@ def test_artifact_conversion_preserves_exact_candidate_digest() -> None:
     text = dumps(authored_metadata(), "Parser input.") + "\n\n"
     artifact = IdeaAgent()._artifact_from_completion(Completion(text, "parser", "parser"))
     assert artifact.text == text
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_research_delivery_requires_actual_evidence_even_with_claimed_review(tmp_path: Path, reviewed: bool) -> None:
+    metadata = authored_metadata()
+    metadata["research_assessment"] = {"version": "idea.research_assessment.v1"}
+    text = dumps(metadata, metadata["human_summary"])
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path)})
+    with pytest.raises(ValueError, match="research decisions"):
+        write_delivery(Artifact(text, "proposal.v1", metadata, ""), request,
+                       invocation="authored-negative-input", reviewed=reviewed)
+    assert not (tmp_path / "idea" / "deliveries").exists()
+
+
+def test_required_research_contract_cannot_be_dropped_at_export(tmp_path: Path) -> None:
+    metadata = authored_metadata()
+    text = dumps(metadata, metadata["human_summary"])
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path),
+                         "idea_requirements": {"require_research_dossier": True}})
+    with pytest.raises(ValueError, match="research_assessment"):
+        write_delivery(Artifact(text, "proposal.v1", metadata, ""), request,
+                       invocation="authored-negative-input", reviewed=True)
+    assert not (tmp_path / "idea" / "deliveries").exists()
+
+
+@pytest.mark.asyncio
+async def test_research_without_review_configuration_fails_before_model_call(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from app.harness.llm.model_registry import get_agent_config
+    config = get_agent_config("idea")
+    config = replace(config, raw={**config.raw, "loop": {**config.raw["loop"], "mode": "react"}})
+    agent = IdeaAgent(agent_config=config)
+    request = RunRequest("pimc", "task", extra={"run_root": str(tmp_path),
+                         "context_sources": {"project_rules": False, "code_repositories": False}})
+    context = await agent.build_context(request)
+    with pytest.raises(ValueError, match="requires reflection mode"):
+        await agent.draft(request, context)
+    assert not (tmp_path / "agent_traces").exists()

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.harness.runtime.run_graph import RunGraph
+from app.harness.agent_loop.trace import atomic_json
 from app.storage.run_store import RunHandle
 
 
@@ -19,6 +20,7 @@ class RunStateSnapshot:
     updated_at: str
     failed_nodes: tuple[str, ...] = ()
     failure_summary: str | None = None
+    termination: dict[str, Any] | None = None
 
 
 class RunStateStore:
@@ -32,6 +34,7 @@ class RunStateStore:
         graph: RunGraph,
         request: dict[str, Any],
         status: str,
+        termination: dict[str, Any] | None = None,
     ) -> None:
         failed_nodes = tuple(
             sorted(
@@ -57,10 +60,9 @@ class RunStateStore:
                 else None
             ),
         }
-        self.path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        if termination is not None:
+            payload["termination"] = dict(termination)
+        atomic_json(self.path, payload)
 
     def load(self) -> RunStateSnapshot | None:
         if not self.path.exists():
@@ -89,4 +91,5 @@ class RunStateStore:
                 if isinstance(failure_summary_raw, str)
                 else None
             ),
+            termination=dict(raw["termination"]) if isinstance(raw.get("termination"), dict) else None,
         )

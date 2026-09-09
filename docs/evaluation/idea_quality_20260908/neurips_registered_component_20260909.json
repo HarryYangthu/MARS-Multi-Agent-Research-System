@@ -1,0 +1,292 @@
+{
+  "schema": "idea.neurips_registered_component.v1",
+  "created_at": "2026-09-09T07:30:16.747666+00:00",
+  "status": "verified_component_only",
+  "component_root": "/tmp/mars-neurips-registered-20260909T072445Z_3967cdae",
+  "full_agent_acceptance": false,
+  "service_entry_tested": false,
+  "scientific_quality_assessed": false,
+  "selection": {
+    "type": "developer_selected_known_title",
+    "query": {
+      "query": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+      "top_k": 1,
+      "year": 2020
+    },
+    "original_source": "Run21 actual arXiv lookup hit; only the title/year was used to test the official directory. No prior PDF or research conclusion was copied into the component.",
+    "original_checkpoint_ref": "runs/2026-09-09T0613_api_idea_20260909t061329_67384114/agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/checkpoint.json",
+    "original_checkpoint_sha256": "4084d8dface1ebc8b405c09e01ed1095502d5efad05fb5a75b3b481ad6765aaa",
+    "original_hit_pointer": "/history/8/output/hits/0"
+  },
+  "execution": {
+    "model_calls": 0,
+    "tool_dispatches": 2,
+    "tools": [
+      "search.neurips_search",
+      "search.fetch_sources"
+    ],
+    "actor": "idea_research",
+    "configured_read_scope": {
+      "agent": "idea_research",
+      "tools": [
+        "search.neurips_search",
+        "search.fetch_sources"
+      ]
+    },
+    "elapsed_seconds": 18.914847458989243,
+    "query_elapsed_seconds": 10.570830583004863,
+    "fetch_elapsed_seconds": 7.612,
+    "new_root_and_fresh_pdf": true,
+    "reused": false,
+    "run22_accessed_or_updated": false
+  },
+  "executed_source": {
+    "commit": "ef709a699da0fc6628260aec5e4f32ee753a7a34",
+    "dirty_files_sha256": {
+      "backend/app/agents/idea/research_review_plan.py": "63ece527bf6450f823805962ff154d6797602cbada0ac171c4f52d40105d8944",
+      "backend/app/agents/idea/runtime_profile.py": "0a4ec99b6d741e5a34cf138a523ce93d0d249219d702143a2a8dd1c269fe7e2d",
+      "backend/app/agents/idea/source_identity.py": "bad421d1eb78c1af9835531244b9551774e22fe1b541340721f475076d0c19b5",
+      "backend/app/harness/tools/registry.py": "54125f23e9774c3a7a7a48e3a40fbc211c9f87d060cdadb16c19e5a9d2323530",
+      "backend/app/harness/tools/search/__init__.py": "dbfdfdf1483d571d49c4921bb3a2b196af81611fdf4a6ef3c575f93caea81694",
+      "backend/app/harness/tools/search/neurips.py": "e76d36c6b7b1ebeb10cb27600e55d55f5f29cbfa256bea0b9428ea4d4d07104b",
+      "backend/app/settings.py": "5d4d52c14209b0bfe3d7f8fc10c77d13c4f1eaee3c2440ce3d22f80a55c8fc2a",
+      "backend/tests/unit/test_idea_single_publication_profile.py": "41da82afa878c4376a5b9442024ce2f6a05af75ac614bedb50fe86d2a3a335a0",
+      "backend/tests/unit/test_neurips_sources.py": "ca2b0ac90a2c937d8661991c83db4bb70cf93cb8da1a3f788e38fb0100796988",
+      "configs/evaluation/idea_research_single_publication_real.yaml": "2bd13ceb95022cfb9d58f853bbacc1ad15f9880f87d3ebcc43e68f7c134832ee",
+      "configs/idea_runtime_profiles.yaml": "36343c727fa8164b04cd1711e081edccbd5e3149895c12cda322cf75f7faf1bc",
+      "configs/tools.yaml": "c90a73d67c2dbaa0dad20aa4ae6a94d6aaa61b97ebaba1a63c999dd1eada5969",
+      "docs/idea_service_runtime_profiles.md": "80b18f357cccebfa2e1f37e2bb3f76a6e3592fe36b2c32dc2a54e19f09fc8b3a"
+    },
+    "driver": {
+      "path": "/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/driver.py",
+      "sha256": "27b34b8283bf9b871b0570786b24412271ba01abfdb4840669f36ee062f956ad"
+    },
+    "driver_sha256_at_execution": "27b34b8283bf9b871b0570786b24412271ba01abfdb4840669f36ee062f956ad",
+    "full_snapshot": {
+      "path": "/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/request.json",
+      "sha256": "99e30fbbee957cd8e4a0c30efd8e00206fe92ea7adeb34b248a045e506e56e98"
+    },
+    "full_snapshot_pointer": "/source",
+    "source_file_map_sha256": "1b02054732cd8c1a25006943d9ee1016a0b55816763a547656719470c5c84684",
+    "source_file_count": 339,
+    "loaded_file_map_sha256": "a4168679496d13bd04d30d67932147c4bef1bba6e22fb5f9ed2175113f3abc08",
+    "loaded_file_count": 59,
+    "loaded_code_unchanged_during_calls": true,
+    "all_app_source_and_config_unchanged_during_calls": true,
+    "note": "Records the actual dirty source at component execution; does not certify later branch edits as executed."
+  },
+  "network": {
+    "allowlist": "papers.nips.cc,proceedings.neurips.cc",
+    "directory_max_mib": 8,
+    "environment_proxy_present": true,
+    "landing_max_kib": 256,
+    "network_enabled": true,
+    "neurips_total_timeout": 60.0,
+    "no_proxy_modified_by_driver": false,
+    "source_connect_timeout": 15.0,
+    "source_download_timeout": 45.0,
+    "source_max_mib": 64,
+    "source_read_timeout": 30.0,
+    "source_total_timeout": 60.0,
+    "trust_env": true
+  },
+  "source_chain": {
+    "directory_url": "https://papers.nips.cc/paper/2020",
+    "directory_entries": 1898,
+    "matching_entries": 1,
+    "selection_policy": "title_tokens_all.v1: all casefolded Unicode query words must occur in the directory title; directory order breaks ties; no semantic score",
+    "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+    "landing_url": "https://papers.nips.cc/paper_files/paper/2020/hash/55053683268957697aa39fba6f231c68-Abstract.html",
+    "actual_paper_href": "/paper_files/paper/2020/file/55053683268957697aa39fba6f231c68-Paper.pdf",
+    "pdf_url": "https://papers.nips.cc/paper_files/paper/2020/file/55053683268957697aa39fba6f231c68-Paper.pdf",
+    "citation_pdf_url": "https://proceedings.neurips.cc/paper_files/paper/2020/file/55053683268957697aa39fba6f231c68-Paper.pdf",
+    "citation_pdf_alias_verified": false,
+    "alternate_host_fetched": false,
+    "metadata_receipt": {
+      "path": "/private/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/receipt.json",
+      "sha256": "99513290e72096b3cfba601686ee574382aa542e8ff4bcf77a421712d6029814"
+    },
+    "http": [
+      {
+        "url": "https://papers.nips.cc/paper/2020",
+        "final_url": "https://papers.nips.cc/paper/2020",
+        "status": 200,
+        "content_length": "1015900",
+        "bytes": 1015900,
+        "complete": true,
+        "elapsed_seconds": 10.123810916004004,
+        "original_html": {
+          "path": "/private/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/directory.html",
+          "sha256": "92a206ec3e110f72c1ac352a40291a5ca821878ddac9064551271339e1be4fd9"
+        }
+      },
+      {
+        "url": "https://papers.nips.cc/paper_files/paper/2020/hash/55053683268957697aa39fba6f231c68-Abstract.html",
+        "final_url": "https://papers.nips.cc/paper_files/paper/2020/hash/55053683268957697aa39fba6f231c68-Abstract.html",
+        "status": 200,
+        "content_length": "9957",
+        "bytes": 9957,
+        "complete": true,
+        "elapsed_seconds": 0.3535800000099698,
+        "original_html": {
+          "path": "/private/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/landing-0.html",
+          "sha256": "9295d5476505121cfb72b0c80954520a66a7e353588577c32ec1a205993a2573"
+        }
+      }
+    ]
+  },
+  "fresh_read": {
+    "pdf": {
+      "path": "/private/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/idea_research/research/downloads/8efd98d9190cdfedb50b05cfbb2651518a7cff7abdb123d8d05323398162c1e2.pdf",
+      "sha256": "8efd98d9190cdfedb50b05cfbb2651518a7cff7abdb123d8d05323398162c1e2"
+    },
+    "bytes": 2384007,
+    "download_elapsed_seconds": 7.538,
+    "download_complete": true,
+    "archive_complete": true,
+    "physical_pdf_pages": 11,
+    "read_receipt": {
+      "path": "/private/tmp/mars-neurips-registered-20260909T072445Z_3967cdae/idea_research/research/downloads/67c850b5cd58421896e7f512df1e885f.read.json",
+      "sha256": "dabb1c1e93a49e85b9400be60404ca87f2c6de9087ffcd52655d61710a21bf2c"
+    },
+    "visible_pages": [
+      {
+        "page": 2,
+        "text_chars": 3486,
+        "full_page_text_chars": 3486,
+        "truncated": false
+      },
+      {
+        "page": 3,
+        "text_chars": 4033,
+        "full_page_text_chars": 4033,
+        "truncated": false
+      }
+    ],
+    "metadata_only_read_publication_count": 0,
+    "verified_read_publication_count": 1,
+    "full_document_read": false,
+    "formula_semantics_verified": false
+  },
+  "integrity": {
+    "indexed_artifact_count": 22,
+    "file_count_including_artifact_index": 23,
+    "original_component_files_sha256": {
+      "request.json": "99e30fbbee957cd8e4a0c30efd8e00206fe92ea7adeb34b248a045e506e56e98",
+      "query_result.json": "8650786dcbf2383788371e9710f6f12adc89feeaea3a8b43d37dc763002ecd1c",
+      "fetch_result.json": "662da7df6036042df5a73be830ff0be9a38b30c83b93ca72fa3ca490f493c6cb",
+      "result.json": "bfa39047fb4af4e7e9368add5a1be9695fa17c98ebd9ddccc6b615ce6e07698a",
+      "evidence_binding.json": "c300a83fd628b849dd805324c1bae17edcf3f359cac4afd3e4b7e15405cf3369",
+      "query_freeze.json": "62996c613d20800ddb6fab483117563cb2de37bb28be63f24eff0388e8511c57",
+      "fetch_request.json": "80caf68262ac8d4964116b9eb76d0aa4889b236a35a111acc7be2fccf8ef3ad0",
+      "driver.py": "27b34b8283bf9b871b0570786b24412271ba01abfdb4840669f36ee062f956ad",
+      "artifact_hashes.json": "d10b63f7ff24148fdfbdb8c05e9e6fee08db59dd1f4be17283cdfb1340a75f1a",
+      "idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/directory.html": "92a206ec3e110f72c1ac352a40291a5ca821878ddac9064551271339e1be4fd9",
+      "idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/landing-0.html": "9295d5476505121cfb72b0c80954520a66a7e353588577c32ec1a205993a2573",
+      "idea_research/research/searches/neurips/19046e738fc448e59f69a94c43f507de/receipt.json": "99513290e72096b3cfba601686ee574382aa542e8ff4bcf77a421712d6029814",
+      "idea_research/research/downloads/67c850b5cd58421896e7f512df1e885f.read.json": "dabb1c1e93a49e85b9400be60404ca87f2c6de9087ffcd52655d61710a21bf2c",
+      "idea_research/research/downloads/8efd98d9190cdfedb50b05cfbb2651518a7cff7abdb123d8d05323398162c1e2.pdf": "8efd98d9190cdfedb50b05cfbb2651518a7cff7abdb123d8d05323398162c1e2",
+      "idea_research/research/downloads/source_fetch_index.v1.json": "a012335fd763ff1ef81470f103e5b1a2660818f75b0cd20b342b0cc7450acd7a",
+      "context/trace_manifest.v2.json": "620f57ef72eba699b3f3b1be371e62fbf0ce9450c9d2c7016fdcc10ff5bcd090",
+      "component_trace/events.jsonl": "7353b0711b40ae01f5938287708bfc50c9634eaeb65c7b55386ae7b653b44d2f",
+      "component_trace/tools/0002.json": "b8c66c5366d9b706572a58bd6416165aab5313b48802e11d3aea5abeb7138b97",
+      "component_trace/tools/0001.json": "afb37dfb336b00003eb013b12a012cd7068546ca128304294a847823645497f9",
+      "coding/tool_applications/c62cf4a998bd46c5910516d27eb59669.json": "365a5a5fe2367efab79b360d8756e14ce28ae0e78e9310b4547d82908ed39759",
+      "coding/tool_applications/8649aabdef094eadbe1f0316192b88c6.json": "03fbad5c3cec92736b1869322572599c72f2a565c85d181ca4b170fd7b6b085b",
+      "events/tool_events.jsonl": "094df5ac9bf16d5881a3a7ac36c72232ed966f213074fd2dc747a9953e2ffd77",
+      "events/tool_calls.jsonl": "4f3eef9478dcbbaf2132cbbc282a41d4dcfd407ec44d14aa743e66dc93bc98d9"
+    },
+    "immutable_query_files_unchanged": true,
+    "original_log_prefixes_preserved": true,
+    "derived_span_index": "Normal tool-span index updated for fetch; prior search span and fields reconstructed to the exact archived pre-fetch SHA in the read-only audit.",
+    "original_failed_feasibility_archives_unchanged": true,
+    "original_run21_checkpoint_unchanged": true
+  },
+  "preserved_prior_failures": [
+    {
+      "result": {
+        "path": "/tmp/mars-neurips-feasibility-20260909T070942Z/result.json",
+        "sha256": "10edd45bbb411e3d2e648f7dee48df8514e813af40b473ee6b143a35f89da3ce"
+      },
+      "recorded_status": "failed",
+      "failure": {
+        "type": "ReadTimeout",
+        "message": ""
+      },
+      "http": [
+        {
+          "label": "directory.html",
+          "status": 200,
+          "received_bytes": 175776,
+          "complete": false,
+          "elapsed_seconds": 23.844746959002805
+        }
+      ]
+    },
+    {
+      "result": {
+        "path": "/tmp/mars-neurips-feasibility-20260909T071118Z/result.json",
+        "sha256": "d87818c6a701229aacee90fa94fd3c5f3e6a26777972210ff9e7c22f5233e6b0"
+      },
+      "recorded_status": "failed",
+      "failure": {
+        "type": "ValueError",
+        "message": "outside official HTTPS hosts"
+      },
+      "http": [
+        {
+          "label": "directory.html",
+          "status": 200,
+          "received_bytes": 1015900,
+          "complete": true,
+          "elapsed_seconds": 8.52645108300203
+        },
+        {
+          "label": "landing.html",
+          "status": 200,
+          "received_bytes": 9957,
+          "complete": true,
+          "elapsed_seconds": 0.34549887500179466
+        }
+      ]
+    },
+    {
+      "result": {
+        "path": "/tmp/mars-neurips-feasibility-20260909T071217Z/result.json",
+        "sha256": "f62bbc6e0956811211e0a26d7c0a5000b722a0d240e192f97095c55caaabf877"
+      },
+      "recorded_status": "failed",
+      "failure": {
+        "type": "ModuleNotFoundError",
+        "message": "No module named 'fitz'"
+      },
+      "http": [
+        {
+          "label": "paper.pdf",
+          "status": 200,
+          "received_bytes": 2384007,
+          "complete": true,
+          "elapsed_seconds": 7.344490792005672
+        }
+      ]
+    }
+  ],
+  "reviews": [
+    {
+      "path": "/tmp/mars-neurips-registered-independent-review-20260909.json",
+      "sha256": "862cacc1029c4c3d0b9d8ff65df22da72f0766a1fa59289faa35d31ad4906f8f"
+    },
+    {
+      "path": "/tmp/mars-neurips-registered-independent-review.json",
+      "sha256": "9d18f8ebcd791645d5af0a20c2496b015b6a475ecb4f6db6545fe9ff3347f01f"
+    }
+  ],
+  "limits": [
+    "Only the observed 2020 directory layout and one known title were checked; other years and general query recall remain untested.",
+    "The author and reviewer model were not invoked; no report, proposal, acceptance or Service/API execution was produced.",
+    "Actual visible reading is physical pages 2 and 3 only. Source registration and PDF transport are separate from relevance or scientific interpretation.",
+    "The alternate citation-host PDF and arXiv v1 are not asserted byte-identical to this official Paper-button PDF.",
+    "Current-shell network success and the earlier direct-path failure do not establish a proxy root cause or guarantee the live API deployment path.",
+    "All prior failed component statuses remain unchanged; the new successful registered component is a separate archive."
+  ]
+}

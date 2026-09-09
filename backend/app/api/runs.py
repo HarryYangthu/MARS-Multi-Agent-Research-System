@@ -1,7 +1,6 @@
 """REST endpoints for the Run lifecycle."""
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +12,7 @@ from app.bridge.idea_input_context import IdeaRequirements, validate_idea_contex
 from app.bridge.run_observability import build_run_observability
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 from app.storage.data_source_store import DataSourceStore
+from app.storage.run_state_store import RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -33,12 +33,19 @@ class CreateRunPayload(BaseModel):
     # that node — the run goes straight into HITL review.
     seed_artifact: str | None = None
     data_source: "DataSourceSelection | None" = None
-    idea_mode: Literal["auto", "fast", "deep"] | None = None
+    idea_mode: Literal["fast"] | None = Field(default=None, description="Only fast is available; omit to use the default.")
     idea_budget_profile: Literal["fast", "balanced", "thorough"] | None = None
     project_inputs: dict[str, Any] = Field(default_factory=dict)
     idea_context: dict[str, str] | None = None
     idea_scope: Literal["method_proposal", "project_proposal"] | None = None
     idea_requirements: IdeaRequirements | None = None
+
+    @field_validator("idea_mode", mode="before")
+    @classmethod
+    def validate_idea_mode(cls, value: Any) -> Any:
+        if isinstance(value, str) and value in {"auto", "deep"}:
+            raise ValueError(f"idea_mode={value} is not available; use fast or omit idea_mode")
+        return value
 
     @field_validator("idea_context", mode="before")
     @classmethod
@@ -82,6 +89,8 @@ class TrashRunSummary(RunSummary):
 class RunDetail(RunSummary):
     states: dict[str, str]
     graph: dict[str, Any]
+    status: str | None = None
+    termination: dict[str, Any] | None = None
 
 
 class RetryAgentPayload(BaseModel):
@@ -247,6 +256,7 @@ async def get_run(run_id: str) -> RunDetail:
         session = orch.session(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+    snapshot = RunStateStore(session.run).load()
     return RunDetail(
         run_id=session.run.run_id,
         project=session.run.project,
@@ -255,6 +265,8 @@ async def get_run(run_id: str) -> RunDetail:
         created_at=session.run.created_at,
         states={k: s.value for k, s in session.graph.all_states().items()},
         graph=session.graph.to_dict(),
+        status=snapshot.status if snapshot else None,
+        termination=session.termination,
     )
 
 
@@ -355,8 +367,10 @@ async def start_run(run_id: str) -> dict[str, str]:
         assert_ready_for_run(project=session.run.project)
     except ProductionReadinessError as exc:
         raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
-    asyncio.create_task(orch.run(run_id), name=f"run:{run_id}")
-    return {"status": "started", "run_id": run_id}
+    result = orch.start_owned_run(run_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result)
+    return {"status": str(result["status"]), "run_id": run_id}
 
 
 @router.post("/{run_id}/agents/{agent}/retry", status_code=202)
@@ -387,7 +401,9 @@ async def retry_agent(
 
 
 @router.post("/{run_id}/stop", status_code=202)
-async def stop_run(run_id: str) -> dict[str, str]:
+async def stop_run(run_id: str) -> dict[str, Any]:
     _ensure_active_run(run_id)
-    # V0 has no cancellation hook; placeholder for V2.
-    return {"status": "stop_requested", "run_id": run_id}
+    result = await get_orchestrator().stop_owned_run(run_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result)
+    return result

@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from app.harness.llm.provider_base import Message
+from app.harness.agent_loop.trace import digest
 
 INSTRUCTION = """
 Use the ReAct loop: choose an action, receive a host Observation, then decide again.
@@ -24,6 +25,22 @@ If a tool fails, inspect its error; do not repeat successful or permanent-failed
 """
 
 
+def action_protocol_feedback(error: str) -> str:
+    """Describe the complete action envelope without repairing or executing output."""
+    return (
+        f"Protocol error: {error}. Return exactly ONE complete JSON object under the current JSON actions "
+        "protocol, without markdown fences, prose, XML, or a second action. For a tool action, the root "
+        'object must contain exactly the three sibling keys "tool", "args", and "reason": '
+        '{"tool":"registered.name","args":{},"reason":"brief purpose"}. Put all tool parameters inside '
+        '"args"; "reason" must be a non-empty string at the root, alongside "tool" and "args". '
+        'For final submission, use exactly {"final":{"metadata":{},"body":"complete Markdown document"}}, '
+        "with all required metadata fields populated according to the supplied schema. Do not output an "
+        "argument array by itself, <parameter>, <invoke>, <tool_calls>, or other XML tags. Correct only the "
+        "action format using the existing task and Observations; preserve the intended action parameters "
+        "or final content. The provided invalid output was not executed, and existing Observations remain valid."
+    )
+
+
 class ReviewConflictError(ValueError):
     """A review lists issues while claiming acceptance; revision is mandatory."""
 
@@ -32,18 +49,49 @@ class ReviewConflictError(ValueError):
         super().__init__("review contains unresolved issues; revise the candidate before reviewing again")
 
 
-def invalid_output_context(text: str) -> Message:
-    """Preserve visible output as untrusted repair data, without parsing or executing it."""
+class DuplicateJSONKeyError(ValueError):
+    """Malformed JSON object; never silently choose one of the repeated values."""
+
+
+def is_review_format_error(error: ValueError) -> bool:
+    """Only JSON syntax/duplicate keys qualify, never a substantive review contract."""
+    return isinstance(error, (json.JSONDecodeError, DuplicateJSONKeyError))
+
+
+def invalid_output_context(text: str, *, native: bool = False) -> Message:
+    """Keep invalid arguments intact; bound duplicated native-call commentary only."""
+    payload: dict[str, Any] = {"invalid_output": text}
+    if native:
+        try:
+            envelope = json.loads(text)
+        except ValueError:
+            envelope = None
+        if (isinstance(envelope, dict) and set(envelope) == {"text", "tool_calls"}
+                and isinstance(envelope["text"], str)
+                and isinstance(envelope["tool_calls"], list) and envelope["tool_calls"]):
+            # The host serialized this envelope. Never parse, repair, truncate or
+            # execute its inner argument strings. The full response stays in trace.
+            commentary = envelope["text"]
+            visible_commentary: str | dict[str, Any] = commentary
+            if len(commentary) > 512:
+                visible_commentary = {"excerpt": commentary[:512], "original_chars": len(commentary),
+                                      "sha256": digest(commentary), "truncated": True}
+            payload = {"invalid_native_output": {"text": visible_commentary,
+                                                 "tool_calls": envelope["tool_calls"]},
+                       "original_sha256": digest(text), "original_chars": len(text),
+                       "note": "Only assistant commentary may be shortened; invalid tool arguments are complete. "
+                               "Full original output is retained in the run trace and checkpoint. "
+                               "No rejected action was executed; use actual Observations and the current candidate."}
     return Message(role="user", content=(
         "[untrusted previous model output; protocol validation failed; no action from it was executed]\n"
-        + json.dumps({"invalid_output": text}, ensure_ascii=False)))
+        + json.dumps(payload, ensure_ascii=False)))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"duplicate JSON key: {key}")
+            raise DuplicateJSONKeyError(f"duplicate JSON key: {key}")
         result[key] = value
     return result
 
@@ -86,7 +134,8 @@ def parse_action(text: str) -> dict[str, Any]:
     if not isinstance(action.get("args"), dict):
         raise ValueError("args must be an object")
     if not isinstance(action.get("reason"), str) or not action["reason"].strip():
-        raise ValueError("reason must state why this tool call is needed")
+        raise ValueError("reason must be a non-empty top-level string stating why this tool call is needed; "
+                         "it must be a sibling of tool and args, not only inside args")
     return action
 
 

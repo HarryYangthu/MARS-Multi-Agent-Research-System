@@ -1,0 +1,575 @@
+{
+  "schema": "idea.api_terminal_public_summary.v1",
+  "api_attempt": 6,
+  "overall_attempt": 21,
+  "run_root": "runs/2026-09-09T0613_api_idea_20260909t061329_67384114",
+  "driver_root": "runs/verification/api_idea_20260909T061329_67384114",
+  "source_commit": "94222a52bac739e9f92fc0683d12f5a1c08bb953",
+  "source_tree": "34c4e559a782c93b7b5d3819d683087cd03bca02",
+  "source_clean_before_and_after": true,
+  "profile": "experimental_research_pro_per_insight_v4",
+  "profile_configuration_sha256": "947faeaca63827f16f3e42a990a9d5ab9d105f0fa61fa5c7302d862c64caa7f8",
+  "profile_receipt_sha256": "ea711fdd330e235a9f0f35560ef7eeab5c1d157f3e2575135e04b774cea12be5",
+  "status": "failed",
+  "reason": "evidence_unavailable",
+  "deadline_triggered": false,
+  "started_at": "2026-09-09T06:13:30.308487+00:00",
+  "finished_at": "2026-09-09T06:34:41.157968+00:00",
+  "driver_budget_seconds": 5400,
+  "elapsed_monotonic_seconds": 1270.8409171250096,
+  "counts": {
+    "action_rounds": 15,
+    "model_requests": 18,
+    "model_responses": 18,
+    "observations": 15,
+    "protocol_repairs": 3,
+    "reflections": 0,
+    "sdk_attempts": 18,
+    "tool_dispatches": 15,
+    "validation_repairs": 0
+  },
+  "usage": {
+    "prompt_tokens": 287248,
+    "completion_tokens": 21835,
+    "total_tokens": 309083
+  },
+  "usage_complete": true,
+  "traces": [
+    {
+      "agent": "idea",
+      "invocation": "febde1b71f3c4063a706f0550c64dec7",
+      "checkpoint_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/checkpoint.json",
+      "checkpoint_sha256": "70454c3197905b824271ba3ea536ad8329e24afb80fce1089e25fb608f85fdbd",
+      "events_sha256": "cbc87d9e8b98da9303fc1be4ff802b7196242baad8e22124eab61bd31efd4018",
+      "status": "evidence_unavailable",
+      "pending": null,
+      "counts": {
+        "action_rounds": 5,
+        "model_requests": 8,
+        "model_responses": 8,
+        "observations": 5,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 8,
+        "tool_dispatches": 5,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 149219,
+        "completion_tokens": 9154,
+        "total_tokens": 158373
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "reflection_accepted": false,
+      "review_plan_contract_id": null,
+      "tool_counts": {
+        "idea.research_delegate": 1,
+        "search.fetch_sources": 4
+      },
+      "stop_contract_id": "idea.lead_research_stop.v2"
+    },
+    {
+      "agent": "idea_research",
+      "invocation": "b4e93a44004b4a28a7aad812036de637",
+      "checkpoint_ref": "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/checkpoint.json",
+      "checkpoint_sha256": "4084d8dface1ebc8b405c09e01ed1095502d5efad05fb5a75b3b481ad6765aaa",
+      "events_sha256": "49c51e1255534aac2d6753f0c4a26a519eb44ba0dcaa6194b0b4a2387cd71c2a",
+      "status": "evidence_unavailable",
+      "pending": null,
+      "counts": {
+        "action_rounds": 10,
+        "model_requests": 10,
+        "model_responses": 10,
+        "observations": 10,
+        "protocol_repairs": 0,
+        "reflections": 0,
+        "sdk_attempts": 10,
+        "tool_dispatches": 10,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 138029,
+        "completion_tokens": 12681,
+        "total_tokens": 150710
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "reflection_accepted": false,
+      "review_plan_contract_id": "idea.research_per_insight_then_whole.v5",
+      "tool_counts": {
+        "search.openalex_search": 2,
+        "search.fetch_sources": 4,
+        "search.cvf_search": 2,
+        "search.arxiv_search": 2
+      },
+      "stop_contract_id": "idea.research_evidence_stop.v2"
+    }
+  ],
+  "research_scope": {
+    "unique_search_urls": 13,
+    "distinct_pdf_contents": 1,
+    "read_windows": 2,
+    "actual_body_publications": 1,
+    "accepted_research_reports": 0,
+    "main_candidates": 0,
+    "child_candidates": 0,
+    "reflections": 0,
+    "successful_network_downloads": 2,
+    "cache_reuses": 0,
+    "search_urls": [
+      "http://arxiv.org/abs/1802.09238",
+      "http://arxiv.org/abs/1901.11112",
+      "http://arxiv.org/abs/1912.04977",
+      "http://arxiv.org/abs/2003.08934",
+      "http://arxiv.org/abs/2006.10739v1",
+      "http://arxiv.org/abs/2012.04555",
+      "http://arxiv.org/abs/2012.09688",
+      "http://arxiv.org/abs/2111.05512",
+      "http://arxiv.org/abs/2201.05989",
+      "http://arxiv.org/abs/2201.05989v2",
+      "http://arxiv.org/abs/2204.13983",
+      "https://arxiv.org/abs/2303.18223",
+      "https://openaccess.thecvf.com/content/CVPR2022/html/Yang_AdaInt_Learning_Adaptive_Intervals_for_3D_Lookup_Tables_on_Real-Time_CVPR_2022_paper.html"
+    ],
+    "reads": [
+      {
+        "agent": "idea",
+        "invocation": "febde1b71f3c4063a706f0550c64dec7",
+        "url": "https://openaccess.thecvf.com/content/CVPR2022/html/Yang_AdaInt_Learning_Adaptive_Intervals_for_3D_Lookup_Tables_on_Real-Time_CVPR_2022_paper.html",
+        "download_url": "https://openaccess.thecvf.com/content/CVPR2022/papers/Yang_AdaInt_Learning_Adaptive_Intervals_for_3D_Lookup_Tables_on_Real-Time_CVPR_2022_paper.pdf",
+        "declared_title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+        "read_observation_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0002.json",
+        "document_sha256": "9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb",
+        "receipt_ref": "idea/research/downloads/ee684c3e22d8472da842615693612d0a.read.json",
+        "receipt_sha256": "311a730e046434a56c626b3c04f717dae56391b7c295e1d22fc62e24e043b723",
+        "pages": [
+          {
+            "page": 2,
+            "visible_chars": 5807,
+            "truncated": false,
+            "visible_text_sha256": "585863d460b8c945666adfffdb4bbb524afae81bc63e0e33a0361d5cd55d89a0"
+          },
+          {
+            "page": 3,
+            "visible_chars": 4136,
+            "truncated": false,
+            "visible_text_sha256": "87fc1b565671e8f398fd911ada1c6b25d0d2f26037ced9a3dcb0b5a11921ea7f"
+          },
+          {
+            "page": 4,
+            "visible_chars": 2057,
+            "truncated": true,
+            "visible_text_sha256": "ad1579b4dfe4100045c26f49a7cfa01ad3618123e3d119b7112aa839b6482510"
+          }
+        ],
+        "network_download_performed": true,
+        "reused": false,
+        "download_bytes_received": 6013795,
+        "download_elapsed_seconds": 4.503,
+        "full_document_read": false,
+        "accepted_insight": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "b4e93a44004b4a28a7aad812036de637",
+        "url": "https://openaccess.thecvf.com/content/CVPR2022/html/Yang_AdaInt_Learning_Adaptive_Intervals_for_3D_Lookup_Tables_on_Real-Time_CVPR_2022_paper.html",
+        "download_url": "https://openaccess.thecvf.com/content/CVPR2022/papers/Yang_AdaInt_Learning_Adaptive_Intervals_for_3D_Lookup_Tables_on_Real-Time_CVPR_2022_paper.pdf",
+        "declared_title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-Time Image Enhancement",
+        "read_observation_ref": "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0004.json",
+        "document_sha256": "9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb",
+        "receipt_ref": "idea_research/research/downloads/cf1be8b2bf9c4e9a9c72a87de57e7cb5.read.json",
+        "receipt_sha256": "2104e904babf549889dee49330ea0a9809a7dbb7c15d92cea1c78bdcad670684",
+        "pages": [
+          {
+            "page": 3,
+            "visible_chars": 4136,
+            "truncated": false,
+            "visible_text_sha256": "87fc1b565671e8f398fd911ada1c6b25d0d2f26037ced9a3dcb0b5a11921ea7f"
+          },
+          {
+            "page": 4,
+            "visible_chars": 4553,
+            "truncated": false,
+            "visible_text_sha256": "58d8b920035fcc93ac7143af1e47a6a18ba3411c3a1ff4b23f372b5f25da4789"
+          },
+          {
+            "page": 5,
+            "visible_chars": 4316,
+            "truncated": false,
+            "visible_text_sha256": "35bb9c880a36216a93a815c708504e285cc6e711cfb4a9b41c4ef4a9c3f5bbcb"
+          },
+          {
+            "page": 6,
+            "visible_chars": 2995,
+            "truncated": true,
+            "visible_text_sha256": "42191bf78bbc9b629baff5c8402db345c7353f694c86dcead1f2c8e8085cc62f"
+          }
+        ],
+        "network_download_performed": true,
+        "reused": false,
+        "download_bytes_received": 6013795,
+        "download_elapsed_seconds": 4.699,
+        "full_document_read": false,
+        "accepted_insight": false
+      }
+    ],
+    "failed_source_attempts": [
+      {
+        "agent": "idea",
+        "invocation": "febde1b71f3c4063a706f0550c64dec7",
+        "url": "http://arxiv.org/abs/2207.03191",
+        "download_url": "https://arxiv.org/pdf/2207.03191v3.pdf",
+        "declared_title": "SepLUT: Separable Image-Adaptive Lookup Tables for Real-Time Image Enhancement",
+        "read_observation_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0002.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2207.03191:v3",
+        "error_code": "http_404",
+        "retryable": false,
+        "download_bytes_received": 0,
+        "download_expected_bytes": null,
+        "download_elapsed_seconds": 1.719,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea",
+        "invocation": "febde1b71f3c4063a706f0550c64dec7",
+        "url": "http://arxiv.org/abs/2006.09661",
+        "download_url": "https://arxiv.org/pdf/2006.09661v2.pdf",
+        "declared_title": "Implicit Neural Representations with Periodic Activation Functions (SIREN)",
+        "read_observation_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0003.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2006.09661:v2",
+        "error_code": "http_404",
+        "retryable": false,
+        "download_bytes_received": 0,
+        "download_expected_bytes": null,
+        "download_elapsed_seconds": 3.06,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea",
+        "invocation": "febde1b71f3c4063a706f0550c64dec7",
+        "url": "http://arxiv.org/abs/2006.09661",
+        "download_url": "https://arxiv.org/pdf/2006.09661v1.pdf",
+        "declared_title": "Implicit Neural Representations with Periodic Activation Functions",
+        "read_observation_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0004.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2006.09661:v1",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "download_bytes_received": 4846478,
+        "download_expected_bytes": 7047671,
+        "download_elapsed_seconds": 180.002,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea",
+        "invocation": "febde1b71f3c4063a706f0550c64dec7",
+        "url": "https://openaccess.thecvf.com/content/CVPR2021/html/Zeng_Learning_Image-Adaptive_3D_Lookup_Tables_for_High_Performance_Photo_Enhancement_CVPR_2021_paper.html",
+        "download_url": "https://openaccess.thecvf.com/content/CVPR2021/papers/Zeng_Learning_Image-Adaptive_3D_Lookup_Tables_for_High_Performance_Photo_Enhancement_CVPR_2021_paper.pdf",
+        "declared_title": "Learning Image-Adaptive 3D Lookup Tables for High Performance Photo Enhancement in Real-Time",
+        "read_observation_ref": "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0005.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "url:https://openaccess.thecvf.com/content/CVPR2021/papers/Zeng_Learning_Image-Adaptive_3D_Lookup_Tables_for_High_Performance_Photo_Enhancement_CVPR_2021_paper.pdf",
+        "error_code": "http_404",
+        "retryable": false,
+        "download_bytes_received": 0,
+        "download_expected_bytes": null,
+        "download_elapsed_seconds": 0.846,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "b4e93a44004b4a28a7aad812036de637",
+        "url": "http://arxiv.org/abs/2204.13983",
+        "download_url": "https://arxiv.org/pdf/2204.13983",
+        "declared_title": "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement",
+        "read_observation_ref": "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0002.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2204.13983:latest",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "download_bytes_received": 2522924,
+        "download_expected_bytes": 40863938,
+        "download_elapsed_seconds": 180.002,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "b4e93a44004b4a28a7aad812036de637",
+        "url": "http://arxiv.org/abs/2201.05989v2",
+        "download_url": "https://arxiv.org/pdf/2201.05989v2.pdf",
+        "declared_title": "Instant Neural Graphics Primitives with a Multiresolution Hash Encoding",
+        "read_observation_ref": "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0007.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2201.05989:v2",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "download_bytes_received": 1945879,
+        "download_expected_bytes": 17821526,
+        "download_elapsed_seconds": 180.001,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "b4e93a44004b4a28a7aad812036de637",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "download_url": "https://arxiv.org/pdf/2006.10739v1.pdf",
+        "declared_title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "read_observation_ref": "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0010.json",
+        "declared_title_is_not_verified_paper_identity": true,
+        "body_evidence_available": false,
+        "resource_key": "arxiv:2006.10739:v1",
+        "error_code": "download_timeout",
+        "retryable": true,
+        "download_bytes_received": 4258983,
+        "download_expected_bytes": 9922740,
+        "download_elapsed_seconds": 180.003,
+        "archive_complete": false
+      }
+    ],
+    "failure_codes": {
+      "http_404": 3,
+      "download_timeout": 4
+    },
+    "reading_scope": "One AdaInt PDF content, child pages 3-5 complete plus page 6 partial; lead pages 2-3 complete plus page 4 partial. These are two windows, not two publications or a full-paper read."
+  },
+  "recovery_budget": {
+    "api_lead_enabled_tools": [
+      "idea.research_delegate",
+      "search.local_docs",
+      "search.arxiv_search",
+      "search.web_search",
+      "search.fetch_sources",
+      "knowledge.kb_query",
+      "knowledge.baseline_match",
+      "code.repo_reader"
+    ],
+    "cli_scenario_lead_tools": [
+      "idea.research_delegate",
+      "knowledge.kb_query"
+    ],
+    "cli_scenario_ref": "configs/evaluation/idea_research_publisher_real.yaml",
+    "cli_scenario_sha256": "5a4f9d6ce997ff4fae3f689b4a30b5b177ee28ba4c585ec33a0ed3df843c0e8e",
+    "actual_lead_tool_counts": {
+      "idea.research_delegate": 1,
+      "search.fetch_sources": 4
+    },
+    "max_lead_tools": 5,
+    "started_delegations": 1,
+    "max_delegations": 3,
+    "remaining_usable_lead_tool_budget": 0,
+    "interpretation": "The API profile retained 8 product tools rather than the scenario CLI list of 2. After one failed delegation, the lead used four direct fetches and exhausted all five tool calls. Only one of three possible delegations started; unused delegation slots did not provide additional tool budget."
+  },
+  "protocol_errors": [
+    {
+      "agent": "idea",
+      "invocation": "febde1b71f3c4063a706f0550c64dec7",
+      "event_seq": 21,
+      "error": "JSON Extra data at line 1, column 208",
+      "time": "2026-09-09T06:29:13.613456+00:00"
+    },
+    {
+      "agent": "idea",
+      "invocation": "febde1b71f3c4063a706f0550c64dec7",
+      "event_seq": 27,
+      "error": "JSON Extra data at line 2, column 1",
+      "time": "2026-09-09T06:29:32.999750+00:00"
+    },
+    {
+      "agent": "idea",
+      "invocation": "febde1b71f3c4063a706f0550c64dec7",
+      "event_seq": 47,
+      "error": "JSON Extra data at line 2, column 1",
+      "time": "2026-09-09T06:34:24.426591+00:00"
+    }
+  ],
+  "quality": {
+    "status": "not_assessable_no_main_candidate",
+    "independent_quality_passed": null,
+    "collect_review_exercised": false,
+    "full_agent_delivery_passed": false,
+    "reason": "One publication was read but no research or main candidate was produced; no semantic Reflection occurred."
+  },
+  "api": {
+    "request_count": 640,
+    "method_counts": {
+      "GET": 637,
+      "POST": 3
+    },
+    "mutations": [
+      {
+        "line": 4,
+        "method": "POST",
+        "path": "/api/runs",
+        "http_status": 200
+      },
+      {
+        "line": 5,
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0613_api_idea_20260909t061329_67384114/start",
+        "http_status": 202
+      },
+      {
+        "line": 639,
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0613_api_idea_20260909t061329_67384114/stop",
+        "http_status": 409
+      }
+    ],
+    "stop_http_status": 409,
+    "stop_status": "not_owned",
+    "stop_cleanup_confirmed": false,
+    "durable_status": "failed",
+    "termination": null,
+    "post_stop_get_status": "failed",
+    "post_stop_get_preceded_server_shutdown": true,
+    "isolated_server_stopped": true,
+    "backend_exit_code": -15,
+    "server_pid_absent_when_audited": true,
+    "auto_approve": false,
+    "waiting_review": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "scientifically_validated": false,
+    "service_restart_tested": false
+  },
+  "independent_reviews": {
+    "manual_research_review.json": {
+      "path": "manual_research_review.json",
+      "sha256": "1d60116ccf89b8c788168d6cf3b8ef5e6e529eea70e289385db1e8237fd11256",
+      "status": "not_assessable_no_research_candidate",
+      "independent_quality_passed": null
+    },
+    "manual_quality_review.json": {
+      "path": "manual_quality_review.json",
+      "sha256": "dd4131da83f4683a2293a820c938379b9aa47f37e3257c5ebee66e0a627ad4da",
+      "status": "not_assessable_no_main_candidate",
+      "independent_quality_passed": null
+    }
+  },
+  "archive": {
+    "original_run_files": 70,
+    "added_review_files": 2,
+    "driver_files": 12,
+    "original_files_unchanged": true,
+    "run_file_sha256": {
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/checkpoint.json": "70454c3197905b824271ba3ea536ad8329e24afb80fce1089e25fb608f85fdbd",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/events.jsonl": "cbc87d9e8b98da9303fc1be4ff802b7196242baad8e22124eab61bd31efd4018",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/facts.json": "886fdb353a2799ac3884476a8b3f7fd4ac05e8d21d59524f7856f787e7096579",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0001.json": "d55d47c2ea29de9e8228dab05c538a901d56b29fb7a394314607758b9674b1d7",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0002.json": "3f66b1e71da87e356e407f727fa333bc9d28b39bb989d82a54572bb3d450c863",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0003.json": "de4581ccd24247e9bcc4288a96e1c5b22accbda902dda887e9715ae9f73dcadb",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0004.json": "f42dafaef3ed305cd8ab57b18b80c168471b2f307e56814163b14f34108b5aea",
+      "agent_traces/idea/febde1b71f3c4063a706f0550c64dec7/tools/0005.json": "fb31aedcd428a900888226494f2c6ab98ceaf683c41f39c2446f28395bf4affc",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/checkpoint.json": "4084d8dface1ebc8b405c09e01ed1095502d5efad05fb5a75b3b481ad6765aaa",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/events.jsonl": "49c51e1255534aac2d6753f0c4a26a519eb44ba0dcaa6194b0b4a2387cd71c2a",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/facts.json": "9371de1eb81e53024fab40f47ffff29cb9cc52349a8011f5a986ad0f2a07f02b",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0001.json": "046aed15aece27c030dde9ab4b324c74d1cc5e3e716b87d42372f0cf080a0372",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0002.json": "977a7e9879794f472039b885d92dac34b4e31dadbaf02518911c5cb698300322",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0003.json": "407a7d7d3429e9e6aee45028e731f37ca47da6abe52c7136cba715d08852eb47",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0004.json": "7b73abac801ce809c8857a175a0596ee420f28a2bd2fb2898bc9c1302e4dabff",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0005.json": "e9e1c94891a278e4f02ef9b4b80e8749bb69265dd543abfe2caf0ed356f4742f",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0006.json": "f5698ded014cd907da7f56208b939e8defd9635bb1f62dc9117d760e14378816",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0007.json": "104c98bc9399d0d54e01b1e88620b018a3bc17e991451232c524b80cda7fb59d",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0008.json": "90a53b5a7595a1e87b52dd5e631c7364660f93e0081583b3502ec78a32ac9969",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0009.json": "201a1c1d0755e8be6753ca5f6387db598ef2e0dd7839a6e36b9b1b05fb4e539c",
+      "agent_traces/idea_research/b4e93a44004b4a28a7aad812036de637/tools/0010.json": "286fc56f98bc6cf8dbb99f49b5a93f737b6e74d19e3d1437ae010e35a3b44b1f",
+      "coding/tool_applications/00b195e3ccdd441c990469dd9be925f9.json": "d76a0d83555ff254c595ac25654039de7571a5ac53e6b8e9af5173ee1546188c",
+      "coding/tool_applications/10c5a116efe843749e05314530c48fd1.json": "85092565a5453e7a65f0b9a48acdc07a23d11e03df81895efcbe6714733b3c63",
+      "coding/tool_applications/1b98b7d6f9f14111ad7b23eaeeb773c0.json": "a22b77983d57e769f35fd2c3c2114549e7ba74b7a9d61f41c52b42287eb9fbf5",
+      "coding/tool_applications/389ff17cdbcd4b538e22c38584e5747d.json": "4cc163cceee141d9e279bcee2486fcc1b2856d86aa036053e88c1e535e85bd4a",
+      "coding/tool_applications/38a96ec0cd044e78bde5a89917bf9a59.json": "525f6c48bc263884356a6fcb5b9da9f2f0b87a95d2bfad597bbaf358b20d13ef",
+      "coding/tool_applications/5711dc511714425cb887a7dece646217.json": "68a46e3bc0215c0db5dd2fe0d61e627d69e3498ca9081fc6e8a2d0824d9898b6",
+      "coding/tool_applications/571e84149b80493688cf72c24fe66036.json": "130dee7ce52d2890540acdd8900893a80a6f4d061a508249ffa9382e56e01463",
+      "coding/tool_applications/6e444818832c4c488f2fe79bef07b7b1.json": "60a12e15b45acfc33d10136960ba6941e5e4206b2e02c56096bfe66cbea1bd03",
+      "coding/tool_applications/7404c0b89fbb4265b08a2ca2410e219d.json": "bb25d79cece58a466196b15a35c85ab918b8bc9c2a9e207093c18c63b7471853",
+      "coding/tool_applications/9415ddd7eb69442d9fd158f2de520463.json": "170ea36f51bf60cdc4f809dc490cca1fbc0fd2deef2dc7147c8da2a2ee2bf989",
+      "coding/tool_applications/a4aa602723ff4c46a752b93f5e504539.json": "dd78fbae4851f2f8bb9e5aab169e69a0a2ef9893bc9a0b6597b1eaea1b893557",
+      "coding/tool_applications/afeb2c42a4a7419680dbcca58a8fcb48.json": "8a4bed04e7b8bedd2dec8b9e0f6053068d3785bbefeda41af23b83bf2c435990",
+      "coding/tool_applications/b74d676c3ff34d43ac1a54da9c0488b0.json": "b3bc7d9f95ad401a5a4aabc9e3246088db86f1520a634699225c724e4dd64ce1",
+      "coding/tool_applications/f98c1391839a4d9d8bf316db0909886d.json": "9c379a4a89811e1692fda390045e1b3501c57329326bc90a5f1e264d0c2778ef",
+      "coding/tool_applications/fa283baed16d4254a6d7a9c370866258.json": "af9fc8f56b8c4b2ddcbc1e7519d29023e0231a8614812b6412e07089afe8d591",
+      "context/langgraph_runtime.v2.json": "0733152d607a993be9898b68ec3c0516bb20f81bc507e2ec0f8a9b61dbcafe71",
+      "context/trace_manifest.v2.json": "f561220b459e93df29e0adee3b5ef2935a31edb3d7b04654d4e9ed44367b765f",
+      "events/agent_events.jsonl": "79bdb2e5d4e0069ed796b982c5a15d5953aa17830ae87b493ecb5b327729c4e1",
+      "events/evaluation_events.jsonl": "8ad63d61eb0bf7f631690cce07945020b1fb501de2abed7183252ec13ccffdd8",
+      "events/evaluation_quality_gate.json": "eda6472b09f9a55bdd7a664f8fbe814d130972c2773c0832da94e18c8904a9f1",
+      "events/evaluation_scorecard.json": "92a83aad87815a5c908d881bf1b59f5651495d2ca2571076947d25aebbf34b4a",
+      "events/langgraph_events.jsonl": "338e43f17879857455ee30d99cd312d296d41893e9b2c269bfbac996b86c3391",
+      "events/tool_calls.jsonl": "abd7237aad519cb1dda8cd481abfea998ed6fe70f1ad7ba4409e7e40e9436e46",
+      "events/tool_events.jsonl": "6de68710641297b918ea89973f3519bcd3ec34cd72b3c64d582296f8ce8a11ba",
+      "events/websocket_events.jsonl": "65d223b418a832c8a031166af0a034f80a11ec78ea18ec5bdedc0b84eaae1b7c",
+      "idea/progress.jsonl": "24d62bdc3f3f60cd3bd2de38a88a5088bc4ad782db6671f16299aef2cbf538ef",
+      "idea/research/downloads/9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb.pdf": "9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb",
+      "idea/research/downloads/ee684c3e22d8472da842615693612d0a.read.json": "311a730e046434a56c626b3c04f717dae56391b7c295e1d22fc62e24e043b723",
+      "idea/research/downloads/source_fetch_index.v1.json": "f336400ff1eb75219eb84a3a9e807bb5cde73be6c820881c1084dca0b03cdfb4",
+      "idea/research/evidence_index.v1.json": "98109d77ed2b79d3209dff3965688994fb12ec11414548e650afe9051e1249aa",
+      "idea/research/tool_results.v1.json": "9073b62490593c347f0e135c7cba1ee946bb8955b84b81221e6ec9fa9f7242ef",
+      "idea/research_delegations/b4e93a44004b4a28a7aad812036de637/failure.json": "3698a6061352db8b6ff07e2c3f6b6bbaceabb45768169b77a6927e677430f34a",
+      "idea/research_delegations/b4e93a44004b4a28a7aad812036de637/progress.jsonl": "8f06832f1cfe60f1a50bcc003569734b617aebf551dbc82edbd01716a40c0e7c",
+      "idea/research_delegations/b4e93a44004b4a28a7aad812036de637/request.json": "356f1bbf22b477cf50fc41dfd57b43b4ac232094aa3b287179b2fe983619d609",
+      "idea_research/research/downloads/9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb.pdf": "9011d332c2c9f0ef9916233ea41aaf6d05b70fb2ae549b3d8e07e9c355fcdefb",
+      "idea_research/research/downloads/cf1be8b2bf9c4e9a9c72a87de57e7cb5.read.json": "2104e904babf549889dee49330ea0a9809a7dbb7c15d92cea1c78bdcad670684",
+      "idea_research/research/downloads/source_fetch_index.v1.json": "cb2ef69d5c93026a63256f4f10686f572fa4be5820d5043cbcde9cecacc083c5",
+      "idea_research/research/searches/ce05d7c4f5eacc38c15b66c512fcb55212627d86adc1ee12a8fa274fa8f3e76b.json": "a8791d156332ddee03809239aca8f79dbde6896615dca67b75ad7a538ce016dd",
+      "idea_research/research/searches/cvf/6ed18bd7650549e88c324c793b6d19c4/directory.html": "7c6a81f30b3317d1837142298c512807e62981d7184057df50acc5d6c66b131c",
+      "idea_research/research/searches/cvf/6ed18bd7650549e88c324c793b6d19c4/receipt.json": "aaf5d100d9ef70f1f17a71a7db6c5047cc914c48899a94bf1d42480c383aa6d1",
+      "idea_research/research/searches/cvf/eab0b893ca9d46eca0b6e1ad59437d09/directory.html": "7c6a81f30b3317d1837142298c512807e62981d7184057df50acc5d6c66b131c",
+      "idea_research/research/searches/cvf/eab0b893ca9d46eca0b6e1ad59437d09/landing-0.html": "f9d26d48c9bb4c28713c23200e61c23037473ca3b20c1ab7328eabe8f66db09e",
+      "idea_research/research/searches/cvf/eab0b893ca9d46eca0b6e1ad59437d09/receipt.json": "6e35f1260b1e2b539f831bd6bd5ddd82b9975a3d58ccd5bd81a1f75c1d6436ea",
+      "idea_research/research/searches/ee909ef7c21c1dde2651e60236b7a3a651499ee3dad2d3305d400f6cd6290bad.json": "a3354659bb906eb5dc4215062b1cd26e95f3f58757d984a194c10cb53054a289",
+      "input/idea_runtime_profile.v1.json": "ea711fdd330e235a9f0f35560ef7eeab5c1d157f3e2575135e04b774cea12be5",
+      "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+      "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+      "manual_quality_review.json": "dd4131da83f4683a2293a820c938379b9aa47f37e3257c5ebee66e0a627ad4da",
+      "manual_research_review.json": "1d60116ccf89b8c788168d6cf3b8ef5e6e529eea70e289385db1e8237fd11256",
+      "run_meta.json": "6fde8a178e66c854e63ba54e4209a4497e917c6e3d1417482a4b2418401690e9",
+      "run_state.json": "8b85615ef20a0041e6db6c561fceb106be42bca1f47febb8327d66f4139ca223"
+    },
+    "driver_file_sha256": {
+      "backend.log": "4c8232b7673819311dd08b147d803ae8598cc14c56cd611bb154e41119eb9e91",
+      "http.jsonl": "57e956f3c5d0ce645e6331b0b40d54f36f043c732d4e8c434e91c6a488cc4961",
+      "isolated_memory/_retrieval_receipts/362547b49ac547d7bb55204632a416dc.json": "f964ba9570f582a98b9ec7e9f24dc7c3b5190e1c9e0095a415d21076f9429e5e",
+      "isolated_memory/_retrieval_receipts/e9bf18df869e48ceb9e2390cee857969.json": "d974a34f6160677194bfbd42448d4e300fce78e21d2324a35d79fcb93f2d9754",
+      "isolated_memory/_semantic_graph.json": "577bcba99e5aebb654fc26fd1b222173164700434c26ad5eb2b580fb1e4436ec",
+      "isolated_memory/literature/_arxiv_cache/4da02ac337711c8db1382e9e.json": "f123878f1049b49b53c0cc0132ead234ee349cdc15748ed80e832c6d93a594c3",
+      "isolated_memory/literature/_arxiv_cache/4da02ac337711c8db1382e9e.xml": "a892fd7c96d4576b06fac48f7a740b566f18cda2862f761abe2ad1cfc1f41b8d",
+      "isolated_memory/literature/_arxiv_cache/c4e35ec39ad9cb0547c968cf.json": "8417ad0cec68da69d8279f45986ebd5e26ef2cd966f4b8bdedddfd70fc1cc682",
+      "isolated_memory/literature/_arxiv_cache/c4e35ec39ad9cb0547c968cf.xml": "8c328fd60fd6997a9fd727d8c8dda363b7dc0507547e71a2ac58d7b5df1289eb",
+      "isolated_memory/literature/_index.json": "1d6e7efb5bdc7e9d7f9000e383b295c61730aa47aedbcf92654b118a1f90489f",
+      "preflight.json": "8b6c5a474598cd98f9738de9ef722d64c0e9b850d55b023fcab855885a56ecdf",
+      "result.json": "f3155ee496f601af1f925a954cb696c674aff0083e56d5a50e8964dbdfc0983b"
+    },
+    "driver_script_sha256": "025d6b8bdc240eee7b86b0126751413aeb228d120f41ce3599dcd4ae516cef5c",
+    "terminal_audit_sha256": "484b802eec2b6103e3a634704abb3b1435594c2af7d8fdc7ec03514851ce38e6",
+    "source_reference_sha256": {
+      "projects/pimc/AGENTS.md": "20a968134a45f9cc4bb4aa2c74f4126280fd5bd46439002fe8ef791941e46499",
+      "projects/pimc/repo_link.yaml": "6513e1eba022c055c34fd731c6deae42b44c75581a239d28876f4d1a70c487a3",
+      "configs/agents.yaml": "59d74c7472438423487dbb5a0538feb2bb688363d58ef23e9fd514687a303ab4",
+      "configs/agent_contexts/idea.yaml": "3b815c527b1d0eec0e93a8aec3665f6af87477b0f97afcc5353fe29979b96d6e",
+      "configs/evaluation/idea_research_publisher_real.yaml": "5a4f9d6ce997ff4fae3f689b4a30b5b177ee28ba4c585ec33a0ed3df843c0e8e",
+      "configs/idea_runtime_profiles.yaml": "0bda43490828872a3db4acdc452dc7035dd5d2cb8f1cb9439bc7f1f95f78c688"
+    },
+    "original_run_manifest_sha256_before": "3c6e0254783e9d5f09a61eb8a60262672a647b410f603c285e1eb2f8453cfc21",
+    "original_run_manifest_sha256_after": "3c6e0254783e9d5f09a61eb8a60262672a647b410f603c285e1eb2f8453cfc21",
+    "driver_manifest_sha256_before": "60b562995aefe5b7abddf6d04450c04256e92c2ae9d1b523ef5b88247c2ff0bb",
+    "driver_manifest_sha256_after": "60b562995aefe5b7abddf6d04450c04256e92c2ae9d1b523ef5b88247c2ff0bb"
+  },
+  "limitations": [
+    "Failed fetch titles are model-supplied labels, not independently verified paper identities. A 404 is not a verified publication.",
+    "Search hits and partial PDF pages do not establish full reading, accepted findings, or method quality.",
+    "No prior-run report, development component paper seed, or independent audit was injected into this run.",
+    "API project and repository context and product tools were retained; this is not a strict CLI replay.",
+    "The later publication-count guard and restricted recovery profile were not active in frozen source 94222a5.",
+    "All model requests have recorded usage; provider billing was not independently reconciled.",
+    "409/not_owned preserves a completed failure and does not prove owned-task cleanup. The driver separately closed its own backend; service restart was not tested."
+  ]
+}

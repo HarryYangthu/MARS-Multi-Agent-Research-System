@@ -27,14 +27,14 @@ def test_idea_config_has_debate_participants() -> None:
     assert cfg.model_name == ("deepseek-v4-flash" if cfg.name == "idea" else "deepseek-v4-pro")
     assert cfg.thinking_enabled is (cfg.name != "idea")
     assert cfg.reasoning_effort == "high"
-    assert cfg.max_tokens == 16_384
+    assert cfg.max_tokens == 32_768
     assert cfg.top_p == 1.0
-    assert cfg.request_timeout_seconds == 120.0
+    assert cfg.request_timeout_seconds == 360.0
     assert cfg.max_retries == 3
 
 
 def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
-    flash_profiles = {"idea": ("high", 16_384), "idea_research": (None, 8_192)}
+    flash_profiles = {"idea": ("high", 32_768), "idea_research": (None, 8_192)}
     for cfg in list_agent_configs():
         if not cfg.enabled:
             continue
@@ -58,9 +58,9 @@ def test_local_provider_selection_preserves_agent_configuration() -> None:
     assert llm_cfg.response_schema == "proposal.v1"
     assert llm_cfg.thinking_enabled == cfg.thinking_enabled
     assert llm_cfg.reasoning_effort == "high"
-    assert llm_cfg.max_tokens == 16_384
+    assert llm_cfg.max_tokens == cfg.max_tokens
     assert llm_cfg.top_p == 1.0
-    assert llm_cfg.request_timeout_seconds == 120.0
+    assert llm_cfg.request_timeout_seconds == cfg.request_timeout_seconds
     assert llm_cfg.max_retries == 3
 
 

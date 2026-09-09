@@ -80,7 +80,9 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
     assert after["counts"]["model_responses"] == 0 and after["candidate"] == ""
     assert after["usage_complete"] is False
     diagnosis = audit_trace(checkpoint.parent)["provider_error"]
-    assert diagnosis["exception_type"] == "APIConnectionError"
+    # A real bound-but-not-listening port may be refused or time out depending
+    # on the platform/transport. Both must retain a failed, incomplete trace.
+    assert diagnosis["exception_type"] in {"APIConnectionError", "APITimeoutError"}
     assert "transport-contract-not-a-credential" not in json.dumps(diagnosis)
     rows, errors = audit_resumptions(tmp_path, checkpoint.parent)
     assert len(rows) == 1 and not errors

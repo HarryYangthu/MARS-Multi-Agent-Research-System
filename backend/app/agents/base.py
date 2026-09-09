@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 
 from app.harness.agent_loop import AgentLoopExecutor, AgentLoopPolicy, LoopInput, NativeAgentLoop
 from app.harness.agent_loop.executor import ProgressSink
+from app.harness.agent_loop.stop import StopCondition
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
@@ -195,6 +196,12 @@ class BaseAgent(ABC):
                 "Do not return a proposal in assistant text. Submission is followed by host validation and, "
                 "when configured, review; it does not claim approval or experimental success."
             )
+        elif self.native_structured_delivery:
+            schema_instruction = (
+                "Return final.metadata as a complete native JSON object and final.body as Markdown. "
+                "The loop supplies the complete final.metadata JSON Schema, including this request's requirements. "
+                "The host serializes the artifact's YAML frontmatter and validates it before review."
+            )
         messages = [Message(role="system", content=context.system),
                     Message(role="system", content=context.project),
                     Message(role="system", content=schema_instruction),
@@ -234,13 +241,19 @@ class BaseAgent(ABC):
         return None
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
-        if not self.native_structured_delivery or self.loop_policy.protocol != "native_tools":
+        if not self.native_structured_delivery:
             return None
         schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
         return schema
 
     def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
         return ()
+
+    def loop_stop_condition(self, request: RunRequest) -> StopCondition | None:
+        return None
+
+    def loop_stop_contract_id(self, request: RunRequest) -> str | None:
+        return None
 
     def loop_registry(self, request: RunRequest, context: ContextPack) -> "ToolRegistry":
         from app.harness.tools.registry import get_registry
@@ -276,6 +289,8 @@ class BaseAgent(ABC):
             progress_sink=self.loop_progress_sink(request, invocation),
             review_messages=self.review_messages(request, context),
             required_review_tools=self.required_review_tools(request),
+            stop_condition=self.loop_stop_condition(request),
+            stop_contract_id=self.loop_stop_contract_id(request),
             final_schema=self.submission_schema(request),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),

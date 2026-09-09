@@ -1,0 +1,1289 @@
+{
+  "record_kind": "idea_api_runtime_verification",
+  "schema": "idea.api_evidence_export.v1",
+  "exported_at": "2026-09-09T05:26:08.344403+00:00",
+  "date_of_execution_utc": "2026-09-09",
+  "global_attempt_number": 19,
+  "api_attempt_number": 4,
+  "evidence_scope": "Real API create/start through Bridge; terminal research rejection/protocol failure, evidence-unavailable main with no candidate, complete model usage, and a subsequent stop request rejected because no owned task remained.",
+  "run_id": "2026-09-09T0425_api_idea_20260909t042501_62477bd6",
+  "local_raw_directory": "runs/2026-09-09T0425_api_idea_20260909t042501_62477bd6",
+  "driver_directory": "runs/verification/api_idea_20260909T042501_62477bd6",
+  "raw_archives_in_repository": false,
+  "raw_archive_note": "Only finite nonsecret summaries, repository-relative paths and complete file hashes are exported. No PDFs, source excerpts, complete model messages, credentials or environment values are copied.",
+  "preserved_exports": {
+    "api_verification_20260909.json": {
+      "file_sha256": "e27f0d9dde43dff6b3fd03ec7ef2f5a7ded823454fe9dfe87be7c8c16c50f49a",
+      "byte_identical": true
+    },
+    "api_verification_20260909_attempt02.json": {
+      "file_sha256": "6c97230a7c2eec1b2a2e0d9a00aad6a60397857c14badbbee6332646fe7a174c",
+      "byte_identical": true
+    },
+    "api_verification_20260909_attempt03.json": {
+      "file_sha256": "a518d6e6110baa9babb39ef9e8db5211d0fa398018227fff3ded9f3a81fdac49",
+      "byte_identical": true
+    },
+    "review_evidence_scope_v4_20260909.json": {
+      "file_sha256": "a1d3c7df565854180e79f414a47623d7d0adabe972fc7b42e90db63814946db6",
+      "byte_identical": true
+    },
+    "verification.json": {
+      "file_sha256": "07a4852693056f5e6acdca76c13bddea3edf60d86115dd9ab43499a34c0cc0d0",
+      "byte_identical": true
+    },
+    "verification_errata_20260909.json": {
+      "file_sha256": "4fb1d2bb7e3f9376ca5458faa1c330217fb3f1d783924118dc776b379c105029",
+      "byte_identical": true
+    }
+  },
+  "preserved_readme_prefix": {
+    "bytes": 55760,
+    "sha256": "8e1777ba7d607839d8068a6754f4c732a0be4df708d4b7d0e8b90e461da22f0d",
+    "byte_identical": true
+  },
+  "source": {
+    "commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+    "tree": "448fa0d1878ab772e2dd23fa726c6ac01aa7d634",
+    "dirty_paths": ""
+  },
+  "source_after": {
+    "commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+    "dirty_paths": ""
+  },
+  "entrypoint": {
+    "kind": "api",
+    "development_bypass_bridge": false,
+    "standalone": true,
+    "auto_approve": false,
+    "seed_artifact_supplied": false,
+    "scope": "method_proposal",
+    "mode": "fast",
+    "api_calls": [
+      {
+        "method": "POST",
+        "path": "/api/runs",
+        "http_status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0425_api_idea_20260909t042501_62477bd6/start",
+        "http_status": 202
+      },
+      {
+        "method": "POST",
+        "path": "/api/runs/2026-09-09T0425_api_idea_20260909t042501_62477bd6/stop",
+        "http_status": 409
+      }
+    ]
+  },
+  "profile": {
+    "id": "experimental_research_pro_per_insight_v2",
+    "status": "experimental",
+    "validated": false,
+    "configuration_sha256": "182d2baa2bcaddf004bd592616ba6644cc035b7465b59083022041a89f00e8a1",
+    "snapshot_sha256": "942f16f9cdd91749733a243468c5237c429bfd5d59b4da7172bc7685372484fe",
+    "lead_model": "deepseek-v4-pro",
+    "lead_reasoning_effort": "low",
+    "research_author_and_normal_reviews_effort": "high",
+    "thinking_enabled": true,
+    "protocol": "json_actions",
+    "research_review_mode": "per_insight_then_whole",
+    "research_review_contract_id": "idea.research_per_insight_then_whole.v4",
+    "author_empty_completion_repair_enabled": true,
+    "model_budgets": {
+      "lead": 36,
+      "child": 16
+    },
+    "tool_budgets": {
+      "lead": 5,
+      "child": 10
+    },
+    "max_delegations": 3,
+    "product_tools_retained": true,
+    "isolated_initial_memory": true
+  },
+  "status": "failed",
+  "started_at": "2026-09-09T04:25:01.956446+00:00",
+  "finished_at": "2026-09-09T05:18:09.243198+00:00",
+  "duration_seconds": 3187.343957792007,
+  "wall_seconds": 3187.286755800247,
+  "driver_budget_seconds": 3600,
+  "driver_budget_provenance": "Explicitly recorded in original preflight.json and result.json.",
+  "duration_note": "The owned execution returned failure before the driver deadline; 3187.34396 seconds includes startup, polling and final shutdown. This was not a timeout.",
+  "isolated_server_stopped": true,
+  "backend_exit_code": -15,
+  "persisted_run_status": "failed",
+  "persisted_main_checkpoint_status": "evidence_unavailable",
+  "owned_stop": {
+    "http_status": 409,
+    "response_status": "not_owned",
+    "cleanup_confirmed": false,
+    "termination": null,
+    "actual_trigger": "driver_finally_after_observed_terminal_failure",
+    "state_unchanged_by_stop": true,
+    "after_stop_get_http_status": 200,
+    "after_stop_get_status": "failed",
+    "claim_boundary": "The execution had already returned. HTTP 409 is not an owned-task cleanup success; the driver subsequently stopped its isolated server."
+  },
+  "counts": {
+    "action_rounds": 20,
+    "model_requests": 37,
+    "model_responses": 37,
+    "observations": 18,
+    "protocol_repairs": 7,
+    "reflections": 4,
+    "sdk_attempts": 37,
+    "tool_dispatches": 18,
+    "validation_repairs": 1
+  },
+  "usage": {
+    "prompt_tokens": 574055,
+    "completion_tokens": 148635,
+    "total_tokens": 722690
+  },
+  "usage_complete": true,
+  "usage_is_known_lower_bound": false,
+  "usage_note": "All 37 observed model requests have completed responses and all reported prompt/completion tokens are accounted for, including the rejected empty response. Complete trace usage is not a separately reconciled provider bill.",
+  "checkpoint_accounting": [
+    {
+      "invocation": "62039f12f6204ab386d111c3d4f337da",
+      "agent": "idea",
+      "checkpoint_ref": "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/checkpoint.json",
+      "checkpoint_sha256": "14c30e5c91811b8cdb8a42c9a50dcbf0c6cae2b4dbc7bd9f9864d98399c16042",
+      "status": "evidence_unavailable",
+      "pending": null,
+      "counts": {
+        "action_rounds": 4,
+        "model_requests": 6,
+        "model_responses": 6,
+        "observations": 4,
+        "protocol_repairs": 2,
+        "reflections": 0,
+        "sdk_attempts": 6,
+        "tool_dispatches": 4,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 95552,
+        "completion_tokens": 15327,
+        "total_tokens": 110879
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "candidate_chars": 0,
+      "candidate_utf8_sha256": null,
+      "candidate_digest": null,
+      "reflection_accepted": false
+    },
+    {
+      "invocation": "0d4dc600b126407a9b7b1ef4c2b3d881",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/checkpoint.json",
+      "checkpoint_sha256": "10e378c56d04230ed0ef017350cffd6ab6253347f302830e7bcc7a49d3b5a156",
+      "status": "reflection_rejected",
+      "pending": null,
+      "counts": {
+        "action_rounds": 6,
+        "model_requests": 13,
+        "model_responses": 13,
+        "observations": 6,
+        "protocol_repairs": 2,
+        "reflections": 2,
+        "sdk_attempts": 13,
+        "tool_dispatches": 6,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 178287,
+        "completion_tokens": 75259,
+        "total_tokens": 253546
+      },
+      "usage_complete": true,
+      "candidate_present": true,
+      "candidate_chars": 4621,
+      "candidate_utf8_sha256": "c2d01a28b0d4aa5bd08d64ee2e9d7a3dab964c87414379227b1bccfb04de9d22",
+      "candidate_digest": "1d0ff902f5e3e29de2fdcd5bf4acdc253be9185272b2f7a79338a5cbebb2afeb",
+      "reflection_accepted": false
+    },
+    {
+      "invocation": "1b8143607db644a0a941dd82e99bf96b",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/checkpoint.json",
+      "checkpoint_sha256": "a62a7570fba46ea3aeef650bd1a5b433db43b93631c19fadf362bb471a456188",
+      "status": "reflection_rejected",
+      "pending": null,
+      "counts": {
+        "action_rounds": 6,
+        "model_requests": 11,
+        "model_responses": 11,
+        "observations": 4,
+        "protocol_repairs": 0,
+        "reflections": 2,
+        "sdk_attempts": 11,
+        "tool_dispatches": 4,
+        "validation_repairs": 1
+      },
+      "usage": {
+        "prompt_tokens": 190789,
+        "completion_tokens": 50527,
+        "total_tokens": 241316
+      },
+      "usage_complete": true,
+      "candidate_present": true,
+      "candidate_chars": 6189,
+      "candidate_utf8_sha256": "a31fec7a94272c1943bb167cbf6c69c74bab6f5f3e518edeb3a3b1dda87a7cbd",
+      "candidate_digest": "05b2c3079e4b15420e70c12a76225e7c4a1d3cbda026ad61b5d2674e2ba7a07e",
+      "reflection_accepted": false
+    },
+    {
+      "invocation": "c1137639a1f44c2fbcfff62b10536699",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/checkpoint.json",
+      "checkpoint_sha256": "2c4e3e6748ff4f1f1b3782717d27559792e4606f14b44927d622376c85cddee0",
+      "status": "protocol_exhausted",
+      "pending": null,
+      "counts": {
+        "action_rounds": 4,
+        "model_requests": 7,
+        "model_responses": 7,
+        "observations": 4,
+        "protocol_repairs": 3,
+        "reflections": 0,
+        "sdk_attempts": 7,
+        "tool_dispatches": 4,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "prompt_tokens": 109427,
+        "completion_tokens": 7522,
+        "total_tokens": 116949
+      },
+      "usage_complete": true,
+      "candidate_present": false,
+      "candidate_chars": 0,
+      "candidate_utf8_sha256": null,
+      "candidate_digest": null,
+      "reflection_accepted": false
+    }
+  ],
+  "research": {
+    "model_accepted_report_count": 0,
+    "model_review_passed": false,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "delegations": [
+      {
+        "delegation_id": "0d4dc600b126407a9b7b1ef4c2b3d881",
+        "status": "reflection_rejected",
+        "candidate_present": true,
+        "candidate_chars": 4621,
+        "candidate_utf8_sha256": "c2d01a28b0d4aa5bd08d64ee2e9d7a3dab964c87414379227b1bccfb04de9d22",
+        "candidate_digest": "1d0ff902f5e3e29de2fdcd5bf4acdc253be9185272b2f7a79338a5cbebb2afeb",
+        "review_contract_id": "idea.research_per_insight_then_whole.v4",
+        "candidate_reviews": [
+          {
+            "candidate_digest": "2a71ea5075cee9fd7b229f27cf13c895805e84b491e817b5b27bd96f03bf1c17",
+            "plan_sha256": "11389205d501b3acdd7bcfde120d1f89d467d32b3e08765252e9ba99d3007b49",
+            "status": "rejected",
+            "units": [
+              {
+                "unit_id": "I1_lowrank_learnable_warp",
+                "request": 9,
+                "accept": false,
+                "result_sha256": "a2d686c739900a7c8ffbb94239c7469951b5e165cbca4ca4929d7d1aae133bd4"
+              }
+            ]
+          },
+          {
+            "candidate_digest": "1d0ff902f5e3e29de2fdcd5bf4acdc253be9185272b2f7a79338a5cbebb2afeb",
+            "plan_sha256": "602e1813534596ec76f3ef27a2e0622c2c4f6553447d5a842a90ebacb0c153ec",
+            "status": "rejected",
+            "units": [
+              {
+                "unit_id": "I1_lowrank_learnable_warp",
+                "request": 12,
+                "accept": true,
+                "result_sha256": "1d66e4bcbbcac897becad34c45ca242d2263eced61399b1de252d7f09d213686"
+              },
+              {
+                "unit_id": "I2_fourier_feature_linear_readout",
+                "request": 13,
+                "accept": false,
+                "result_sha256": "659e618de0cead8c81945a3c83f6861d4c03244dfae2afb873772d075d68de7d"
+              }
+            ]
+          }
+        ],
+        "whole_review_executed": false,
+        "protocol_events": [
+          {
+            "kind": "protocol_error",
+            "event_seq": 28,
+            "error": "JSON Extra data at line 2, column 1"
+          },
+          {
+            "kind": "protocol_error",
+            "event_seq": 69,
+            "error": "duplicate JSON key: page"
+          }
+        ]
+      },
+      {
+        "delegation_id": "1b8143607db644a0a941dd82e99bf96b",
+        "status": "reflection_rejected",
+        "candidate_present": true,
+        "candidate_chars": 6189,
+        "candidate_utf8_sha256": "a31fec7a94272c1943bb167cbf6c69c74bab6f5f3e518edeb3a3b1dda87a7cbd",
+        "candidate_digest": "05b2c3079e4b15420e70c12a76225e7c4a1d3cbda026ad61b5d2674e2ba7a07e",
+        "review_contract_id": "idea.research_per_insight_then_whole.v4",
+        "candidate_reviews": [
+          {
+            "candidate_digest": "04ad39fbe728ba1ee6cea2121a702986619434fb75b45e427927f6b5952586a5",
+            "plan_sha256": "d6c92b8629fce89ec175efef5344ae04c67949162d143558babe17c2bebe3345",
+            "status": "rejected",
+            "units": [
+              {
+                "unit_id": "ff_mapping_init",
+                "request": 7,
+                "accept": false,
+                "result_sha256": "952ff38d658043f0ed132a94a626cf43faf749818f89af3fb659468c94f393e0"
+              }
+            ]
+          },
+          {
+            "candidate_digest": "05b2c3079e4b15420e70c12a76225e7c4a1d3cbda026ad61b5d2674e2ba7a07e",
+            "plan_sha256": "f7dcfd70d1fb043fb1a3d70ca5dd08eb43bd50fc845214edfe4ca8980f109795",
+            "status": "rejected",
+            "units": [
+              {
+                "unit_id": "ff_mapping_init",
+                "request": 11,
+                "accept": false,
+                "result_sha256": "6e5241a1ad683b33527e56977e040b8f5f07e34dc12394d656bbb82cf0869589"
+              }
+            ]
+          }
+        ],
+        "whole_review_executed": false,
+        "protocol_events": []
+      },
+      {
+        "delegation_id": "c1137639a1f44c2fbcfff62b10536699",
+        "status": "protocol_exhausted",
+        "candidate_present": false,
+        "candidate_chars": 0,
+        "candidate_utf8_sha256": null,
+        "candidate_digest": null,
+        "review_contract_id": "idea.research_per_insight_then_whole.v4",
+        "candidate_reviews": [],
+        "whole_review_executed": false,
+        "protocol_events": [
+          {
+            "kind": "completion_recovery",
+            "event_seq": 22,
+            "code": "empty_final_content",
+            "phase": "act",
+            "recovery_kind": "author_empty_completed_response",
+            "protocol_repairs": 1,
+            "response_event_seq": 20,
+            "response_metadata_sha256": "4e129989780dbeaff3991a2e7d7b6057958ba2753aac51fd319df9351c0a2c0d",
+            "remaining_model_calls": 13
+          },
+          {
+            "kind": "protocol_error",
+            "event_seq": 42,
+            "error": "JSON Extra data at line 1, column 222"
+          },
+          {
+            "kind": "protocol_error",
+            "event_seq": 48,
+            "error": "JSON Extra data at line 1, column 185"
+          }
+        ]
+      }
+    ],
+    "actual_acquisition_counts": {
+      "unique_search_urls": 19,
+      "unique_pdf_contents": 3,
+      "read_windows": 10,
+      "network_downloads": 3,
+      "cache_reuses": 7
+    },
+    "count_boundary": "Acquisition counts span all failed children and main observations. Search URLs are deduplicated by exact URL; they are not accepted papers or full-document reads. The main accepted-report inventory remains empty.",
+    "source_read_windows": [
+      {
+        "agent": "idea_research",
+        "invocation": "0d4dc600b126407a9b7b1ef4c2b3d881",
+        "observation_index": 2,
+        "resource_key": "arxiv:2006.15655:v1",
+        "url": "http://arxiv.org/abs/2006.15655v1",
+        "title": "Physics-aware registration based auto-encoder for convection dominated PDEs",
+        "sha256": "f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73",
+        "pdf_pages": 10,
+        "extracted_pages": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "full_document_read": false,
+        "reused": false,
+        "network_download_performed": true,
+        "download_path": "idea_research/research/downloads/f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73.pdf",
+        "read_receipt": "idea_research/research/downloads/1b1c72c3a5c74e5884a1d6736a9a10b3.read.json",
+        "read_receipt_sha256": "599ed67417f5d47251f4e6f9ed03e974ab2ca18b599ed52d225e8421dff3f7e5",
+        "visible_pages": [
+          {
+            "page": 1,
+            "visible_text_chars": 3518,
+            "full_page_text_chars": 3518,
+            "visible_text_sha256": "c4a8e0851a0961d5fc7bf0b232cde59996542199635c8b35976cbf0acb80ab43",
+            "truncated": false
+          },
+          {
+            "page": 2,
+            "visible_text_chars": 4313,
+            "full_page_text_chars": 4313,
+            "visible_text_sha256": "2a4189f37263d1bf6176f7018798ba20651176279d67f7170a99e80ce1084e57",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4219,
+            "full_page_text_chars": 4219,
+            "visible_text_sha256": "6e4e7558dad53bbd3f6a23592f74b16b98a1311ec32a49bb3af05159ec484c74",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 2728,
+            "full_page_text_chars": 2728,
+            "visible_text_sha256": "82e3af98dc9004f54c244e451406d1eb0ade667e82f171ee2d03c1598a8bc170",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 1222,
+            "full_page_text_chars": 3486,
+            "visible_text_sha256": "bc13e0b7914fa886a9528a91684244cacea26653b175ba05deb4c1096d0bcecc",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "0d4dc600b126407a9b7b1ef4c2b3d881",
+        "observation_index": 5,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+        "pdf_pages": 24,
+        "extracted_pages": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "full_document_read": false,
+        "reused": false,
+        "network_download_performed": true,
+        "download_path": "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf",
+        "read_receipt": "idea_research/research/downloads/faf2c5d5846144a280ac5f614a842f1f.read.json",
+        "read_receipt_sha256": "866857b33b0202409d6524ac5576fb88242a3192c9ca88d70e65a4b9dda3e4a3",
+        "visible_pages": [
+          {
+            "page": 1,
+            "visible_text_chars": 3369,
+            "full_page_text_chars": 3369,
+            "visible_text_sha256": "831abbb9baa94c6449b81c6a9ae7112f425c54486baece03210d01157ab6f13c",
+            "truncated": false
+          },
+          {
+            "page": 2,
+            "visible_text_chars": 3482,
+            "full_page_text_chars": 3482,
+            "visible_text_sha256": "3aabab0a45bf870a036fc9d91fdacc41cb193843060298f99cb50a8fc342c4db",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4050,
+            "full_page_text_chars": 4050,
+            "visible_text_sha256": "6cd59dae9a0475aa715eb4e1f476b89f3db426a686dafad0b6cd644746443e28",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 4234,
+            "full_page_text_chars": 4234,
+            "visible_text_sha256": "77789fca318b863f7d383e33de4ac4167ec297f28e7d9e3b960a53aff2b2ac71",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 865,
+            "full_page_text_chars": 3878,
+            "visible_text_sha256": "c1c15385af9ec2a2bacf7199909924a749a9eee14b2ee791de4117fa7fb056b8",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 1,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+        "pdf_pages": 24,
+        "extracted_pages": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf",
+        "read_receipt": "idea_research/research/downloads/fdb4428012a54c72846bef2f4c90ba84.read.json",
+        "read_receipt_sha256": "76c50be05d53256b26bd054bca794ee77d059a05600f296e767b64a30e80f6e4",
+        "visible_pages": [
+          {
+            "page": 2,
+            "visible_text_chars": 3482,
+            "full_page_text_chars": 3482,
+            "visible_text_sha256": "3aabab0a45bf870a036fc9d91fdacc41cb193843060298f99cb50a8fc342c4db",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4050,
+            "full_page_text_chars": 4050,
+            "visible_text_sha256": "6cd59dae9a0475aa715eb4e1f476b89f3db426a686dafad0b6cd644746443e28",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 4234,
+            "full_page_text_chars": 4234,
+            "visible_text_sha256": "77789fca318b863f7d383e33de4ac4167ec297f28e7d9e3b960a53aff2b2ac71",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 3878,
+            "full_page_text_chars": 3878,
+            "visible_text_sha256": "0a861ab5b5052adb2c0c62a41198efb50e8ac0cc4092154ce68953736f82b2ab",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "visible_text_chars": 356,
+            "full_page_text_chars": 4099,
+            "visible_text_sha256": "3feb70f31ad15a914e5307ee3bcfa8f46999046178867bb83681cb8d7e6c5950",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 1,
+        "resource_key": "arxiv:2006.15655:v1",
+        "url": "http://arxiv.org/abs/2006.15655v1",
+        "title": "Physics-aware registration based auto-encoder for convection dominated PDEs",
+        "sha256": "f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73",
+        "pdf_pages": 10,
+        "extracted_pages": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73.pdf",
+        "read_receipt": "idea_research/research/downloads/e45f8c04bbef4b37a35a67c0971dcbbf.read.json",
+        "read_receipt_sha256": "3d801fbdd3cb0f63bbd986b7066978ed9e457f664a0a30c1c188fb51dd13b6cb",
+        "visible_pages": [
+          {
+            "page": 2,
+            "visible_text_chars": 4313,
+            "full_page_text_chars": 4313,
+            "visible_text_sha256": "2a4189f37263d1bf6176f7018798ba20651176279d67f7170a99e80ce1084e57",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4219,
+            "full_page_text_chars": 4219,
+            "visible_text_sha256": "6e4e7558dad53bbd3f6a23592f74b16b98a1311ec32a49bb3af05159ec484c74",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 2728,
+            "full_page_text_chars": 2728,
+            "visible_text_sha256": "82e3af98dc9004f54c244e451406d1eb0ade667e82f171ee2d03c1598a8bc170",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 3486,
+            "full_page_text_chars": 3486,
+            "visible_text_sha256": "120ebf1c37934dee31be1986d27afa1eea6f4ac0afcfa942afa86cc9b62b6d8f",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "visible_text_chars": 1254,
+            "full_page_text_chars": 2580,
+            "visible_text_sha256": "df00e77f10f0a5ee137c8ab118235d32087ab333a4caf15d6ec78c38237ef34b",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 2,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+        "pdf_pages": 24,
+        "extracted_pages": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf",
+        "read_receipt": "idea_research/research/downloads/1f9b095396134b198aa8fae0165e5b8f.read.json",
+        "read_receipt_sha256": "76c50be05d53256b26bd054bca794ee77d059a05600f296e767b64a30e80f6e4",
+        "visible_pages": [
+          {
+            "page": 2,
+            "visible_text_chars": 3482,
+            "full_page_text_chars": 3482,
+            "visible_text_sha256": "3aabab0a45bf870a036fc9d91fdacc41cb193843060298f99cb50a8fc342c4db",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4050,
+            "full_page_text_chars": 4050,
+            "visible_text_sha256": "6cd59dae9a0475aa715eb4e1f476b89f3db426a686dafad0b6cd644746443e28",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 4234,
+            "full_page_text_chars": 4234,
+            "visible_text_sha256": "77789fca318b863f7d383e33de4ac4167ec297f28e7d9e3b960a53aff2b2ac71",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 3878,
+            "full_page_text_chars": 3878,
+            "visible_text_sha256": "0a861ab5b5052adb2c0c62a41198efb50e8ac0cc4092154ce68953736f82b2ab",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "visible_text_chars": 356,
+            "full_page_text_chars": 4099,
+            "visible_text_sha256": "3feb70f31ad15a914e5307ee3bcfa8f46999046178867bb83681cb8d7e6c5950",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 2,
+        "resource_key": "arxiv:2006.15655:v1",
+        "url": "http://arxiv.org/abs/2006.15655v1",
+        "title": "Physics-aware registration based auto-encoder for convection dominated PDEs",
+        "sha256": "f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73",
+        "pdf_pages": 10,
+        "extracted_pages": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73.pdf",
+        "read_receipt": "idea_research/research/downloads/27feb770e9d545f595cca2d3345e89a1.read.json",
+        "read_receipt_sha256": "3d801fbdd3cb0f63bbd986b7066978ed9e457f664a0a30c1c188fb51dd13b6cb",
+        "visible_pages": [
+          {
+            "page": 2,
+            "visible_text_chars": 4313,
+            "full_page_text_chars": 4313,
+            "visible_text_sha256": "2a4189f37263d1bf6176f7018798ba20651176279d67f7170a99e80ce1084e57",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4219,
+            "full_page_text_chars": 4219,
+            "visible_text_sha256": "6e4e7558dad53bbd3f6a23592f74b16b98a1311ec32a49bb3af05159ec484c74",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 2728,
+            "full_page_text_chars": 2728,
+            "visible_text_sha256": "82e3af98dc9004f54c244e451406d1eb0ade667e82f171ee2d03c1598a8bc170",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 3486,
+            "full_page_text_chars": 3486,
+            "visible_text_sha256": "120ebf1c37934dee31be1986d27afa1eea6f4ac0afcfa942afa86cc9b62b6d8f",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "visible_text_chars": 1254,
+            "full_page_text_chars": 2580,
+            "visible_text_sha256": "df00e77f10f0a5ee137c8ab118235d32087ab333a4caf15d6ec78c38237ef34b",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 3,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+        "pdf_pages": 24,
+        "extracted_pages": [
+          7,
+          8
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf",
+        "read_receipt": "idea_research/research/downloads/f38db1d775164707a0195721ecaa9b0f.read.json",
+        "read_receipt_sha256": "16480cf1ec98fbb83cae02a77f6a80173d880952d6b11f3dc15dc7a1a5dc97b0",
+        "visible_pages": [
+          {
+            "page": 7,
+            "visible_text_chars": 3789,
+            "full_page_text_chars": 3789,
+            "visible_text_sha256": "24d1b73cca3a25b9b71ec3f206e24ffcb89f252375cf1f6acf7c82b6975bd769",
+            "truncated": false
+          },
+          {
+            "page": 8,
+            "visible_text_chars": 4453,
+            "full_page_text_chars": 4453,
+            "visible_text_sha256": "fb506aa0697aa809bd8bbac5cae4525f96a78a3c1abe92e745ef1d33ce26e854",
+            "truncated": false
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "observation_index": 3,
+        "resource_key": "arxiv:2006.15655:v1",
+        "url": "http://arxiv.org/abs/2006.15655v1",
+        "title": "Physics-aware registration based auto-encoder for convection dominated PDEs",
+        "sha256": "f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73",
+        "pdf_pages": 10,
+        "extracted_pages": [
+          7,
+          8
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73.pdf",
+        "read_receipt": "idea_research/research/downloads/6d7ced6b27604aa6bec25349b999d4bc.read.json",
+        "read_receipt_sha256": "14ebc7536cd86979d579c56c7e2f73f1d7a550cab199bf359c5e516c8bc25269",
+        "visible_pages": [
+          {
+            "page": 7,
+            "visible_text_chars": 3474,
+            "full_page_text_chars": 3474,
+            "visible_text_sha256": "c7994f94d06b04dd9419e4b4777804d48bd844c76899377040c0616840c7200d",
+            "truncated": false
+          },
+          {
+            "page": 8,
+            "visible_text_chars": 3076,
+            "full_page_text_chars": 3076,
+            "visible_text_sha256": "c19e72f190bb2547107e3d3b4a826c2a094dc58e6b61276b99e39fcc0cc07825",
+            "truncated": false
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c1137639a1f44c2fbcfff62b10536699",
+        "observation_index": 1,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "title": "Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains",
+        "sha256": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+        "pdf_pages": 24,
+        "extracted_pages": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "full_document_read": false,
+        "reused": true,
+        "network_download_performed": false,
+        "download_path": "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf",
+        "read_receipt": "idea_research/research/downloads/4e4c87e83b4d421ba6fcdd7e613f2382.read.json",
+        "read_receipt_sha256": "8b0d980b1a6f1f2dec5b8fd2ed145272044240688d9b69a256a376df966f7b47",
+        "visible_pages": [
+          {
+            "page": 2,
+            "visible_text_chars": 3482,
+            "full_page_text_chars": 3482,
+            "visible_text_sha256": "3aabab0a45bf870a036fc9d91fdacc41cb193843060298f99cb50a8fc342c4db",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 4050,
+            "full_page_text_chars": 4050,
+            "visible_text_sha256": "6cd59dae9a0475aa715eb4e1f476b89f3db426a686dafad0b6cd644746443e28",
+            "truncated": false
+          },
+          {
+            "page": 4,
+            "visible_text_chars": 4234,
+            "full_page_text_chars": 4234,
+            "visible_text_sha256": "77789fca318b863f7d383e33de4ac4167ec297f28e7d9e3b960a53aff2b2ac71",
+            "truncated": false
+          },
+          {
+            "page": 5,
+            "visible_text_chars": 3878,
+            "full_page_text_chars": 3878,
+            "visible_text_sha256": "0a861ab5b5052adb2c0c62a41198efb50e8ac0cc4092154ce68953736f82b2ab",
+            "truncated": false
+          },
+          {
+            "page": 6,
+            "visible_text_chars": 356,
+            "full_page_text_chars": 4099,
+            "visible_text_sha256": "3feb70f31ad15a914e5307ee3bcfa8f46999046178867bb83681cb8d7e6c5950",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "c1137639a1f44c2fbcfff62b10536699",
+        "observation_index": 3,
+        "resource_key": "arxiv:1607.01668:latest",
+        "url": "http://arxiv.org/abs/1607.01668",
+        "title": "Tensor Decomposition for Signal Processing and Machine Learning",
+        "sha256": "491a38cf554df9b4e4e3924455da6287930e39e968080e9a11a55034be1c99b0",
+        "pdf_pages": 44,
+        "extracted_pages": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "full_document_read": false,
+        "reused": false,
+        "network_download_performed": true,
+        "download_path": "idea_research/research/downloads/491a38cf554df9b4e4e3924455da6287930e39e968080e9a11a55034be1c99b0.pdf",
+        "read_receipt": "idea_research/research/downloads/313cdd4d2c1b4979b954bc4d99fcce2d.read.json",
+        "read_receipt_sha256": "526c5509adc0b1b42c23cb31d4bae8a838971a86ad888ac29aec02ac44116d32",
+        "visible_pages": [
+          {
+            "page": 1,
+            "visible_text_chars": 6148,
+            "full_page_text_chars": 6148,
+            "visible_text_sha256": "ba53213707dcc59ba7439d16bf120c256f44d3394ed6fc72d8f9327e1ecef39d",
+            "truncated": false
+          },
+          {
+            "page": 2,
+            "visible_text_chars": 6865,
+            "full_page_text_chars": 6865,
+            "visible_text_sha256": "65685520afa989b4986f2e7f7572bb2a9a2fb3bc25eaa8bd9a8d61fc57b4bdb0",
+            "truncated": false
+          },
+          {
+            "page": 3,
+            "visible_text_chars": 2987,
+            "full_page_text_chars": 4915,
+            "visible_text_sha256": "f14dbaa2c828f14228b480dfa5f9c24260ac0cd551f1ddb588513b99d0eb96ec",
+            "truncated": true
+          }
+        ]
+      }
+    ],
+    "source_fetch_failures": [
+      {
+        "agent": "idea",
+        "invocation": "62039f12f6204ab386d111c3d4f337da",
+        "observation_index": 2,
+        "resource_key": "arxiv:2006.10739:v1",
+        "url": "http://arxiv.org/abs/2006.10739v1",
+        "error_code": "download_timeout",
+        "reused": false,
+        "network_download_attempted": true,
+        "download_bytes_received": 4521838,
+        "download_expected_bytes": 9922740,
+        "download_elapsed_seconds": 180.001,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea",
+        "invocation": "62039f12f6204ab386d111c3d4f337da",
+        "observation_index": 2,
+        "resource_key": "arxiv:2006.15655:v1",
+        "url": "http://arxiv.org/abs/2006.15655v1",
+        "error_code": "total_timeout",
+        "reused": false,
+        "network_download_attempted": true,
+        "download_bytes_received": 848964,
+        "download_expected_bytes": 1730333,
+        "download_elapsed_seconds": 59.988,
+        "archive_complete": false
+      },
+      {
+        "agent": "idea_research",
+        "invocation": "0d4dc600b126407a9b7b1ef4c2b3d881",
+        "observation_index": 2,
+        "resource_key": "arxiv:1503.01057:v1",
+        "url": "http://arxiv.org/abs/1503.01057v1",
+        "error_code": "download_timeout",
+        "reused": false,
+        "network_download_attempted": true,
+        "download_bytes_received": 1452581,
+        "download_expected_bytes": 1773271,
+        "download_elapsed_seconds": 180.003,
+        "archive_complete": false
+      }
+    ],
+    "rejection_summary": [
+      "Child 1 first rejected an absence assertion covering a truncated page. Its revised candidate narrowed that scope and passed I1; I2 then rejected a claimed original-model parameter total unsupported by a visible finite architecture. These were different candidates.",
+      "Child 2 first rejected paper-wide absence assertions. After additional reads, its revised candidate still claimed an inspected continuous page range despite a truncated page 6. Rejection means the asserted scope was unsupported, not that an unseen page is known to contain a counterexample.",
+      "Child 3 had one fully observed empty final response, used the configured bounded author recovery, and then exhausted its original protocol allowance on two invalid JSON responses. No candidate or whole review was produced."
+    ],
+    "independent_review": {
+      "file_ref": "manual_research_review.json",
+      "file_sha256": "f3ddea5ba8ce82341387945dc7dfb6fbac2f474d5f090c605f9e6f0f13f6734c",
+      "status": "no_accepted_research_report",
+      "independent_quality_passed": false,
+      "review_type": "Codex independent offline terminal review; no model, tool, training or runtime feedback",
+      "core_method_findings_supported": true,
+      "issues": [
+        {
+          "id": "R1_unsupported_original_parameter_count",
+          "delegation_id": "0d4dc600b126407a9b7b1ef4c2b3d881",
+          "severity": "unsupported_source_fact",
+          "finding": "At this delegation time, the actual visible Fourier pages 1–4 and the beginning of page5 did not specify finite experimental layer widths or total parameters. Infinite-width NTK theory does not establish a finite reported model count. This absence of support does not prove that the actual original models used 256 or fewer parameters.",
+          "blocking_for_report_acceptance": true
+        },
+        {
+          "id": "R2_truncated_page_in_negative_claim_scope",
+          "delegation_id": "1b8143607db644a0a941dd82e99bf96b",
+          "severity": "source_scope_description",
+          "finding": "The report names pages2–8 as the range of negative observations but Fourier page6 was visible only for356 of4099 characters; pages2–5 and7–8 were complete. The claim should identify the received excerpt range, or the author can omit the unnecessary negative claim. No contrary result in the unread page6 is asserted by this offline review.",
+          "blocking_for_report_acceptance": true
+        }
+      ],
+      "summary": "Core source mechanisms and the candidate arithmetic of 242 and 256 allocated parameters have support. Acceptance was blocked by an originally unsupported finite-model count and an imprecisely bounded negative observation. Later page8 evidence was not backfilled into the first candidate."
+    }
+  },
+  "runtime_findings": {
+    "visible_coverage": {
+      "source_ref": "backend/app/harness/agent_loop/context.py",
+      "source_commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+      "finding": "The source receipt index lists visible page numbers without separating complete extracted text from partial pages. extract_pdf keeps extracted_pages after the character budget is consumed. The full actual observations still retain visible_pages and truncated flags.",
+      "verified_author_input": {
+        "invocation": "1b8143607db644a0a941dd82e99bf96b",
+        "request": 10,
+        "request_event_seq": 61,
+        "input_sha256": "d59cf10bc3370eb90d5ca97e50624cf67c37cc607b0000c934047f51aa76dee4",
+        "context_event_seq": 60,
+        "input_utf8_upper_bound": 144726,
+        "compressed_history": [],
+        "omitted_history": [],
+        "successful_source_rows": 6,
+        "source_rows_match_original_receipts": true,
+        "partial_page_6": {
+          "arxiv:2006.10739:v1": {
+            "visible_chars": 356,
+            "full_text_chars": 4099
+          },
+          "arxiv:2006.15655:v1": {
+            "visible_chars": 1254,
+            "full_text_chars": 2580
+          }
+        }
+      },
+      "claim_boundary": "The author context was updated; the error is not evidence of lost observations. Complete extracted text is also not proof that figures or equations were understood."
+    },
+    "cross_agent_cache": {
+      "source_ref": "backend/app/harness/tools/search/source_fetch.py",
+      "source_commit": "19cb790fa141fabe379fc34f7d5f18c5ccb5c16f",
+      "finding": "Cache lookup is confined to run_root/agent/research/downloads. Main idea did not discover complete hash-verified PDFs already in idea_research/research/downloads, and performed two unsuccessful downloads.",
+      "main_tool_ref": "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/tools/0003.json",
+      "main_tool_elapsed_seconds": 240.004,
+      "claim_boundary": "Reusing complete same-run PDF bytes would still require a new actual window extraction and receipt; it cannot inherit acceptance of a failed research report."
+    }
+  },
+  "main_proposal": {
+    "candidate_present": false,
+    "candidate_chars": 0,
+    "candidate_utf8_sha256": null,
+    "model_review_passed": false,
+    "independent_quality_passed": null,
+    "final_method_assessed": false,
+    "scientific_validated": false,
+    "checkpoint_ref": "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/checkpoint.json",
+    "checkpoint_sha256": "14c30e5c91811b8cdb8a42c9a50dcbf0c6cae2b4dbc7bd9f9864d98399c16042",
+    "termination": {
+      "contract_id": "idea.lead_research_stop.v2",
+      "details": {
+        "max_delegations": 3,
+        "max_tool_steps": 5,
+        "required_publications": 2,
+        "scientific_validated": false,
+        "started_delegations": [
+          "0d4dc600b126407a9b7b1ef4c2b3d881",
+          "1b8143607db644a0a941dd82e99bf96b",
+          "c1137639a1f44c2fbcfff62b10536699"
+        ],
+        "tool_dispatches": 4,
+        "usable_as_final_evidence": false,
+        "verified_report_publications": 0
+      },
+      "reason": "合格调研报告仅覆盖 0 篇论文，要求至少 2 篇；当前取证预算已用尽或没有可用委派工具，无法通过改写方案补足原文证据。",
+      "stage": "before_model",
+      "status": "evidence_unavailable"
+    },
+    "independent_review": {
+      "file_ref": "manual_quality_review.json",
+      "file_sha256": "91dcdeb3faaf45fb73dd4537020dc16c848e7897ddd497b7b76f40b722b92e69",
+      "status": "not_assessable_no_main_candidate",
+      "independent_quality_passed": null,
+      "review_type": "Codex independent offline terminal review; no model, tool, training or runtime feedback",
+      "final_method_assessed": false,
+      "quality_gate_satisfied": false,
+      "issues": [],
+      "summary": "No main candidate or final-method review exists. The complete delivery gate is unsatisfied; no mathematical failure, failed training or absent benefit of a final method is inferred."
+    },
+    "claim_boundary": "No main proposal exists to assess for training success or mathematical validity. The stop records zero verified report publications after three unsuccessful delegations, not zero PDFs acquired."
+  },
+  "delivery": {
+    "accepted_main_artifact": false,
+    "human_readable_and_structured_delivery": false,
+    "waiting_review_observed": false,
+    "pending_artifact_observed": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "scientific_validated": false,
+    "restart_tested": false,
+    "in_memory_review_session_persistence_claimed": false
+  },
+  "subsequent_fixes": {
+    "applied_to_this_run": false,
+    "collect_review": {
+      "commit": "38181209670e4314b27fd19b372702f0917dd913",
+      "profile": "experimental_research_pro_per_insight_v3",
+      "contract": "idea.research_per_insight_then_whole.v5",
+      "preserves_models_tools_and_internal_budgets": true,
+      "claim_boundary": "Old separate-candidate decisions are not relabeled as a completed same-candidate collect execution."
+    },
+    "next_complete_run": {
+      "global_attempt_number": 20,
+      "source_commit": "38181209670e4314b27fd19b372702f0917dd913",
+      "driver_preflight_ref": "runs/verification/api_idea_20260909T052155_16895f9e/preflight.json",
+      "driver_preflight_sha256": "b030abf0dcafe94ee314821a5a6c80f776fda95a690667262957998a7ddf34da",
+      "preflight_at": "2026-09-09T05:21:55.652124+00:00",
+      "status_at_export": "running",
+      "driver_budget_seconds": 5400,
+      "quality_acceptance_claimed": false,
+      "comparison_boundary": "Collect mode and the outer driver deadline both changed; model/tool settings and internal budgets match. This is not a single-variable performance comparison."
+    },
+    "metadata_and_cross_agent_cache_changes_applied": false
+  },
+  "manual_review_hashes": {
+    "manual_research_review.json": "f3ddea5ba8ce82341387945dc7dfb6fbac2f474d5f090c605f9e6f0f13f6734c",
+    "manual_quality_review.json": "91dcdeb3faaf45fb73dd4537020dc16c848e7897ddd497b7b76f40b722b92e69"
+  },
+  "original_file_hashes": {
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/checkpoint.json": "14c30e5c91811b8cdb8a42c9a50dcbf0c6cae2b4dbc7bd9f9864d98399c16042",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/events.jsonl": "6f5b6e13da24add145d409766252f718718fb071addf15c226d251f919e9e416",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/facts.json": "5233cb4be5b6311b1874545e4dc39b137f7e5937141f871affcdd1b038138126",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/tools/0001.json": "0684473dec43c3c9b91bdcc8b2094e8f4d3ef083c3f258f48d80e53f78cd0702",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/tools/0002.json": "6f5a5a81ddf23f1fba95ec849bca9653760d083e68b903a062c31fb984d125f6",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/tools/0003.json": "ebdcb2ef6b269d44b6132b4b966ea4cc795b783f994cf12581f9a6a02df88e13",
+    "agent_traces/idea/62039f12f6204ab386d111c3d4f337da/tools/0004.json": "2823cd653a246526fca77ba51180ec1446a122df5b0565b8fbe0a8a48fe47a6c",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/checkpoint.json": "10e378c56d04230ed0ef017350cffd6ab6253347f302830e7bcc7a49d3b5a156",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/events.jsonl": "b31368662c549ac2104c2c61ce5cdccb33e586349a23150111c4ec0a9cf18ed8",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/facts.json": "b3e435c72e68ef0198880710965e5bb1308cbe4027de08e61c03f88b8f799fde",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0001.json": "dfa477a3c381890e4e2ac1e7f63f9fb4c24aeaec9830ba00b39583d2c3019ebf",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0002.json": "7cbb8afc17120d3ec664a02a09a8ba3645b5d2935e534809a594e4f8d1141de1",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0003.json": "3c372b96c0502af0ac0d14e0f4b8168c6f5db9b586872a15efabe351bd7efc14",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0004.json": "87914fd7819219315b730678c27ca5601305e7d1ca9a2f93fca5dd656a5e7fb1",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0005.json": "2070c61cadcc915cfaed42e607714727e0d32383cb4fb8e7a2bc2e09bacf3392",
+    "agent_traces/idea_research/0d4dc600b126407a9b7b1ef4c2b3d881/tools/0006.json": "c111b62f3cd372643a6b01df85a668c594d7f8cbd4f6090a8705d3e870784ed0",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/checkpoint.json": "a62a7570fba46ea3aeef650bd1a5b433db43b93631c19fadf362bb471a456188",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/events.jsonl": "b0a2dbd5f5d99cf88d975feb6a250d70fa1dd030b23d777cf3a078e78629eafb",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/facts.json": "5a16296f00d44c316c36c48240d17961a51642b7aa058aaab315ccf2eb513cf0",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/tools/0001.json": "8bb785cf88d1e45c23b555ac50274ac724763b36b3b4169e1abf4e15a40e4987",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/tools/0002.json": "44d8be1aa5096085640ba520b48b18f227f9a6b0ce07eba4e5d5e79cacb8d589",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/tools/0003.json": "b3109b694c396914c9aef50a012dd46574db23e3c025a9320d05fbff8934efe9",
+    "agent_traces/idea_research/1b8143607db644a0a941dd82e99bf96b/tools/0004.json": "841b6de929e6280d26962340390aea0b1cbb9c13c47686c7cb0c0e6f7545ff3b",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/checkpoint.json": "2c4e3e6748ff4f1f1b3782717d27559792e4606f14b44927d622376c85cddee0",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/events.jsonl": "bed0c7b8e2c0bfcf3db21cc8c90ab85258f64713af4a589ac30b3ea455142e85",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/facts.json": "6e7a1a86b1822f65975e11b5923348c8640e46e37219e060523e7983ddebdc2a",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/tools/0001.json": "e89faf4d549c8704e31a87706b7338dbcb0a3ab0a2b12e657209d48502a47795",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/tools/0002.json": "af1556d0018695c348198cbe910e21411888c548f988ad31bff5f848b71ad6ac",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/tools/0003.json": "c81dc4ad4986ad192c4e4f68bb53bf58d554011c47baba9ecc7fb0ce9f204eb3",
+    "agent_traces/idea_research/c1137639a1f44c2fbcfff62b10536699/tools/0004.json": "66dc7df1d4588ab648d004134aac9aaa271645acc39ff8513099b551baebfb8c",
+    "coding/tool_applications/06ebd1d9ff0447989b66f6726a6aaec1.json": "c6ecafe21c95a8ffc669ce792e157cf5e6a56f6fc28f68f376a0d32aa1335d8a",
+    "coding/tool_applications/1c117d21455f4e39a2510f6ee868fa0c.json": "354dc979a8ec71ba34e4bbdbe027fcccf5a7a7f16e39cc42718212e6481a9c16",
+    "coding/tool_applications/2bc22480b45d40a69e50077065704bfc.json": "84be3a2e6a37d74cc2d0635c248618bd85a03ec3aa6017e26ff64619c2e4f567",
+    "coding/tool_applications/48dbc1bcee284e5d96330eca527c00f4.json": "670fe1382e81317ef28bebaa29eed45995c106d510f2bcc7a34b40bfabd7cca0",
+    "coding/tool_applications/60c76f88750444cf990d2d8ddeb8dde1.json": "004726798d12bd4a95eb5558dab414c7e811d7397b9a6852ae300e9ae6295f5a",
+    "coding/tool_applications/644f4994daed4797bdc312778fb7a4b4.json": "eae5af80b69de3ea0870c553ccbd5b6b08360e2abf133c5a034ec21c8aac2ccb",
+    "coding/tool_applications/754755ff2e74406e942e4688f2d2a5a2.json": "8337e9e1e7ad3b818dc9d55a7f3e4b2a6f20f042cff75b0e77c67074bca8b6fc",
+    "coding/tool_applications/7a4cd11eeb1a4822aa1bca06de838a5b.json": "4c9ad5c459db4a45a7a78ad204112415d5f4d557653156d55eb2ac4e671dface",
+    "coding/tool_applications/7f5853f522344b3dacbf9f9da3750037.json": "c94362725086eb7a76b972f87e1d2bf720b3cea3f4f76c2d106c899cbfbcdb09",
+    "coding/tool_applications/82f3151cb26d4f6b861982d6a6a61347.json": "af0745fe56f4f301110752ae150bda73d32ce664cb05133a13701b4d2b70a092",
+    "coding/tool_applications/92aca1d458f5490391a118a989762cfc.json": "ff0cf8343249c5adedcd90de66a6c464aa6ac3d8a9183ae6fe8976c1a019b977",
+    "coding/tool_applications/94a668ab5cdd44a0a35e6f2a79a8b69a.json": "8041532378385ac0fcd4dd3d44c6cba1ea6a2e4c5009b72001dd0e533c1b6a46",
+    "coding/tool_applications/b2ceb5ab6329464e9fcbe424a59d253b.json": "73c93f4cb20d3418f11cff184a82a120f4c2ce063d36b0536acc51df8e55c73a",
+    "coding/tool_applications/cb207faf5a65482b82437e68d7ff8df3.json": "3a81586343e358a23c6a18f1fcc4e4da23b948299c3c660194a62e382cb8f8e6",
+    "coding/tool_applications/de462e866cda46d79dc711e5604b7333.json": "8932f18c6b7c951708d29822f3fa8f1b5e33100cf2fbb2a098ed822c2ef36ba9",
+    "coding/tool_applications/df37dd63001443de9040dd3c0a077f9c.json": "5e7250f44db6072e54313a3f65a1a30bbc2f3268296e9a9f93040573a7c40146",
+    "coding/tool_applications/f21b1ec35f4546b094b4c605a34ae652.json": "02377f5574e7801d481bc90808f59b67202e8c9c9683eb8b6cb8b1c8e52a3e04",
+    "coding/tool_applications/fe4dd0afd3c443eaa3453584ce6a5db4.json": "fa8fd3288ac07989ef5dd442351f70c9aba1e5ed649a0b13489822708a6fccdf",
+    "context/langgraph_runtime.v2.json": "7173f877f3f6ff1fd83cf462554ad90c45b033c38970ada3604f1c7d7069fce5",
+    "context/trace_manifest.v2.json": "0b3706af51e18319588e15c1ae00bed0d1f480fdf67f5e099f7090e4ebab1ce8",
+    "events/agent_events.jsonl": "c250dd11b3dc82b124ab965975054eeb8d19813e33cea40a27a3e9b6ecdde7b8",
+    "events/evaluation_events.jsonl": "7a98cd3884f1b4779a29e9b3f5e38dd5685351fc9128bae84082f28c1ed303df",
+    "events/evaluation_quality_gate.json": "eda6472b09f9a55bdd7a664f8fbe814d130972c2773c0832da94e18c8904a9f1",
+    "events/evaluation_scorecard.json": "160ef2937f89c81a3c1ff31875935e399a69a1dc84ab8349696c9e7e5a053faf",
+    "events/langgraph_events.jsonl": "35d2d0c662da322b5279f4f9adfde2d87635c200a2e054fa66b3b5e86cc25ad1",
+    "events/tool_calls.jsonl": "431531d2ad63e5bf424b437672727b277d48cb0679c672f43a51a87f307c9d92",
+    "events/tool_events.jsonl": "bb93698dc20a031168ffa351df2e69854267b977241809cc1813f4de14c62a8a",
+    "events/websocket_events.jsonl": "a26473fa40b09baf9f708682392494bb6a3403d0846f69816481862daaa08638",
+    "idea/progress.jsonl": "b6e72d9ed3245822a6edbfcc66921fe1899201acaa284c6e9378b075d1804443",
+    "idea/research/downloads/source_fetch_index.v1.json": "011b6f654bdb6d46c6ca1642b4bd96f2fee4e3d2f5505083d5010414fecf1c40",
+    "idea/research/evidence_index.v1.json": "00b9e640919c661495a2b78e72c876f924f95390a7f88e3518372a96735fa30c",
+    "idea/research/tool_results.v1.json": "feb282f34cb7e1bf0995c3dc70b3f32782660f77b5963a21a9c68531964e0e21",
+    "idea/research_delegations/0d4dc600b126407a9b7b1ef4c2b3d881/failure.json": "02de4c8878769cff6c49f7b227bae1910030a155d590e5d0ac39d9c4470e4e1d",
+    "idea/research_delegations/0d4dc600b126407a9b7b1ef4c2b3d881/progress.jsonl": "a11579da6fc438cab97e8c6c8b7c0824600ce3f6a32ec559eca28eb06587424c",
+    "idea/research_delegations/0d4dc600b126407a9b7b1ef4c2b3d881/request.json": "a32181416cdef2a7f78b58b0091e890155773fb6e131438db24133a58796579c",
+    "idea/research_delegations/1b8143607db644a0a941dd82e99bf96b/failure.json": "15c73d4a06d90ca84e68c9fa6d98984d29bbe8ee06a67d1ae178cd20afcb5f75",
+    "idea/research_delegations/1b8143607db644a0a941dd82e99bf96b/progress.jsonl": "362849948f892fe1d3757da6dd30790c4756fa0cd9130b2bd3efc32899656165",
+    "idea/research_delegations/1b8143607db644a0a941dd82e99bf96b/request.json": "b45b686fe23ed559a25af17b22931c14e08b942a651f82d878549668f0336b19",
+    "idea/research_delegations/c1137639a1f44c2fbcfff62b10536699/failure.json": "033f5e4ff44f4716168079ab9bb031252b61ba70deb9feb0acbfe72036d95d3b",
+    "idea/research_delegations/c1137639a1f44c2fbcfff62b10536699/progress.jsonl": "c7680a6feddd5b5487e33fe4298b4651c33dce2ae3f7305c2040cec81521a59d",
+    "idea/research_delegations/c1137639a1f44c2fbcfff62b10536699/request.json": "ab2583086b904af200574ac3fb5a9c04e61f31cf997aaa21ef2b54b66204a6c7",
+    "idea_research/research/downloads/0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c.pdf": "0b8f5b65d48c43920bb0033261735738750fec5c998d3e783f3ec0c1a8e9952c",
+    "idea_research/research/downloads/1b1c72c3a5c74e5884a1d6736a9a10b3.read.json": "599ed67417f5d47251f4e6f9ed03e974ab2ca18b599ed52d225e8421dff3f7e5",
+    "idea_research/research/downloads/1f9b095396134b198aa8fae0165e5b8f.read.json": "76c50be05d53256b26bd054bca794ee77d059a05600f296e767b64a30e80f6e4",
+    "idea_research/research/downloads/27feb770e9d545f595cca2d3345e89a1.read.json": "3d801fbdd3cb0f63bbd986b7066978ed9e457f664a0a30c1c188fb51dd13b6cb",
+    "idea_research/research/downloads/313cdd4d2c1b4979b954bc4d99fcce2d.read.json": "526c5509adc0b1b42c23cb31d4bae8a838971a86ad888ac29aec02ac44116d32",
+    "idea_research/research/downloads/491a38cf554df9b4e4e3924455da6287930e39e968080e9a11a55034be1c99b0.pdf": "491a38cf554df9b4e4e3924455da6287930e39e968080e9a11a55034be1c99b0",
+    "idea_research/research/downloads/4e4c87e83b4d421ba6fcdd7e613f2382.read.json": "8b0d980b1a6f1f2dec5b8fd2ed145272044240688d9b69a256a376df966f7b47",
+    "idea_research/research/downloads/6d7ced6b27604aa6bec25349b999d4bc.read.json": "14ebc7536cd86979d579c56c7e2f73f1d7a550cab199bf359c5e516c8bc25269",
+    "idea_research/research/downloads/e45f8c04bbef4b37a35a67c0971dcbbf.read.json": "3d801fbdd3cb0f63bbd986b7066978ed9e457f664a0a30c1c188fb51dd13b6cb",
+    "idea_research/research/downloads/f38db1d775164707a0195721ecaa9b0f.read.json": "16480cf1ec98fbb83cae02a77f6a80173d880952d6b11f3dc15dc7a1a5dc97b0",
+    "idea_research/research/downloads/f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73.pdf": "f8ca8c7ba5dbdd299be1a35313b14338c165e905d390c5a4d706ff1b33227e73",
+    "idea_research/research/downloads/faf2c5d5846144a280ac5f614a842f1f.read.json": "866857b33b0202409d6524ac5576fb88242a3192c9ca88d70e65a4b9dda3e4a3",
+    "idea_research/research/downloads/fdb4428012a54c72846bef2f4c90ba84.read.json": "76c50be05d53256b26bd054bca794ee77d059a05600f296e767b64a30e80f6e4",
+    "idea_research/research/downloads/source_fetch_index.v1.json": "d03a57cfcc2a56fe64bd3761cbb11a9245a29519e31a5d1139c1b98588e7d47d",
+    "idea_research/research/searches/21543a7fba6d39b8ee9dd3cbbc9d3e1aeebd4b847359a300f1d89f2f75ffd8c8.json": "f414b4037143c85f1f82662b5ce3c7ddc65082e52889d3bcb60271ce34d86eba",
+    "idea_research/research/searches/da68506003791255c7cd9ba790b1ff2652db0fbe5846d15c9b97c0d84ab1bf48.json": "547f9b07cfadd98bc735c2b649af3770f863e7d8ba63de33c4f02cd827705034",
+    "input/idea_runtime_profile.v1.json": "942f16f9cdd91749733a243468c5237c429bfd5d59b4da7172bc7685372484fe",
+    "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+    "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+    "manual_quality_review.json": "91dcdeb3faaf45fb73dd4537020dc16c848e7897ddd497b7b76f40b722b92e69",
+    "manual_research_review.json": "f3ddea5ba8ce82341387945dc7dfb6fbac2f474d5f090c605f9e6f0f13f6734c",
+    "run_meta.json": "0efc370b0be73a656d882005607f8e5273d2868bf7c4acd7b01d8aa7ded13666",
+    "run_state.json": "0654e0a4964b4d012fd15e3c46ce720468cfc28e3c6a3f35290fcabeab68c716"
+  },
+  "driver_file_hashes": {
+    "backend.log": "28c0528ea8fb143d6e633b54aa44d7aa230502505020b30d84ebb210f9c6935b",
+    "http.jsonl": "36f01cc081d294d46235b0f0c4a8c4c0cb35420e256597dc78d3606bc236038c",
+    "isolated_memory/_retrieval_receipts/3bd52530c8e64cb786a381c52de346cd.json": "8f1b9e68d3bb7da25dc3b0fdb341ac027f1037ad839c5a30edcd93655ef76094",
+    "isolated_memory/_retrieval_receipts/752483e0c02140dc9fa85d4a830f3448.json": "efd40b15f3b6bc637f913ef2215288687d888e26fd68adda7b54dbc4777eeadd",
+    "isolated_memory/_retrieval_receipts/ab7c84f1250f4e5e8383285385fb0284.json": "efd40b15f3b6bc637f913ef2215288687d888e26fd68adda7b54dbc4777eeadd",
+    "isolated_memory/_retrieval_receipts/b8571c417e514effad0a3012072e768e.json": "8f1b9e68d3bb7da25dc3b0fdb341ac027f1037ad839c5a30edcd93655ef76094",
+    "isolated_memory/_retrieval_receipts/ee85ea9b9a64470ea58fb2e1d0df9489.json": "a4b46d2daa52884e908dfd1c6aba39d100762cc7ad5fe63ecaf59ff47382ac4a",
+    "isolated_memory/_retrieval_receipts/f438e8cc9c85410e9be4835ad84acf00.json": "8f1b9e68d3bb7da25dc3b0fdb341ac027f1037ad839c5a30edcd93655ef76094",
+    "isolated_memory/_semantic_graph.json": "f267eacaa54a513d194fd4cdbf9c394a7872a3be731af7379bd9257018803dc6",
+    "isolated_memory/literature/_arxiv_cache/14c2dcd437f2f12a01275f9d.json": "25d5ac8d1aaacf0a79234e5271fabb2803df3aa8be0f3568e39868b5c2255d5b",
+    "isolated_memory/literature/_arxiv_cache/4da02ac337711c8db1382e9e.json": "48e1748238db4bec72f82697821582304c0e6c4b333f81cd739b139f2ec4f24e",
+    "isolated_memory/literature/_arxiv_cache/4da02ac337711c8db1382e9e.xml": "dde65e96e27a98fde4da4eb8539478669557545d019ef15a55b49db95169ad57",
+    "isolated_memory/literature/_arxiv_cache/a1d2cebac6b0456b54ac3f52.json": "b4271645c42d7dfea219dcd71d406fd5ae559711784c0ce7b805aadbe0e76611",
+    "isolated_memory/literature/_arxiv_cache/a1d2cebac6b0456b54ac3f52.xml": "e73d3fe5dcc24fab33a9bf5e66c44ba4f43fce1fc0c3eab846b54fe20df1a4bc",
+    "isolated_memory/literature/_arxiv_cache/a8274c43ed1bf5b89fa57e46.json": "63a802d01c526329c36226c5224a630ad9fc447316dcf06eba77708feace5c3d",
+    "isolated_memory/literature/_arxiv_cache/a8274c43ed1bf5b89fa57e46.xml": "97fde02dd7ca0b94b58597eb85fab60ff86abe623913a95ea9a32804952ea3b4",
+    "isolated_memory/literature/_arxiv_cache/e3698e278411fc30663e2e17.json": "8cf59865a9caa8f752793690f71f1bf453444e944f12ebef097e186b00bab799",
+    "isolated_memory/literature/_arxiv_cache/e3698e278411fc30663e2e17.xml": "62d99401caffe2b52fb7164b41c4ffe9aa41f2e44a4d1d82efbe80c872a2a615",
+    "isolated_memory/literature/_index.json": "0b98b3f12dadc00e11fee4cc172f15d8e8a969f845989410a9362e2635307489",
+    "preflight.json": "600ab7c3512ceec5576fd947b9c20c0fc10347812c164ea5aee3f9fa1f82dde9",
+    "result.json": "5351e7b2290fc1c3a80eb549766a44c700854e7025695008d307e979a0d4c0d4"
+  },
+  "archive_integrity": {
+    "original_run_file_count": 92,
+    "manual_sidecar_count": 2,
+    "total_run_file_count": 94,
+    "driver_file_count": 21,
+    "driver_file_count_includes_isolated_memory_and_logs": true,
+    "original_files_unchanged": true,
+    "manual_files_unchanged": true,
+    "driver_files_unchanged": true,
+    "old_exports_byte_identical": true,
+    "readme_original_prefix_preserved": true,
+    "terminal_audit_sha256": "6e95c55111f1e20b07d53244d9bbb5db39254c5f6c3d9c0c0fdf9e9cf914acd3"
+  }
+}

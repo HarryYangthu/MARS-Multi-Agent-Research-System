@@ -29,9 +29,9 @@ import type {
 } from "./types";
 
 const MODE_OPTIONS: Array<{ value: IdeaMode; label: string; detail: string }> = [
-  { value: "auto", label: "Auto", detail: "首次 deep，修订 fast" },
-  { value: "fast", label: "Fast", detail: "沿用 V3.0 Idea 路径" },
-  { value: "deep", label: "Deep", detail: "强制 Co-Scientist 深度发现" },
+  { value: "fast", label: "Fast", detail: "论文调研与候选方案审查" },
+  { value: "auto", label: "Auto", detail: "自动选择策略（暂未开放）" },
+  { value: "deep", label: "Deep", detail: "深度发现（暂未开放）" },
 ];
 
 const BUDGET_OPTIONS: Array<{ value: IdeaBudgetProfile; label: string; detail: string }> = [
@@ -48,7 +48,7 @@ export function ProjectPackRunCreator(): JSX.Element {
   const [schema, setSchema] = useState<DynamicProjectPackUiSchema | null>(null);
   const [inputs, setInputs] = useState<JsonObject>({});
   const [issues, setIssues] = useState<ProjectPackValidationIssue[]>([]);
-  const [mode, setMode] = useState<IdeaMode>("auto");
+  const [mode, setMode] = useState<IdeaMode>("fast");
   const [budget, setBudget] = useState<IdeaBudgetProfile>("balanced");
   const [task, setTask] = useState("model-discovery");
   const [request, setRequest] = useState("");
@@ -247,13 +247,14 @@ export function ProjectPackRunCreator(): JSX.Element {
           <aside className="space-y-5">
             <section className="rounded-2xl border border-mars-border bg-mars-panel p-5">
               <h2 className="text-base font-semibold">Idea strategy</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-400">当前仅支持 Fast；Auto 和 Deep 暂未开放。</p>
               <div className="mt-4 space-y-3">
                 {MODE_OPTIONS.map((option) => (
                   <ChoiceCard
                     key={option.value}
                     name="idea-mode"
                     checked={(compatibilityMode ? "fast" : mode) === option.value}
-                    disabled={compatibilityMode && option.value !== "fast"}
+                    disabled={option.value !== "fast"}
                     label={option.label}
                     detail={option.detail}
                     onChange={() => setMode(option.value)}

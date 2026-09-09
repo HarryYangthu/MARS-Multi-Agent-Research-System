@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,25 @@ def test_protocol_rejects_ambiguous_actions(text: str) -> None:
 
 def test_flat_protocol_preserves_arguments() -> None:
     action = {"tool": "search.arxiv_search", "args": {"q": "spline LUT"}, "reason": "find interpolation methods"}
+    assert parse_action(json.dumps(action)) == action
+
+
+@pytest.mark.parametrize("action", [
+    {"tool": "registered.name", "args": {}},
+    {"tool": "registered.name", "args": {"reason": "An argument does not supply the action reason"}},
+    *[{"tool": "registered.name", "args": {}, "reason": value} for value in ("", " \n\t", None, 7)],
+])
+def test_protocol_reason_diagnostic_requires_nonempty_top_level_string(action: dict[str, Any]) -> None:
+    # Authored parser inputs only; no tool is registered or dispatched here.
+    with pytest.raises(ValueError, match="non-empty top-level string") as error:
+        parse_action(json.dumps(action))
+    assert "why this tool call is needed" in str(error.value)
+    assert "sibling of tool and args, not only inside args" in str(error.value)
+
+
+def test_protocol_accepts_and_preserves_a_nonempty_top_level_reason() -> None:
+    action = {"tool": "registered.name", "args": {"value": 1},
+              "reason": "  Explain why this authored action is needed.  "}
     assert parse_action(json.dumps(action)) == action
 
 

@@ -13,7 +13,7 @@ import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from loguru import logger
@@ -24,10 +24,14 @@ from app.agents.idea.research import canonical_source, evidence_inventory
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
 from app.harness.llm.model_registry import AgentConfig, get_agent_config
+from app.harness.llm.provider_base import ReasoningEffort
 from app.harness.schema.validator import validate_document
 from app.harness.schema.frontmatter_parser import parse
 from app.agents.idea.research_dossier import dossier_errors
+from app.agents.idea.research_delegate import research_policy
+from app.agents.idea.research_review_plan import research_review_mode
 from app.settings import env_or_local, reset_settings_cache
+from scripts.idea_research_continuation import check_configuration, fork_continuation, load_continuation
 
 LEAD_TOOLS = {"idea.research_delegate", "knowledge.kb_query"}
 CHILD_TOOLS = {"search.arxiv_search", "search.openalex_search", "search.fetch_sources", "knowledge.kb_query"}
@@ -44,6 +48,31 @@ def source_limit(scenario: dict[str, Any]) -> int:
     return value
 
 
+def author_model_config(original: AgentConfig, model: dict[str, Any],
+                        policy: AgentLoopPolicy) -> AgentConfig:
+    """Validate explicit author settings without creating a provider or request."""
+    if model.get("provider") != "deepseek":
+        raise ValueError("real research evaluation requires DeepSeek")
+    thinking = model.get("thinking")
+    effort = model.get("reasoning_effort")
+    if type(thinking) is not bool:
+        raise ValueError("author thinking must be an explicit boolean")
+    if policy.protocol == "native_tools":
+        if thinking is not False or effort is not None:
+            raise ValueError("native_tools author requires non-thinking DeepSeek without reasoning effort")
+    elif thinking:
+        if effort not in ("low", "medium", "high", "max"):
+            raise ValueError("thinking json_actions author requires an explicit valid reasoning_effort")
+    elif effort is not None:
+        raise ValueError("non-thinking author must not configure reasoning_effort")
+    return replace(original, model_provider="deepseek", model_name=str(model["name"]),
+                   api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
+                   thinking_enabled=thinking, reasoning_effort=cast(ReasoningEffort | None, effort),
+                   max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
+                   max_retries=int(model["max_retries"]),
+                   request_timeout_seconds=float(model["timeout_seconds"]))
+
+
 def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
     if scenario.get("data_scope") != "public_research" or scenario.get("scope") != "method_proposal":
         raise ValueError("requires public_research method_proposal; private project inputs are not loaded")
@@ -58,12 +87,26 @@ def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
 
 def public_config(config: AgentConfig) -> dict[str, Any]:
     # Only credential variable names are exposed; never provider instances or secret values.
-    return {"name": config.name, "model_provider": config.model_provider, "model_name": config.model_name,
+    value = {"name": config.name, "model_provider": config.model_provider, "model_name": config.model_name,
             "api_key_env": config.api_key_env, "thinking_enabled": config.thinking_enabled,
             "reasoning_effort": config.reasoning_effort, "max_tokens": config.max_tokens,
             "temperature": config.temperature, "tools": list(config.tools),
             "request_timeout_seconds": config.request_timeout_seconds, "max_retries": config.max_retries,
             "loop": dict(config.raw.get("loop", {}))}
+    if config.name == "idea_research":
+        mode = research_review_mode(config.raw.get("research", {}))
+        if mode != "whole_report":
+            value["research_review_mode"] = mode
+    return value
+
+
+def child_research_config(original: dict[str, Any], override: object) -> dict[str, Any]:
+    """Only explicitly opt into a new review mode; preserve the default baseline."""
+    if not isinstance(override, dict) or set(override) - {"review_mode"}:
+        raise ValueError("child_research accepts only the explicit review_mode setting")
+    value = {**original, **override}
+    research_review_mode(value)
+    return value
 
 
 def aggregate_traces(root: Path) -> dict[str, Any]:
@@ -140,6 +183,15 @@ def archive_report(root: Path, summary: dict[str, Any]) -> None:
     summary["research_counts"] = findings["counts"]
     atomic_json(root / "research_findings.json", findings)
     lines += ["Research counts: `" + json.dumps(findings["counts"]) + "`", ""]
+    if summary.get("continuation_source"):
+        lines += ["Continuation of: " + str(summary["continuation_source"]), "",
+                  "The totals above include inherited history once. Only these increments belong to this attempt:", "",
+                  "New calls: `" + json.dumps(summary.get("attempt_counts", {})) + "`", "",
+                  "New known usage: `" + json.dumps(summary.get("attempt_known_usage", {})) + "`", "",
+                  "Earlier unknown usage remains unknown. Original source receipts and review records were not rewritten.", ""]
+    if summary.get("delivery_root"):
+        brief = Path(summary["delivery_root"]) / "research_brief.md"
+        lines += ["[中文研究说明](" + str(brief.relative_to(root)) + ")", ""]
     def cell(value: Any) -> str:
         return str(value).replace("|", "\\|").replace("\n", " ")
     for report in findings["reports"]:
@@ -158,51 +210,48 @@ def archive_report(root: Path, summary: dict[str, Any]) -> None:
 
 
 async def run(args: argparse.Namespace) -> int:
-    if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 1200:
-        raise ValueError("max-seconds must be finite and in (0, 1200]")
-    scenario = yaml.safe_load(args.scenario.read_text())
+    if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 3600:
+        raise ValueError("max-seconds must be finite and in (0, 3600]")
+    source_commit, source_tree = git_value("rev-parse", "HEAD"), git_value("rev-parse", "HEAD^{tree}")
+    source = (load_continuation(args.resume_from, source_commit=source_commit, source_tree=source_tree)
+              if getattr(args, "resume_from", None) else None)
+    scenario_path = args.scenario or Path("configs/evaluation/idea_research_delegated_real.yaml")
+    scenario = source.scenario if source else yaml.safe_load(scenario_path.read_text())
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be an object")
     maximum_source_mib = source_limit(scenario)
     run_id = "idea_research_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
     root = (args.runs_root / run_id).resolve()
     request = evaluation_request(scenario, root)
+    if source:
+        request.extra["resume_invocation"] = source.checkpoint.parent.name
     selected_tools = tuple(scenario["tools"])
     if "idea.research_delegate" not in selected_tools or set(selected_tools) - LEAD_TOOLS:
         raise ValueError("lead must delegate research and may only additionally query memory")
     child_original = get_agent_config("idea_research")
     child_model = scenario["child_model"]
-    if child_model.get("provider") != "deepseek" or child_model.get("thinking") is not False or child_model.get("reasoning_effort") is not None:
-        raise ValueError("child must explicitly configure non-thinking DeepSeek")
     child_policy = AgentLoopPolicy.from_mapping(scenario["child_loop"])
     child_tools = tuple(scenario["child_tools"])
-    child = replace(child_original, tools=child_tools, model_provider="deepseek", model_name=str(child_model["name"]),
-                    api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
-                    thinking_enabled=False, reasoning_effort=None, max_tokens=int(child_model["max_tokens"]),
-                    temperature=float(child_model["temperature"]), max_retries=int(child_model["max_retries"]),
-                    request_timeout_seconds=float(child_model["timeout_seconds"]),
-                    raw={**child_original.raw, "loop": asdict(child_policy)})
+    child = replace(author_model_config(child_original, child_model, child_policy), tools=child_tools,
+                    raw={**child_original.raw, "loop": asdict(child_policy),
+                         "research": child_research_config(child_original.raw.get("research", {}),
+                                                           scenario.get("child_research", {}))})
+    research_policy(child, require_review=True)
     request.runtime["idea_research_config"] = child
     if not child.tools or set(child.tools) - CHILD_TOOLS:
         raise ValueError("research child must use only audited public research tools")
     model = scenario["model"]
-    if model.get("provider") != "deepseek" or model.get("thinking") is not False or model.get("reasoning_effort") is not None:
-        raise ValueError("scenario must explicitly use non-thinking DeepSeek without inherited reasoning effort")
     policy = AgentLoopPolicy.from_mapping(scenario["loop"])
     original = get_agent_config("idea")
-    config = replace(original, model_provider="deepseek", model_name=str(model["name"]),
-                     api_key_env="DEEPSEEK_API_KEY", base_url="https://api.deepseek.com/v1", base_url_env="",
-                     max_tokens=int(model["max_tokens"]), temperature=float(model["temperature"]),
-                     thinking_enabled=False, reasoning_effort=None, max_retries=int(model["max_retries"]),
-                     request_timeout_seconds=float(model["timeout_seconds"]), debate_enabled=False,
+    config = replace(author_model_config(original, model, policy), debate_enabled=False,
                      tools=selected_tools, raw={**original.raw, "loop": asdict(policy),
                                                "research": scenario["research"]})
+    if source or not args.prepare_only:
+        if git_value("status", "--porcelain", "--", "backend/app", "configs", "scripts"):
+            raise RuntimeError("commit source/config/script changes before real evaluation or continuation preparation")
     if not args.prepare_only:
         if not env_or_local("DEEPSEEK_API_KEY") or not env_or_local(child.api_key_env):
             raise RuntimeError("real lead/child credential missing; no request made")
-        if git_value("status", "--porcelain", "--", "backend/app", "configs", "scripts"):
-            raise RuntimeError("commit source/config/script changes before real evaluation")
-    root.mkdir(parents=True, exist_ok=False)
     os.environ["MARS_SOURCE_MAX_MIB"] = str(maximum_source_mib)
     os.environ["MARS_ENABLE_NETWORK_TOOLS"] = "true"
     os.environ["MARS_WEB_SEARCH_ALLOWLIST"] = ",".join(scenario["domains"])
@@ -211,28 +260,55 @@ async def run(args: argparse.Namespace) -> int:
     os.environ["MARS_MOCK_MODE"] = "never"
     reset_settings_cache()
     from app.harness.kb.stores import reset_for_tests as reset_stores
-    reset_stores(root / "memory")
     agent = IdeaAgent(agent_config=config)
     context = await agent.build_context(request)
+    messages = agent._messages_for_context(request, context, purpose="live_preflight")
+    continuation = None
+    if source:
+        check_configuration(source, lead=public_config(config), child=public_config(child), messages=messages)
+        continuation = fork_continuation(source, root)
+    else:
+        root.mkdir(parents=True, exist_ok=False)
+    reset_stores(root / "memory")
+    attempt_seconds = min(args.max_seconds, source.remaining_seconds) if source else args.max_seconds
+    cumulative_seconds = float(continuation["inherited_duration_seconds"]) if continuation else 0.0
     atomic_json(root / "input" / "request.json", {
-        "run_id": run_id, "scenario": scenario, "source_commit": git_value("rev-parse", "HEAD"),
-        "source_tree": git_value("rev-parse", "HEAD^{tree}"), "source_dirty": bool(git_value("status", "--porcelain")),
+        "run_id": run_id, "scenario": scenario, "source_commit": source_commit,
+        "source_tree": source_tree, "source_dirty": bool(git_value("status", "--porcelain")),
         "lead_config": public_config(config), "child_config": public_config(child),
-        "resource_limits": {"source_max_mib": maximum_source_mib},
+        "resource_limits": {"source_max_mib": maximum_source_mib,
+                            "max_seconds": source.initial["resource_limits"]["max_seconds"] if source else args.max_seconds},
+        "continuation": continuation is not None,
         "credential_persisted": False, "development_bypass_bridge": True,
         "context_sources": context.metadata.get("context_sources"),
-        "messages": [asdict(m) for m in agent._messages_for_context(request, context, purpose="live_preflight")]})
+        "messages": [asdict(m) for m in messages]})
     summary: dict[str, Any] = {"run_id": run_id, "run_root": str(root), "status": "prepared",
                                "schema_valid": False, "material_ready": False, "model_review_passed": False,
                                "scientific_validated": False, "simulation_executed": False,
                                "downstream_delivered": False, "development_bypass_bridge": True, "preflight_results_supplied_to_model": False}
+    if continuation:
+        summary.update(continuation_source=str(source.root) if source else None,
+                       inherited_counts=continuation["inherited_counts"],
+                       inherited_known_usage=continuation["inherited_usage"],
+                       budgets_reset=False, attempt_max_seconds=attempt_seconds,
+                       cumulative_duration_seconds=cumulative_seconds,
+                       preparation_note="Only source/configuration/byte-copy checks completed; no resumed model call or quality acceptance.")
+        (root / "continuation_preparation.md").write_text(
+            "# Continuation preparation\n\n"
+            f"Source run: {continuation['source_run_root']}\n\n"
+            "The source archive was copied and verified by file hashes. Original absolute read receipts remain unchanged. "
+            "No model call was made during preparation; this does not establish successful execution or research quality.\n\n"
+            f"Remaining total runtime budget: {attempt_seconds:.3f} seconds for this attempt. "
+            "Model/tool counters, evidence, candidate and unknown usage are inherited without reset.\n\n"
+            "The current outcome is recorded in summary.json. Earlier copied reports describe the original run.\n",
+            encoding="utf-8")
     atomic_json(root / "summary.json", summary)
     logger.info("LIVE_RUN_ROOT={}", root)
     if args.prepare_only:
         return 0
     started = time.monotonic()
     try:
-        artifact = await asyncio.wait_for(agent.run_loop(request, context), timeout=args.max_seconds)
+        artifact = await asyncio.wait_for(agent.run_loop(request, context), timeout=attempt_seconds)
         target = root / "idea" / "idea_proposal.v1.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(artifact.text, encoding="utf-8")
@@ -240,14 +316,24 @@ async def run(args: argparse.Namespace) -> int:
                        material_ready=True, proposal_path=str(target), proposal_sha256=digest(artifact.text),
                        human_summary=artifact.metadata.get("human_summary"), handoff=artifact.metadata.get("handoff"),
                        research_links=artifact.metadata.get("research_links"),
+                       research_assessment=artifact.metadata.get("research_assessment"),
+                       delivery_root=context.metadata.get("idea_delivery_root"),
                        model_review_passed=bool(context.metadata.get("reflection_accepted")))
     except (Exception, asyncio.CancelledError) as exc:
-        summary.update(status="failed", error_type=type(exc).__name__, error=str(exc)[:2000])
+        detail = (f"Run exceeded its {attempt_seconds:g}-second execution budget; no acceptance is inferred."
+                  if isinstance(exc, TimeoutError) else str(exc) or type(exc).__name__)
+        summary.update(status="failed", error_type=type(exc).__name__, error=detail[:2000])
         logger.error("Real delegated run stopped: {}", type(exc).__name__)
     finally:
         summary["duration_seconds"] = time.monotonic() - started
+        summary["cumulative_duration_seconds"] = cumulative_seconds + summary["duration_seconds"]
         aggregate = aggregate_traces(root)
         summary.update(aggregate)
+        inherited_counts = continuation["inherited_counts"] if continuation else {}
+        inherited_usage = continuation["inherited_usage"] if continuation else {}
+        summary["attempt_counts"] = {key: value - inherited_counts.get(key, 0) for key, value in aggregate["counts"].items()}
+        summary["attempt_known_usage"] = {key: value - inherited_usage.get(key, 0) for key, value in aggregate["usage"].items()}
+        summary["accounting_note"] = "counts/usage include inherited history once; attempt_counts/attempt_known_usage contain only this invocation's increments. Unknown earlier usage stays unknown."
         atomic_json(root / "all_traces_audit.json", aggregate)
         archive_report(root, summary)
         atomic_json(root / "summary.json", summary)
@@ -257,13 +343,16 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", type=Path, default=Path("configs/evaluation/idea_research_delegated_real.yaml"))
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--scenario", type=Path)
+    source_group.add_argument("--resume-from", type=Path,
+                              help="Fork a same-source interrupted/model-error run; preserve old artifacts and remaining budgets")
     parser.add_argument("--runs-root", type=Path, default=Path("runs/real_idea_research"))
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--max-seconds", type=float, default=1200)
     try:
         return asyncio.run(run(parser.parse_args()))
-    except (ValueError, RuntimeError, KeyError) as exc:
+    except (ValueError, RuntimeError, KeyError, OSError) as exc:
         logger.error("preflight failed: {}", str(exc))
         return 2
 

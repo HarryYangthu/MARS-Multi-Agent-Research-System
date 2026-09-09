@@ -72,9 +72,17 @@ def native_decision(completion: Completion, tools: tuple[str, ...], *, structure
     if call.name == SUBMIT_DOCUMENT and structured_final:
         if not call.id:
             raise ValueError("document submission requires a call id")
-        # The shared strict parser rejects duplicate keys/nonfinite values and
-        # serializes only the model's supplied fields, before normal validation.
-        return {**parse_action('{"final":' + call.arguments + '}'), "submission_id": call.id}
+        # Parse the original argument text before wrapping, so malformed JSON
+        # is rejected at its original position rather than in a synthetic root.
+        try:
+            document = json.loads(call.arguments, object_pairs_hook=_unique_object,
+                                  parse_constant=_reject_constant, parse_float=_finite_float)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"JSON {exc.msg} at line {exc.lineno}, column {exc.colno}") from exc
+        if not isinstance(document, dict) or set(document) != {"metadata", "body"}:
+            raise ValueError("document arguments require exactly metadata and body")
+        return {**parse_action(json.dumps({"final": document}, ensure_ascii=False, allow_nan=False)),
+                "submission_id": call.id}
     names = {wire_name(name): name for name in tools}
     if not call.id:
         raise ValueError("missing native call id; nothing executed")

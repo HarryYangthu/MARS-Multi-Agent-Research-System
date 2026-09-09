@@ -73,6 +73,10 @@ class LoopTrace:
             os.fsync(handle.fileno())
 
     def snapshot(self, state: dict[str, Any]) -> None:
+        if "review_plan_contract_id" in state:
+            # A plan may advance without changing model counters. Detect the
+            # facts/checkpoint write gap as well as missing response events.
+            state["review_checkpoint_seq"] = self.seq
         facts = {k: state[k] for k in ("status", "counts", "usage", "usage_complete", "fingerprint", "pending")}
         facts.update(event_seq=self.seq, trace_mode=self.mode, resume_available=self.mode == "full")
         atomic_json(self.root / "facts.json", facts)

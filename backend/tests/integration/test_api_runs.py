@@ -217,10 +217,10 @@ def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> No
     response = client.post(
         "/api/runs",
         json={
-            "task": "deep-idea-options",
+            "task": "fast-idea-options",
             "project": "synthetic_regression",
             "entrypoint": "idea",
-            "idea_mode": "auto",
+            "idea_mode": "fast",
             "idea_budget_profile": "balanced",
             "project_inputs": {"candidate_count": 20, "mode": "synthetic"},
         },
@@ -232,7 +232,7 @@ def test_create_run_persists_additive_v31_idea_options(client: TestClient) -> No
     run_id = response.json()["run_id"]
     session = deps.get_orchestrator().session(run_id)
     assert session.request.extra == {
-        "idea_mode": "auto",
+        "idea_mode": "fast",
         "idea_budget_profile": "balanced",
         "project_inputs": {"candidate_count": 20, "mode": "synthetic"},
     }

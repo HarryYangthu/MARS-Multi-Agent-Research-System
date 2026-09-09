@@ -7,24 +7,11 @@ import math
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from app.harness.agent_loop.trace import atomic_json
 from app.agents.idea.protocol import protocol_errors
-
-
-def canonical_source(url: str) -> str:
-    p = urlparse(url.strip())
-    host = (p.hostname or "").lower()
-    path = p.path.rstrip("/")
-    if host in {"arxiv.org", "export.arxiv.org"}:
-        paper = re.sub(r"v[0-9]+$", "", path.removesuffix(".pdf").split("/")[-1])
-        return "arxiv:" + paper
-    if host == "ieeexplore.ieee.org":
-        match = re.search(r"(?:document|abstract/document)/([0-9]+)", path)
-        if match:
-            return "ieee:" + match.group(1)
-    return host + path
+from app.agents.idea.source_identity import SourceIdentityIndex, search_metadata_rows
+from app.agents.idea.publication_count import canonical_source as canonical_source, count_publications
 
 
 def title_key(value: str) -> str:
@@ -149,7 +136,7 @@ def parameter_errors(raw: Any, *, max_ratio: float) -> list[str]:
 
 
 def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str]:
-    """Check each declared configuration against the same tensor ledger and limit.
+    """Check shared or explicitly overridden candidate ledgers against the limit.
 
     No free-text dimensions are inferred and no passing cases are generated.
     Historical ledgers without evaluation_cases retain their original contract.
@@ -161,10 +148,13 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
     errors: list[str] = []
     names: set[str] = set()
     includes_primary = False
+    base_fields = {"name", "variables", "baseline_parameters", "candidate_parameters"}
+    override_fields = {"candidate_formula", "candidate_components"}
     for index, case in enumerate(cases):
         path = f"{prefix}/{index}"
-        if not isinstance(case, dict) or set(case) != {"name", "variables", "baseline_parameters", "candidate_parameters"}:
-            errors.append(path + ": require only name, variables, baseline_parameters, candidate_parameters")
+        if not isinstance(case, dict) or set(case) not in (base_fields, base_fields | override_fields):
+            errors.append(path + ": require name, variables, baseline_parameters, candidate_parameters; "
+                          "a different candidate architecture must supply both candidate_formula and candidate_components")
             continue
         name = case["name"]
         if not isinstance(name, str) or not name.strip() or len(name) > 120 or name in names:
@@ -172,16 +162,24 @@ def _parameter_case_errors(raw: dict[str, Any], *, max_ratio: float) -> list[str
         else:
             names.add(name)
         variables = case["variables"]
-        if not isinstance(variables, dict) or set(variables) != set(raw["variables"]):
-            errors.append(path + "/variables: explicitly assign exactly the primary variable names")
+        overridden = override_fields <= set(case)
+        if (not isinstance(variables, dict) or not set(raw["variables"]) <= set(variables)
+                or (not overridden and set(variables) != set(raw["variables"]))):
+            errors.append(path + "/variables: explicitly assign all primary variable names; "
+                          "additional variables require a complete candidate formula/components override")
             continue
-        includes_primary = includes_primary or variables == raw["variables"]
+        same_candidate = (not overridden or all(case[key] == raw.get(key) for key in override_fields))
+        includes_primary = includes_primary or (same_candidate and variables == raw["variables"])
         ledger = {key: value for key, value in raw.items() if key != "evaluation_cases"}
         ledger.update({key: case[key] for key in ("variables", "baseline_parameters", "candidate_parameters")})
+        if overridden:
+            ledger.update({key: case[key] for key in override_fields})
         errors.extend(path + error.removeprefix("/parameter_budget")
                       for error in parameter_errors(ledger, max_ratio=max_ratio))
     if not includes_primary:
-        errors.append(prefix + ": primary variables must be included explicitly")
+        errors.append(prefix + ": primary variables must be included explicitly with the unchanged "
+                      "primary candidate formula/components (inherited or exactly repeated); a different candidate ledger "
+                      "cannot replace the primary configuration")
     return errors
 
 
@@ -193,14 +191,13 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
         output = obs.get("output")
         if not obs.get("ok") or not isinstance(output, dict):
             continue
-        if obs.get("tool") in {"search.arxiv_search", "search.web_search", "search.openalex_search"}:
-            for hit in output.get("hits", []):
-                if isinstance(hit, dict) and hit.get("title") and hit.get("url"):
-                    identity = canonical_source(hit["url"])
-                    previous_titles = papers.get(identity, {}).get("observed_titles", [])
-                    titles = list(dict.fromkeys([*previous_titles, hit["title"]]))
-                    papers[identity] = {**hit, "identity": identity, "observed_titles": titles,
-                                        "selection_reason": obs.get("reason", ""), "tool": obs["tool"]}
+        for hit in search_metadata_rows(obs):
+            if hit.get("title") and hit.get("url"):
+                identity = canonical_source(hit["url"])
+                previous_titles = papers.get(identity, {}).get("observed_titles", [])
+                titles = list(dict.fromkeys([*previous_titles, hit["title"]]))
+                papers[identity] = {**hit, "identity": identity, "observed_titles": titles,
+                                    "selection_reason": obs.get("reason", ""), "tool": obs["tool"]}
         if obs.get("tool") == "search.fetch_sources":
             for source in output.get("sources", []):
                 if not source.get("ok"):
@@ -225,7 +222,7 @@ def evidence_inventory(observations: list[dict[str, Any]]) -> dict[str, Any]:
 def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], *,
                     min_sources: int, min_pdfs: int, require_budget: bool, max_ratio: float) -> list[str]:
     inventory = evidence_inventory(observations)
-    papers = {p["identity"]: p for p in inventory["papers"]}
+    identities = SourceIdentityIndex(observations)
     errors: list[str] = protocol_errors(metadata)
     debate = metadata.get("debate_summary")
     if isinstance(debate, dict) and debate.get("rounds", 0) != 0:
@@ -233,27 +230,28 @@ def material_errors(metadata: dict[str, Any], observations: list[dict[str, Any]]
     citations = metadata.get("related_literature", [])
     if not isinstance(citations, list):
         citations = []
-    cited: set[str] = set()
+    cited_urls: set[str] = set()
+    cited_metadata: list[dict[str, Any]] = []
     for index, citation in enumerate(citations):
         if not isinstance(citation, dict):
             errors.append(f"/related_literature/{index}: object required")
             continue
-        identity = canonical_source(str(citation.get("url", "")))
-        source = papers.get(identity)
-        if source is None or title_key(str(citation.get("title", ""))) not in {
-                title_key(title) for title in source.get("observed_titles", [source["title"]])}:
-            errors.append(f"/related_literature/{index}: URL/title not matched to a real search result")
+        matches = identities.matching_hits(str(citation.get("url", "")))
+        if title_key(str(citation.get("title", ""))) not in {title_key(source["title"]) for source in matches}:
+            errors.append(f"/related_literature/{index}: URL/title not matched to a real search result at the declared document version")
         else:
-            cited.add(identity)
-    if len(cited) < min_sources:
-        errors.append(f"/related_literature: need {min_sources} distinct retrieved cited sources; observed {len(cited)}")
+            cited_urls.add(str(citation["url"]))
+            cited_metadata.extend({"url": citation["url"], "title": hit["title"]} for hit in matches
+                                  if title_key(str(citation.get("title", ""))) == title_key(hit["title"]))
+    publications = count_publications(cited_metadata)
+    if publications.count < min_sources:
+        errors.append(f"/related_literature: need {min_sources} distinct retrieved cited sources; observed {publications.count}"
+                      + publications.diagnostic())
     valid_pdfs = set()
     for row in inventory["reads"]:
-        identity = canonical_source(row["url"])
-        source = papers.get(identity)
-        download_id = canonical_source(row["download_url"])
-        expected = canonical_source(str((source or {}).get("pdf_url") or (source or {}).get("url", "")))
-        if source and download_id == expected and row.get("source_type") == "pdf" and row.get("visible_pages"):
+        cited_read = any(identities.matching_hits(url, read_receipt=str(row.get("read_receipt", "")))
+                         for url in cited_urls)
+        if cited_read and row.get("source_type") == "pdf" and row.get("visible_pages"):
             valid_pdfs.add(row["sha256"])
     if len(valid_pdfs) < min_pdfs:
         errors.append(f"/evidence: need {min_pdfs} source-matched downloaded PDFs with visible page excerpts")

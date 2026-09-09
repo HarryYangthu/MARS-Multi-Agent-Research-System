@@ -1,0 +1,73 @@
+# Same public LUT task with CVF and NeurIPS publisher sources plus single-paper research units.
+# API acceptance uses its explicit runtime profile; no paper, URL or prior finding is seeded.
+project: pimc
+scope: method_proposal
+data_scope: public_research
+question: >-
+  研究二维实值LUT的表达能力优化。公开符号基线已经使用双线性插值：
+  输入(x,y)属于[-1,1]^2，输出实标量，固定均匀16×16网格，256个可训练实参数。
+  候选总可训练实参数不得超过256。局部高曲率和不均匀采样仅为待验证的瓶颈假设，
+  未提供真实数据和代码，不得当作已观察事实。自主委派论文调研，提出研究缺口，
+  自主检索并读取至少两篇相关论文的方法页段，说明逐篇选文理由、原文依据、
+  提取思路及迁移限制；比较候选，交付一个公式、固定/可训练量、边界、初始化、
+  优化方式和判别实验定义完整的方案。输出一两句中文人话总结和规范Experiment交接包。
+  不允许声称完成真实PIMC仿真或已取得性能提升。论文和具体方法由Agent自主选择。
+model:
+  provider: deepseek
+  name: deepseek-v4-flash
+  max_tokens: 32768
+  temperature: 0.1
+  thinking: false
+  reasoning_effort: null
+  timeout_seconds: 360
+  max_retries: 1
+loop:
+  mode: reflection
+  reflection_reasoning_effort: high
+  reflection_format_repair_enabled: true
+  reflection_thinking_enabled: true
+  trace: full
+  max_model_calls: 14
+  max_tool_steps: 5
+  max_protocol_repairs: 4
+  max_validation_repairs: 4
+  max_reflections: 3
+  input_token_budget: 256000
+  observation_chars: 16000
+  protocol: native_tools
+research:
+  max_delegations: 3
+  per_delegation_min_sources: 1
+requirements:
+  min_sources: 2
+  min_pdfs: 2
+  require_research_dossier: true
+  require_parameter_budget: true
+  max_parameter_ratio: 1.0
+domains: [arxiv.org, export.arxiv.org, api.openalex.org, openaccess.thecvf.com, papers.nips.cc, proceedings.neurips.cc]
+tools: [idea.research_delegate, knowledge.kb_query]
+child_model:
+  provider: deepseek
+  name: deepseek-v4-flash
+  max_tokens: 24576
+  temperature: 0.1
+  thinking: false
+  reasoning_effort: null
+  timeout_seconds: 360
+  max_retries: 1
+child_loop:
+  mode: reflection
+  reflection_thinking_enabled: true
+  reflection_reasoning_effort: high
+  reflection_format_repair_enabled: true
+  trace: full
+  max_model_calls: 12
+  max_tool_steps: 10
+  max_protocol_repairs: 2
+  max_validation_repairs: 3
+  max_reflections: 2
+  input_token_budget: 256000
+  observation_chars: 16000
+  protocol: native_tools
+child_tools: [search.openalex_search, search.arxiv_search, search.cvf_search, search.neurips_search, search.fetch_sources, knowledge.kb_query]
+source_max_mib: 64

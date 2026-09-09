@@ -31,6 +31,17 @@ def get_orchestrator() -> Orchestrator:
     return _orchestrator
 
 
+async def shutdown_owned_runs() -> None:
+    """Do not instantiate/recover an orchestrator just to shut the app down."""
+    if _orchestrator is not None:
+        from loguru import logger
+
+        results = await _orchestrator.shutdown_owned_runs()
+        for result in results:
+            if result.get("status") != "stopped":
+                logger.error("Owned run shutdown incomplete: run={} status={}", result["run_id"], result["status"])
+
+
 def reset_for_tests() -> None:
     global _run_store, _orchestrator, _bus
     _run_store = None

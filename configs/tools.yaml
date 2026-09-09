@@ -1,4 +1,53 @@
 tools:
+  search.neurips_search:
+    enabled: true
+    description: Search an official NeurIPS yearly directory with short title keywords. Supports observed /paper_files/paper/{year}/hash/*-Abstract.html pages and their actual Paper buttons; unavailable years or other layouts fail explicitly. Returns verified original HTML/citation metadata and the actual PDF link, without downloading or reading PDFs. Alternate citation hosts are not verified PDF aliases. Use search.fetch_sources for body evidence.
+    mutation_level: read
+    allowed_agents: [idea_research]
+    # Covers the configured metadata budget (at most 180s) plus local archival.
+    timeout_seconds: 185
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [query, year]
+      properties:
+        query: {type: string, minLength: 1, maxLength: 200, pattern: '\S'}
+        year: {type: integer, minimum: 2000, maximum: 2100}
+        top_k: {type: integer, minimum: 1, maximum: 3, default: 3}
+    output_schema:
+      type: object
+      required: [source, query, year, hits, search_receipt]
+      additionalProperties: true
+      properties:
+        source: {const: neurips}
+        hits: {type: array, maxItems: 3, items: {type: object}}
+
+  search.cvf_search:
+    enabled: true
+    description: Search the official CVF proceedings directory for a specified venue and year using short title keywords. Supports the /content/{VENUE}{YEAR}/ layout; older layouts or unavailable years fail explicitly. Returns only actual directory entries with verified landing-page citation metadata and original PDF links; does not download or read PDFs. Use search.fetch_sources for body evidence.
+    mutation_level: read
+    allowed_agents: [idea_research]
+    # Covers the configurable metadata budget (maximum 180s) plus local archival.
+    timeout_seconds: 185
+    network: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [query, venue, year]
+      properties:
+        query: {type: string, minLength: 1, maxLength: 200, pattern: '\S'}
+        venue: {type: string, enum: [CVPR, ICCV, WACV]}
+        year: {type: integer, minimum: 2000, maximum: 2100}
+        top_k: {type: integer, minimum: 1, maximum: 3, default: 3}
+    output_schema:
+      type: object
+      required: [source, query, venue, year, hits, search_receipt]
+      additionalProperties: true
+      properties:
+        source: {const: cvf}
+        hits: {type: array, maxItems: 3, items: {type: object}}
+
   search.openalex_search:
     enabled: true
     description: Search OpenAlex metadata for papers with original PDF locations inside configured source domains. Returns explicit OpenAlex provenance; not MCP.
@@ -68,7 +117,7 @@ tools:
 
   search.arxiv_search:
     enabled: true
-    description: Search arXiv and cache results into literature KB.
+    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 65
@@ -78,10 +127,29 @@ tools:
       additionalProperties: false
       oneOf:
         - required: [query]
+          not: {required: [arxiv_ids]}
         - required: [q]
+          not: {required: [arxiv_ids]}
+        - required: [arxiv_ids]
+          not:
+            anyOf:
+              - required: [query]
+              - required: [q]
+              - required: [date_from]
+              - required: [categories]
+              - required: [sort_by]
+              - required: [top_k]
       properties:
         q: {type: string, minLength: 1}
         query: {type: string, minLength: 1}
+        arxiv_ids:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^(?:[0-9]{4}\.[0-9]{4,5}|[a-zA-Z.-]+/[0-9]{7})(?:v[1-9][0-9]*)?$'
         top_k: {type: integer, minimum: 1, maximum: 20}
         date_from: {type: string}
         sort_by:
@@ -122,10 +190,11 @@ tools:
 
   search.fetch_sources:
     enabled: true
-    description: Archive selected sources and read PDF page windows. Default max_sources=1; set explicitly for a batch. Reuse cached PDFs to read more pages.
+    description: Archive selected sources and read PDF page windows. Default max_sources=1; set explicitly for a batch. Reuse verified cached PDFs to read more pages. Link aliases of the same paper version share the download attempt limit; inspect per-source error_code, retryable, received bytes and elapsed time before retrying. Different versions are distinct resources.
     mutation_level: read
     allowed_agents: [idea, idea_research]
-    timeout_seconds: 125
+    # The settings-backed total source budget is at most 300s, including parsing.
+    timeout_seconds: 330
     network: true
     input_schema:
       type: object

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +12,8 @@ from loguru import logger
 from app.agents.coding.agent import CodingAgent
 from app.agents.execution.agent import ExecutionAgent
 from app.agents.experiment.agent import ExperimentAgent
-from app.agents.idea.agent import IdeaAgent
+from app.agents.idea.runtime_profile import resolve_idea_profile
+from app.agents.idea.service_agent import ServiceIdeaAgent
 from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
@@ -36,7 +39,7 @@ from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
-from app.api.dependencies import get_event_bus, get_run_store
+from app.api.dependencies import get_event_bus, get_run_store, shutdown_owned_runs
 from app.bridge.agent_registry import get_registry
 from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
@@ -53,10 +56,28 @@ from app.settings import get_settings
 
 def register_default_agents() -> None:
     reg = get_registry()
-    for cls in (IdeaAgent, ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent):
+    idea = ServiceIdeaAgent(profile=resolve_idea_profile(get_settings().mars_idea_runtime_profile))
+    if not reg.has(idea.name):
+        reg.register(idea.name, idea)
+    else:
+        existing = reg.get(idea.name)
+        if isinstance(existing, ServiceIdeaAgent):
+            if existing.service_profile_snapshot != idea.service_profile_snapshot:
+                raise ValueError("Idea runtime profile changed after registration; restart the service")
+        elif idea.service_profile_snapshot is not None:
+            raise ValueError("experimental Idea profile requires its service-start registered agent")
+    for cls in (ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent):
         agent = cls()
         if not reg.has(agent.name):
             reg.register(agent.name, agent)
+
+
+@asynccontextmanager
+async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await shutdown_owned_runs()
 
 
 def create_app() -> FastAPI:
@@ -70,6 +91,7 @@ def create_app() -> FastAPI:
         title="MARS",
         description="Multi-Agent Research System",
         version=extension_runtime.profile.core_version,
+        lifespan=service_lifespan,
     )
     app.state.extension_runtime = extension_runtime
 
