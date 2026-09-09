@@ -38,6 +38,30 @@ def test_legacy_opt_in() -> None:
     assert protocol_errors({}, required=True)
 
 
+@pytest.mark.parametrize("reference", ["/decision_rule", "/decision_rule/primary"])
+def test_primary_comparison_can_explicitly_bind_its_decision(reference: str) -> None:
+    value = proposal()
+    value["decision_rule"] = {"primary": "Human-authored statistical decision contract."}
+    value["evaluation_protocol"]["comparison"]["decision_rule_ref"] = reference
+    assert protocol_errors(value) == []
+
+
+@pytest.mark.parametrize("reference", ["/decision_rule/missing", "/method_spec/loss", "/decision_rule/",
+                                      "/decision_rule/~2", "/decision_rule/steps/01"])
+def test_explicit_primary_decision_must_resolve_canonically(reference: str) -> None:
+    value = proposal()
+    value["decision_rule"] = {"steps": ["Human-authored decision step."]}
+    value["evaluation_protocol"]["comparison"]["decision_rule_ref"] = reference
+    assert protocol_errors(value)
+
+
+def test_primary_omission_preserves_legacy_validation_but_dangling_explicit_ref_fails() -> None:
+    value = proposal()
+    assert protocol_errors(value) == []
+    value["evaluation_protocol"]["comparison"]["decision_rule_ref"] = "/decision_rule"
+    assert any("unresolved" in error for error in protocol_errors(value))
+
+
 @pytest.mark.parametrize("value", [None, [], "invalid", {}, {"version": "v0"}])
 def test_malformed_protocol_is_reported(value: Any) -> None:
     assert protocol_errors({"evaluation_protocol": value})

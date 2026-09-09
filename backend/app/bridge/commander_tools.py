@@ -7,7 +7,6 @@ verbs the Commander LLM can pick from. Dependencies are injected via
 """
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -131,9 +130,12 @@ async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     except KeyError:
         return {"ok": False, "error": f"run {run_id} not found"}
     ctx.session.linked_run_id = run_id
-    asyncio.create_task(ctx.orchestrator.run(run_id), name=f"commander_run:{run_id}")
+    started = ctx.orchestrator.start_owned_run(run_id)
+    if not started["ok"]:
+        return started
     return {
         "ok": True,
+        "status": started["status"],
         "run_id": run_id,
         "entrypoint": rsession.request.entrypoint,
         "auto_approve": rsession.request.auto_approve,

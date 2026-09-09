@@ -1,6 +1,7 @@
 """Run-local research delegation with independent real loops and verified receipts."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -316,6 +317,13 @@ class ResearchSession:
             "as well as detailed findings; a caveat elsewhere does not qualify an unqualified claim. Every insight must point "
             "to an actual read receipt, document hash and page with an exact visible quote. Stop when evidence answers the gap; "
             "Do not repeat searches merely to increase counts after the explicit minimum evidence requirement is met. "
+            "Use the smallest nonredundant set of complete transferable mechanisms that resolves the gap. "
+            "Keep a mechanism's parameterization, interpolation, initialization, budget and limitations together "
+            "instead of splitting its dependent details into repeated insights. Separate insights only when "
+            "they inform independent downstream design decisions; there is no insight-count quota. Each "
+            "insight still needs source evidence and all relevant assumptions. A nonsignificant difference "
+            "cannot establish equivalence, retained ability or compressible redundancy; any such proposed "
+            "conclusion needs an explicit margin and supporting decision procedure, otherwise remain inconclusive. "
             + research_submission_instruction(policy) + "Use research_report.v1 for a grounded report. "
             "If the gap cannot be resolved within available evidence and tools, submit research_gap.v1 instead: "
             "give project, human_summary, reason, remaining_gaps and next_actions. This is an explicit failure, "
@@ -391,6 +399,18 @@ class ResearchSession:
         provider = None
         runtime_error: dict[str, str] | None = None
         result = None
+
+        def archive_cancellation() -> None:
+            from app.agents.idea.research_cancellation import archive_research_cancellation
+            try:
+                failure = archive_research_cancellation(
+                    root=root, trace=trace, target=target, delegation_id=identifier,
+                    min_sources=minimum, policy=policy, gap=str(args.get("gap", "")), project=self.request.project)
+                if not any(item.get("delegation_id") == identifier for item in self.failures):
+                    self.failures.append(failure)
+            except Exception as archive_error:
+                logger.warning("Cancelled research archive failed: delegation={} type={}", identifier, type(archive_error).__name__)
+
         try:
             provider, model = select_provider(self.config)
             result = await NativeAgentLoop().run(LoopInput(messages=messages, provider=provider, config=model,
@@ -409,6 +429,11 @@ class ResearchSession:
                 stop_contract_id=STOP_CONTRACT,
                 stop_condition=lambda view: evidence_stop(view, min_sources=minimum,
                     max_tool_steps=policy.max_tool_steps, tools=tools, project=self.request.project)))
+        except asyncio.CancelledError:
+            # Cancellation is not an ordinary failed ToolResult: preserve the
+            # child identity, then propagate it so the parent also stops.
+            archive_cancellation()
+            raise
         except Exception as exc:
             # The loop persists its own error checkpoint. Preserve that outcome
             # and delegation identity instead of losing them at the tool boundary.
@@ -417,6 +442,9 @@ class ResearchSession:
             if provider is not None:
                 try:
                     await provider.close()
+                except asyncio.CancelledError:
+                    archive_cancellation()
+                    raise
                 except Exception as exc:
                     # Cleanup must not erase the original execution error.
                     if runtime_error is None:

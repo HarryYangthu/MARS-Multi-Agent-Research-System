@@ -15,7 +15,6 @@ from app.harness.schema.frontmatter_parser import dumps as fm_dumps, parse as fm
 from app.harness.schema.validator import validate_metadata
 from app.harness.sedimentation.hooks import sediment_approved_artifact
 from app.hitl.approval import approve as do_approve, reject as do_reject
-from app.hitl.approval import request_revision as do_request_revision
 from app.hitl.audit_log import read as read_audit
 from app.hitl.diff_view import unified
 from app.hitl.review_session import get_registry as get_review_registry
@@ -578,22 +577,20 @@ async def approve_artifact(
 async def reject_artifact(
     run_id: str, agent_dir: str, stem: str, payload: RejectPayload
 ) -> dict[str, str]:
-    review = get_review_registry().get(run_id, agent_dir)
-    if review is None:
+    try:
         result = await get_orchestrator().request_artifact_revision(
             run_id=run_id,
             agent=agent_dir,
             reason=payload.reason,
         )
-        if not result.get("ok"):
-            raise HTTPException(status_code=409, detail=result)
-        return {
-            "status": str(result.get("status") or "revision_started"),
-            "node": str(result.get("node") or ""),
-        }
-    bus = get_event_bus()
-    await do_request_revision(session=review, bus=bus, reason=payload.reason)
-    return {"status": "revision_requested", "node": agent_dir}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result)
+    return {
+        "status": str(result.get("status") or "revision_started"),
+        "node": str(result.get("node") or ""),
+    }
 
 
 @router.post("/{run_id}/{agent_dir}/{stem}/comment", status_code=202)

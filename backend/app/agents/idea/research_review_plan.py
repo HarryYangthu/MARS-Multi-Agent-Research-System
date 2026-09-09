@@ -18,7 +18,9 @@ from app.harness.agent_loop.trace import canonical, digest
 from app.harness.llm.provider_base import Message
 from app.harness.schema.frontmatter_parser import parse
 
-REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v2"
+LEGACY_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v2"
+REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v3"
+REVIEW_PLAN_CONTRACTS = (LEGACY_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT)
 ReviewMode = Literal["whole_report", "per_insight_then_whole"]
 
 
@@ -128,13 +130,16 @@ def matching_source_rows(source: dict[str, Any], observations: list[dict[str, An
 
 def build_research_review_plan(candidate: str, observations: list[dict[str, Any]], *, task: str,
                               project: str, gap: dict[str, Any], min_sources: int,
-                              supplied_context: dict[str, str] | None = None) -> ReviewPlan:
+                              supplied_context: dict[str, str] | None = None,
+                              contract_id: str = REVIEW_PLAN_CONTRACT) -> ReviewPlan:
     """Each unit receives one full insight, its source, original task and real rows."""
     if (not isinstance(task, str) or not task.strip() or not isinstance(project, str)
             or not isinstance(gap, dict) or (supplied_context is not None and (
                 not isinstance(supplied_context, dict)
                 or not all(isinstance(key, str) and isinstance(value, str) for key, value in supplied_context.items())))):
         raise ValueError("research review needs the complete original task, gap and supplied context")
+    if contract_id not in REVIEW_PLAN_CONTRACTS:
+        raise ValueError("unknown research review plan contract: " + contract_id)
     document = parse(candidate)
     report = document.metadata
     errors = dossier_errors(report, observations, min_sources=min_sources)
@@ -177,7 +182,12 @@ def build_research_review_plan(candidate: str, observations: list[dict[str, Any]
             "required in the later method proposal, not in an exploratory transfer idea. Do not demand "
             "measured target-task gains, a complete experiment plan or that the paper solves the entire task. "
             "Do not write a replacement insight, infer new source text or claim additional reading. "
-            "Explain checks, issues and rationale in concise Chinese; preserve source titles and quotations."),
+            "Explain checks, issues and rationale in concise Chinese; preserve source titles and quotations."
+            + (" A nonsignificant difference or inconclusive comparison does not establish equivalence, "
+               "noninferiority, retained ability or compressible redundancy. Check both source interpretations "
+               "and proposed transfer conclusions: such claims need an explicit margin and a decision procedure "
+               "that can establish them. Otherwise the result remains inconclusive."
+               if contract_id == REVIEW_PLAN_CONTRACT else "")),
             Message("user", "Complete research task:\n" + task),
             Message("user", "Project constraints:\n" + project),
             Message("user", "Delegated evidence gap and completion criteria:\n" + canonical(gap)),
@@ -189,17 +199,20 @@ def build_research_review_plan(candidate: str, observations: list[dict[str, Any]
                         for name, content in sorted((supplied_context or {}).items()))
         units.append(ReviewUnit(unit_id=insight["id"], messages=tuple(messages), response_schema=insight_review_schema(fields),
                                 parse_response=partial(parse_insight_review, fields=fields), evidence_bindings=bindings))
-    return ReviewPlan(contract_id=REVIEW_PLAN_CONTRACT, candidate_sha256=digest(candidate), units=tuple(units))
+    return ReviewPlan(contract_id=contract_id, candidate_sha256=digest(candidate), units=tuple(units))
 
 
 def review_plan_claim(checkpoint: dict[str, Any], candidate: str, *, trace_root: Path,
                       checkpoint_ref: str) -> dict[str, Any]:
     """Describe only a complete plan tied to original model request/result events."""
-    errors = review_plan_errors(checkpoint, candidate, REVIEW_PLAN_CONTRACT, trace_root=trace_root)
+    contract_id = checkpoint.get("review_plan", {}).get("contract_id")
+    if contract_id not in REVIEW_PLAN_CONTRACTS:
+        raise ValueError("unknown research review plan contract")
+    errors = review_plan_errors(checkpoint, candidate, contract_id, trace_root=trace_root)
     if errors:
         raise ValueError("research review plan: " + "; ".join(errors))
     plan = checkpoint["review_plan"]
-    return {"contract_id": REVIEW_PLAN_CONTRACT, "candidate_sha256": digest(candidate),
+    return {"contract_id": contract_id, "candidate_sha256": digest(candidate),
             "plan_sha256": plan["plan_sha256"], "covered_insight_ids": [unit["unit_id"] for unit in plan["units"]],
             "results_ref": checkpoint_ref + "#/review_plan/results", "results_sha256": digest(plan["results"])}
 
@@ -229,7 +242,7 @@ def research_plan_errors(manifest: dict[str, Any], output: dict[str, Any], check
             raise ValueError("research request is missing its exact review context")
         expected = build_research_review_plan(candidate, checkpoint["history"], task=context["task"],
             project=context["project"], gap=request_record["arguments"], min_sources=request_record["min_sources"],
-            supplied_context=context["supplied_context"])
+            supplied_context=context["supplied_context"], contract_id=manifest.get("review_plan", {}).get("contract_id", ""))
         payload = plan_payload(expected)
         if any(checkpoint.get("review_plan", {}).get(key) != value for key, value in payload.items()):
             raise ValueError("review plan inputs/coverage differ from the complete original insights and source rows")

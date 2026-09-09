@@ -13,6 +13,7 @@ def protocol_schema() -> dict[str, Any]:
     method_ref = {"type": "string", "pattern": "^/method_spec/.+"}
     refs = {"type": "array", "items": text, "minItems": 1, "uniqueItems": True}
     identifier = {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"}
+    decision_ref = {"type": "string", "pattern": "^/decision_rule(?:/.+)?$"}
     arm: dict[str, Any] = {"type": "object", "additionalProperties": False,
            "description": "One independently initialized and trained model per seed. Do not pool independent cases into one fit.",
            "required": ["training_data_refs", "assessment_data_refs", "objective_ref", "optimizer_ref", "initialization_ref"],
@@ -23,11 +24,14 @@ def protocol_schema() -> dict[str, Any]:
     extra_arm = {**arm, "required": [*arm["required"], "method_spec_ref"]}
     comparison: dict[str, Any] = {"type": "object", "additionalProperties": False,
         "required": ["isolates_architecture", "differences_justification"],
-        "properties": {"isolates_architecture": {"type": "boolean"}, "differences_justification": {"type": "string"}}}
+        "description": "Primary baseline/candidate comparison. Legacy omission of decision_rule_ref uses the proposal's canonical decision_rule.",
+        "properties": {"isolates_architecture": {"type": "boolean"}, "differences_justification": {"type": "string"},
+                       "decision_rule_ref": decision_ref}}
     named_comparison = {**comparison,
+        "description": "An explicit additional pair with its own required decision rule reference.",
         "required": [*comparison["required"], "baseline_arm", "candidate_arm", "decision_rule_ref"],
         "properties": {**comparison["properties"], "baseline_arm": identifier, "candidate_arm": identifier,
-            "decision_rule_ref": {"type": "string", "pattern": "^/decision_rule(?:/.+)?$"}}}
+            "decision_rule_ref": decision_ref}}
     return {
         "type": "object", "additionalProperties": False,
         "required": ["version", "datasets", "objectives", "arms", "randomness", "comparison"],
@@ -129,6 +133,8 @@ def protocol_errors(metadata: dict[str, Any], *, required: bool = False) -> list
         if objective and not set(objective["data_refs"]) <= set(arm["training_data_refs"]):
             errors.append(prefix + f"/arms/{name}/objective_ref: objective data must belong to the arm's training data")
     baseline, candidate = protocol["arms"]["baseline"], protocol["arms"]["candidate"]
+    if "decision_rule_ref" in protocol["comparison"]:
+        check_reference(protocol["comparison"]["decision_rule_ref"], "comparison/decision_rule_ref")
     if set(baseline["assessment_data_refs"]) != set(candidate["assessment_data_refs"]):
         errors.append(prefix + "/arms: baseline and candidate must use the same held-out comparison datasets")
     if protocol["comparison"]["isolates_architecture"]:

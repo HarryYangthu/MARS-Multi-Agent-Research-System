@@ -7,12 +7,13 @@ implementations are looked up via agent_registry (reverse dependency).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -21,6 +22,7 @@ from app.bridge.bridge_agent import BridgeAgent, BridgeDecision
 from app.bridge.commander_agent import CommanderAgent, FeedbackDecision
 from app.bridge.langgraph_runtime import LangGraphRuntimeFacade
 from app.bridge.node_key import attempt_key, parse_node_key
+from app.bridge.owned_run_tasks import OwnedRunTasks
 from app.bridge.workflow_service import (
     LINEAR_STAGES,
     EntryPoint,
@@ -75,6 +77,7 @@ class RunSession:
     runners: dict[str, NodeRunner] = field(default_factory=dict)
     waiting_for_feedback: bool = False
     read_only: bool = False
+    termination: dict[str, Any] | None = None
 
 
 class Orchestrator:
@@ -92,6 +95,7 @@ class Orchestrator:
         self.commander_agent = CommanderAgent()
         self.langgraph_runtime = LangGraphRuntimeFacade()
         self._sessions: dict[str, RunSession] = {}
+        self.owned_tasks = OwnedRunTasks()
 
     # --------------------------------------------------------------- create
 
@@ -141,8 +145,111 @@ class Orchestrator:
 
     # ---------------------------------------------------------------- drive
 
+    def _stopping(self, session: RunSession) -> bool:
+        return session.termination is not None or self.owned_tasks.stopping(session.run.run_id)
+
+    def _spawn_owned(self, session: RunSession, operation: str,
+                     factory: Callable[[], Awaitable[None]]) -> bool:
+        if self._stopping(session):
+            return False
+        return self.owned_tasks.spawn(session.run.run_id, operation, factory,
+                                      finished=lambda: self._finish_owned_stop(session))
+
+    def start_owned_run(self, run_id: str) -> dict[str, Any]:
+        session = self.session(run_id)
+        if self.owned_tasks.active(run_id) is not None:
+            return {"ok": True, "status": "already_running", "run_id": run_id}
+        if session.read_only or self._stopping(session) or self.owned_tasks.closing:
+            return {"ok": False, "status": "not_startable", "run_id": run_id}
+        if any(state in {NodeState.RUNNING, NodeState.WAITING_REVIEW, NodeState.APPROVED}
+               for state in session.graph.all_states().values()):
+            return {"ok": False, "status": "unowned_existing_execution", "run_id": run_id,
+                    "error": "inspect original execution; start does not replay or recover unknown work"}
+        if session.graph.is_complete():
+            return {"ok": False, "status": "already_finished", "run_id": run_id}
+        started = self._spawn_owned(session, "start", lambda: self.run(run_id))
+        return {"ok": started, "status": "started" if started else "not_startable", "run_id": run_id}
+
+    def _finish_owned_stop(self, session: RunSession) -> None:
+        """Commit cancellation only after the owned coroutine's real cleanup."""
+        termination = session.termination
+        if termination is None or termination.get("cleanup_complete"):
+            return
+        interrupted = list(termination.get("interrupted_nodes", []))
+        for key, state in session.graph.all_states().items():
+            if state != NodeState.RUNNING:
+                continue
+            interrupted.append(key)
+            session.graph.transition(key, NodeState.FAILED)
+            session.graph.nodes[key].metadata["termination"] = {
+                "type": "cancelled", "reason": termination["reason"],
+            }
+            session.run.write_event("agent_events", {
+                "run_id": session.run.run_id, "agent": key, "from_state": "running", "to_state": "failed",
+                "termination": {"type": "cancelled", "reason": termination["reason"]},
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            })
+        termination.update(cleanup_complete=True, interrupted_nodes=interrupted,
+                           finished_at=datetime.now(tz=timezone.utc).isoformat(), automatic_resume=False)
+        states = session.graph.all_states().values()
+        status = ("failed" if NodeState.FAILED in states else "waiting_review" if NodeState.WAITING_REVIEW in states
+                  else "completed" if session.graph.is_complete() else "stopped")
+        try:
+            self._persist_state(session, status=status)
+        except Exception:
+            termination["cleanup_complete"] = False
+            raise
+        session.run.write_event("run_lifecycle", {"event": "run.cancelled", "run_id": session.run.run_id,
+                                                 "termination": dict(termination)})
+
+    def _request_owned_stop(self, run_id: str, *, reason: str) -> tuple[RunSession, asyncio.Task[None]] | dict[str, Any]:
+        """Mark and cancel synchronously, before queued work can start."""
+        task = self.owned_tasks.active(run_id)
+        # Do not recover a historical run just to mutate its state at stop.
+        session = self._sessions.get(run_id)
+        if task is None or session is None:
+            if session is not None and self.owned_tasks.stopping(run_id) and session.termination:
+                self._finish_owned_stop(session)
+                return {"ok": True, "status": "stopped", "run_id": run_id, "termination": dict(session.termination)}
+            return {"ok": False, "status": "not_owned", "run_id": run_id,
+                    "error": "no live task owned by this process; historical execution was not changed"}
+        if session.termination is None:
+            session.termination = {"type": "cancelled", "reason": reason[:500], "scope": "owned_async_tasks",
+                "requested_at": datetime.now(tz=timezone.utc).isoformat(), "cleanup_complete": False,
+                "automatic_resume": False}
+            self._persist_state(session, status="cancelling")
+        self.owned_tasks.cancel_once(run_id)
+        return session, task
+
+    async def _wait_owned_stop(self, requested: tuple[RunSession, asyncio.Task[None]] | dict[str, Any],
+                               *, grace_seconds: float) -> dict[str, Any]:
+        if isinstance(requested, dict):
+            return requested
+        session, task = requested
+        complete = await self.owned_tasks.wait(task, timeout=grace_seconds)
+        if complete:
+            self._finish_owned_stop(session)
+        return {"ok": complete, "status": "stopped" if complete else "stop_incomplete", "run_id": session.run.run_id,
+                "termination": dict(session.termination or {})}
+
+    async def stop_owned_run(self, run_id: str, *, reason: str = "user_request",
+                             grace_seconds: float = 10.0) -> dict[str, Any]:
+        if not 0 <= grace_seconds <= 60:
+            raise ValueError("stop grace must be in [0,60] seconds")
+        requested = self._request_owned_stop(run_id, reason=reason)
+        return await self._wait_owned_stop(requested, grace_seconds=grace_seconds)
+
+    async def shutdown_owned_runs(self, *, grace_seconds: float = 10.0) -> list[dict[str, Any]]:
+        if not 0 <= grace_seconds <= 60:
+            raise ValueError("stop grace must be in [0,60] seconds")
+        self.owned_tasks.closing = True
+        requested = [self._request_owned_stop(run_id, reason="server_shutdown") for run_id in self.owned_tasks.run_ids()]
+        return list(await asyncio.gather(*(self._wait_owned_stop(item, grace_seconds=grace_seconds) for item in requested)))
+
     async def run(self, run_id: str) -> None:
         session = self.session(run_id)
+        if self._stopping(session):
+            return
         graph = session.graph
         self._persist_state(session, status="running")
         await self._publish_state(session, channel="run.lifecycle", payload={
@@ -155,6 +262,8 @@ class Orchestrator:
         max_loops = len(graph.nodes) * 4 + 4
         loops = 0
         while not graph.is_complete():
+            if self._stopping(session):
+                return
             if session.waiting_for_feedback:
                 self._persist_state(session, status="waiting_feedback")
                 return
@@ -178,11 +287,15 @@ class Orchestrator:
                 logger.error("orchestrator stuck after {} loops", loops)
                 break
             for node_key in ready:
+                if self._stopping(session):
+                    return
                 await self._advance(session, node_key)
                 if session.waiting_for_feedback:
                     self._persist_state(session, status="waiting_feedback")
                     return
 
+        if self._stopping(session):
+            return
         await self._write_evaluation_scorecard(session)
         states = graph.all_states()
         failed_nodes = sorted(
@@ -237,6 +350,8 @@ class Orchestrator:
             )
 
     async def _advance(self, session: RunSession, node_key: str) -> None:
+        if self._stopping(session):
+            return
         await self._transition(session, node_key, NodeState.RUNNING)
         if not await self._run_node_runner(session, node_key):
             return
@@ -246,7 +361,8 @@ class Orchestrator:
             self._refresh_idea_acceptance_report(session, node_key)
         if session.graph.state(node_key) == NodeState.WAITING_REVIEW:
             await self._await_hitl_or_auto(session, node_key)
-            await self._complete_approved_node(session, node_key)
+            if not self._stopping(session):
+                await self._complete_approved_node(session, node_key)
 
     def _refresh_idea_acceptance_report(
         self,
@@ -336,6 +452,8 @@ class Orchestrator:
         behaviour (used by smoke tests / no-frontend pipelines). Otherwise we
         register a ReviewSession and block on its approval/rejection event.
         """
+        if self._stopping(session):
+            return
         if session.request.auto_approve:
             if not self._auto_promote(session, node_key):
                 await self._transition(session, node_key, NodeState.FAILED)
@@ -426,7 +544,12 @@ class Orchestrator:
                 or review.rejection_event.is_set()
                 or review.regenerate_event.is_set()
             ):
+                if self._stopping(session):
+                    return
                 await asyncio.sleep(0.05)
+
+            if self._stopping(session):
+                return
 
             if review.regenerate_event.is_set():
                 reason = review.revision_reason
@@ -492,7 +615,7 @@ class Orchestrator:
         session: RunSession,
         node_key: str,
     ) -> None:
-        if session.graph.state(node_key) != NodeState.APPROVED:
+        if self._stopping(session) or session.graph.state(node_key) != NodeState.APPROVED:
             return
         if parse_node_key(node_key).stage == "execution":
             await self._transition(session, node_key, NodeState.RUNNING)
@@ -547,6 +670,52 @@ class Orchestrator:
         if parse_node_key(node_key).stage == "execution":
             await self._after_execution(session, node_key)
 
+    def _release_review_stop(self, session: RunSession, *, agent: str, operation: Literal["approval", "revision"]) -> bool:
+        """Explicit action on a durable review never replays interrupted generation."""
+        from app.harness.schema.validator import validate_document
+        from app.storage.artifact_store import ArtifactStore, SCHEMA_TO_AGENT
+
+        termination = session.termination
+        run_id = session.run.run_id
+        node_key = self._latest_node_for_stage(session, agent)
+        allowed = {NodeState.WAITING_REVIEW, NodeState.APPROVED} if operation == "approval" else {NodeState.WAITING_REVIEW}
+        if (session.read_only or self.owned_tasks.closing or self.owned_tasks.active(run_id) is not None
+                or termination is None or termination.get("type") != "cancelled"
+                or termination.get("cleanup_complete") is not True or termination.get("interrupted_nodes") != []
+                or any(state in {NodeState.RUNNING, NodeState.FAILED} for state in session.graph.all_states().values())
+                or node_key is None or session.graph.state(node_key) not in allowed):
+            return False
+        for schema, (directory, stem) in SCHEMA_TO_AGENT.items():
+            if directory != agent:
+                continue
+            versions = ArtifactStore(session.run).list_versions(agent_dir=directory, stem=stem)
+            candidates = [ref for ref in versions if (ref.version == "approved") == (operation == "approval")]
+            if not candidates:
+                continue
+            artifact = candidates[-1]
+            data = artifact.path.read_bytes()
+            result = validate_document(data.decode("utf-8"), expected_schema=schema)
+            if not result.valid or result.metadata.get("project") != session.run.project:
+                continue
+            # Preserve the old stop in the append-only lifecycle before clearing
+            # its current marker. No scheduler/start/feedback path calls this.
+            session.run.write_event("run_lifecycle", {
+                "event": f"run.{operation}_resumed", "run_id": run_id, "node": node_key,
+                "previous_termination": dict(termination),
+                ("approved_artifact" if operation == "approval" else "source_artifact"): artifact.path.relative_to(session.run.root).as_posix(),
+                ("approved_sha256" if operation == "approval" else "source_sha256"): hashlib.sha256(data).hexdigest(),
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            })
+            session.termination = None
+            try:
+                self._persist_state(session, status="waiting_review")
+            except Exception:
+                session.termination = termination
+                raise
+            self.owned_tasks.release_after_explicit_review(run_id)
+            return True
+        return False
+
     async def resume_after_artifact_approval(
         self,
         *,
@@ -561,6 +730,43 @@ class Orchestrator:
         matching waiting node and starts the downstream scheduler.
         """
         session = self.session(run_id)
+        if self.owned_tasks.closing:
+            return {"ok": False, "status": "stopped_run_requires_new_execution", "run_id": run_id}
+        if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="approval"):
+            return {"ok": False, "status": "stopped_run_requires_new_execution", "run_id": run_id}
+        if self.owned_tasks.active(run_id) is not None:
+            # The existing driver observes the ReviewSession approval event or
+            # the already-written approved artifact. Never start a second one.
+            return {"ok": True, "status": "approval_signalled", "run_id": run_id}
+        acknowledgement: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+
+        async def resume_owned() -> None:
+            try:
+                result = await self._resume_approved_artifact(session, agent=agent)
+                acknowledgement.set_result(result)
+                if result.get("status") == "resumed" and not self._stopping(session):
+                    await self.run(run_id)
+            finally:
+                if not acknowledgement.done():
+                    acknowledgement.set_result({"ok": False, "status": "approval_resume_interrupted", "run_id": run_id})
+
+        if not self._spawn_owned(session, "approval", resume_owned):
+            return {"ok": False, "status": "not_startable", "run_id": run_id}
+        task = self.owned_tasks.active(run_id)
+        assert task is not None
+
+        def acknowledge_finished(_task: asyncio.Task[None]) -> None:
+            if not acknowledgement.done():
+                acknowledgement.set_result({"ok": False, "status": "approval_resume_interrupted", "run_id": run_id})
+
+        task.add_done_callback(acknowledge_finished)
+        # HTTP disconnects do not abandon or cancel the owned execution.
+        return await asyncio.shield(acknowledgement)
+
+    async def _resume_approved_artifact(self, session: RunSession, *, agent: str) -> dict[str, Any]:
+        run_id = session.run.run_id
+        if self._stopping(session):
+            return {"ok": False, "status": "stopped", "run_id": run_id}
         node_key = self._latest_node_for_stage(session, agent)
         if node_key is None:
             return {"ok": False, "error": f"stage {agent} is not in this run"}
@@ -580,7 +786,6 @@ class Orchestrator:
             }
         if not session.graph.is_complete() and not session.waiting_for_feedback:
             self._persist_state(session, status="running")
-            asyncio.create_task(self.run(run_id), name=f"resume_after_approval:{run_id}")
             return {"ok": True, "status": "resumed", "node": node_key}
         status = "waiting_feedback" if session.waiting_for_feedback else "completed"
         self._persist_state(session, status=status)
@@ -792,6 +997,12 @@ class Orchestrator:
         diagnosis_version: str,
     ) -> dict[str, Any]:
         session = self.session(run_id)
+        if self._stopping(session) or self.owned_tasks.closing:
+            return {"ok": False, "status": "stopped_run_requires_new_execution"}
+        if self.owned_tasks.active(run_id) is not None:
+            return {"ok": True, "status": "already_running"}
+        if NodeState.RUNNING in session.graph.all_states().values():
+            return {"ok": False, "status": "unowned_existing_execution"}
         run = session.run
         path = run.subdir("diagnosis") / f"diagnosis.{diagnosis_version}.md"
         if not path.exists():
@@ -820,7 +1031,7 @@ class Orchestrator:
         if appended:
             session.waiting_for_feedback = False
             self._persist_state(session, status="running")
-            asyncio.create_task(self.run(run_id), name=f"feedback_loop:{run_id}")
+            self._spawn_owned(session, "feedback", lambda: self.run(run_id))
         return {
             "ok": True,
             "status": "appended" if appended else "already_exists",
@@ -838,12 +1049,27 @@ class Orchestrator:
         reason: str,
     ) -> dict[str, Any]:
         session = self.session(run_id)
+        if self.owned_tasks.closing:
+            return {"ok": False, "status": "stopped_run_requires_new_execution"}
+        if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
+            return {"ok": False, "status": "stopped_run_requires_new_execution"}
         node_key = self._latest_node_for_stage(session, agent)
         if node_key is None:
             return {"ok": False, "error": f"stage {agent} is not in this run"}
         state = session.graph.state(node_key)
-        if state == NodeState.RUNNING:
+        if self.owned_tasks.active(run_id) is not None:
+            if state == NodeState.WAITING_REVIEW:
+                from app.hitl.review_session import get_registry as get_review_registry
+                review = get_review_registry().get(run_id, agent)
+                if review is not None:
+                    if not review.regenerate_event.is_set():
+                        from app.hitl.approval import request_revision
+                        await request_revision(session=review, bus=session.bus, reason=reason)
+                    return {"ok": True, "status": "revision_requested", "node": node_key}
             return {"ok": True, "status": "already_running", "node": node_key}
+        if NodeState.RUNNING in session.graph.all_states().values():
+            return {"ok": False, "status": "unowned_existing_execution", "node": node_key,
+                    "error": "unknown historical execution is not automatically replayed"}
         if state not in {
             NodeState.WAITING_REVIEW,
             NodeState.FAILED,
@@ -854,26 +1080,20 @@ class Orchestrator:
                 "error": f"stage {agent} cannot be revised from {state.value}",
                 "node": node_key,
             }
-        await self._publish_state(
-            session,
-            channel=f"run.{session.run.run_id}.hitl",
-            payload={
-                "event": "hitl.revision_requested",
-                "agent": agent,
-                "node": node_key,
-                "reason": reason,
-                "fallback": True,
-            },
-        )
-        asyncio.create_task(
-            self._run_revision_flow(
-                session=session,
-                node_key=node_key,
-                reason=reason,
-            ),
-            name=f"artifact_revision:{run_id}:{node_key}",
-        )
-        return {"ok": True, "status": "revision_started", "node": node_key}
+        async def revise_owned() -> None:
+            from app.hitl.review_session import get_registry as get_review_registry
+
+            # A review object may have outlived a stopped owner. This new
+            # explicit revision replaces that wait; it is never a checkpoint replay.
+            await get_review_registry().unregister(run_id, agent)
+            await self._publish_state(session, channel=f"run.{run_id}.hitl", payload={
+                "event": "hitl.revision_requested", "agent": agent, "node": node_key,
+                "reason": reason, "fallback": True,
+            })
+            await self._run_revision_flow(session=session, node_key=node_key, reason=reason)
+
+        started = self._spawn_owned(session, "revision", revise_owned)
+        return {"ok": started, "status": "revision_started" if started else "not_startable", "node": node_key}
 
     async def _run_revision_flow(
         self,
@@ -883,6 +1103,8 @@ class Orchestrator:
         reason: str,
     ) -> None:
         try:
+            if self._stopping(session):
+                return
             await self._transition(session, node_key, NodeState.RUNNING)
             if not await self._run_node_runner(
                 session,
@@ -894,6 +1116,9 @@ class Orchestrator:
                 await self._transition(session, node_key, NodeState.WAITING_REVIEW)
             if session.graph.state(node_key) == NodeState.WAITING_REVIEW:
                 await self._await_hitl_or_auto(session, node_key)
+            if not self._stopping(session):
+                await self._complete_approved_node(session, node_key)
+                await self.run(session.run.run_id)
         except Exception as exc:  # pragma: no cover - background safety net
             logger.warning(
                 "artifact revision flow failed: run={} node={} error={}",
@@ -952,6 +1177,7 @@ class Orchestrator:
             bus=self.bus,
             waiting_for_feedback=waiting,
             read_only=read_only,
+            termination=snapshot.termination if snapshot is not None else None,
         )
         self._sessions[run_id] = session
         return session
@@ -1066,6 +1292,7 @@ class Orchestrator:
                 "extra": dict(session.request.extra),
             },
             status=status,
+            termination=session.termination,
         )
 
     @staticmethod

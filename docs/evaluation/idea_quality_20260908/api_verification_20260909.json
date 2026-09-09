@@ -1,0 +1,421 @@
+{
+  "record_kind": "idea_api_runtime_verification",
+  "schema": "idea.api_evidence_export.v1",
+  "exported_at": "2026-09-09T01:57:24.036207+00:00",
+  "date_of_execution_utc": "2026-09-08",
+  "global_attempt_number": 16,
+  "api_attempt_number": 1,
+  "evidence_scope": "Real API create/start through Bridge, followed by independent offline semantic review; no accepted main delivery. This is separate from the prior 15 direct CLI attempts.",
+  "legacy_cli_export": {
+    "file": "verification.json",
+    "runs_count": 15,
+    "raw_file_sha256_entries": 181,
+    "file_sha256": "07a4852693056f5e6acdca76c13bddea3edf60d86115dd9ab43499a34c0cc0d0",
+    "all_15_records_and_hashes_unchanged": true,
+    "legacy_readme_before_api_append_sha256": "5c39bdd24ea61757591abced2a567646931c6c7a130553261e6ddffe16f77e91"
+  },
+  "raw_archives_in_repository": false,
+  "raw_archive_note": "Only a small summary and source hashes are exported. No PDFs, full model request/response archives, keys or credentials are copied.",
+  "run_id": "2026-09-08T1906_api_idea_20260908t190611_bd5d1df3",
+  "local_raw_directory": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-08T1906_api_idea_20260908t190611_bd5d1df3",
+  "driver_directory": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/verification/api_idea_20260908T190611_bd5d1df3",
+  "source": {
+    "commit": "41fb00ccc8fa9f544686c49bed55eb727606c56d",
+    "tree": "4dc3097a1be9bb0d80a47b55d1fe3e409a342da5",
+    "dirty_paths": ""
+  },
+  "source_after": {
+    "commit": "41fb00ccc8fa9f544686c49bed55eb727606c56d",
+    "dirty_paths": ""
+  },
+  "entrypoint": {
+    "kind": "api",
+    "development_bypass_bridge": false,
+    "api_create": {
+      "method": "POST",
+      "path": "/api/runs",
+      "http_status": 200
+    },
+    "api_start": {
+      "method": "POST",
+      "path": "/api/runs/2026-09-08T1906_api_idea_20260908t190611_bd5d1df3/start",
+      "http_status": 202
+    },
+    "auto_approve": false,
+    "claim_boundary": "HTTP create/start succeeded and real parent/child traces exist; this is not final API delivery or a completed project."
+  },
+  "profile": {
+    "id": "experimental_research_pro_per_insight_v1",
+    "status": "experimental",
+    "validated": false,
+    "configuration_sha256": "c66565fcb6f6a16745b2c15d3fecec9120f186bdfe26b6b95df40514df330d72",
+    "lead_model": "deepseek-v4-pro",
+    "lead_reasoning_effort": "low",
+    "research_author_and_normal_reviews_effort": "high",
+    "protocol": "json_actions",
+    "research_review_mode": "per_insight_then_whole",
+    "research_review_contract_id": "idea.research_per_insight_then_whole.v2",
+    "model_budgets": {
+      "lead": 36,
+      "child": 16
+    },
+    "tool_budgets": {
+      "lead": 5,
+      "child": 10
+    },
+    "product_tools_retained": true,
+    "isolated_initial_memory": true,
+    "comparison_boundary": "API/Bridge and retained product tools/project context differ from the CLI scenarios; this is not a single-variable comparison."
+  },
+  "status": "timeout",
+  "termination_authority": "driver/result.json",
+  "started_at": "2026-09-08T19:06:11.839217+00:00",
+  "finished_at": "2026-09-08T20:06:12.788729+00:00",
+  "duration_seconds": 3600.9578562909956,
+  "wall_seconds": 3600.9495282173157,
+  "driver_budget_seconds": 3600,
+  "isolated_server_stopped": true,
+  "backend_exit_code": -15,
+  "persisted_run_status": "running",
+  "persisted_run_status_note": "Original run_state and lead checkpoint retain running because the isolated process was terminated at the external deadline. They have not been rewritten. The driver timeout is terminal for this attempt.",
+  "timeout_layers": {
+    "sdk_timeout_seconds": 360,
+    "sdk_timeout_semantics": "The frozen OpenAI-compatible adapter passes 360 to the streaming SDK timeout option. This governs SDK/network waits, including waiting for stream data; it is not a 360-second wall-clock limit for the entire streamed completion.",
+    "author_outer_deadline_seconds": 726,
+    "author_outer_deadline_formula": "360*(1+1)+1+5=726, using max_retries=1, retry_base_delay_seconds=1 and outer grace=5 in frozen 41fb00c.",
+    "review_unit_retry_policy": "Per-insight/whole ReviewPlan units set max_retries=0; they do not inherit the author retry allowance.",
+    "driver_total_budget_seconds": 3600,
+    "driver_semantics": "The external verification driver, not the API itself, imposed this total duration and stopped only its isolated backend. It does not establish a general API 3600-second deadline.",
+    "frozen_source_blob_sha256": {
+      "backend/app/harness/llm/provider_base.py": "13cdd543d3ca0235c3a6b17d39c26896f7006eca90cbab2939392f2852db9f1a",
+      "backend/app/harness/llm/openai_provider.py": "709dff2e5fbd7559cc23ef8b013d14bc17b474f8b2163feb674318e82ff5284f",
+      "backend/app/harness/agent_loop/executor.py": "231848ce62c9fba2426db6de23f7f505f9c00aceb5fc9ba93e509eaa8593a5e2",
+      "backend/app/agents/idea/protocol.py": "419302a114df82e1941feb1abdcfaf7cd99254456b856328525d300f287ce031"
+    }
+  },
+  "counts": {
+    "model_requests": 30,
+    "model_responses": 28,
+    "sdk_attempts": 30,
+    "tool_dispatches": 11,
+    "protocol_repairs": 0,
+    "validation_repairs": 3,
+    "reflections": 3
+  },
+  "usage": {
+    "prompt_tokens": 447085,
+    "completion_tokens": 204082,
+    "total_tokens": 651167
+  },
+  "usage_complete": false,
+  "usage_is_known_lower_bound": true,
+  "usage_note": "Includes all known parent and child responses. First-child request 6 timed out with unknown result/usage; lead request 8 was in flight when the driver stopped the process. Lead checkpoint usage_complete=true is only its persisted pre-completion value and does not prove full accounting.",
+  "checkpoint_accounting": [
+    {
+      "invocation": "5ba0162d94554cebae5577abfd30cc91",
+      "agent": "idea",
+      "checkpoint_ref": "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/checkpoint.json",
+      "checkpoint_sha256": "d4c304394b641f4fa6daeb9d1cb983832979d1e342a28510cbea8a60799c8507",
+      "persisted_status": "running",
+      "counts": {
+        "action_rounds": 3,
+        "model_requests": 8,
+        "model_responses": 7,
+        "observations": 3,
+        "protocol_repairs": 0,
+        "reflections": 1,
+        "sdk_attempts": 8,
+        "tool_dispatches": 3,
+        "validation_repairs": 2
+      },
+      "usage": {
+        "completion_tokens": 80881,
+        "prompt_tokens": 194147,
+        "total_tokens": 275028
+      },
+      "persisted_usage_complete": true,
+      "reflection_accepted": false,
+      "candidate_utf8_sha256": "dbb17272b1a38023249f874b704d3b0a4349b208ba6f84c0c5ac8a3d728809c8"
+    },
+    {
+      "invocation": "c6def1a97e50434ca95783a84b7eba64",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/checkpoint.json",
+      "checkpoint_sha256": "cc055d7e1a6a5328db63ba4510cd0894883efa52eac0ee2540d75f1b8e875796",
+      "persisted_status": "passed",
+      "counts": {
+        "action_rounds": 4,
+        "model_requests": 16,
+        "model_responses": 16,
+        "observations": 4,
+        "protocol_repairs": 0,
+        "reflections": 2,
+        "sdk_attempts": 16,
+        "tool_dispatches": 4,
+        "validation_repairs": 1
+      },
+      "usage": {
+        "completion_tokens": 103034,
+        "prompt_tokens": 176744,
+        "total_tokens": 279778
+      },
+      "persisted_usage_complete": true,
+      "reflection_accepted": true,
+      "candidate_utf8_sha256": "f300ea0c75f4e64589b4580c1e4ebeb86366f6ae288c502f3985f086c1e693cf"
+    },
+    {
+      "invocation": "d3b9a9eb4ab74c6e9f8e06808309e656",
+      "agent": "idea_research",
+      "checkpoint_ref": "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/checkpoint.json",
+      "checkpoint_sha256": "576c70608ab087c2240a995b45d08f866abd0105e1b510a70b35c2ead250effb",
+      "persisted_status": "model_error",
+      "counts": {
+        "action_rounds": 4,
+        "model_requests": 6,
+        "model_responses": 5,
+        "observations": 4,
+        "protocol_repairs": 0,
+        "reflections": 0,
+        "sdk_attempts": 6,
+        "tool_dispatches": 4,
+        "validation_repairs": 0
+      },
+      "usage": {
+        "completion_tokens": 20167,
+        "prompt_tokens": 76194,
+        "total_tokens": 96361
+      },
+      "persisted_usage_complete": false,
+      "reflection_accepted": false,
+      "candidate_utf8_sha256": "eb6e7b10abfbf0829c96d45cae531dab45245c447b9e010f978e93e6e93e8c77"
+    }
+  ],
+  "research": {
+    "accepted_report_count": 1,
+    "accepted_source_count": 2,
+    "accepted_insight_count": 6,
+    "source_papers": [
+      "AdaInt: Learning Adaptive Intervals for 3D Lookup Tables on Real-time Image Enhancement (2204.13983v1)",
+      "SepLUT: Separable Image-adaptive Lookup Tables for Real-time Image Enhancement (2207.08351v1)"
+    ],
+    "model_review_passed": true,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "binding": {
+      "delegation_id": "c6def1a97e50434ca95783a84b7eba64",
+      "report_ref": "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/report.md",
+      "report_sha256": "f300ea0c75f4e64589b4580c1e4ebeb86366f6ae288c502f3985f086c1e693cf",
+      "candidate_digest": "98a3d085413edcab530f4ea2501846502d769d92d1a9f4fdb5a44669cfbf5914",
+      "checkpoint_ref": "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/checkpoint.json",
+      "checkpoint_sha256": "cc055d7e1a6a5328db63ba4510cd0894883efa52eac0ee2540d75f1b8e875796",
+      "manifest_ref": "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/manifest.json",
+      "manifest_sha256": "4fec2c6bf7710def940733b3cceac7ad411c25e15831d1af8309778229dbef14",
+      "model_review_passed": true,
+      "review_contract_id": "idea.research_per_insight_then_whole.v2",
+      "review_plan_sha256": "e3e056df5dc13634f075bbb652eee6f95c8422e26568e5ea6b383dbe654e4a6b"
+    },
+    "final_review_units": [
+      {
+        "unit_id": "I1",
+        "request": 10,
+        "accept": true
+      },
+      {
+        "unit_id": "I2",
+        "request": 11,
+        "accept": true
+      },
+      {
+        "unit_id": "I3",
+        "request": 12,
+        "accept": true
+      },
+      {
+        "unit_id": "I4",
+        "request": 13,
+        "accept": true
+      },
+      {
+        "unit_id": "I5",
+        "request": 14,
+        "accept": true
+      },
+      {
+        "unit_id": "I6",
+        "request": 15,
+        "accept": true
+      },
+      {
+        "unit_id": "__whole_report__",
+        "request": 16,
+        "accept": true
+      }
+    ],
+    "observed_valid_correction": "A real earlier I2 review rejected missing complementary terms in the bilinear weights; the final report fixes those terms.",
+    "remaining_issue": {
+      "id": "R16-R1",
+      "field": "/insights/5/transfer_idea",
+      "finding": "I6 treats not significantly worse as proof of compressible redundancy. Failure to detect a difference is not equivalence/noninferiority evidence; both the final I6 and whole-report model reviews accepted this inference."
+    },
+    "source_interpretation_boundary": "SepLUT factors the context-to-LUT generator, not a fixed 2D spatial table. The report explicitly distinguishes those objects and treats UV^T as a transfer hypothesis; 2Nr arithmetic is correct. I3/I4 repeat the same mechanism. The source page-9 capacity ablation is So=0,m=8, not a direct 2D result.",
+    "first_delegation_status": "model_error; no successful report or completed semantic acceptance"
+  },
+  "main_proposal": {
+    "candidate_scope": "candidate_only_unaccepted",
+    "candidate_binding": {
+      "checkpoint_ref": "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/checkpoint.json",
+      "checkpoint_sha256": "d4c304394b641f4fa6daeb9d1cb983832979d1e342a28510cbea8a60799c8507",
+      "candidate_field": "/candidate",
+      "candidate_chars": 21837,
+      "candidate_utf8_sha256": "dbb17272b1a38023249f874b704d3b0a4349b208ba6f84c0c5ac8a3d728809c8",
+      "candidate_digest": "26b0ca7d27b342031ab4019ab50ced18d8cfab4b8e008b43457228a1af5f227c",
+      "reviewed_candidate_sha": "26b0ca7d27b342031ab4019ab50ced18d8cfab4b8e008b43457228a1af5f227c",
+      "reflection_accepted": false,
+      "last_completed_review_request": 7,
+      "last_completed_review_event_seq": 46,
+      "last_inflight_request": 8,
+      "final_proposal_file_exists": false
+    },
+    "model_review_passed": false,
+    "independent_quality_passed": false,
+    "scientific_validated": false,
+    "last_completed_review_request": 7,
+    "last_inflight_revision_request": 8,
+    "confirmed_issues": [
+      {
+        "id": "R16-Q1",
+        "finding": "Declared train/val/test disjointness is false: exactly one train–val point and one train–test point overlap; val–test have zero intersections. No performance effect is claimed."
+      },
+      {
+        "id": "R16-Q2",
+        "finding": "V2/handoff uses uniform15−candidate but refers to the candidate−baseline decision rule, reversing the sign."
+      },
+      {
+        "id": "R16-Q3",
+        "finding": "testable_predictions[2] interprets inability to distinguish rank8 from baseline as retained ability, although the decision rule correctly labels that case inconclusive."
+      },
+      {
+        "id": "R16-Q4",
+        "finding": "Random-coordinate comparison prose claims both arms have fixed coordinates/225 trainables; canonical candidate has learned coordinates and 253 trainables. The canonical ledger is correct; frozen ablations may legitimately have fewer parameters."
+      }
+    ],
+    "model_reviewer_false_rejection": {
+      "review_issue_index": 2,
+      "finding": "The reviewer demands decision_rule_ref in the primary comparison, but the frozen primary schema forbids it. Only named comparisons require that field; primary V1 already refers to the global decision rule.",
+      "actual_metadata_protocol_errors": [],
+      "errors_after_adding_requested_field": [
+        "/evaluation_protocol/comparison: Additional properties are not allowed ('decision_rule_ref' was unexpected)"
+      ]
+    },
+    "scope_caveats": [
+      "Arm-specific truth initializations use additional analytic target queries outside train_grid. This needs disclosure for a same-data claim; the user did not impose a fixed label-query budget, so it is not automatically an invalid oracle approximation experiment.",
+      "The selected analytic target is a sum of three separable terms, hence sampled tensor-grid matrices have rank at most 3. A rank8 result on this target cannot establish general 16x16 compressibility.",
+      "Missing experiments or a new equivalence theorem are not proposal-stage rejection reasons."
+    ]
+  },
+  "delivery": {
+    "final_proposal_delivered": false,
+    "dual_output_delivered": false,
+    "waiting_review_reached": false,
+    "human_approved": false,
+    "downstream_executed": false,
+    "simulation_executed": false,
+    "scientific_validated": false
+  },
+  "separate_review_records": {
+    "manual_research_review.json": {
+      "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-08T1906_api_idea_20260908t190611_bd5d1df3/manual_research_review.json",
+      "sha256": "57be358695e2e98a7206473c05d8e3e60dc1dd55d0c1c4a436981fc1c9eba0cd",
+      "reviewer": "Codex independent offline review; not runtime or human scientific acceptance"
+    },
+    "manual_quality_review.json": {
+      "path": "/Users/harry/Documents/10_project/mars_idea_20260908/runs/2026-09-08T1906_api_idea_20260908t190611_bd5d1df3/manual_quality_review.json",
+      "sha256": "8dff89fb8dadfde12f4768db44385faa354fdd6ff7f10fd30d764639370fab75",
+      "reviewer": "Codex independent offline review; not runtime or human scientific acceptance"
+    }
+  },
+  "driver_file_sha256": {
+    "preflight.json": "d827fb74eaa202c4012feea0d75c4ee098b068fca616877a81fea91b6b14e469",
+    "http.jsonl": "ff011d7b2c5b59f3e01ae06ff3a833ad955e37339d97809d6f79a0e8dcfe93c3",
+    "result.json": "8c2c3572f0528b7a7ee32ee59f909a13131f8b6095addda7212a987fcc2a6531"
+  },
+  "raw_file_sha256": {
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/checkpoint.json": "d4c304394b641f4fa6daeb9d1cb983832979d1e342a28510cbea8a60799c8507",
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/events.jsonl": "1bf6379f731dfab275763d3de5e1b511154b279b9819f59d07e46f9efba76cf8",
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/facts.json": "124a0107eee1050f26cbadea093e45ebf541185ecdfa82f545964c63f6dd2337",
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/tools/0001.json": "0609a67d54733dd08dc419d77f4a585f88094446507db7543b4ab21e2b0a1d97",
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/tools/0002.json": "39a75a868992417691ba4795113590099734b6e4f50377b4a1a8ab13d4af59fc",
+    "agent_traces/idea/5ba0162d94554cebae5577abfd30cc91/tools/0003.json": "52942946fa92eb06c937d151b2cf36cd3d87cd1b705512ca35fcad2e826bf062",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/checkpoint.json": "cc055d7e1a6a5328db63ba4510cd0894883efa52eac0ee2540d75f1b8e875796",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/events.jsonl": "fbc20890fc10b9200f7c6de64f369f96da60aa594b05b147049f951ea786c4ef",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/facts.json": "697ea7e33406446d4e14264ca9f6fb0c0d4a9d114c6f9e10ddb217b8d190dd8d",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/tools/0001.json": "00461e3ab8fed6b6ea0dc3ca4e2819a25b2ada9e41567a146cd89218b64dc4f0",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/tools/0002.json": "3c3de29cc75ac7e5e5b62da55f7dc2a23554d420d25c069bd5be3e949271f9d0",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/tools/0003.json": "77598a9527f417285cbfa1efd98cbe424fdc482ee6f5ea44dd619098ce381077",
+    "agent_traces/idea_research/c6def1a97e50434ca95783a84b7eba64/tools/0004.json": "a20a8d38c8592a66052877f5e8428392bc83a0eac111a427bdfac6a4a53bdbec",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/checkpoint.json": "576c70608ab087c2240a995b45d08f866abd0105e1b510a70b35c2ead250effb",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/events.jsonl": "6dce3483f6a4b56499a390cdd424ba419370c1f71dc9be4f908f2d54a3ca5140",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/facts.json": "f07e7740c870a49aee93358caf54a794a31cbf893f0b5fe5536cff6503f5f5d4",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/tools/0001.json": "1f85fdf2c29f54e9861fe91c6bef30c8d5e1b38db84513027458abcf1da338e5",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/tools/0002.json": "fc068954a4dd3fa81957b961c94657b3eacb367d9b6eccbccf33c6b4ab35e309",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/tools/0003.json": "600d0eb89bb24818d7ab5fdc587ea9f4fea8470b6d1a32f7734583390fbf9ab2",
+    "agent_traces/idea_research/d3b9a9eb4ab74c6e9f8e06808309e656/tools/0004.json": "f332e468cec39d07e14cfaea5b4c1b72d80937d0e302c67f47efdfef28623ba4",
+    "coding/tool_applications/0cc96e25387d4fb1aecb7bae8c837fb0.json": "1c24a295bde98241b6fd5381a772c1a172f845809f6348b00b561a2c9ab94fb4",
+    "coding/tool_applications/1e3e7da140dc46bdacb57e818e315f01.json": "9f65988d2ccdecbaa82d610e86d21808f89f67918e2a977e8a6fbf9522b553b2",
+    "coding/tool_applications/25be6adab95345b7ade8199267713250.json": "18b982ec1c53afaad67eeb7d1190efa364f380c3005ba3042dcc06c1bf4e6d07",
+    "coding/tool_applications/387da7a4568641058c2873468ec4049a.json": "f9d0a4e52b607f104e8cdf26e7521f5e58206430e21f818d116b12685c489bdc",
+    "coding/tool_applications/3881888b914c445d94dd2baf9d391503.json": "f9001db5abf0a8ea48b17f806ac998860512b017716be13df206d9c1e3fe56ac",
+    "coding/tool_applications/59b1e5a0c89443eb8ef9f6e9cd3f499f.json": "a45849c19dd677bdd943c6e4470dfc9bb226a8c3e2ef91f3b0af23d4c7903101",
+    "coding/tool_applications/74e2bbe0dd6949a0889f08c410450038.json": "e30b9d8021a4d55ef8042ac363cb38b58f1877a5df1939e484386f5630057f1d",
+    "coding/tool_applications/7684c36280ff4c0581877b153a2eefd5.json": "cdd17f42978ed471b3a395146b5ddb11c0f2e61afa848df4585ba51c998e2f7f",
+    "coding/tool_applications/8fa7b6281e244799acfe4a8151eef1d0.json": "297a8fc4d423a7831d59382708874d7648cab57112b7239414a0593787bbd550",
+    "coding/tool_applications/b57ed913f0de48208119edc1abc3eac2.json": "4f664d354cf10e60e239364291fbcb17c2e34e007639498aeb9d317ad59253dd",
+    "coding/tool_applications/fe9b719cb4a4416c8927ce14ed698def.json": "7a71389a1778cf84c41d08880c344bec1bb955171ee470524c5bb72b3d7f2701",
+    "context/langgraph_runtime.v2.json": "74e870dfdb9b8b5d86c8d76a4fb8d856e21b792c2ef4c3419f467a001c50e786",
+    "context/trace_manifest.v2.json": "9c0502678dc9d27d7bb78722c5c6e61cb2875648482d23a16cb5617c49a6bd2d",
+    "events/agent_events.jsonl": "a5bea8779d632a8a29d73a0c610c542c24da4c76be1eea4ff6964accae3f6af6",
+    "events/langgraph_events.jsonl": "c77a4ca4a5eb20ef29f906bb0efb78b58dd68c0fce4c9364dce39104a84dc5be",
+    "events/tool_calls.jsonl": "b35f31bb7263b97f174fc6dd9739e56b69762a6672ba0987d3753691804409cc",
+    "events/tool_events.jsonl": "9a86d84f10e2d374eebd69c078592048c49d7884eac12e564619566a1f2fea33",
+    "events/websocket_events.jsonl": "72f4758a09b9c79432450fec28d8d1dcf98f22bc4332b664e5152cbbdfbf2bba",
+    "idea/progress.jsonl": "796584119a6a4b96951ecb16aca6a4071bdd7ecc642465fe90bdbe0e11919848",
+    "idea/research/downloads/06d8e6663cf27c4ca6813aee02861cb008e7a75a943a52cd17583caa1e5a1390.pdf": "06d8e6663cf27c4ca6813aee02861cb008e7a75a943a52cd17583caa1e5a1390",
+    "idea/research/downloads/215fb29791914996af938d58360f162c.read.json": "2afa9da4a395e43f2630310fe10b7f9dc1e8bd396d96e68f9a6cd120592b4190",
+    "idea/research/downloads/6ca06fd4384b43818ba5a88e97874d06.read.json": "51469da2f74011e8bb446aed51a7b958bcbd22e3285648910934158145b9a76f",
+    "idea/research/downloads/98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af.pdf": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+    "idea/research/downloads/source_fetch_index.v1.json": "e1714584b5cd1e27604fb73db4a39aa61ad9bc4b1760f0159b3efc062a8764b8",
+    "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/manifest.json": "4fec2c6bf7710def940733b3cceac7ad411c25e15831d1af8309778229dbef14",
+    "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/progress.jsonl": "0d7dbf520792c9349bb87e60bcd58b4a799ff301c4b6f9c5bd8d7c3b0fe1f800",
+    "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/report.md": "f300ea0c75f4e64589b4580c1e4ebeb86366f6ae288c502f3985f086c1e693cf",
+    "idea/research_delegations/c6def1a97e50434ca95783a84b7eba64/request.json": "f35320a297ebaaddceec30f48bdaf84d1f627ec27cacfa6bc704e1af2eeb3949",
+    "idea/research_delegations/d3b9a9eb4ab74c6e9f8e06808309e656/failure.json": "cdd734b4d76be152fd54e919865e100afc55792a4815b7103ab8c800fc130717",
+    "idea/research_delegations/d3b9a9eb4ab74c6e9f8e06808309e656/progress.jsonl": "a74c26703b38e9a1bca07a1f9ef9b3e283c0b6be431ff077945df83a65c275e0",
+    "idea/research_delegations/d3b9a9eb4ab74c6e9f8e06808309e656/request.json": "b2504461d2160466e6e3b76a50506f69d33a1063bb02f157ba1c0ed45dba3b5d",
+    "idea/validation/610d464f89ec4e4d937370862a0cfac4.json": "eb85053eb36023fbc389015d2d648577fa6bfc473bdde8336b4877e5c35bb11c",
+    "idea/validation/e6855b78760044b398d4b2ef50c575c8.json": "640f7c201e117ae08d0e0f09a724815cb6d4b2b1a1724c0df922d26286479d0f",
+    "idea_research/research/downloads/06d8e6663cf27c4ca6813aee02861cb008e7a75a943a52cd17583caa1e5a1390.pdf": "06d8e6663cf27c4ca6813aee02861cb008e7a75a943a52cd17583caa1e5a1390",
+    "idea_research/research/downloads/08d7349cd40d429b9ae9d8588ea89364.read.json": "ba59d5b716a949bb1b264d9398697559c7cc728c2513315a7f9f13b1e8aaadeb",
+    "idea_research/research/downloads/1a8aca923a6f432ea15f779abdf1960a.read.json": "5f5f0f4bbb5e0681313dde34a53ee90a0588391baea58502d4b9e265034c7ae8",
+    "idea_research/research/downloads/279cc800ebe6e92c7314571a4cb6650b30936cebd80e8903b5bb813392047b71.pdf": "279cc800ebe6e92c7314571a4cb6650b30936cebd80e8903b5bb813392047b71",
+    "idea_research/research/downloads/4098b68b32d34cb9b82fa4c02abd8336.read.json": "c0414c536c0c1c47675f54a717a2e25fda21ea7bab0e8409873002265cc3a5d9",
+    "idea_research/research/downloads/72554e67dfb747efb479e3705571c760.read.json": "3c7fdb544359bbedaf0497dcf9c8617456fab044426f201c660a6775b0b13264",
+    "idea_research/research/downloads/98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af.pdf": "98a958e39b6a406ea004b816b611d2601c04411d99c5a925f44d05a200f578af",
+    "idea_research/research/downloads/ba8b2a50c36f46b8a0a38b7943212544.read.json": "4bc866687735521f004e36d13f32f663fb873d4e2940e352f9968efec8015ba4",
+    "idea_research/research/downloads/e2f63d60099c4332801daf6e06d15619.read.json": "e9d6c1516b94a6d3dede29429168eaad217d52eace5f1f6d3354a8c60dc054c9",
+    "idea_research/research/downloads/fc9ec10c586c40f8a1f376c1b83904ce.read.json": "c678ed7263e4722ccc9288ef3a3ee1d9a0671b0e3d382f2d7345006a5ae3559a",
+    "idea_research/research/downloads/source_fetch_index.v1.json": "342b7b52519dd0bf886f3ae7aa6de5d9068adf08d2c4d874988871c0f0a01bcb",
+    "input/idea_runtime_profile.v1.json": "618da08e4e4ad69103a0027ac874c0607efa585302408bae44663bab5073d287",
+    "input/run_request_options.v1.json": "b8994715e9e7ae20c1715f21084353843a31ed9f6b59b36fbd8efdd6d9d64656",
+    "input/user_request.md": "f3482712f6791b637cb63d72ce123f4e5efa29f7283a42c5e51bac3ed77de45a",
+    "run_meta.json": "3ef02697537557c4a7fc771098b2a5b79c29cfb7ed999d070fea98a6653bbbc9",
+    "run_state.json": "5410a3a46589182ee0bcd31793305901fb0085fa726e2f97d2f6b16d22cf924d",
+    "manual_research_review.json": "57be358695e2e98a7206473c05d8e3e60dc1dd55d0c1c4a436981fc1c9eba0cd",
+    "manual_quality_review.json": "8dff89fb8dadfde12f4768db44385faa354fdd6ff7f10fd30d764639370fab75"
+  },
+  "integrity": {
+    "original_run_files_checked_unchanged": 69,
+    "legacy_cli_export_byte_identical": true,
+    "source_archives_modified": false,
+    "new_models_called_for_export": false
+  }
+}

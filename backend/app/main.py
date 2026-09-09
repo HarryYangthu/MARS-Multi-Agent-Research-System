@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +39,7 @@ from app.api import timeline as timeline_api
 from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
-from app.api.dependencies import get_event_bus, get_run_store
+from app.api.dependencies import get_event_bus, get_run_store, shutdown_owned_runs
 from app.bridge.agent_registry import get_registry
 from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
@@ -70,6 +72,14 @@ def register_default_agents() -> None:
             reg.register(agent.name, agent)
 
 
+@asynccontextmanager
+async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await shutdown_owned_runs()
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     extension_runtime = get_extension_runtime()
@@ -81,6 +91,7 @@ def create_app() -> FastAPI:
         title="MARS",
         description="Multi-Agent Research System",
         version=extension_runtime.profile.core_version,
+        lifespan=service_lifespan,
     )
     app.state.extension_runtime = extension_runtime
 
