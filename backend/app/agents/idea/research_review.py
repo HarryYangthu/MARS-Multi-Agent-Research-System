@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents.idea.research_unit import unit_messages, validate_unit_arguments
 from app.harness.llm.provider_base import Message
 
 
@@ -64,8 +65,10 @@ RESEARCH_REVIEW_RUBRIC = (
 
 
 def research_review_messages(*, task: str, project: str, gap: dict[str, Any],
-                             supplied_context: dict[str, str] | None = None) -> list[Message]:
+                             supplied_context: dict[str, str] | None = None,
+                             research_unit: dict[str, Any] | None = None) -> list[Message]:
     """Supply the full task and gap independently of the researcher's reasoning."""
+    validate_unit_arguments(gap, research_unit)
     messages = [
         Message("system", "You independently review a literature evidence report for MARS. "
                 "The current candidate and original tool observations will be supplied separately. "
@@ -79,4 +82,5 @@ def research_review_messages(*, task: str, project: str, gap: dict[str, Any],
     ]
     messages.extend(Message("user", "[untrusted supplied context:" + name + "]\n" + content)
                     for name, content in (supplied_context or {}).items())
+    messages.extend(unit_messages(research_unit, reviewing=True))
     return messages

@@ -24,6 +24,10 @@ from app.agents.idea.research_review_plan import (
     build_research_review_plan, research_plan_errors, research_review_contract, research_review_mode, review_plan_claim,
 )
 from app.agents.idea.research_origin import ResearchOrigin, research_origins
+from app.agents.idea.research_unit import (
+    RESEARCH_UNIT_CONTRACT, UNIT_TOOL_NOTE, configured_research_unit, research_unit_errors,
+    unit_fields, unit_input_constraint, unit_messages, validate_unit_arguments,
+)
 from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_contract
 from app.agents.idea.source_identity import SourceIdentityIndex
 from app.agents.idea.research import title_key
@@ -204,7 +208,19 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
         if checkpoint.get("status") != "passed" or checkpoint.get("candidate") != report_text:
             raise ValueError("delegate candidate is not the checkpoint's passed document")
         request_record = None
-        if manifest.get("review_mode") in ("per_insight_then_whole", "per_insight_collect_then_whole"):
+        # A new whole-report receipt cannot become legacy by deleting both public
+        # scope claims. Inspect only this known delegation's canonical host request.
+        canonical_request = manifest_path.parent / "request.json"
+        canonical_record: dict[str, Any] = {}
+        if canonical_request.exists() or canonical_request.is_symlink():
+            canonical_path = _contained(root, canonical_request.relative_to(root).as_posix(),
+                                        under=ROOT + "/" + delegation_id)
+            saved_request = json.loads(canonical_path.read_text())
+            if not isinstance(saved_request, dict):
+                raise ValueError("canonical research request must be an object")
+            canonical_record = saved_request
+        if (manifest.get("review_mode") in ("per_insight_then_whole", "per_insight_collect_then_whole")
+                or any("research_unit" in record for record in (manifest, output, canonical_record))):
             request_path = _contained(root, manifest.get("request_ref"), under=ROOT + "/" + delegation_id)
             if request_path != manifest_path.parent / "request.json" or file_sha(request_path) != manifest.get("request_sha256"):
                 raise ValueError("research review request path/hash mismatch")
@@ -212,6 +228,13 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
             if (not isinstance(request_record, dict) or request_record.get("delegation_id") != delegation_id
                     or request_record.get("min_sources") != manifest.get("min_sources")):
                 raise ValueError("research review request identity or evidence requirement mismatch")
+        unit_errors = research_unit_errors(manifest, output, request=request_record,
+            arguments=observation.get("args"),
+            events=([json.loads(line) for line in (checkpoint_path.parent / "events.jsonl").read_text().splitlines()]
+                    if "research_unit" in manifest or "research_unit" in output
+                    or (request_record is not None and "research_unit" in request_record) else None))
+        if unit_errors:
+            raise ValueError("; ".join(unit_errors))
         review_errors = research_review_errors(manifest, output, checkpoint, report_text,
                                               trace_root=checkpoint_path.parent, request_record=request_record)
         if review_errors:
@@ -279,6 +302,7 @@ class ResearchSession:
     receipts: list[dict[str, Any]] = field(default_factory=list)
     failures: list[dict[str, Any]] = field(default_factory=list)
     require_review: bool = False
+    research_unit: dict[str, Any] | None = None
 
     def research_tool_context(self, *, run_id: str, project: str, root: Path) -> ToolContext:
         """Use the same validated effective child tools at dispatch as in its prompt."""
@@ -291,6 +315,7 @@ class ResearchSession:
     def author_messages(self, args: dict[str, Any], *, refs: list[str], minimum: int,
                         policy: AgentLoopPolicy) -> list[Message]:
         """Assemble real author inputs without dispatching tools or a provider."""
+        validate_unit_arguments(args, self.research_unit)
         messages = [Message("system", (
             "You are the independent MARS literature researcher. Resolve the delegated information gap with real tools. "
             "Select your own searches and papers, explain why each source is selected or rejected, read actual PDF method pages. "
@@ -356,12 +381,18 @@ class ResearchSession:
         if self.failures:
             messages.append(Message("user", "[untrusted prior failed delegation receipts; not accepted findings]\n"
                                     + json.dumps(self._recovery_context(), ensure_ascii=False)))
+        messages.extend(unit_messages(self.research_unit, reviewing=False))
         return messages
 
     async def dispatch(self, args: dict[str, Any], tool_context: ToolContext) -> ToolResult:
         root = Path(str(self.request.extra["run_root"])).resolve()
         if tool_context.run_id != str(self.request.extra.get("run_id", root.name)) or tool_context.project != self.request.project:
             return ToolResult(ok=False, error="delegate session does not match tool run/project")
+        try:
+            validate_unit_arguments(args, self.research_unit)
+        except ValueError as exc:
+            return ToolResult(ok=False, error=str(exc), output={"failure_type": "research_unit_argument_conflict",
+                **unit_fields(self.research_unit), "usable_as_final_evidence": False})
         if self.attempted >= self.max_delegations:
             return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap",
                               output={"failure_type": "delegation_budget_exhausted", "remaining_delegations": 0,
@@ -373,7 +404,7 @@ class ResearchSession:
                               + ". Use [] when none apply. The overall task is already passed automatically; do not invent keys.",
                               output={"available_context_refs": sorted(self.context.upstream)})
         minimum = delegation_min_sources(args)
-        policy = research_policy(self.config, require_review=self.require_review or bool(
+        policy = research_policy(self.config, require_review=self.research_unit is not None or self.require_review or bool(
             self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
         review_mode = research_review_mode(self.config.raw.get("research", {}))
         plan_contract = research_review_contract(review_mode)
@@ -389,11 +420,13 @@ class ResearchSession:
         review_context = {"task": self.request.user_request, "project": self.context.project,
                           "supplied_context": {ref: self.context.upstream[ref] for ref in refs}}
         plan_request = ({"review_mode": review_mode, "review_context": review_context}
-                        if review_mode in ("per_insight_then_whole", "per_insight_collect_then_whole") else {})
+                        if review_mode in ("per_insight_then_whole", "per_insight_collect_then_whole")
+                        or self.research_unit is not None else {})
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,
             "parent_run_id": tool_context.run_id, "context_refs": refs, "min_sources": minimum,
-            "parent_invocation": str(self.context.metadata.get("loop_trace_root", "")), **plan_request})
+            "parent_invocation": str(self.context.metadata.get("loop_trace_root", "")),
+            **plan_request, **unit_fields(self.research_unit)})
 
         async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
             try:
@@ -444,14 +477,15 @@ class ResearchSession:
                 trace_root=trace, validate=validate, final_schema=research_submission_schema(), progress_sink=progress,
                 reflection_rubric=RESEARCH_REVIEW_RUBRIC,
                 review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
-                    supplied_context={ref: self.context.upstream[ref] for ref in refs}),
+                    supplied_context={ref: self.context.upstream[ref] for ref in refs}, research_unit=self.research_unit),
                 review_plan_factory=(partial(build_research_review_plan, task=self.request.user_request,
                     project=self.context.project, gap=args, min_sources=minimum,
                     supplied_context={ref: self.context.upstream[ref] for ref in refs}, contract_id=plan_contract)
                     if plan_contract is not None else None),
                 review_plan_contract_id=plan_contract,
                 required_review_tools=("search.fetch_sources",),
-                stop_contract_id=STOP_CONTRACT,
+                stop_contract_id=(STOP_CONTRACT + "+" + RESEARCH_UNIT_CONTRACT if self.research_unit is not None
+                                  else STOP_CONTRACT),
                 stop_condition=lambda view: evidence_stop(view, min_sources=minimum,
                     max_tool_steps=policy.max_tool_steps, tools=tools, project=self.request.project)))
         except asyncio.CancelledError:
@@ -522,6 +556,7 @@ class ResearchSession:
             plan_metadata = {"review_mode": review_mode, "review_plan": review_plan_claim(
                 json.loads(checkpoint.read_text()), result.text, trace_root=trace,
                 checkpoint_ref=checkpoint.relative_to(root).as_posix())}
+        if plan_metadata or self.research_unit is not None:
             request_metadata = {"request_ref": (target / "request.json").relative_to(root).as_posix(),
                                 "request_sha256": file_sha(target / "request.json")}
         atomic_json(manifest_path, {"schema": "research.delegation.v1", "delegation_id": identifier,
@@ -530,15 +565,18 @@ class ResearchSession:
             "checkpoint_sha256": file_sha(checkpoint), "min_sources": minimum, "scientific_validated": False,
             "model_review_required": policy.mode == "reflection", "model_review_passed": result.reflection_accepted,
             "publication_count_contract": PUBLICATION_COUNT_CONTRACT,
-            **plan_metadata, **request_metadata})
+            **plan_metadata, **request_metadata, **unit_fields(self.research_unit)})
         excerpt_context = self.config.raw.get("research", {}).get("excerpt_context_chars", 600)
         excerpts = research_excerpts(report, result.observations, context_chars=int(excerpt_context))
         output = {"delegation_id": identifier, "report": report, "source_excerpts": excerpts,
                   "manifest_ref": manifest_path.relative_to(root).as_posix(), "manifest_sha256": file_sha(manifest_path),
                   "scientific_validated": False, "model_review_required": policy.mode == "reflection",
                   "publication_count_contract": PUBLICATION_COUNT_CONTRACT,
-                  "model_review_passed": result.reflection_accepted, **plan_metadata}
+                  "model_review_passed": result.reflection_accepted, **plan_metadata,
+                  **unit_fields(self.research_unit), **(request_metadata if self.research_unit is not None else {})}
         receipt = {"tool": TOOL, "ok": True, "output": output}
+        if self.research_unit is not None:
+            receipt["args"] = json.loads((target / "request.json").read_text())["arguments"]
         load_delegated_research(root, [receipt])
         self.receipts.append(receipt)
         return ToolResult(ok=True, output=output)
@@ -563,8 +601,11 @@ class ResearchSession:
 
 def make_research_registry(agent_config: AgentConfig, request: RunRequest, context: ContextPack) -> ToolRegistry:
     """Bind one private researcher session to this parent invocation."""
+    unit = configured_research_unit(agent_config.raw.get("research", {}))
     existing = request.runtime.get("idea_research_session")
     if isinstance(existing, ResearchSession):
+        if existing.research_unit != unit:
+            raise ValueError("research_unit cannot change in an existing research session")
         return existing.registry
     registry = get_registry().fork()
     raw = agent_config.raw.get("research", {})
@@ -574,9 +615,9 @@ def make_research_registry(agent_config: AgentConfig, request: RunRequest, conte
     config = request.runtime.get("idea_research_config") or get_agent_config("idea_research")
     if not isinstance(config, AgentConfig) or config.name != "idea_research" or config.output_schema != "research_report.v1" or not config.enabled:
         raise ValueError("researcher requires an enabled independent idea_research AgentConfig")
-    session = ResearchSession(request, context, config, registry, limit)
+    session = ResearchSession(request, context, config, registry, limit, research_unit=unit)
     session.require_review = bool(request.extra.get("idea_requirements", {}).get("require_research_dossier")) or TOOL in agent_config.tools
-    research_policy(config, require_review=session.require_review)
+    research_policy(config, require_review=session.require_review or unit is not None)
     if request.extra.get("resume_invocation"):
         checkpoint = Path(str(context.metadata["loop_trace_root"])) / "checkpoint.json"
         previous = json.loads(checkpoint.read_text())
@@ -591,6 +632,8 @@ def make_research_registry(agent_config: AgentConfig, request: RunRequest, conte
             parent_invocation=str(context.metadata["loop_trace_root"]))
     registry.register(TOOL, session.dispatch, spec=ToolSpec(name=TOOL, namespace="idea",
         description="Delegate a specific literature evidence gap to an independent researcher with its own tools and context."))
+    if unit is not None:
+        registry.constrain_input_schema(TOOL, unit_input_constraint(), description_note=UNIT_TOOL_NOTE)
     request.runtime["idea_research_session"] = session
     return registry
 

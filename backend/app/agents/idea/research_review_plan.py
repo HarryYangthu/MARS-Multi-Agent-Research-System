@@ -116,7 +116,7 @@ def matching_source_rows(source: dict[str, Any], observations: list[dict[str, An
             continue
         tool = observation.get("tool")
         values = output.get("sources", []) if tool == "search.fetch_sources" else output.get("hits", [])
-        if tool not in {"search.fetch_sources", "search.arxiv_search", "search.openalex_search", "search.web_search", "search.cvf_search"}:
+        if tool not in {"search.fetch_sources", "search.arxiv_search", "search.openalex_search", "search.web_search", "search.cvf_search", "search.neurips_search"}:
             continue
         for source_index, row in enumerate(values):
             if not isinstance(row, dict):
@@ -132,7 +132,7 @@ def matching_source_rows(source: dict[str, Any], observations: list[dict[str, An
                                 "document_sha256": row["sha256"]})
             elif row not in matched_hits:
                 continue
-            elif tool == "search.cvf_search":
+            elif tool in {"search.cvf_search", "search.neurips_search"}:
                 binding.update({key: row[key] for key in ("search_receipt", "search_receipt_sha256",
                                                         "metadata_response_ref", "metadata_response_sha256")})
             rows.append({**deepcopy(binding), "source_row": deepcopy(row)})

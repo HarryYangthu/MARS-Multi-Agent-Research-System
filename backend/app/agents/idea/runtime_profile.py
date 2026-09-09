@@ -26,10 +26,10 @@ from app.harness.tools.registry import get_registry
 from app.settings import repo_root
 
 
-ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5"]
+ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5", "experimental_research_pro_per_insight_v6"]
 EXPERIMENTAL_PROFILES = ("experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2",
                          "experimental_research_pro_per_insight_v3", "experimental_research_pro_per_insight_v4",
-                         "experimental_research_pro_per_insight_v5")
+                         "experimental_research_pro_per_insight_v5", "experimental_research_pro_per_insight_v6")
 PROFILE_FILE = "configs/idea_runtime_profiles.yaml"
 SNAPSHOT_FILE = "input/idea_runtime_profile.v1.json"
 
@@ -56,6 +56,7 @@ class _Author(_StrictModel):
 
 class _LeadResearch(_StrictModel):
     max_delegations: int = Field(ge=1, le=8)
+    per_delegation_min_sources: int | None = Field(default=None, strict=True, ge=1, le=1)
 
 
 class _ChildResearch(_StrictModel):
@@ -89,7 +90,8 @@ def public_agent_configuration(config: AgentConfig) -> dict[str, Any]:
     # Research settings currently consumed by the product, copied explicitly so
     # unknown raw configuration cannot accidentally disclose arbitrary values.
     research_keys = ("max_delegations", "required_tools", "enable_network", "source_downloads",
-                     "source_download_limit", "web_search", "excerpt_context_chars", "review_mode")
+                     "source_download_limit", "web_search", "excerpt_context_chars", "review_mode",
+                     "per_delegation_min_sources")
     if not isinstance(research, dict):
         raise ValueError("research configuration must be a mapping")
     configured_tools = load_tool_configs()
@@ -182,7 +184,7 @@ def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
         raise ValueError("experimental profile requires high-thinking review")
     raw = deepcopy(dict(original.raw))
     raw["loop"] = asdict(policy)
-    raw["research"] = {**raw.get("research", {}), **configured.research.model_dump()}
+    raw["research"] = {**raw.get("research", {}), **configured.research.model_dump(exclude_none=True)}
     # Keep raw and typed settings consistent for existing configuration readers.
     raw["model"] = {"provider": model.provider, "model": model.name, "max_tokens": model.max_tokens,
                     "temperature": model.temperature, "top_p": model.top_p,
@@ -236,10 +238,12 @@ def resolve_idea_profile(selector: str) -> ResolvedIdeaProfile | None:
             or set(data["profiles"]) != set(EXPERIMENTAL_PROFILES)):
         raise ValueError("invalid local Idea runtime profile catalog")
     definition = _Definition.model_validate(data["profiles"][selector])
-    if definition.child.tools is not None and selector not in {"experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5"}:
-        raise ValueError("explicit research tools require the separate v4 or v5 profile")
-    if definition.lead.tools is not None and selector != "experimental_research_pro_per_insight_v5":
-        raise ValueError("explicit lead tools require the separate v5 profile")
+    if definition.child.tools is not None and selector not in {"experimental_research_pro_per_insight_v4", "experimental_research_pro_per_insight_v5", "experimental_research_pro_per_insight_v6"}:
+        raise ValueError("explicit research tools require a separate v4, v5 or v6 profile")
+    if definition.lead.tools is not None and selector not in {"experimental_research_pro_per_insight_v5", "experimental_research_pro_per_insight_v6"}:
+        raise ValueError("explicit lead tools require a separate v5 or v6 profile")
+    if definition.lead.research.per_delegation_min_sources is not None and selector != "experimental_research_pro_per_insight_v6":
+        raise ValueError("single-publication research units require the separate v6 profile")
     original_lead, original_child = get_agent_config("idea"), get_agent_config("idea_research")
     if (not original_lead.enabled or not original_child.enabled
             or original_lead.output_schema != "proposal.v1" or original_child.output_schema != "research_report.v1"

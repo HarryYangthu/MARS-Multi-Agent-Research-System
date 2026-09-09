@@ -1,6 +1,6 @@
 # Idea 服务启动配置方案
 
-默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1`、`experimental_research_pro_per_insight_v2`、`experimental_research_pro_per_insight_v3`、`experimental_research_pro_per_insight_v4` 和 `experimental_research_pro_per_insight_v5` 均标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
+默认 `MARS_IDEA_RUNTIME_PROFILE=baseline` 继续使用 `configs/agents.yaml` 的 Flash/native 配置。未设置时也是 baseline。可选 `experimental_research_pro_per_insight_v1` 至 `experimental_research_pro_per_insight_v6` 均标记为 **experimental**、`validated=false`；配置和纯检查通过，不代表产品入口或科学质量已经通过。
 
 服务启动前显式设置 `MARS_IDEA_RUNTIME_PROFILE=experimental_research_pro_per_insight_v1`，再用正常的 Uvicorn 入口 `app.main:app` 启动。选择器只接受上述本地已知名称，不能指定文件路径或 URL。运行时不修改环境、YAML、全局 memory 或已注册 Agent 的配置；改变方案需要重新启动服务。当前不是逐请求选择功能，前端及 `POST /api/runs` 均未增加配置入口。模型设置页仍展示/编辑原 agents.yaml，不表示实验方案的有效设置。
 
@@ -19,6 +19,10 @@ v5 相对 v4 仅将主 Agent 工具显式收窄为 `idea.research_delegate` 和 
 `max_delegations=3` 是委派上限，所有工具仍共享主循环的 5 次调用预算，并非预留三个委派名额。v5 不自动派发工具、补造研究答案或允许直接读取替代合格报告；最终仍要求真实接受的调研报告及对应方法引用。纯配置与真实第 21 次档案回放只验证清单、schema、拒绝跨配置恢复和旧记录不变，不能据此认定论文相关性、调研恢复能力或完整 Idea 交付已经通过。
 
 CVF 工具要求部署允许 `openaccess.thecvf.com`，使用官方会议目录及论文页元数据，不需要通用搜索 API key；当前仅支持现代 `/content/{venue}{year}/` 布局。元数据和实际 PDF 阅读分别记账。公开验证场景为 `configs/evaluation/idea_research_publisher_real.yaml`；API 只采用其中的问题与要求，有效模型及工具来自显式服务 profile，不能把场景文件中的 CLI 模型配置误认为服务配置。
+
+v6 在 v5 基础上组合两项改动：子 Agent 的 `search.neurips_search` 官方元数据通道，以及主研究配置 `per_delegation_min_sources=1`。该组合不是单变量比较，v1—v5 保留原值。单篇策略要求父 Agent 拆分可由一篇相关论文支持的信息缺口；工具实际 Schema 明示 `min_sources=1`，其它值在创建子任务前拒绝，不静默改写。子作者和整报告审查都接收宿主的单篇交付范围，同时保留完整原任务及委派说明；若自由文本仍要求多篇，须明确处理范围冲突，不能借数值门槛忽略任务。研究员可继续比较多个来源，但每篇采用的材料仍需来源、正文、引用及科学审查。原任务的全局来源要求和父级方法链接门槛不变，失败材料不会自动成为接受报告。
+
+NeurIPS 通道从官方年份目录匹配题名，核对真实论文页及 Paper 按钮，保存原始 HTML 和来源收据。引文元数据中的另一个 PDF 域名不自动变成已验证别名，会议版也不冒充 arXiv 版本。元数据不是正文，后续阅读仍由现有 `search.fetch_sources` 独立生成收据。部署需允许实际官方站点；对应公开场景为 `configs/evaluation/idea_research_single_publication_real.yaml`，显式增加 `papers.nips.cc` 和 `proceedings.neurips.cc`，保留原问题、至少两篇来源/PDF、256 参数上限和模型预算。NeurIPS 的真实注册工具组件已完成检索、下载和正文收据链验证；单篇策略与完整组合仍需新的实际 Agent 验证。独立组件使用指定题名，不能当成自主选文或研究报告通过。
 
 开始及继续逐项审查均按原模型预算预留剩余单元和一次整份审查。结果未知、响应合同冲突、材料装配或输入预算校验失败都立即停止，不通过汇总模式重抽、截断证据或扩大预算。checkpoint 和 trace 保存原始单项判定、同候选汇总及各自哈希；新模式通过合同、plan 的 `failure_mode` 和运行时版本绑定身份。旧 v2/v3/v4 审查合同及默认遇拒即返回作者的行为保持，不能把旧运行迁移为 v5。纯状态检查与已终态第十九次子任务档案只验证边界、来源和旧消息重建；该子任务原稿与修订稿的判定属于不同候选，不是新模式已经收集同稿意见的真实证据。v3 的实际质量和调用效率仍待新的完整真实运行。
 

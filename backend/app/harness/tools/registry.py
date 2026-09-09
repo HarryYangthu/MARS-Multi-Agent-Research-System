@@ -12,13 +12,14 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable
 
 import yaml
-from jsonschema import ValidationError, validate
+from jsonschema import Draft202012Validator, ValidationError, validate
 from loguru import logger
 
 from app.harness.observability.tracing import TraceRecorder
@@ -152,6 +153,25 @@ class ToolRegistry:
         child._specs = dict(self._specs)
         child._gates = list(self._gates)
         return child
+
+    def constrain_input_schema(self, name: str, constraint: dict[str, Any], *,
+                               description_note: str = "") -> None:
+        """Add a host constraint after configuration on a private registry fork.
+
+        allOf preserves every original restriction. No handler, permission or gate
+        is replaced, and deep copies keep the parent registry's schemas unchanged.
+        """
+        if name not in self._tools or name not in self._specs:
+            raise ValueError("cannot constrain an unregistered tool: " + name)
+        Draft202012Validator.check_schema(constraint)
+        spec = self._specs[name]
+        schema = deepcopy(spec.input_schema)
+        # Keep the original root ($defs/$ref and object declaration included).
+        # Wrapping that schema in another allOf could change root-relative refs.
+        schema["allOf"] = [*schema.get("allOf", []), deepcopy(constraint)]
+        self._specs[name] = replace(spec,
+            input_schema=schema,
+            description=spec.description + (" " + description_note if description_note else ""))
 
     def scope_for_read_tools(self, agent: str, tools: tuple[str, ...]) -> ConfiguredReadToolScope:
         """Validate the effective host configuration without changing global permissions."""
@@ -388,6 +408,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.search import (
         arxiv_search_tool,
         cvf_search_tool,
+        neurips_search_tool,
         openalex_search_tool,
         fetch_sources_tool,
         local_docs_tool,
@@ -398,6 +419,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     reg.register("search.local_docs", local_docs_tool)
     reg.register("search.arxiv_search", arxiv_search_tool)
     reg.register("search.cvf_search", cvf_search_tool)
+    reg.register("search.neurips_search", neurips_search_tool)
     reg.register("search.openalex_search", openalex_search_tool)
     reg.register("search.web_search", web_search_tool)
     reg.register("search.fetch_sources", fetch_sources_tool)

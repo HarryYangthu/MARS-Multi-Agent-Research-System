@@ -16,6 +16,8 @@ def search_metadata_rows(observation: dict[str, Any]) -> list[dict[str, Any]]:
     if not observation.get("ok") or not isinstance(output, dict):
         return []
     tool = observation.get("tool")
+    if tool == "search.neurips_search":
+        return _neurips_metadata_rows(observation)
     if tool not in {"search.arxiv_search", "search.web_search", "search.openalex_search", "search.cvf_search"}:
         return []
     hits = output.get("hits", [])
@@ -43,6 +45,35 @@ def search_metadata_rows(observation: dict[str, Any]) -> list[dict[str, Any]]:
             return []
         return [hit for hit in rows if hit.get("search_receipt") == output["search_receipt"]
                 and hit.get("search_receipt_sha256") == output.get("search_receipt_sha256") and verified_cvf_hit(hit)]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return []
+
+
+def _neurips_metadata_rows(observation: dict[str, Any]) -> list[dict[str, Any]]:
+    """Only this tool's original Observation and reconstructed official HTML qualify."""
+    from app.harness.tools.search.neurips import verified_neurips_hit
+    try:
+        raw_ref = observation["raw_ref"]
+        raw_path = Path(raw_ref)
+        if raw_path.is_symlink():
+            return []
+        raw = json.loads(raw_path.read_text())
+        output, args = observation["output"], observation["args"]
+        if ({**raw, "raw_ref": raw_ref} != observation or output.get("source") != "neurips"
+                or output.get("metadata_only") is not True or output.get("pdf_downloaded") is not False
+                or not isinstance(output.get("search_receipt"), str)):
+            return []
+        receipt_data = Path(output["search_receipt"]).read_bytes()
+        receipt = json.loads(receipt_data)
+        expected = {"query": args["query"].strip(), "year": args["year"], "top_k": args.get("top_k", 3)}
+        if (hashlib.sha256(receipt_data).hexdigest() != output.get("search_receipt_sha256")
+                or any(receipt["request"].get(key) != value for key, value in expected.items())
+                or any(output.get(key) != args.get(key) for key in ("query", "year"))
+                or not isinstance(output.get("hits"), list)):
+            return []
+        return [hit for hit in output["hits"] if isinstance(hit, dict)
+                and hit.get("search_receipt") == output["search_receipt"]
+                and hit.get("search_receipt_sha256") == output["search_receipt_sha256"] and verified_neurips_hit(hit)]
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return []
 

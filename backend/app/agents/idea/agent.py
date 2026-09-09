@@ -10,6 +10,7 @@ from typing import Any
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
 from app.agents.idea.research_review import RESEARCH_EVIDENCE_SCOPE_GUIDANCE
+from app.agents.idea.research_unit import UNIT_PARENT_GUIDANCE, configured_research_unit
 from app.agents.idea.delivery import (
     STRUCTURED_REFERENCE_GUIDANCE, delivery_errors, progress_sink, write_delivery,
 )
@@ -324,6 +325,8 @@ class IdeaAgent(BaseAgent):
                 "or design constraint precisely enough to justify that decision. Merely naming a discarded "
                 "approach does not make its paper an adopted source. " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE
             )
+            if configured_research_unit(self.config.raw.get("research", {})) is not None:
+                context.task += UNIT_PARENT_GUIDANCE
         return context
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
