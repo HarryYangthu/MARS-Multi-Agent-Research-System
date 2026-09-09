@@ -21,7 +21,7 @@ from app.agents.idea.research_review import (
     RESEARCH_EVIDENCE_SCOPE_GUIDANCE, RESEARCH_REVIEW_RUBRIC, research_review_messages,
 )
 from app.agents.idea.research_review_plan import (
-    REVIEW_PLAN_CONTRACT, build_research_review_plan, research_plan_errors, research_review_mode, review_plan_claim,
+    build_research_review_plan, research_plan_errors, research_review_contract, research_review_mode, review_plan_claim,
 )
 from app.agents.idea.research_origin import ResearchOrigin, research_origins
 from app.harness.agent_loop import AgentLoopPolicy, LoopInput, LoopResult, NativeAgentLoop
@@ -42,8 +42,8 @@ def research_policy(config: AgentConfig, *, require_review: bool) -> AgentLoopPo
         raise ValueError("research delegation requires full auditable traces")
     if require_review and policy.mode != "reflection":
         raise ValueError("required research dossier needs an independent reflection review; react cannot bypass it")
-    if research_review_mode(config.raw.get("research", {})) == "per_insight_then_whole" and policy.mode != "reflection":
-        raise ValueError("per_insight_then_whole requires reflection review")
+    if research_review_mode(config.raw.get("research", {})) != "whole_report" and policy.mode != "reflection":
+        raise ValueError("per-insight review requires reflection review")
     return policy
 
 
@@ -201,7 +201,7 @@ def load_delegated_research(run_root: Path, observations: list[dict[str, Any]]) 
         if checkpoint.get("status") != "passed" or checkpoint.get("candidate") != report_text:
             raise ValueError("delegate candidate is not the checkpoint's passed document")
         request_record = None
-        if manifest.get("review_mode") == "per_insight_then_whole":
+        if manifest.get("review_mode") in ("per_insight_then_whole", "per_insight_collect_then_whole"):
             request_path = _contained(root, manifest.get("request_ref"), under=ROOT + "/" + delegation_id)
             if request_path != manifest_path.parent / "request.json" or file_sha(request_path) != manifest.get("request_sha256"):
                 raise ValueError("research review request path/hash mismatch")
@@ -360,6 +360,7 @@ class ResearchSession:
         policy = research_policy(self.config, require_review=self.require_review or bool(
             self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
         review_mode = research_review_mode(self.config.raw.get("research", {}))
+        plan_contract = research_review_contract(review_mode)
         self.attempted += 1
         identifier = uuid.uuid4().hex
         target = root / ROOT / identifier
@@ -372,7 +373,7 @@ class ResearchSession:
         review_context = {"task": self.request.user_request, "project": self.context.project,
                           "supplied_context": {ref: self.context.upstream[ref] for ref in refs}}
         plan_request = ({"review_mode": review_mode, "review_context": review_context}
-                        if review_mode == "per_insight_then_whole" else {})
+                        if review_mode in ("per_insight_then_whole", "per_insight_collect_then_whole") else {})
         atomic_json(target / "request.json", {"delegation_id": identifier, "arguments": args,
             "model": self.config.model_name, "provider": self.config.model_provider, "tools": tools,
             "parent_run_id": tool_context.run_id, "context_refs": refs, "min_sources": minimum,
@@ -430,9 +431,9 @@ class ResearchSession:
                     supplied_context={ref: self.context.upstream[ref] for ref in refs}),
                 review_plan_factory=(partial(build_research_review_plan, task=self.request.user_request,
                     project=self.context.project, gap=args, min_sources=minimum,
-                    supplied_context={ref: self.context.upstream[ref] for ref in refs})
-                    if review_mode == "per_insight_then_whole" else None),
-                review_plan_contract_id=REVIEW_PLAN_CONTRACT if review_mode == "per_insight_then_whole" else None,
+                    supplied_context={ref: self.context.upstream[ref] for ref in refs}, contract_id=plan_contract)
+                    if plan_contract is not None else None),
+                review_plan_contract_id=plan_contract,
                 required_review_tools=("search.fetch_sources",),
                 stop_contract_id=STOP_CONTRACT,
                 stop_condition=lambda view: evidence_stop(view, min_sources=minimum,
@@ -501,7 +502,7 @@ class ResearchSession:
         manifest_path = target / "manifest.json"
         plan_metadata: dict[str, Any] = {}
         request_metadata: dict[str, Any] = {}
-        if review_mode == "per_insight_then_whole":
+        if review_mode in ("per_insight_then_whole", "per_insight_collect_then_whole"):
             plan_metadata = {"review_mode": review_mode, "review_plan": review_plan_claim(
                 json.loads(checkpoint.read_text()), result.text, trace_root=trace,
                 checkpoint_ref=checkpoint.relative_to(root).as_posix())}

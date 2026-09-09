@@ -115,6 +115,12 @@ def progress_message(event: dict[str, Any]) -> str:
         return "已形成候选方案，接下来检查格式、证据和下游所需信息。"
     if kind == "validation":
         return "结构与材料检查通过，继续完成本次验收。" if event.get("valid") else f"结构或材料检查发现 {len(event.get('issues', []))} 项问题，候选方案尚未通过。"
+    if kind == "review_unit":
+        if event.get("accepted") is True:
+            return "当前审查项通过模型检查。"
+        if event.get("accepted") is False:
+            return "当前审查项有待解决问题。"
+        return "当前审查项尚未确认结果。"
     if kind == "review":
         if event.get("accepted"):
             return "本轮模型审查未发现阻断问题；研究效果仍需实验验证。"

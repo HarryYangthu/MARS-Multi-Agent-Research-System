@@ -1,7 +1,9 @@
 """Contract and real-file tests; authored documents are parser inputs, not Agent results."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +107,41 @@ def test_candidate_progress_never_claims_acceptance() -> None:
 
 def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
     assert progress_message({"kind": "action", "tool": "search.arxiv_search", "reason": "Search more papers"}) == "正在检索相关论文。"
+
+
+@pytest.mark.parametrize("accepted,expected", [
+    (True, "当前审查项通过模型检查。"),
+    (False, "当前审查项有待解决问题。"),
+    (None, "当前审查项尚未确认结果。"),
+    ("false", "当前审查项尚未确认结果。"),
+])
+@pytest.mark.parametrize("phase", ["act", "reflect"])
+def test_review_unit_progress_describes_only_the_current_item(accepted: object, expected: str, phase: str) -> None:
+    # Authored rendering inputs; no review or provider execution is represented.
+    # A rejected item may remain in reflect while other items are collected.
+    event = {"kind": "review_unit", "unit_id": "item", "accepted": accepted, "phase": phase}
+    message = progress_message(event)
+    assert message == expected
+    assert all(word not in message for word in ("已停止", "已完成", "开始修订", "整份报告通过"))
+
+
+def test_real_run19_review_unit_progress_no_longer_reports_stopped() -> None:
+    configured = os.environ.get("MARS_TEST_IDEA_REVIEW_UNIT_PROGRESS")
+    if not configured:
+        pytest.skip("requires actual run-19 child progress; no replacement is generated")
+    path = Path(configured)
+    with path.open("rb") as stream:
+        prefix = b"".join(stream.readline() for _ in range(21))
+    assert hashlib.sha256(prefix).hexdigest() == "d6ea18dc8e9689706245d545b831a0b39cec7aef8b353e91b47a7cc39b0ac382"
+    rows = [json.loads(line) for line in prefix.splitlines()]
+    units = [row for row in rows if row["kind"] == "review_unit"]
+    assert [row["accepted"] for row in units] == [False, True, False]
+    assert all("本次运行已停止" in row["message"] for row in units)
+    assert [progress_message(row) for row in units] == [
+        "当前审查项有待解决问题。", "当前审查项通过模型检查。", "当前审查项有待解决问题。",
+    ]
+    with path.open("rb") as stream:
+        assert stream.read(len(prefix)) == prefix
 
 
 def test_repeated_delivery_preserves_exact_prior_artifact(tmp_path: Path) -> None:

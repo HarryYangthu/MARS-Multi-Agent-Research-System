@@ -10,7 +10,7 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.harness.agent_loop.context import token_upper_bound
 from app.harness.agent_loop.policy import AgentLoopPolicy
@@ -19,6 +19,7 @@ from app.harness.agent_loop.trace import canonical, digest
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
 
 WHOLE_REVIEW_UNIT = "__whole_report__"
+ReviewFailureMode = Literal["fail_fast", "collect_units"]
 _BUDGET_PREFIX = "Host remaining budget for this agent loop: "
 _BUDGET_SUFFIX = (". The next model call is included. Each dispatched tool, including failures, consumes "
                   "one tool call. Reserve tools for acquiring and checking evidence, and calls for submission "
@@ -68,6 +69,7 @@ class ReviewPlan:
     contract_id: str
     candidate_sha256: str
     units: tuple[ReviewUnit, ...]
+    failure_mode: ReviewFailureMode = "fail_fast"
 
 
 ReviewPlanFactory = Callable[[str, list[dict[str, Any]]], ReviewPlan]
@@ -87,6 +89,8 @@ def review_plan_fingerprint(base: str, factory: ReviewPlanFactory | None, contra
 
 
 def plan_payload(plan: ReviewPlan) -> dict[str, Any]:
+    if plan.failure_mode not in ("fail_fast", "collect_units"):
+        raise ValueError("unknown review plan failure_mode")
     identifiers = [unit.unit_id for unit in plan.units]
     if (not identifiers or len(set(identifiers)) != len(identifiers)
             or any(not isinstance(value, str) or not value.strip() or value == WHOLE_REVIEW_UNIT for value in identifiers)):
@@ -102,7 +106,48 @@ def plan_payload(plan: ReviewPlan) -> dict[str, Any]:
     # Round trip prevents later callback mutations from altering persisted inputs.
     payload: dict[str, Any] = json.loads(canonical({"contract_id": plan.contract_id, "candidate_sha256": plan.candidate_sha256,
                                                   "units": units}))
+    # The explicit opt-in contract must be versioned by the domain caller.
+    # Omitted default fields preserve historical payloads and fingerprints.
+    if plan.failure_mode == "collect_units":
+        payload.update(failure_mode="collect_units", review_plan_runtime_version=2)
     return payload
+
+
+def _plan_identity(plan: dict[str, Any]) -> dict[str, Any]:
+    payload = {key: plan[key] for key in ("contract_id", "candidate_sha256", "units")}
+    if "failure_mode" in plan or "review_plan_runtime_version" in plan:
+        if (plan.get("failure_mode") != "collect_units" or type(plan.get("review_plan_runtime_version")) is not int
+                or plan.get("review_plan_runtime_version") != 2):
+            raise ValueError("invalid explicit review failure mode/version")
+        payload.update(failure_mode="collect_units", review_plan_runtime_version=2)
+    return payload
+
+
+def _completed_status(plan: dict[str, Any]) -> str:
+    """Derive plan progress only from recorded, candidate-bound unit decisions."""
+    results = plan["results"]
+    if results and not results[-1]["valid"]:
+        return "failed"
+    rejected = any(not result["decision"]["accept"] for result in results)
+    if rejected and (plan.get("failure_mode") != "collect_units" or len(results) >= len(plan["units"])):
+        return "rejected"
+    if len(results) == len(plan["units"]) + 1:
+        return "passed"
+    return "running"
+
+
+def completed_plan_decision(plan: dict[str, Any]) -> dict[str, Any] | None:
+    """Aggregate authored rejection text once; never supply scientific judgments."""
+    if plan["status"] not in {"rejected", "passed"}:
+        return None
+    if plan.get("failure_mode") != "collect_units" or plan["results"][-1]["unit_id"] == WHOLE_REVIEW_UNIT:
+        return dict(plan["results"][-1]["decision"])
+    rejected = [result for result in plan["results"] if not result["decision"]["accept"]]
+    return parse_review(canonical({
+        "accept": False,
+        "issues": [f"[{result['unit_id']}] {issue}" for result in rejected for issue in result["decision"]["issues"]],
+        "rationale": "\n".join(f"[{result['unit_id']}] {result['decision']['rationale']}" for result in rejected),
+    }))
 
 
 def prepare_review_plan(state: dict[str, Any], plan: ReviewPlan, *, contract_id: str,
@@ -182,6 +227,9 @@ def start_review_unit(state: dict[str, Any], messages: list[Message]) -> dict[st
     if current["status"] != "running" or current["pending_request"] is not None or index != len(current["results"]):
         raise ValueError("review unit is finished, inconsistent or already started")
     unit_id = current["units"][index]["unit_id"] if index < len(current["units"]) else WHOLE_REVIEW_UNIT
+    if unit_id == WHOLE_REVIEW_UNIT and any(not result["valid"] or not result["decision"]["accept"]
+                                           for result in current["results"]):
+        raise ValueError("whole review requires every insight to be accepted")
     pending = {"unit_id": unit_id, "request": state["counts"]["model_requests"],
                "input_sha256": digest([message.to_wire() for message in messages])}
     current["pending_request"] = pending
@@ -203,19 +251,14 @@ def finish_review_unit(state: dict[str, Any], result: UnitReviewResult, *, respo
     current["results"].append(record)
     current["pending_request"] = None
     current["next_unit"] += 1
-    if not valid:
-        current["status"] = "failed"
-    elif not decision["accept"]:
-        current["status"] = "rejected"
-    elif pending["unit_id"] == WHOLE_REVIEW_UNIT:
-        current["status"] = "passed"
+    current["status"] = _completed_status(current)
     return record
 
 
 def _plan_structure_errors(plan: dict[str, Any]) -> list[str]:
     errors = []
     try:
-        payload = {key: plan[key] for key in ("contract_id", "candidate_sha256", "units")}
+        payload = _plan_identity(plan)
         if plan["plan_sha256"] != digest(payload):
             errors.append("review plan input hash mismatch")
         identifiers = [unit["unit_id"] for unit in plan["units"]] + [WHOLE_REVIEW_UNIT]
@@ -236,8 +279,12 @@ def _plan_structure_errors(plan: dict[str, Any]) -> list[str]:
             parse_review(canonical(result["decision"]))
             if type(result["valid"]) is not bool or not isinstance(result["details"], dict):
                 errors.append("review unit validity/details malformed")
-            if index < len(results) - 1 and (not result["valid"] or not result["decision"]["accept"]):
+            if index < len(results) - 1 and (not result["valid"] or (
+                    not result["decision"]["accept"] and plan.get("failure_mode") != "collect_units")):
                 errors.append("review continued after a failed unit")
+            if result["unit_id"] == WHOLE_REVIEW_UNIT and any(
+                    not previous["valid"] or not previous["decision"]["accept"] for previous in results[:index]):
+                errors.append("whole review followed a rejected or invalid insight")
             requests.append(result["request"])
         if (any(type(value) is not int or value < 1 for value in requests)
                 or requests != sorted(set(requests))):
@@ -246,12 +293,8 @@ def _plan_structure_errors(plan: dict[str, Any]) -> list[str]:
                       and all(result["valid"] and result["decision"]["accept"] for result in results))
         if (plan["status"] == "passed") != all_passed:
             errors.append("review plan acceptance differs from complete unit coverage")
-        if plan["status"] == "running" and results and (not results[-1]["valid"] or not results[-1]["decision"]["accept"]):
-            errors.append("failed review unit cannot remain running")
-        if plan["status"] == "rejected" and (not results or not results[-1]["valid"] or results[-1]["decision"]["accept"]):
-            errors.append("rejected review plan lacks a valid rejecting result")
-        if plan["status"] == "failed" and (not results or results[-1]["valid"]):
-            errors.append("failed review plan lacks its invalid result")
+        if plan["status"] != _completed_status(plan):
+            errors.append("review plan status differs from completed unit decisions")
         pending = plan["pending_request"]
         if pending is not None:
             if (plan["status"] != "running" or len(results) >= len(identifiers)
@@ -261,6 +304,26 @@ def _plan_structure_errors(plan: dict[str, Any]) -> list[str]:
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         errors.append("invalid review plan record: " + str(exc))
     return errors
+
+
+def collected_reflection_errors(plan: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Check the aggregate event separately from the last unit's own decision."""
+    if plan.get("failure_mode") != "collect_units":
+        return []
+    completed = completed_plan_decision(plan)
+    reflections = [row for row in rows if row["kind"] == "reflection"
+                   and row.get("review_plan_sha256") == plan["plan_sha256"]]
+    if completed is None:
+        return ["unfinished collected review has a whole-candidate decision"] if reflections else []
+    if (len(reflections) != 1 or reflections[0].get("visible") != completed
+            or reflections[0].get("accept") != completed["accept"]
+            or reflections[0].get("review_candidate_sha256") != plan["candidate_sha256"]
+            or reflections[0].get("visible_sha256") != digest(completed)):
+        return ["collected review reflection differs from its complete unit decisions"]
+    if not any(row["kind"] == "review_unit" and row.get("request") == plan["results"][-1]["request"]
+               and row["event_seq"] < reflections[0]["event_seq"] for row in rows):
+        return ["collected reflection precedes its final insight result"]
+    return []
 
 
 def review_plan_trace_errors(state: dict[str, Any], trace_root: Path) -> list[str]:
@@ -290,7 +353,8 @@ def review_plan_trace_errors(state: dict[str, Any], trace_root: Path) -> list[st
             else:
                 visible_plan = starts[0].get("visible")
                 if (not isinstance(visible_plan, dict) or starts[0].get("visible_sha256") != digest(visible_plan)
-                        or any(visible_plan.get(key) != plan.get(key) for key in ("contract_id", "candidate_sha256", "units", "plan_sha256"))):
+                        or _plan_identity(visible_plan) != _plan_identity(plan)
+                        or visible_plan.get("plan_sha256") != plan.get("plan_sha256")):
                     errors.append("review plan input differs from its original creation event")
             if plan.get("pending_request") is not None:
                 recorded_requests.append(plan["pending_request"]["request"])
@@ -327,6 +391,7 @@ def review_plan_trace_errors(state: dict[str, Any], trace_root: Path) -> list[st
                     errors.append("review unit request/response/result hash or identity mismatch")
                 if not req["event_seq"] < res["event_seq"] < unit["event_seq"]:
                     errors.append("review unit journal ordering is invalid")
+            errors.extend(collected_reflection_errors(plan, rows))
         if len([row for row in rows if row["kind"] == "review_unit"]) != len(stored_results):
             errors.append("review checkpoint omitted unit results from the journal")
         actual_requests = [row["request"] for row in rows if row["kind"] == "model_request" and row.get("review_unit_id")]

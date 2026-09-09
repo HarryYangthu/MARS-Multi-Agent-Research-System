@@ -14,7 +14,7 @@ from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUC
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
 from app.harness.agent_loop.review_plan import (
-    WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, finish_review_unit, pack_review_unit,
+    WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, completed_plan_decision, finish_review_unit, pack_review_unit,
     prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
     start_review_unit, validate_review_plan_resume, validate_review_provider,
 )
@@ -179,9 +179,10 @@ def apply_planned_review_decision(state: dict[str, Any], result: UnitReviewResul
                                   response_visible: Any, max_reflections: int) -> tuple[dict[str, Any], str]:
     """Commit unit and candidate transitions together, before any notification await."""
     record = finish_review_unit(state, result, response_text=response_text, response_visible=response_visible)
-    if record["unit_id"] != WHOLE_REVIEW_UNIT and result.decision["accept"]:
+    decision = completed_plan_decision(state["review_plan"])
+    if decision is None:
         return record, "next_unit"
-    outcome = apply_review_decision(state, result.decision, format_repair=False, max_reflections=max_reflections)
+    outcome = apply_review_decision(state, decision, format_repair=False, max_reflections=max_reflections)
     return record, outcome
 
 
@@ -509,6 +510,7 @@ class NativeAgentLoop:
                            visible=response_visible)
                 review_conflict = False
                 unit_result: UnitReviewResult | None = None
+                parse_error: ValueError | None = None
                 try:
                     if planned_review and completion.tool_calls:
                         raise ValueError("review units cannot return tool calls")
@@ -521,18 +523,23 @@ class NativeAgentLoop:
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
-                    review_conflict = True
-                    decision = {**exc.review, "accept": False}
-                    trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
+                    if planned_review and active_plan is not None and active_plan.failure_mode == "collect_units":
+                        parse_error = exc
+                    else:
+                        review_conflict = True
+                        decision = {**exc.review, "accept": False}
+                        trace.emit("review_conflict", {"effective_accept": False}, visible=exc.review)
                 except ValueError as exc:
+                    parse_error = exc
+                if parse_error is not None:
                     counts["protocol_repairs"] += 1
                     if planned_review:
                         # A malformed reviewer response is an execution failure,
                         # not an invitation to edit the scientific candidate or
                         # silently call the same review unit again.
-                        failure = UnitReviewResult({"accept": False, "issues": ["Review response failed its contract: " + str(exc)],
+                        failure = UnitReviewResult({"accept": False, "issues": ["Review response failed its contract: " + str(parse_error)],
                                                     "rationale": "No usable review decision; the candidate is not accepted."},
-                                                   {"protocol_error": str(exc)})
+                                                   {"protocol_error": str(parse_error)})
                         record = finish_review_unit(state, failure, response_text=completion.text,
                                                     response_visible=response_visible, valid=False)
                         trace.emit("review_unit", {"request": counts["model_requests"], "unit_id": record["unit_id"],
@@ -540,39 +547,39 @@ class NativeAgentLoop:
                         state["status"] = "review_protocol_error"
                         state["reflection_accepted"] = False
                         state["feedback"] = failure.decision["issues"][0]
-                        trace.emit("protocol_error", {"error": str(exc), "review_unit_id": record["unit_id"],
+                        trace.emit("protocol_error", {"error": str(parse_error), "review_unit_id": record["unit_id"],
                                                       "automatic_retry": False})
                         trace.snapshot(state)
                         break
                     state["review_format_repair_pending"] = bool(
-                        p.reflection_format_repair_enabled and reviewing and is_review_format_error(exc))
+                        p.reflection_format_repair_enabled and reviewing and is_review_format_error(parse_error))
                     state["protocol_output"] = (canonical({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]})
                                                 if native else completion.text)
-                    state["feedback"] = (f"Protocol error: {exc}. Correct the provided invalid output and return "
+                    state["feedback"] = (f"Protocol error: {parse_error}. Correct the provided invalid output and return "
                                          "exactly one required JSON object. No extra braces, prose or second action. "
                                          "Preserve the proposal's content while fixing syntax; existing Observations remain valid.")
                     if reviewing:
                         state["feedback"] = (
-                            f"Review protocol error: {exc}. Return exactly one JSON object with "
+                            f"Review protocol error: {parse_error}. Return exactly one JSON object with "
                             "accept (boolean), issues (array of unresolved blocker strings), and rationale (string). "
                             "Do not return a proposal, tool invocation, XML, code fence or multiple JSON objects. "
                             "Review the current candidate and preserve substantive findings while fixing only format."
                         )
                         if state["review_format_repair_pending"]:
                             state["feedback"] = (
-                                f"Review JSON format error: {exc}. Correct only syntax or duplicate keys in the complete "
+                                f"Review JSON format error: {parse_error}. Correct only syntax or duplicate keys in the complete "
                                 "provided review. Preserve every substantive finding and unresolved blocker. "
                                 "Do not reassess the candidate or discard an issue to produce acceptance."
                             )
                     elif native:
                         final_instruction = ("call mars_submit_document with complete metadata and body"
                                              if request.final_schema is not None else "submit the complete Markdown candidate")
-                        state["feedback"] = (f"Protocol error: {exc}. Use valid native research tool calls or {final_instruction}. "
+                        state["feedback"] = (f"Protocol error: {parse_error}. Use valid native research tool calls or {final_instruction}. "
                                              "For document submission, arguments must be exactly one JSON object with "
                                              "two keys: metadata and body. Close metadata before body; close the root "
                                              "once after body. Do not append another body or object after the root. "
                                              "Resolve the pinned candidate validation errors too. No rejected action was executed.")
-                    trace.emit("protocol_error", {"error": str(exc),
+                    trace.emit("protocol_error", {"error": str(parse_error),
                                "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
                         state["status"] = "protocol_exhausted"
@@ -589,11 +596,15 @@ class NativeAgentLoop:
                         trace.emit("review_unit", {"request": counts["model_requests"], "unit_id": finished_record["unit_id"],
                                                    "valid": True}, visible=finished_record)
                         if outcome == "next_unit":
-                            # Positive units are not whole-candidate acceptance.
-                            # They also never become input to another reviewer.
+                            # Collected unit decisions, positive or negative, are
+                            # never exposed to the next isolated reviewer.
                             trace.snapshot(state)
-                            await progress("review_unit", unit_id=finished_record["unit_id"], accepted=True)
+                            await progress("review_unit", unit_id=finished_record["unit_id"],
+                                           accepted=finished_record["decision"]["accept"])
                             continue
+                        aggregate = completed_plan_decision(state["review_plan"])
+                        assert aggregate is not None
+                        decision = aggregate
                     else:
                         outcome = apply_review_decision(state, decision, format_repair=format_repair,
                                                         max_reflections=p.max_reflections)
@@ -605,10 +616,15 @@ class NativeAgentLoop:
                         continue
                     trace.emit("reflection", {"accept": decision["accept"], "round": counts["reflections"],
                                               "host_conflict_rejection": review_conflict,
+                                              **({"review_plan_sha256": state["review_plan"]["plan_sha256"],
+                                                  "review_candidate_sha256": state["review_plan"]["candidate_sha256"]}
+                                                 if planned_review and active_plan is not None
+                                                 and active_plan.failure_mode == "collect_units" else {}),
                                               "repair_mode": "review_format" if format_repair else None}, visible=decision)
                     trace.snapshot(state)
                     if finished_record is not None:
-                        await progress("review_unit", unit_id=finished_record["unit_id"], accepted=decision["accept"])
+                        await progress("review_unit", unit_id=finished_record["unit_id"],
+                                       accepted=finished_record["decision"]["accept"])
                     await progress("review", accepted=decision["accept"], issues=decision["issues"])
                     if outcome == "accepted":
                         break

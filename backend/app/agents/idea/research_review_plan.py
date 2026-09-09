@@ -22,8 +22,10 @@ from app.harness.schema.frontmatter_parser import parse
 LEGACY_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v2"
 STATISTICAL_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v3"
 REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v4"
-REVIEW_PLAN_CONTRACTS = (LEGACY_REVIEW_PLAN_CONTRACT, STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT)
-ReviewMode = Literal["whole_report", "per_insight_then_whole"]
+COLLECT_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v5"
+REVIEW_PLAN_CONTRACTS = (LEGACY_REVIEW_PLAN_CONTRACT, STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT,
+                         COLLECT_REVIEW_PLAN_CONTRACT)
+ReviewMode = Literal["whole_report", "per_insight_then_whole", "per_insight_collect_then_whole"]
 
 
 def research_review_mode(research: object) -> ReviewMode:
@@ -31,9 +33,16 @@ def research_review_mode(research: object) -> ReviewMode:
     if not isinstance(research, dict):
         raise ValueError("research configuration must be an object")
     value = research.get("review_mode", "whole_report")
-    if value not in ("whole_report", "per_insight_then_whole"):
-        raise ValueError("research.review_mode must be whole_report or per_insight_then_whole")
+    if value not in ("whole_report", "per_insight_then_whole", "per_insight_collect_then_whole"):
+        raise ValueError("research.review_mode must be whole_report, per_insight_then_whole or per_insight_collect_then_whole")
     return cast(ReviewMode, value)
+
+
+def research_review_contract(mode: ReviewMode) -> str | None:
+    """The collect opt-in acquires a new fingerprint through its explicit contract."""
+    if mode == "whole_report":
+        return None
+    return COLLECT_REVIEW_PLAN_CONTRACT if mode == "per_insight_collect_then_whole" else REVIEW_PLAN_CONTRACT
 
 
 def insight_fields(insight: dict[str, Any]) -> tuple[str, ...]:
@@ -189,8 +198,9 @@ def build_research_review_plan(candidate: str, observations: list[dict[str, Any]
                "noninferiority, retained ability or compressible redundancy. Check both source interpretations "
                "and proposed transfer conclusions: such claims need an explicit margin and a decision procedure "
                "that can establish them. Otherwise the result remains inconclusive."
-               if contract_id in (STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT) else "")
-            + (" " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE if contract_id == REVIEW_PLAN_CONTRACT else "")),
+               if contract_id in (STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT, COLLECT_REVIEW_PLAN_CONTRACT) else "")
+            + (" " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE
+               if contract_id in (REVIEW_PLAN_CONTRACT, COLLECT_REVIEW_PLAN_CONTRACT) else "")),
             Message("user", "Complete research task:\n" + task),
             Message("user", "Project constraints:\n" + project),
             Message("user", "Delegated evidence gap and completion criteria:\n" + canonical(gap)),
@@ -202,7 +212,8 @@ def build_research_review_plan(candidate: str, observations: list[dict[str, Any]
                         for name, content in sorted((supplied_context or {}).items()))
         units.append(ReviewUnit(unit_id=insight["id"], messages=tuple(messages), response_schema=insight_review_schema(fields),
                                 parse_response=partial(parse_insight_review, fields=fields), evidence_bindings=bindings))
-    return ReviewPlan(contract_id=contract_id, candidate_sha256=digest(candidate), units=tuple(units))
+    return ReviewPlan(contract_id=contract_id, candidate_sha256=digest(candidate), units=tuple(units),
+                      failure_mode="collect_units" if contract_id == COLLECT_REVIEW_PLAN_CONTRACT else "fail_fast")
 
 
 def review_plan_claim(checkpoint: dict[str, Any], candidate: str, *, trace_root: Path,
@@ -217,7 +228,9 @@ def review_plan_claim(checkpoint: dict[str, Any], candidate: str, *, trace_root:
     plan = checkpoint["review_plan"]
     return {"contract_id": contract_id, "candidate_sha256": digest(candidate),
             "plan_sha256": plan["plan_sha256"], "covered_insight_ids": [unit["unit_id"] for unit in plan["units"]],
-            "results_ref": checkpoint_ref + "#/review_plan/results", "results_sha256": digest(plan["results"])}
+            "results_ref": checkpoint_ref + "#/review_plan/results", "results_sha256": digest(plan["results"]),
+            **({"failure_mode": "collect_units", "review_plan_runtime_version": 2}
+               if contract_id == COLLECT_REVIEW_PLAN_CONTRACT else {})}
 
 
 def research_plan_errors(manifest: dict[str, Any], output: dict[str, Any], checkpoint: dict[str, Any],
@@ -225,7 +238,7 @@ def research_plan_errors(manifest: dict[str, Any], output: dict[str, Any], check
                          request_record: dict[str, Any] | None = None) -> list[str]:
     """Historical whole review cannot acquire a new mode claim by edited flags."""
     mode = manifest.get("review_mode", "whole_report")
-    if mode not in ("whole_report", "per_insight_then_whole"):
+    if mode not in ("whole_report", "per_insight_then_whole", "per_insight_collect_then_whole"):
         return ["unknown research review_mode"]
     if manifest.get("review_mode") != output.get("review_mode") or manifest.get("review_plan") != output.get("review_plan"):
         return ["research review plan claim differs between manifest and output"]
@@ -240,12 +253,15 @@ def research_plan_errors(manifest: dict[str, Any], output: dict[str, Any], check
     try:
         if request_record.get("review_mode") != mode:
             raise ValueError("research request does not declare this review mode")
+        declared_contract = manifest.get("review_plan", {}).get("contract_id", "")
+        if (declared_contract == COLLECT_REVIEW_PLAN_CONTRACT) != (mode == "per_insight_collect_then_whole"):
+            raise ValueError("research review mode and failure-mode contract disagree")
         context = request_record["review_context"]
         if not isinstance(context, dict) or set(context) != {"task", "project", "supplied_context"}:
             raise ValueError("research request is missing its exact review context")
         expected = build_research_review_plan(candidate, checkpoint["history"], task=context["task"],
             project=context["project"], gap=request_record["arguments"], min_sources=request_record["min_sources"],
-            supplied_context=context["supplied_context"], contract_id=manifest.get("review_plan", {}).get("contract_id", ""))
+            supplied_context=context["supplied_context"], contract_id=declared_contract)
         payload = plan_payload(expected)
         if any(checkpoint.get("review_plan", {}).get(key) != value for key, value in payload.items()):
             raise ValueError("review plan inputs/coverage differ from the complete original insights and source rows")

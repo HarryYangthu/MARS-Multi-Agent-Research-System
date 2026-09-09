@@ -25,8 +25,9 @@ from app.harness.tools.config import ToolConfig, load_tool_configs
 from app.settings import repo_root
 
 
-ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2"]
-EXPERIMENTAL_PROFILES = ("experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2")
+ProfileName = Literal["baseline", "experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2", "experimental_research_pro_per_insight_v3"]
+EXPERIMENTAL_PROFILES = ("experimental_research_pro_per_insight_v1", "experimental_research_pro_per_insight_v2",
+                         "experimental_research_pro_per_insight_v3")
 PROFILE_FILE = "configs/idea_runtime_profiles.yaml"
 SNAPSHOT_FILE = "input/idea_runtime_profile.v1.json"
 
@@ -56,7 +57,7 @@ class _LeadResearch(_StrictModel):
 
 
 class _ChildResearch(_StrictModel):
-    review_mode: Literal["per_insight_then_whole"]
+    review_mode: Literal["per_insight_then_whole", "per_insight_collect_then_whole"]
 
 
 class _Lead(_StrictModel):
