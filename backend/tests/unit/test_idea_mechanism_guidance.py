@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,14 @@ def test_coupled_zero_factors_are_a_different_initialization_case() -> None:
     assert (loss(epsilon, 1) - loss(-epsilon, 1)) / (2 * epsilon) == pytest.approx(-2)
 
 
+def test_clamped_knots_change_boundary_support_even_with_uniform_interior_spacing() -> None:
+    # Human-authored mathematical counterexample to a uniform-support claim;
+    # no experiment or Agent answer is generated.
+    knots = [Fraction(-1)] * 4 + [Fraction(-1) + Fraction(2*i, 13) for i in range(1, 13)] + [Fraction(1)] * 4
+    widths = [knots[i+4] - knots[i] for i in range(16)]
+    assert widths == [Fraction(2, 13), Fraction(4, 13), Fraction(6, 13)] + [Fraction(8, 13)] * 10 + [Fraction(6, 13), Fraction(4, 13), Fraction(2, 13)]
+
+
 @pytest.mark.asyncio
 async def test_author_and_reviewer_require_specific_transfer_and_initialization_reasoning() -> None:
     root = Path(__file__).resolve().parents[3]
@@ -44,7 +53,9 @@ async def test_author_and_reviewer_require_specific_transfer_and_initialization_
     assert "zero output or zero coefficients alone do not imply zero gradients" in context.task
     assert "what is changed and why the changed structure is a plausible hypothesis" in context.task
     assert "paper-specific link" in context.task
+    assert "do not apply the interior support width to boundary bases" in context.task
     rubric = agent.reflection_rubric()
     assert "evaluate the Jacobian and loss gradient" in rubric
     assert "Follow the actual operations" in rubric
+    assert "repeated/clamped boundary knots" in rubric
     assert "Do not require a novel hypothesis to have already been" in rubric
