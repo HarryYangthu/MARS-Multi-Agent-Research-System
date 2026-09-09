@@ -7,6 +7,25 @@ from typing import Any
 from app.harness.llm.provider_base import Message
 
 
+RESEARCH_EVIDENCE_SCOPE_GUIDANCE = (
+    "Negative source claims, including a missing experiment, ablation, result or formula, are factual claims "
+    "even when placed in limitations. Not found in inspected material does not mean absent from the paper. "
+    "A paper-wide absence claim needs an explicit source statement that entails it or verified coverage of "
+    "all locations relevant to that claim in the same document version, including any relevant appendix or "
+    "supplement. A download or extracted_pages list is not evidence that the text was visible: check actual "
+    "visible_pages, truncation and legibility. Otherwise narrow the claim to the inspected material, or read "
+    "the relevant section if the decision needs it. Do not require every paper to be read in full when the "
+    "available passages already support the stated mechanism. Do not silently narrow a claim's scope only "
+    "inside an assessment's statement, assumptions or verification and then accept the original broader assertion. "
+    "A narrower claim requires an explicit author revision. Labeling an unsupported factual absence claim "
+    "as a hypothesis does not validate it; this differs from an explicitly untested proposed transfer. "
+    "A reviewer's reasoning and counterexample must entail its conclusion under the declared assumptions. "
+    "An admissible counterexample can refute a universal statement, but a loose upper bound or merely "
+    "allowed setting does not establish an actual reported experimental value. Distinguish bounds, "
+    "possible configurations and computed actual quantities; uncertainty alone does not prove a claim false."
+)
+
+
 RESEARCH_REVIEW_RUBRIC = (
     "Review the whole report, including human_summary/body, selection reasons, paper_findings, transfers "
     "and limitations, against the actual visible source pages, not merely the matching quote. A cautious "
@@ -39,7 +58,8 @@ RESEARCH_REVIEW_RUBRIC = (
     "claims about the source. Do not demand measured improvements, a novelty proof, or a complete final "
     "experiment plan at this research-report stage. Reject only specific material errors or missing evidence "
     "for claims the report actually makes. Cite the precise insight field and visible page in each issue. "
-    "Evaluate the current corrected report independently; do not retain resolved objections."
+    "Evaluate the current corrected report independently; do not retain resolved objections. "
+    + RESEARCH_EVIDENCE_SCOPE_GUIDANCE
 )
 
 

@@ -11,6 +11,7 @@ from typing import Any, Literal, cast
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.research_dossier import dossier_errors
+from app.agents.idea.research_review import RESEARCH_EVIDENCE_SCOPE_GUIDANCE
 from app.agents.idea.source_identity import SourceIdentityIndex
 from app.harness.agent_loop.protocol import parse_review
 from app.harness.agent_loop.review_plan import ReviewPlan, ReviewUnit, UnitReviewResult, plan_payload, review_plan_errors
@@ -19,8 +20,9 @@ from app.harness.llm.provider_base import Message
 from app.harness.schema.frontmatter_parser import parse
 
 LEGACY_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v2"
-REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v3"
-REVIEW_PLAN_CONTRACTS = (LEGACY_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT)
+STATISTICAL_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v3"
+REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v4"
+REVIEW_PLAN_CONTRACTS = (LEGACY_REVIEW_PLAN_CONTRACT, STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT)
 ReviewMode = Literal["whole_report", "per_insight_then_whole"]
 
 
@@ -187,7 +189,8 @@ def build_research_review_plan(candidate: str, observations: list[dict[str, Any]
                "noninferiority, retained ability or compressible redundancy. Check both source interpretations "
                "and proposed transfer conclusions: such claims need an explicit margin and a decision procedure "
                "that can establish them. Otherwise the result remains inconclusive."
-               if contract_id == REVIEW_PLAN_CONTRACT else "")),
+               if contract_id in (STATISTICAL_REVIEW_PLAN_CONTRACT, REVIEW_PLAN_CONTRACT) else "")
+            + (" " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE if contract_id == REVIEW_PLAN_CONTRACT else "")),
             Message("user", "Complete research task:\n" + task),
             Message("user", "Project constraints:\n" + project),
             Message("user", "Delegated evidence gap and completion criteria:\n" + canonical(gap)),

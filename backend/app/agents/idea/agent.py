@@ -9,6 +9,7 @@ from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.idea.research import material_errors, write_evidence
+from app.agents.idea.research_review import RESEARCH_EVIDENCE_SCOPE_GUIDANCE
 from app.agents.idea.delivery import (
     STRUCTURED_REFERENCE_GUIDANCE, delivery_errors, progress_sink, write_delivery,
 )
@@ -320,7 +321,7 @@ class IdeaAgent(BaseAgent):
                 "the complete target task with its exact budget. The final adaptation must meet all task constraints. "
                 "If an insight supports an alternative or a rejected approach, define the actual alternative "
                 "or design constraint precisely enough to justify that decision. Merely naming a discarded "
-                "approach does not make its paper an adopted source."
+                "approach does not make its paper an adopted source. " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE
             )
         return context
 

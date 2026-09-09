@@ -17,7 +17,9 @@ from app.agents.idea.research_dossier import dossier_errors, locate_quote, norma
 from app.agents.idea.research_gap import (
     GAP_SCHEMA, STOP_CONTRACT, evidence_stop, failure_record, gap_errors, research_submission_schema,
 )
-from app.agents.idea.research_review import RESEARCH_REVIEW_RUBRIC, research_review_messages
+from app.agents.idea.research_review import (
+    RESEARCH_EVIDENCE_SCOPE_GUIDANCE, RESEARCH_REVIEW_RUBRIC, research_review_messages,
+)
 from app.agents.idea.research_review_plan import (
     REVIEW_PLAN_CONTRACT, build_research_review_plan, research_plan_errors, research_review_mode, review_plan_claim,
 )
@@ -270,32 +272,9 @@ class ResearchSession:
     failures: list[dict[str, Any]] = field(default_factory=list)
     require_review: bool = False
 
-    async def dispatch(self, args: dict[str, Any], tool_context: ToolContext) -> ToolResult:
-        root = Path(str(self.request.extra["run_root"])).resolve()
-        if tool_context.run_id != str(self.request.extra.get("run_id", root.name)) or tool_context.project != self.request.project:
-            return ToolResult(ok=False, error="delegate session does not match tool run/project")
-        if self.attempted >= self.max_delegations:
-            return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap",
-                              output={"failure_type": "delegation_budget_exhausted", "remaining_delegations": 0,
-                                      "previous_failures": self._recovery_context(), "usable_as_final_evidence": False})
-        refs = args.get("context_refs", [])
-        if any(ref not in self.context.upstream for ref in refs):
-            return ToolResult(ok=False, error="context_refs must use available upstream keys: "
-                              + json.dumps(sorted(self.context.upstream), ensure_ascii=False)
-                              + ". Use [] when none apply. The overall task is already passed automatically; do not invent keys.",
-                              output={"available_context_refs": sorted(self.context.upstream)})
-        minimum = delegation_min_sources(args)
-        policy = research_policy(self.config, require_review=self.require_review or bool(
-            self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
-        review_mode = research_review_mode(self.config.raw.get("research", {}))
-        self.attempted += 1
-        identifier = uuid.uuid4().hex
-        target = root / ROOT / identifier
-        target.mkdir(parents=True, exist_ok=False)
-        trace = root / "agent_traces" / "idea_research" / identifier
-        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
-        if TOOL in tools:
-            raise ValueError("researcher cannot recursively delegate")
+    def author_messages(self, args: dict[str, Any], *, refs: list[str], minimum: int,
+                        policy: AgentLoopPolicy) -> list[Message]:
+        """Assemble real author inputs without dispatching tools or a provider."""
         messages = [Message("system", (
             "You are the independent MARS literature researcher. Resolve the delegated information gap with real tools. "
             "Select your own searches and papers, explain why each source is selected or rejected, read actual PDF method pages. "
@@ -332,7 +311,7 @@ class ResearchSession:
             "pages cannot be acquired with the remaining tools. "
             "human_summary must be one or two short Chinese sentences. Copy human_summary exactly into body. "
             "Do not put a long report, headings, citations or tables in body; all detailed findings belong in metadata. "
-            "Explain each important action briefly in Chinese.")),
+            "Explain each important action briefly in Chinese. " + RESEARCH_EVIDENCE_SCOPE_GUIDANCE)),
             Message("system", self.context.project),
             Message("user", "Overall research task:\n" + self.request.user_request),
             Message("user", "Delegated gap and completion criteria:\n" + json.dumps(args, ensure_ascii=False)),
@@ -361,6 +340,35 @@ class ResearchSession:
         if self.failures:
             messages.append(Message("user", "[untrusted prior failed delegation receipts; not accepted findings]\n"
                                     + json.dumps(self._recovery_context(), ensure_ascii=False)))
+        return messages
+
+    async def dispatch(self, args: dict[str, Any], tool_context: ToolContext) -> ToolResult:
+        root = Path(str(self.request.extra["run_root"])).resolve()
+        if tool_context.run_id != str(self.request.extra.get("run_id", root.name)) or tool_context.project != self.request.project:
+            return ToolResult(ok=False, error="delegate session does not match tool run/project")
+        if self.attempted >= self.max_delegations:
+            return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap",
+                              output={"failure_type": "delegation_budget_exhausted", "remaining_delegations": 0,
+                                      "previous_failures": self._recovery_context(), "usable_as_final_evidence": False})
+        refs = args.get("context_refs", [])
+        if any(ref not in self.context.upstream for ref in refs):
+            return ToolResult(ok=False, error="context_refs must use available upstream keys: "
+                              + json.dumps(sorted(self.context.upstream), ensure_ascii=False)
+                              + ". Use [] when none apply. The overall task is already passed automatically; do not invent keys.",
+                              output={"available_context_refs": sorted(self.context.upstream)})
+        minimum = delegation_min_sources(args)
+        policy = research_policy(self.config, require_review=self.require_review or bool(
+            self.request.extra.get("idea_requirements", {}).get("require_research_dossier")))
+        review_mode = research_review_mode(self.config.raw.get("research", {}))
+        self.attempted += 1
+        identifier = uuid.uuid4().hex
+        target = root / ROOT / identifier
+        target.mkdir(parents=True, exist_ok=False)
+        trace = root / "agent_traces" / "idea_research" / identifier
+        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        if TOOL in tools:
+            raise ValueError("researcher cannot recursively delegate")
+        messages = self.author_messages(args, refs=refs, minimum=minimum, policy=policy)
         review_context = {"task": self.request.user_request, "project": self.context.project,
                           "supplied_context": {ref: self.context.upstream[ref] for ref in refs}}
         plan_request = ({"review_mode": review_mode, "review_context": review_context}
