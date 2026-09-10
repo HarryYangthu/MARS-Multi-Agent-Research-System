@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from openai import APIError
 
 from app.agents.coding.agent import CodingAgent
 from app.agents.execution.agent import ExecutionAgent
@@ -40,6 +41,7 @@ from app.api import tools as tools_api
 from app.api import traces as traces_api
 from app.api import websocket as ws_api
 from app.api.dependencies import get_event_bus, get_run_store, shutdown_owned_runs
+from app.api.llm_errors import llm_error_response
 from app.bridge.agent_registry import get_registry
 from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
@@ -115,6 +117,7 @@ def create_app() -> FastAPI:
     app.state.discovery_service = discovery_service
 
     cors_origins = settings.cors_origins
+    app.add_exception_handler(APIError, llm_error_response)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
