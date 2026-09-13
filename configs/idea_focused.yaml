@@ -3,7 +3,7 @@ author_agent: idea_author
 review_agent: idea_reviewer
 author:
   thinking_enabled: true
-  reasoning_effort: high
+  reasoning_effort: low
   temperature: 0.2
   max_tokens: 16384
   request_timeout_seconds: 180
@@ -16,8 +16,9 @@ loop:
   observation_chars: 24000
   max_model_calls: 36
   max_tool_steps: 24
-  max_protocol_repairs: 2
-  max_validation_repairs: 2
+  max_protocol_repairs: 4
+  max_validation_repairs: 4
+  author_empty_completion_repair_enabled: true
   max_reflections: 2
   reflection_thinking_enabled: true
   reflection_reasoning_effort: high
