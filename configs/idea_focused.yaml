@@ -20,7 +20,7 @@ loop:
   max_protocol_repairs: 4
   max_validation_repairs: 4
   author_empty_completion_repair_enabled: true
-  max_reflections: 2
+  max_reflections: 4
   reflection_thinking_enabled: true
   reflection_reasoning_effort: high
   reflection_format_repair_enabled: false
