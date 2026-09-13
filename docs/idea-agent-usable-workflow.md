@@ -4,7 +4,7 @@
 
 Idea Agent 在理解 PIMC、实际代码与当前任务的基础上，寻找有用的相关研究，读懂其中可迁移的方法，形成一份可交给下一阶段验证的方案。当前阶段完成方案生成、证据检查和不同模型评审；实验收益、科学创新性和真实数据泛化需要下游验证。
 
-同一份方案有两种呈现：`proposal.v1` 和 `idea.handoff.v1` 供后续 Agent 使用；工作台展示方案说明、验证办法和研究依据。详细方法在 `method_spec` 中只定义一次，交接字段通过 JSON Pointer 引用它，避免多处定义互相矛盾。
+同一份方案有两种呈现：`proposal.v1` 及其内嵌的 `idea.handoff.v1` 交接字段供后续 Agent 使用，独立的 `research_handoff.json` 使用 `idea.research_handoff.v2` 保存研究证据和评审收据；工作台展示方案说明、验证办法和研究依据。详细方法在 `method_spec` 中只定义一次，交接字段通过 JSON Pointer 引用它，避免多处定义互相矛盾。
 
 ## 固定背景
 
