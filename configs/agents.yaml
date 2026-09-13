@@ -272,3 +272,26 @@ writing:
   tools:
   - knowledge.methodology
   - knowledge.run_archive
+
+# A separate model and session for focused Idea review; no same-model fallback.
+idea_reviewer:
+  enabled: true
+  output_schema: proposal.v1
+  model:
+    provider: deepseek
+    model: deepseek-v4-pro
+    temperature: 0.1
+    max_tokens: 16384
+    api_key_env: DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
+    base_url_env: DEEPSEEK_BASE_URL
+    thinking:
+      enabled: true
+    reasoning_effort: high
+    request_timeout_seconds: 180
+    retry:
+      max_retries: 0
+      base_delay_seconds: 1
+  debate:
+    enabled: false
+  tools: []

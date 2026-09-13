@@ -125,8 +125,8 @@ def progress_message(event: dict[str, Any]) -> str:
         if event.get("accepted"):
             return "本轮模型审查未发现阻断问题；研究效果仍需实验验证。"
         issues = event.get("issues", [])
-        detail = str(issues[0]) if issues and re.search(r"[\u4e00-\u9fff]", str(issues[0])) else "需要修订方案。"
-        return f"审查发现 {len(issues)} 项待解决问题：" + detail[:220]
+        detail = "\n".join(str(issue) for issue in issues) if issues else "需要修订方案。"
+        return f"审查发现 {len(issues)} 项待解决问题：\n" + detail
     if kind == "review_format_repaired":
         return "审查回复的格式已修复，正在重新进行内容审查；当前尚未通过验收。"
     if event.get("status") == "evidence_unavailable":
@@ -153,6 +153,13 @@ def progress_sink(request: RunRequest, invocation: str) -> ProgressSink:
                    "message": message, "agent": "idea", "project": request.project,
                    "run_id": str(request.extra.get("run_id", Path(str(request.extra["run_root"])).name)),
                    "invocation": invocation}
+        if event["kind"] in {"candidate", "review"}:
+            folder = target.parent / ("candidates" if event["kind"] == "candidate" else "reviews") / invocation
+            folder.mkdir(parents=True, exist_ok=True)
+            if event["kind"] == "candidate":
+                (folder / (payload["id"] + ".md")).write_text(str(event.get("text", "")), encoding="utf-8")
+            else:
+                atomic_json(folder / (payload["id"] + ".json"), event)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -173,6 +180,12 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
         raise ValueError("cannot publish an invalid Idea delivery: " + "; ".join(errors))
     reports: list[dict[str, Any]] = []
     research_brief: str | None = None
+    if "research_context" in validation.metadata:
+        from app.agents.idea.focused_research import focused_handoff, render_research_context
+        handoff = focused_handoff(Path(str(request.extra["run_root"])), artifact.text, request.project)
+        if not reviewed or not handoff["model_review_passed"]:
+            raise ValueError("focused research requires completed cross-model review")
+        research_brief = render_research_context(validation.metadata["research_context"])
     if ("research_assessment" in validation.metadata
             or request.extra.get("idea_requirements", {}).get("require_research_dossier")
             or "idea_research_session" in request.runtime):
@@ -199,6 +212,9 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
     (root / "summary.txt").write_text(str(validation.metadata["human_summary"]) + "\n", encoding="utf-8")
     if research_brief is not None:
         (root / "research_brief.md").write_text(research_brief, encoding="utf-8")
+        if "research_context" in validation.metadata:
+            atomic_json(root / "research_handoff.json", handoff)
+            (root / "proposal_readable.md").write_text(render_readable_proposal(validation.metadata, research_brief), encoding="utf-8")
         atomic_json(root / "research_evidence.json", {"schema": "idea.research_evidence.v1",
             "proposal_sha256": digest(artifact.text), "reports": reports,
             "scientific_validated": False})
@@ -208,3 +224,20 @@ def write_delivery(artifact: Artifact, request: RunRequest, *, invocation: str, 
         "proposal_sha256": digest(artifact.text), "scope": request.extra.get("scope", "method_proposal"),
         "execution_requires_context": any(c["blocks_execution"] for c in validation.metadata["handoff"]["required_context"])})
     return root
+
+
+def render_readable_proposal(metadata: dict[str, Any], research_brief: str) -> str:
+    """A derived export; the validated structured proposal remains canonical."""
+    def lines(value: Any, depth: int = 0) -> list[str]:
+        if isinstance(value, dict):
+            result: list[str] = []
+            for key, item in value.items():
+                result += ["  " * depth + "- **" + str(key) + "**", *lines(item, depth + 1)]
+            return result
+        if isinstance(value, list):
+            return [line for item in value for line in lines(item, depth)]
+        return ["  " * depth + "- " + str(value).replace("\n", "\n" + "  " * (depth + 1))]
+
+    return "\n".join(["# 研究方案", "", str(metadata["human_summary"]), "", "## 方法", "",
+        *lines(metadata["method_spec"]), "", "## 验证办法", "", *lines(metadata["decision_rule"]),
+        "", research_brief, "", "方案收益仍需实验验证。", ""])

@@ -35,7 +35,7 @@ def profile() -> ResolvedIdeaProfile:
 def test_profile_selection_is_local_explicit_and_baseline_is_default() -> None:
     settings = Settings(_env_file=None, mars_idea_runtime_profile="baseline")  # type: ignore[call-arg]
     assert settings.mars_idea_runtime_profile == "baseline"
-    assert Settings.model_fields["mars_idea_runtime_profile"].default == "baseline"
+    assert Settings.model_fields["mars_idea_runtime_profile"].default == "focused_v1"
     assert resolve_idea_profile("baseline") is None
     for invalid in ("", "../agents.yaml", "/tmp/profile.yaml", "deepseek-v4-pro", "https://host/profile"):
         with pytest.raises(ValueError, match="unknown Idea runtime profile"):

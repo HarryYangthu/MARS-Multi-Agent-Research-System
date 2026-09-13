@@ -189,7 +189,8 @@ async def download(client: httpx.AsyncClient, url: str, *,
         stats["download_elapsed_seconds"] = round(time.monotonic() - started, 3)
 
 
-def extract_pdf(data: bytes, *, start_page: int, max_pages: int, max_chars: int) -> dict[str, Any]:
+def extract_pdf(data: bytes, *, start_page: int, max_pages: int, max_chars: int,
+                char_offset: int = 0) -> dict[str, Any]:
     if not data.startswith(b"%PDF-"):
         raise ValueError("invalid PDF signature")
     with warnings.catch_warnings(record=True) as captured:
@@ -203,10 +204,13 @@ def extract_pdf(data: bytes, *, start_page: int, max_pages: int, max_chars: int)
         for page_num in range(start_page, min(start_page + max_pages, len(reader.pages) + 1)):
             text = reader.pages[page_num - 1].extract_text() or ""
             extracted.append(page_num)
-            if remaining and text.strip():
-                excerpt = text[:remaining]
+            offset = char_offset if page_num == start_page else 0
+            if remaining and text[offset:].strip():
+                excerpt = text[offset:offset + remaining]
                 visible.append({"page": page_num, "text": excerpt,
-                                "full_page_text_chars": len(text), "truncated": len(excerpt) < len(text)})
+                                "char_start": offset, "char_end": offset + len(excerpt),
+                                "next_offset": offset + len(excerpt) if offset + len(excerpt) < len(text) else None,
+                                "full_page_text_chars": len(text), "truncated": offset + len(excerpt) < len(text)})
                 remaining -= len(excerpt)
         if not visible:
             raise ValueError("PDF downloaded but selected pages have no extractable text")
@@ -263,7 +267,8 @@ async def _fetch_sources_tool(args: dict[str, Any], ctx: ToolContext, *, started
     start_page = int(args.get("start_page", 1))
     max_pages = int(args.get("max_pages", 4))
     max_chars = int(args.get("max_chars", 8000))
-    if not 1 <= max_pages <= 10 or not 1000 <= max_chars <= 16000 or start_page < 1:
+    char_offset = int(args.get("char_offset", 0))
+    if not 1 <= max_pages <= 10 or not 1000 <= max_chars <= 16000 or start_page < 1 or char_offset < 0:
         return ToolResult(ok=False, error="invalid extraction window")
     sources = args.get("sources")
     if not isinstance(sources, list) or not sources:
@@ -299,11 +304,19 @@ async def _fetch_sources_tool(args: dict[str, Any], ctx: ToolContext, *, started
             try:
                 if not isinstance(source, dict):
                     raise ValueError("source entry must be an object")
+                if source.get("source_id"):
+                    matches = [entry for entry in previous if entry.get("source_id") == source["source_id"]
+                               and entry.get("ok") and entry.get("archive_complete")]
+                    if not matches:
+                        raise ValueError("source_id must refer to a successfully archived source in this run")
+                    known = matches[-1]
+                    source = {"title": known["title"], "url": known["url"], "pdf_url": known["download_url"]}
                 title = str(source.get("title") or "").strip()
                 source_url = str(source.get("url") or "").strip()
                 parsed = urlparse(source_url)
                 inferred = ("https://arxiv.org/pdf/" + parsed.path.removeprefix("/abs/")
                             if parsed.hostname in {"arxiv.org", "www.arxiv.org", "export.arxiv.org"} and parsed.path.startswith("/abs/")
+                            and args.get("format", "auto") != "html"
                             else source_url)
                 url = allowed_url(str(source.get("pdf_url") or inferred))
                 if not title:
@@ -354,6 +367,7 @@ async def _fetch_sources_tool(args: dict[str, Any], ctx: ToolContext, *, started
                     finally:
                         temporary.unlink(missing_ok=True)
                 row.update(download_path=str(target), sha256=sha, bytes=len(data), resource_aliases=sorted(aliases),
+                           source_id="source_" + sha[:16],
                            content_type=mime, source_type="pdf" if is_pdf else "html", final_url=final_url,
                            archive_complete=True)
                 stage = "extraction"
@@ -363,13 +377,19 @@ async def _fetch_sources_tool(args: dict[str, Any], ctx: ToolContext, *, started
                 if is_pdf:
                     try:
                         row.update(await asyncio.wait_for(asyncio.to_thread(extract_pdf, data, start_page=start_page,
-                                                       max_pages=max_pages, max_chars=max_chars), timeout=remaining))
+                                                       max_pages=max_pages, max_chars=max_chars, char_offset=char_offset), timeout=remaining))
                     except TimeoutError as exc:
                         raise SourceFetchError("total_timeout", "total source budget exhausted during page extraction; no read receipt", retryable=True) from exc
                 else:
                     text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", "", data.decode("utf-8", errors="replace"))
                     text = html.unescape(re.sub(r"<[^>]+>", " ", text))
-                    row.update(excerpt=re.sub(r"\s+", " ", text).strip()[:max_chars], full_document_read=False)
+                    text = re.sub(r"\s+", " ", text).strip()
+                    end = min(len(text), char_offset + max_chars)
+                    row.update(excerpt=text[char_offset:end], char_start=char_offset, char_end=end,
+                               full_text_chars=len(text), next_offset=end if end < len(text) else None,
+                               truncated=end < len(text), full_document_read=False)
+                    if not row["excerpt"]:
+                        raise ValueError("HTML reading offset has no visible text")
                 row.update(ok=True, error_code=None, retryable=False)
                 receipt_path = root / (uuid.uuid4().hex + ".read.json")
                 atomic_json(receipt_path, row)

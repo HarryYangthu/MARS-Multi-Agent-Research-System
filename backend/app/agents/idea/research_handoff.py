@@ -68,6 +68,9 @@ def load_research_handoff(run_root: Path, proposal_text: str, *, project: str) -
     Evidence verification neither executes an agent nor marks a proposal reviewed.
     """
     metadata = parse(proposal_text).metadata
+    if "research_context" in metadata:
+        from app.agents.idea.focused_research import focused_handoff
+        return focused_handoff(run_root, proposal_text, project)
     if "research_assessment" not in metadata:
         return None
     validation = validate_document(proposal_text, expected_schema="proposal.v1")

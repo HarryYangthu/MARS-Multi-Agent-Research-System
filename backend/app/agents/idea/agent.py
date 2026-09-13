@@ -29,6 +29,7 @@ from app.storage.run_store import RunHandle
 
 
 class IdeaAgent(BaseAgent):
+    project_knowledge_enabled = True
     name = "idea"
     output_schema = "proposal.v1"
     native_structured_delivery = True

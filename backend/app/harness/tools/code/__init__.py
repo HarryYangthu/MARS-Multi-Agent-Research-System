@@ -60,13 +60,19 @@ async def repo_reader_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
     if target.suffix.lower() not in _TEXT_SUFFIXES:
         return ToolResult(ok=False, error=f"unsupported code file type '{target.suffix}'")
     raw = target.read_text(encoding="utf-8", errors="replace")
+    offset = args.get("char_offset", 0)
+    if type(offset) is not int or offset < 0 or (raw and offset >= len(raw)):
+        return ToolResult(ok=False, error="char_offset must identify a character inside the file")
+    end = min(len(raw), offset + _MAX_READ_BYTES)
     return ToolResult(
         ok=True,
         output={
             "repo_root": str(root),
             "path": rel,
-            "truncated": len(raw) > _MAX_READ_BYTES,
-            "content": raw[:_MAX_READ_BYTES],
+            "truncated": end < len(raw),
+            "char_start": offset, "char_end": end, "total_chars": len(raw),
+            "next_offset": end if end < len(raw) else None,
+            "content": raw[offset:end],
         },
         evidence_refs=[rel],
     )

@@ -220,6 +220,15 @@ def _agent_event_worklog(
     )
     agent = str(payload.get("agent") or payload.get("node") or "")
     event = str(payload.get("event") or "")
+    if event == "agent.progress":
+        kind = str(payload.get("kind") or "")
+        titles = {"started": "准备研究背景", "candidate": "形成候选方案", "validation": "检查方案与证据",
+                  "review": "评审方案", "finished": "方案生成结果"}
+        if kind not in titles:
+            return None  # Tool actions already have their own durable entries.
+        return WorkLogItem(id=f"agent:{index}:progress:{agent}", timestamp=timestamp, agent=agent,
+                           kind="progress", status=str(payload.get("phase") or kind),
+                           title=titles[kind], detail=str(payload.get("message") or ""))
     if payload.get("to_state"):
         to_state = str(payload.get("to_state") or "")
         from_state = str(payload.get("from_state") or "")
@@ -372,7 +381,7 @@ def _tool_worklog_text(
     if tool == "search.fetch_sources":
         sources = args.get("sources")
         source_count = len(sources) if isinstance(sources, list) else 0
-        return ("下载/抓取关键来源", f"抓取 {source_count} 个来源，生成 PDF/正文摘要。", "把 source_summaries 注入当前 Agent 上下文。")
+        return ("读取研究资料", f"获取或续读 {source_count} 份资料的指定正文。", "检查方法、公式和适用条件；未读完的关键段落需要继续读取。")
     if tool == "search.web_search":
         return ("检索 web/blog 来源", f"query={query}", "若 provider/allowlist 缺失，就把它作为配置阻塞展示。")
     if tool == "execution.metrics_collector":

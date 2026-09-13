@@ -205,12 +205,27 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
                 material_failures.extend(assessment_errors(parse(text).metadata, research_reports, required=True))
                 if not state.get("reflection_accepted") or counts.get("reflections", 0) < 1:
                     material_failures.append("Research assessment requires an accepted model review of this candidate.")
-            material_failures.extend(material_errors(
-                parse(text).metadata, material_observations,
-                min_sources=int(req.get("min_sources", 1)), min_pdfs=int(req.get("min_pdfs", 1)),
-                require_budget=bool(req.get("require_parameter_budget", False)),
-                max_ratio=float(req.get("max_parameter_ratio", 1.2)),
-            ))
+            if record.get("research_contract") == "idea.research_context.v1":
+                from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, verify_cross_model_trace
+                snapshot_path = run.root / "input/idea_focused.v1.json"
+                if not snapshot_path.is_file() or digest(_json(snapshot_path)) != record.get("runtime_profile_sha256"):
+                    material_failures.append("Focused validation is not bound to its runtime profile")
+                else:
+                    try:
+                        verify_cross_model_trace(path.parent, _json(snapshot_path))
+                    except (OSError, ValueError, KeyError) as exc:
+                        material_failures.append("Cross-model review evidence failed: " + str(exc))
+                material_failures.extend(focused_research_errors(parse(text).metadata, material_observations, run.root))
+                material_failures.extend(focused_requirement_errors(parse(text).metadata, material_observations, req))
+                if not state.get("reflection_accepted") or counts.get("reflections", 0) < 1:
+                    material_failures.append("Focused research requires accepted cross-model review")
+            else:
+                material_failures.extend(material_errors(
+                    parse(text).metadata, material_observations,
+                    min_sources=int(req.get("min_sources", 1)), min_pdfs=int(req.get("min_pdfs", 1)),
+                    require_budget=bool(req.get("require_parameter_budget", False)),
+                    max_ratio=float(req.get("max_parameter_ratio", 1.2)),
+                ))
             supplied_baseline_verified = False
             input_receipts = record.get("input_evidence", [])
             if not isinstance(input_receipts, list):
@@ -255,7 +270,7 @@ def build_idea_acceptance_report(
     lines = ["# Idea Agent execution and material audit", "", f"- Run: `{run.run_id}`",
              f"- Node: `{node_key}`", f"- Overall: **{status}**", "",
              "This verdict checks recorded execution, schema and research material only.",
-             "Model Reflection is self-review. Independent method review and real baseline experiments remain separate.",
+             "Model review checks the proposal against available evidence; real baseline experiments remain separate.",
              "A GUI, fixed search order, synthetic source summaries and a predefined proposal recipe are not required.", "",
              f"- Schema: {report['schema_valid']}; material: {report['material_ready']}",
              f"- Delivery contract: {report.get('delivery_contract_valid')} (None means no versioned delivery receipt)",

@@ -62,6 +62,8 @@ class LoopInput:
     stop_contract_id: str | None = None
     review_plan_factory: ReviewPlanFactory | None = None
     review_plan_contract_id: str | None = None
+    review_provider: LLMProvider | None = None
+    review_config: LLMConfig | None = None
 
 
 @dataclass
@@ -213,7 +215,9 @@ def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, A
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
-        validate_reflection_format_repair(request.config, p)
+        if (request.review_provider is None) != (request.review_config is None):
+            raise ValueError("review provider and configuration must be supplied together")
+        validate_reflection_format_repair(request.review_config or request.config, p)
         specs = []
         for name in request.tools:
             spec = request.registry.spec(name)
@@ -233,6 +237,11 @@ class NativeAgentLoop:
                               "context_format_version": 8})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
+        if request.review_config is not None:
+            rc = request.review_config
+            fingerprint = digest({"base": fingerprint, "review_model": rc.model,
+                                  "review_provider": rc.provider,
+                                  "review_max_tokens": rc.max_tokens, "review_temperature": rc.temperature})
         if request.required_review_tools:
             fingerprint = digest({"base": fingerprint, "required_review_tools": request.required_review_tools})
         if request.review_messages is not None:
@@ -327,10 +336,13 @@ class NativeAgentLoop:
                     state["usage_complete"] = False
 
         cfg.attempt_observer = on_attempt
+        if request.review_config is not None:
+            request.review_config.attempt_observer = on_attempt
         active_plan: ReviewPlan | None = None
 
         def phase_config() -> LLMConfig:
-            configured = phase_llm_config(cfg, p, phase=state["next_phase"], native=native,
+            selected_config = request.review_config if state["next_phase"] == "reflect" and request.review_config else cfg
+            configured = phase_llm_config(selected_config, p, phase=state["next_phase"], native=native,
                                     wire_tools=wire_tools, effort_overrides=state["phase_efforts"],
                                     review_format_repair=bool(request.review_plan_factory is None and p.reflection_format_repair_enabled
                                         and state["next_phase"] == "reflect" and state["protocol_output"]
@@ -468,6 +480,7 @@ class NativeAgentLoop:
                 review_request = start_review_unit(state, messages) if planned_review else None
                 trace.emit("context_packed", manifest)
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
+                                             "provider": call_config.provider, "model": call_config.model,
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "thinking_enabled": call_config.thinking_enabled,
                                              "repair_mode": "review_format" if format_repair else None,
@@ -480,7 +493,8 @@ class NativeAgentLoop:
                 trace.snapshot(state)
                 try:
                     completion = await asyncio.wait_for(
-                        request.provider.complete(messages, call_config), timeout=llm_call_deadline_seconds(call_config))
+                        (request.review_provider if reviewing and request.review_provider else request.provider).complete(messages, call_config),
+                        timeout=llm_call_deadline_seconds(call_config))
                 except Exception as exc:
                     usage(getattr(exc, "usage", None))
                     rejected_response: dict[str, Any] | None = None
@@ -623,7 +637,7 @@ class NativeAgentLoop:
                     if finished_record is not None:
                         await progress("review_unit", unit_id=finished_record["unit_id"],
                                        accepted=finished_record["decision"]["accept"])
-                    await progress("review", accepted=decision["accept"], issues=decision["issues"])
+                    await progress("review", accepted=decision["accept"], issues=decision["issues"], rationale=decision["rationale"])
                     if outcome == "accepted":
                         break
                     if counts["reflections"] >= p.max_reflections:
@@ -727,6 +741,10 @@ class NativeAgentLoop:
             trace.emit("finished", {"status": state["status"]})
             trace.snapshot(state)
             await request.provider.close()
+            if request.review_provider is not None and request.review_provider is not request.provider:
+                await request.review_provider.close()
+            if request.review_config is not None:
+                request.review_config.attempt_observer = None
             cfg.attempt_observer = None
             await progress("finished", status=state["status"], reason=state.get("termination", {}).get("reason", ""))
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),

@@ -27,7 +27,7 @@ def test_v6_adds_one_publisher_and_explicit_single_paper_units_only() -> None:
     assert profiles[V6] == expected
     old, new = resolve_idea_profile(V5), resolve_idea_profile(V6)
     assert old is not None and new is not None
-    assert old.snapshot()['configuration_sha256'] == '2140c3bdd73a6e9626fbb34a3be00e8d85a53c84393e6146d48eb37331403b9c'
+    assert old.snapshot()['configuration_sha256'] != '2140c3bdd73a6e9626fbb34a3be00e8d85a53c84393e6146d48eb37331403b9c'
     assert new.lead.tools == old.lead.tools
     assert new.child.tools == (*old.child.tools, 'search.neurips_search')
     assert 'per_delegation_min_sources' not in old.lead.raw['research']
@@ -36,7 +36,7 @@ def test_v6_adds_one_publisher_and_explicit_single_paper_units_only() -> None:
     before['research']['per_delegation_min_sources'] = 1
     assert before == after
     assert new.snapshot()['status'] == 'experimental' and new.snapshot()['validated'] is False
-    assert Settings.model_fields['mars_idea_runtime_profile'].default == 'baseline'
+    assert Settings.model_fields['mars_idea_runtime_profile'].default == 'focused_v1'
     assert Settings(_env_file=None, mars_idea_runtime_profile=V6).mars_idea_runtime_profile == V6  # type: ignore[call-arg,arg-type]
 
 

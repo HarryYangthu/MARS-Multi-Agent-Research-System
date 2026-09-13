@@ -68,7 +68,7 @@ function NewRunInner(): JSX.Element {
   const [task, setTask] = useState("PIMC static 残差指标优化");
   const [project, setProject] = useState(selectedProject);
   const [userRequest, setUserRequest] = useState(
-    "针对当前 paper_static PIMC 模型（train_static.py --cfg configs/static.yaml）和已接入的真实 static capture，如何在不修改 baseline 受保护代码的前提下，通过可消费的配置、训练或数据处理消融改善 PIM 抵消后的 residual 指标？请同时报告 PIM、paper_RES_db、paper_APE_db，并明确 MARS 指标映射 RES=-paper_APE_db、loss=10**(-paper_APE_db/10)。请用中文生成研究假设、实验方案和后续产物。",
+    "基于项目已有的 PIMC 知识，研究如何改善静态模型的残差指标。请核对当前可用的基线与数据资料，调研并读懂相关方法，提出一个有依据、可尝试的方案。",
   );
 
   useEffect(() => {
@@ -194,6 +194,7 @@ function NewRunInner(): JSX.Element {
         task,
         project,
         entrypoint,
+        standalone: entrypoint === "idea",
         user_request: userRequest,
         idea_context: suppliedContext,
       };

@@ -44,7 +44,7 @@ async def test_actual_unavailable_endpoint_terminates_without_a_successful_answe
                          api_key_env="", base_url_env="", base_url=f"http://127.0.0.1:{port}/v1",
                          request_timeout_seconds=0.3, max_retries=1, retry_base_delay_seconds=0,
                          thinking_enabled=False, reasoning_effort=None, debate_participants=(), tools=(),
-                         raw={"loop": {"mode": "react", "trace": "full", "max_model_calls": 1}})
+                         raw={"loop": {"mode": "react", "trace": "full", "max_model_calls": 1, "input_token_budget": 128000}})
         request = RunRequest(project="pimc", user_request="Actual transport failure contract",
                              extra={"run_root": str(tmp_path)})
         if caller == "idea":

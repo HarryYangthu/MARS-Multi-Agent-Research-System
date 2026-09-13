@@ -261,14 +261,18 @@ async def run(args: argparse.Namespace) -> int:
     reset_settings_cache()
     from app.harness.kb.stores import reset_for_tests as reset_stores
     agent = IdeaAgent(agent_config=config)
+    if source:
+        # Build against the source's frozen knowledge before cloning its archive.
+        request.extra["run_root"] = str(source.root)
+    else:
+        root.mkdir(parents=True, exist_ok=False)
     context = await agent.build_context(request)
+    request.extra["run_root"] = str(root)
     messages = agent._messages_for_context(request, context, purpose="live_preflight")
     continuation = None
     if source:
         check_configuration(source, lead=public_config(config), child=public_config(child), messages=messages)
         continuation = fork_continuation(source, root)
-    else:
-        root.mkdir(parents=True, exist_ok=False)
     reset_stores(root / "memory")
     attempt_seconds = min(args.max_seconds, source.remaining_seconds) if source else args.max_seconds
     cumulative_seconds = float(continuation["inherited_duration_seconds"]) if continuation else 0.0

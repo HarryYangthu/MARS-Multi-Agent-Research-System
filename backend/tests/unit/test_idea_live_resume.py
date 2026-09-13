@@ -58,7 +58,7 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
         config = replace(get_agent_config("idea"), model_provider="local_vllm", model_name="unavailable-local-model",
                          api_key_env="", base_url_env="", base_url=f"http://127.0.0.1:{sock.getsockname()[1]}/v1",
                          request_timeout_seconds=0.3, max_retries=0, tools=(),
-                         raw={"loop": {"max_model_calls": 3, "trace": "full"}})
+                         raw={"loop": {"max_model_calls": 3, "trace": "full", "input_token_budget": 128000}})
         agent = IdeaAgent(agent_config=config)
         request = RunRequest(project="pimc", user_request="Actual connection-refusal resume test",
                              extra={"run_root": str(tmp_path), "run_id": tmp_path.name})

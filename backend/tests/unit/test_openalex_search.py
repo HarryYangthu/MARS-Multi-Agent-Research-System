@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from typing import Any
 
 from app.harness.tools.registry import ToolContext
 from app.harness.tools.search.openalex import openalex_search_tool, parse_openalex
@@ -18,6 +19,15 @@ def test_parser_preserves_original_location_and_provider_identity() -> None:
     assert hits[0]["pdf_url"] == "https://arxiv.org/pdf/0000.00000"
     assert hits[0]["metadata_url"] == "https://openalex.org/W0000"
     assert parse_openalex(payload, allowed_domains=("example.org",), top_k=1) == []
+
+
+def test_screening_can_retain_metadata_without_claiming_method_reading() -> None:
+    payload: dict[str, Any] = {"results": [{"title": "Parser-only screening input", "doi": "https://doi.org/10.example/method",
+                           "locations": [], "primary_location": None}]}
+    assert parse_openalex(payload, allowed_domains=("arxiv.org",), top_k=1) == []
+    hits = parse_openalex(payload, allowed_domains=("arxiv.org",), top_k=1, require_pdf=False)
+    assert len(hits) == 1 and hits[0]["pdf_url"] == ""
+    assert hits[0]["reading_status"].startswith("metadata_only")
 
 
 @pytest.mark.asyncio

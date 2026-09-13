@@ -15,6 +15,7 @@ from app.agents.execution.agent import ExecutionAgent
 from app.agents.experiment.agent import ExperimentAgent
 from app.agents.idea.runtime_profile import resolve_idea_profile
 from app.agents.idea.service_agent import ServiceIdeaAgent
+from app.agents.idea.focused_agent import FocusedIdeaAgent
 from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
@@ -58,12 +59,14 @@ from app.settings import get_settings
 
 def register_default_agents() -> None:
     reg = get_registry()
-    idea = ServiceIdeaAgent(profile=resolve_idea_profile(get_settings().mars_idea_runtime_profile))
+    selector = get_settings().mars_idea_runtime_profile
+    idea = (FocusedIdeaAgent() if selector == "focused_v1"
+            else ServiceIdeaAgent(profile=resolve_idea_profile(selector)))
     if not reg.has(idea.name):
         reg.register(idea.name, idea)
     else:
         existing = reg.get(idea.name)
-        if isinstance(existing, ServiceIdeaAgent):
+        if isinstance(existing, (ServiceIdeaAgent, FocusedIdeaAgent)):
             if existing.service_profile_snapshot != idea.service_profile_snapshot:
                 raise ValueError("Idea runtime profile changed after registration; restart the service")
         elif idea.service_profile_snapshot is not None:

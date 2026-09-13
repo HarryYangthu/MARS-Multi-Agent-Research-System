@@ -1,4 +1,5 @@
 project: pimc
+knowledge_file: context/public_context.md
 display_name: PIMC
 domain: signal_processing/wireless
 description: PIMC for FDD Massive MIMO under beam/layer switching.

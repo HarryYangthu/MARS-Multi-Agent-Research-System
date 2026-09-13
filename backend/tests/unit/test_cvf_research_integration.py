@@ -74,7 +74,7 @@ def test_cvf_is_registered_read_only_with_bounded_configured_inputs_and_metadata
     registry = get_registry()
     spec = registry.spec("search.cvf_search")
     assert registry.has("search.cvf_search") and spec is not None
-    assert spec.policy.allowed_agents == ("idea_research",)
+    assert spec.policy.allowed_agents == ("idea", "idea_research")
     assert spec.policy.mutation_level == "read" and spec.policy.network
     assert not spec.policy.requires_approval and not spec.bridge_only
     validator = Draft202012Validator(spec.input_schema)
@@ -141,8 +141,8 @@ def test_a_constructed_scope_cannot_cross_agents_or_authorize_writes() -> None:
     scope = registry.scope_for_read_tools("idea_research", ("search.cvf_search",))
     assert _allowed_for_agent(spec.name, "idea_research", spec, configured_scope=scope)
     assert not _allowed_for_agent(spec.name, "idea", spec, configured_scope=scope)
-    assert not _allowed_for_agent(spec.name, "idea", spec,
-                                  configured_scope=ConfiguredReadToolScope("idea", (spec.name,)))
+    assert not _allowed_for_agent(spec.name, "experiment", spec,
+                                  configured_scope=ConfiguredReadToolScope("experiment", (spec.name,)))
     write = registry.spec("code.write_file")
     assert write is not None
     assert not _allowed_for_agent(write.name, "coding", write,

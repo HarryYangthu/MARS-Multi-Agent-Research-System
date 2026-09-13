@@ -84,6 +84,7 @@ class BaseAgent(ABC):
     agent_brief = ""
     max_tool_steps = 18
     native_structured_delivery = False
+    project_knowledge_enabled = False
 
     def __init__(self, *, agent_config: AgentConfig | None = None,
                  loop_executor: AgentLoopExecutor | None = None) -> None:
@@ -126,6 +127,14 @@ class BaseAgent(ABC):
                         if sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
         metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources}
+        from app.harness.context.project_knowledge import load_project_knowledge
+        knowledge, knowledge_record = (load_project_knowledge(
+            project_path, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
+            if self.project_knowledge_enabled else ("", {}))
+        if knowledge:
+            rules_path_label = knowledge_record["source"]
+            rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge
+            metadata["project_knowledge"] = {key: value for key, value in knowledge_record.items() if key != "content"}
         if repositories:
             upstream[f"{self.name}_code_repositories"] = json.dumps(
                 [asdict(repository) for repository in repositories], ensure_ascii=False)
@@ -164,6 +173,9 @@ class BaseAgent(ABC):
 
     def _select_provider(self) -> tuple[LLMProvider, LLMConfig]:
         return select_provider(self._config)
+
+    def _select_review_provider(self) -> tuple[LLMProvider, LLMConfig] | None:
+        return None
 
     async def _call_llm(self, messages: Sequence[Message], *,
                         debate_role: str | None = None) -> Completion:
@@ -259,6 +271,9 @@ class BaseAgent(ABC):
         from app.harness.tools.registry import get_registry
         return get_registry()
 
+    def configured_read_tools(self) -> tuple[str, ...] | None:
+        return None
+
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
                              debate_role: str | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext
@@ -273,17 +288,26 @@ class BaseAgent(ABC):
         trace_root = run_root / "agent_traces" / self.name / invocation
         context.metadata["loop_trace_root"] = str(trace_root)
         tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        registry = self.loop_registry(request, context)
+        read_tools = self.configured_read_tools()
+        read_scope = registry.scope_for_read_tools(self.name, read_tools) if read_tools else None
         provider, config = self._select_provider()
 
         async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
             return await self.validate_candidate(request, text, observations)
 
+        try:
+            review = self._select_review_provider()
+        except Exception:
+            await provider.close()
+            raise
         result = await self._executor.run(LoopInput(
             messages=self._messages_for_context(request, context, purpose="loop"),
-            provider=provider, config=config, registry=self.loop_registry(request, context),
+            provider=provider, config=config, registry=registry,
+            review_provider=review[0] if review else None, review_config=review[1] if review else None,
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
                                      project=request.project, agent=self.name,
-                                     extra={"run_root": str(run_root)}),
+                                     extra={"run_root": str(run_root)}, configured_read_scope=read_scope),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
             progress_sink=self.loop_progress_sink(request, invocation),
