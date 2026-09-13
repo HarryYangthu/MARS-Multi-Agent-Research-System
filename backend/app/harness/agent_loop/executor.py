@@ -124,7 +124,8 @@ def phase_llm_config(config: LLMConfig, policy: AgentLoopPolicy, *, phase: str,
     thinking = (policy.reflection_thinking_enabled
                 if reviewing and policy.reflection_thinking_enabled is not None else config.thinking_enabled)
     return replace(config, reasoning_effort=effort_overrides.get(phase, effort), thinking_enabled=thinking,
-                   json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else ())
+                   json_mode=reviewing or not native, tools=wire_tools if native and not reviewing else (),
+                   extra={**config.extra, **({"native_observation_history": True} if policy.native_observation_history else {})})
 
 
 def reflection_instruction(rubric: str, *, format_repair: bool = False) -> Message:
@@ -225,7 +226,9 @@ class NativeAgentLoop:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
         native = p.protocol == "native_tools"
-        if native and request.config.thinking_enabled is not False:
+        if (native and request.config.thinking_enabled is not False
+                and not (request.config.thinking_enabled is True and p.native_observation_history
+                         and request.config.provider == "deepseek")):
             raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
         wire_tools = native_specs(specs, request.final_schema) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
@@ -462,6 +465,7 @@ class NativeAgentLoop:
                         native=native, reviewing=reviewing, review_issues=state["review_issues"],
                         validation_issues=state["validation_issues"],
                         required_review_tools=request.required_review_tools,
+                        native_observation_history=p.native_observation_history,
                     )
                 manifest["tool_schema_upper_bound_tokens"] = phase_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + phase_schema_budget

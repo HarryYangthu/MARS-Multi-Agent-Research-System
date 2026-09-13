@@ -9,7 +9,8 @@ author:
   request_timeout_seconds: 180
   max_retries: 1
 loop:
-  protocol: json_actions
+  protocol: native_tools
+  native_observation_history: true
   mode: reflection
   trace: full
   input_token_budget: 256000

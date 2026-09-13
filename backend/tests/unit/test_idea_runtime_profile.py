@@ -69,7 +69,9 @@ def test_profile_adopts_declared_variant_models_protocol_and_budgets(profile: Re
         effective = snapshot["configuration"][role]
         for key, value in scenario[model_key].items():
             assert effective["model"][key] == value
-        assert effective["loop"] == asdict(AgentLoopPolicy.from_mapping(scenario[loop_key]))
+        expected_loop = asdict(AgentLoopPolicy.from_mapping(scenario[loop_key]))
+        expected_loop.pop("native_observation_history")  # Omitted opt-in preserves historical receipts.
+        assert effective["loop"] == expected_loop
         assert effective["model"]["api_key_env"] == "DEEPSEEK_API_KEY"
         assert effective["model"]["base_url_env"] == ""
         assert effective["model"]["base_url"] == "https://api.deepseek.com/v1"

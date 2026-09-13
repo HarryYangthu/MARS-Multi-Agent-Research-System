@@ -70,8 +70,9 @@ class FocusedIdeaAgent(IdeaAgent):
             raise ValueError("focused Idea requires different generation and review models")
         author = replace(original, tools=tuple(settings["tools"]), raw=raw, debate_enabled=False,
                          **settings["author"])
-        if author.thinking_enabled and settings["loop"]["protocol"] == "native_tools":
-            raise ValueError("thinking author requires json_actions until native reasoning history is supported")
+        if (author.thinking_enabled and settings["loop"]["protocol"] == "native_tools"
+                and not settings["loop"].get("native_observation_history")):
+            raise ValueError("thinking author requires explicit observation history for native tools")
         super().__init__(agent_config=author)
         self._snapshot = {"schema": "idea.focused.runtime.v1", "profile_id": "focused_v1",
                           "source_sha256": digest(settings), "author": public_agent_configuration(author),

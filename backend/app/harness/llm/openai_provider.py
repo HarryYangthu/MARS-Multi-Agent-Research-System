@@ -139,7 +139,12 @@ class _OpenAICompatProvider(LLMProvider):
             if self.name == "zhipu":
                 raise ValueError("native tool streaming is not implemented for zhipu")
             if thinking_enabled:
-                raise ValueError("native tools currently require explicit non-thinking mode")
+                # Each request is a new reasoning turn over public observations.
+                # Never replay incomplete assistant/tool turns without the private
+                # reasoning history required by DeepSeek's conversational API.
+                if (self.name != "deepseek" or config.extra.get("native_observation_history") is not True
+                        or any(m.role in {"assistant", "tool"} or m.tool_calls for m in messages)):
+                    raise ValueError("native tools require explicit non-thinking mode or DeepSeek observation-only history")
             kwargs["tools"] = list(config.tools)
             kwargs["parallel_tool_calls"] = False
         if config.json_mode:
