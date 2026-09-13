@@ -1,6 +1,8 @@
 schema: idea.focused.config.v1
 review_agent: idea_reviewer
 author:
+  thinking_enabled: false
+  reasoning_effort: null
   temperature: 0.2
   max_tokens: 16384
   request_timeout_seconds: 180

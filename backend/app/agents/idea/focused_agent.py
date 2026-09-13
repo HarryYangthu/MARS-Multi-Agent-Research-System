@@ -37,6 +37,9 @@ BRIEF = """根据项目固定知识、当前任务、真实代码和数据说明
 候选文献可以采用、排除、待补充，解释各自与任务的具体联系。方法是否可迁移，要结合项目代码、数据和约束判断。
 最终只提出一个方案，明确基线改动、输入输出、关键公式/步骤、初始化或优化方式、适用条件与最小验证办法。
 选定一个可以立即尝试的主方案，不要求同时实现多个变体。关键公式须处理边界、重复值、除零和有限精度等退化情形。
+提交前逐项核对公式、步骤、初始化、handoff和摘要是否描述同一个实现。区分保留外部接口与修改内部算法，
+区分参数形状兼容与迁移后函数等价；涉及状态迁移时明确采用重新初始化、映射还是拟合，并解释适用条件。
+收到评审后修订整份方案及所有关联字段，删除失效的旧说法；不要只在被点名的字段旁追加补丁。
 没有实测收益或创新性证明可以形成假设，不得声称已有实验成功。不要自动生成庞大的统计协议或固定数量消融。
 所有解释用清楚的中文，字段保留schema要求的名称。
 将完整方法只定义在 method_spec；handoff.changes[].spec_ref 指向其具体子字段，
@@ -66,7 +69,9 @@ class FocusedIdeaAgent(IdeaAgent):
         if (original.model_provider, original.model_name) == (self._review_config.model_provider, self._review_config.model_name):
             raise ValueError("focused Idea requires different generation and review models")
         author = replace(original, tools=tuple(settings["tools"]), raw=raw, debate_enabled=False,
-                         thinking_enabled=False, reasoning_effort=None, **settings["author"])
+                         **settings["author"])
+        if author.thinking_enabled and settings["loop"]["protocol"] == "native_tools":
+            raise ValueError("thinking author requires json_actions until native reasoning history is supported")
         super().__init__(agent_config=author)
         self._snapshot = {"schema": "idea.focused.runtime.v1", "profile_id": "focused_v1",
                           "source_sha256": digest(settings), "author": public_agent_configuration(author),
@@ -168,6 +173,8 @@ class FocusedIdeaAgent(IdeaAgent):
                 "基于原任务、PIMC知识、实际原文阅读窗口和候选方案检查，不把生成者的解释当作论文事实。"
                 "判断核心方法是否真正读完整、选文是否相关有用、迁移假设是否合理、关键公式和实现是否自洽。"
                 "必须检查边界和退化输入，例如重复值、零分母、饱和区和有限精度；给出明确反例时要求修正。所有意见用中文。"
+                "首次评审尽量一次列全实质问题，交叉核对公式、步骤、初始化、handoff与摘要的一致性；"
+                "特别区分接口保留与内部算法变化、形状兼容与函数等价。复核时检查整份修订是否消除了矛盾。"
                 "摘要或截断前缀不足以支持完整方法时，指出缺少的章节或公式；不要求无关段落全部阅读。"
                 "不要求固定文献数量，不要求先取得实验收益，不额外要求完整实验统计设计。"
                 "重大问题给出准确字段和原文依据；次要改进写在rationale里，不无限扩大范围。"),

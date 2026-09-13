@@ -47,6 +47,8 @@ PDF 成功下载后保存在运行目录，可在工作台打开。后续页段�
 
 服务默认使用 `focused_v1`。[`configs/idea_focused.yaml`](../configs/idea_focused.yaml) 控制工具和运行预算；[`configs/agents.yaml`](../configs/agents.yaml) 分别配置生成模型和 `idea_reviewer`。模型调用及工具次数是可调的运行上限，不是必须读多少篇论文。旧的研究 profile 继续保留，任务快照不同不能混用恢复。
 
+生成者通过原生工具协议调用真实注册工具和提交结构化方案，评审者启用推理。当前原生工具协议尚不支持带推理历史的调用，因此不与推理模式混用。修订时必须同时更新公式、步骤、初始化、交接字段与摘要，并核对接口兼容和状态迁移的具体含义。
+
 工具使用现有统一注册和权限机制。当前直接提供 OpenAlex、arXiv、CVF、NeurIPS、本地知识检索、正文获取及源码读取；通用搜索仅在配置供应商时提供。自研 Tools 可继续通过同一注册层接入。没有配置的 MCP 或 skill 不会被声称已经接通。
 
 当前无需新增 LangChain 或迁移 Idea 执行器。现有 NativeAgentLoop 已承担真实工具调用、记录、恢复和评审；Bridge 中原有编排继续使用。先验证这条单 Agent 路径，再按具体的多分支、人工暂停或可视化编排需求评估框架迁移。
@@ -60,3 +62,5 @@ PDF 成功下载后保存在运行目录，可在工作台打开。后续页段�
 可通过 `scripts/check_idea_models.py` 检查两个真实模型是否可用；`scripts/verify_focused_idea.py start` 经正常 API 创建并启动真实 PIMC 验证任务。后者默认连接本机 8011 端口，不注入预写答案。`status` 读取当前验证任务状态。
 
 运行目录保存知识快照、模型和工具轨迹、初稿、评审意见、失败原因和最终交付。结构检查通过、跨模型评审通过、真实仿真完成是不同证据层，报告应分别说明。
+
+对已完成的运行执行 `scripts/audit_focused_idea.py <run_id>`，可再次检查真实作者与评审模型调用、每次输入中的完整知识正文、schema 和证据交接，并生成 `idea/focused_verification.json`。
