@@ -1,4 +1,5 @@
 schema: idea.focused.config.v1
+author_agent: idea_author
 review_agent: idea_reviewer
 author:
   thinking_enabled: false

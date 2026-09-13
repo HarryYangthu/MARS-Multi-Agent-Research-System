@@ -5,9 +5,11 @@ import asyncio
 from dataclasses import replace
 import json
 from pathlib import Path
+import yaml
 
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
+from app.settings import repo_root
 
 
 async def check(name: str) -> dict[str, object]:
@@ -29,7 +31,8 @@ async def check(name: str) -> dict[str, object]:
 
 
 async def main() -> None:
-    results = await asyncio.gather(check("idea"), check("idea_reviewer"))
+    profile = yaml.safe_load((repo_root() / "configs/idea_focused.yaml").read_text())
+    results = await asyncio.gather(check(profile.get("author_agent", "idea")), check(profile["review_agent"]))
     path = Path("runs/verification/idea_model_preflight.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")

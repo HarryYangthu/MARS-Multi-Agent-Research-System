@@ -62,7 +62,7 @@ class FocusedIdeaAgent(IdeaAgent):
         settings = yaml.safe_load(path.read_text())
         if not get_settings().mars_web_search_provider:
             settings["tools"] = [tool for tool in settings["tools"] if tool != "search.web_search"]
-        original = get_agent_config("idea")
+        original = get_agent_config(settings.get("author_agent", "idea"))
         raw = deepcopy(dict(original.raw))
         raw["loop"], raw["tools"] = settings["loop"], settings["tools"]
         self._review_config = get_agent_config(settings["review_agent"])
