@@ -2,14 +2,14 @@ schema: idea.focused.config.v1
 author_agent: idea_author
 review_agent: idea_reviewer
 author:
-  thinking_enabled: false
-  reasoning_effort: null
+  thinking_enabled: true
+  reasoning_effort: high
   temperature: 0.2
   max_tokens: 16384
   request_timeout_seconds: 180
   max_retries: 1
 loop:
-  protocol: native_tools
+  protocol: json_actions
   mode: reflection
   trace: full
   input_token_budget: 256000

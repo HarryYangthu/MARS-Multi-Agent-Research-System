@@ -65,8 +65,8 @@ def test_actual_focused_configuration_uses_different_models_and_no_delegation() 
     assert "idea.research_delegate" not in agent.config.tools
     assert "search.fetch_sources" in agent.config.tools
     assert agent.config.raw["loop"]["max_reflections"] == 2
-    assert not agent.config.thinking_enabled
-    assert agent.config.raw["loop"]["protocol"] == "native_tools"
+    assert agent.config.thinking_enabled
+    assert agent.config.raw["loop"]["protocol"] == "json_actions"
     assert "min_sources" not in research_schema()["properties"]
 
 
