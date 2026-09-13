@@ -5,7 +5,7 @@ author:
   thinking_enabled: true
   reasoning_effort: low
   temperature: 0.2
-  max_tokens: 16384
+  max_tokens: 32768
   request_timeout_seconds: 180
   max_retries: 1
 loop:
