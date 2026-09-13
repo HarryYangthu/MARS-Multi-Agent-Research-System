@@ -31,7 +31,7 @@ from app.bridge.workflow_service import (
 )
 from app.harness.observability.tracing import TraceRecorder
 from app.harness.runtime.event_bus import EventBus, InProcessEventBus
-from app.harness.runtime.readiness import assert_ready_for_run
+from app.harness.runtime.readiness import ReadinessScope, assert_ready_for_run
 from app.harness.runtime.run_graph import RunGraph
 from app.harness.runtime.state_machine import NodeState
 from app.settings import get_settings
@@ -66,6 +66,16 @@ class RunRequest:
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
     data_source: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def readiness_scope(self) -> ReadinessScope:
+        if self.standalone and self.entrypoint == "idea":
+            # Delegated research and its reflection review remain required.
+            return ReadinessScope(
+                required_agents=frozenset({"idea", "idea_research"}),
+                requires_execution=False,
+            )
+        return ReadinessScope()
 
 
 @dataclass
@@ -107,7 +117,7 @@ class Orchestrator:
         settings = get_settings()
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
-        assert_ready_for_run(project=request.project)
+        assert_ready_for_run(project=request.project, scope=request.readiness_scope)
         run = self.run_store.create(
             task=request.task,
             project=request.project,

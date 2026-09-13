@@ -108,18 +108,10 @@ def _ensure_active_run(run_id: str) -> None:
 
 @router.post("", response_model=RunDetail)
 async def create_run(payload: CreateRunPayload) -> RunDetail:
-    try:
-        assert_ready_for_run(project=payload.project)
-    except ProductionReadinessError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=exc.report.to_dict(),
-        ) from exc
     data_source = _resolve_data_source_selection(
         selection=payload.data_source,
         project=payload.project,
     )
-    orch = get_orchestrator()
     request_extra: dict[str, Any] = payload.idea_request_extra()
     if payload.idea_mode is not None:
         request_extra["idea_mode"] = payload.idea_mode
@@ -138,6 +130,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         extra=request_extra,
     )
     try:
+        assert_ready_for_run(project=request.project, scope=request.readiness_scope)
+        orch = get_orchestrator()
         session = orch.create_session(request)
     except ProductionReadinessError as exc:
         raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc

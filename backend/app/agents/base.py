@@ -297,8 +297,7 @@ class BaseAgent(ABC):
         ))
         context.metadata["loop_status"] = result.status
         context.metadata["reflection_accepted"] = result.reflection_accepted
-        if result.status != "passed":
-            raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
+        result.require_passed(self.name)
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,
                                                          model=config.model, debate_role=debate_role))
 

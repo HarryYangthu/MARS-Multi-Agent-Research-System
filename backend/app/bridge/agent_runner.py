@@ -19,11 +19,13 @@ from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
+from app.harness.agent_loop.executor import AgentLoopError
 from app.harness.execution_intent import (
     requested_experiment_count,
     wants_execution_sweep,
 )
 from app.harness.llm.provider_base import LLMCompletionError
+from app.harness.llm.failures import model_failure_message
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
 from app.storage.data_source_store import selection_summary
@@ -370,10 +372,16 @@ def _write_agent_failure_diagnostic(
             "model",
             "finish_reason",
             "empty_final",
+            "http_status",
+            "api_error_code",
+            "exception_type",
+            "retry_after_seconds",
         )
         details = {key: reason[key] for key in allowed_keys if key in reason}
         diagnostic["code"] = str(details.get("code") or diagnostic["code"])
         diagnostic["details"] = details
+        if isinstance(exc, AgentLoopError):
+            diagnostic["message"] = model_failure_message(details)
     run.write_event(
         "agent_events",
         {

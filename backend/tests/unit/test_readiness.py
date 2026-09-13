@@ -4,8 +4,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
-from app.harness.runtime.readiness import check_readiness
+from app.api.runs import CreateRunPayload, create_run
+from app.bridge.orchestrator import RunRequest
+from app.harness.runtime.readiness import ReadinessScope, check_readiness
 
 
 @pytest.fixture(autouse=True)
@@ -178,3 +181,111 @@ def test_remote_gpu_backend_accepts_complete_local_prerequisites(
     assert execution.details["live_probe"] == "pending"
     assert str(key_path) not in repr(execution.details)
     assert "gpu.example.test" not in repr(execution.details)
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "standalone", "requires_execution"),
+    [
+        ("idea", True, False),
+        ("idea", False, True),
+        ("pipeline", True, True),
+        ("pipeline", False, True),
+        ("experiment", True, True),
+        ("execution", True, True),
+    ],
+)
+def test_only_standalone_idea_narrows_admission_dependencies(
+    entrypoint: str, standalone: bool, requires_execution: bool
+) -> None:
+    request = RunRequest(
+        task="dependency scope", project="pimc",
+        entrypoint=entrypoint, standalone=standalone,  # type: ignore[arg-type]
+    )
+    assert request.readiness_scope.requires_execution is requires_execution
+    assert request.readiness_scope.required_agents == (
+        None if requires_execution else frozenset({"idea", "idea_research"})
+    )
+
+
+def test_standalone_idea_does_not_require_gpu_but_keeps_research_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
+    monkeypatch.setenv("MARS_EXECUTION_DEVICE", "gpu")
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "remote_gpu")
+    monkeypatch.setenv("MARS_REMOTE_ENABLED", "false")
+    request = RunRequest(
+        task="idea only", project="pimc", entrypoint="idea", standalone=True,
+    )
+    report = check_readiness(project=request.project, scope=request.readiness_scope)
+    checks = {item.name: item for item in report.checks}
+
+    assert "execution_device" not in checks
+    assert "execution_backend" not in checks
+    assert {"project_repo", "gates", "schema_templates"} <= checks.keys()
+    assert checks["llm_providers"].details["agents"] == ["idea", "idea_research"]
+    assert checks["schema_templates"].details["required"] == [
+        "proposal.v1", "research_report.v1",
+    ]
+    full_report = check_readiness(project=request.project)
+    assert any(item.name == "execution_device" and not item.ready for item in full_report.checks)
+    assert not full_report.ready
+
+
+def test_scoped_readiness_still_blocks_missing_real_model_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    request = RunRequest(
+        task="missing credentials", project="pimc", entrypoint="idea", standalone=True,
+    )
+    report = check_readiness(project=request.project, scope=request.readiness_scope)
+    check = next(item for item in report.checks if item.name == "llm_providers")
+
+    assert not check.ready
+    assert not report.ready
+    assert check.severity == "blocker"
+    assert "deepseek" in check.details["missing"]
+    assert check.details["agents"] == ["idea", "idea_research"]
+
+
+def test_scoped_readiness_rejects_missing_agent_configuration() -> None:
+    report = check_readiness(
+        project="pimc",
+        scope=ReadinessScope(
+            required_agents=frozenset({"idea", "unconfigured_researcher"}),
+            requires_execution=False,
+        ),
+    )
+    check = next(item for item in report.checks if item.name == "llm_providers")
+
+    assert not report.ready
+    assert not check.ready
+    assert check.details["missing_agents"] == ["unconfigured_researcher"]
+
+
+async def test_api_admission_uses_standalone_scope_without_faking_model_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MARS_RUNTIME_MODE", "production")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    monkeypatch.setenv("MARS_EXECUTION_DEVICE", "gpu")
+    monkeypatch.setenv("MARS_REMOTE_ENABLED", "false")
+
+    with pytest.raises(HTTPException) as caught:
+        await create_run(CreateRunPayload(
+            task="idea admission", project="pimc", entrypoint="idea", standalone=True,
+        ))
+
+    assert caught.value.status_code == 503
+    detail: object = caught.value.detail
+    assert isinstance(detail, dict)
+    check_items = detail["checks"]
+    assert isinstance(check_items, list)
+    assert all(isinstance(item, dict) for item in check_items)
+    checks = {item["name"]: item for item in check_items}
+    assert not checks["llm_providers"]["ready"]
+    assert checks["llm_providers"]["details"]["agents"] == ["idea", "idea_research"]
+    assert "execution_device" not in checks
+    assert "execution_backend" not in checks

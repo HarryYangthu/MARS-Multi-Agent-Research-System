@@ -21,6 +21,7 @@ from app.harness.agent_loop.review_plan import (
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
+from app.harness.llm.failures import model_failure_message, model_failure_reason
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.registry import ToolContext, ToolRegistry
 
@@ -64,6 +65,18 @@ class LoopInput:
     review_plan_contract_id: str | None = None
 
 
+class AgentLoopError(RuntimeError):
+    """A failed loop with its safe diagnostic and durable evidence location."""
+
+    def __init__(self, *, agent: str, status: str, trace_root: Path,
+                 reason: dict[str, Any] | None = None) -> None:
+        self.reason = dict(reason) if reason is not None else None
+        self.status = status
+        self.trace_root = trace_root
+        detail = f": {model_failure_message(reason)}" if reason is not None else ""
+        super().__init__(f"{agent} loop {status}{detail}; evidence: {trace_root}")
+
+
 @dataclass
 class LoopResult:
     text: str
@@ -72,6 +85,12 @@ class LoopResult:
     counts: dict[str, int]
     trace_root: Path
     reflection_accepted: bool = False
+    error_reason: dict[str, Any] | None = None
+
+    def require_passed(self, agent: str) -> None:
+        if self.status != "passed":
+            raise AgentLoopError(agent=agent, status=self.status, trace_root=self.trace_root,
+                                 reason=self.error_reason)
 
 
 class AgentLoopExecutor(Protocol):
@@ -492,8 +511,8 @@ class NativeAgentLoop:
                         rejected_response = {"event_seq": trace.seq, "kind": "model_response", **response_payload}
                         state["pending"] = None
                     state["status"] = "model_error"
-                    state["last_model_error"] = getattr(exc, "reason", None)
-                    trace.emit("model_error", {"error_type": type(exc).__name__, "reason": getattr(exc, "reason", None)})
+                    state["last_model_error"] = model_failure_reason(exc, call_config)
+                    trace.emit("model_error", {"error_type": type(exc).__name__, "reason": state["last_model_error"]})
                     if recover_completion(state["last_model_error"], error=exc, response=rejected_response):
                         continue
                     break
@@ -730,4 +749,5 @@ class NativeAgentLoop:
             cfg.attempt_observer = None
             await progress("finished", status=state["status"], reason=state.get("termination", {}).get("reason", ""))
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
-                          request.trace_root, state["reflection_accepted"])
+                          request.trace_root, state["reflection_accepted"],
+                          state.get("last_model_error") if state["status"] == "model_error" else None)

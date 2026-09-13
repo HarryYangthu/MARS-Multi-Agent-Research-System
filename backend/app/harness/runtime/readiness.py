@@ -37,6 +37,18 @@ class ReadinessCheck:
 
 
 @dataclass(frozen=True)
+class ReadinessScope:
+    """Dependencies selected by the product's run topology.
+
+    Omission keeps the full-system admission policy. The harness never infers
+    agent dependencies from product-specific entrypoint names.
+    """
+
+    required_agents: frozenset[str] | None = None
+    requires_execution: bool = True
+
+
+@dataclass(frozen=True)
 class ReadinessReport:
     ready: bool
     runtime_mode: str
@@ -80,17 +92,20 @@ class ProductionReadinessError(RuntimeError):
         self.report = report
 
 
-def check_readiness(*, project: str | None = None) -> ReadinessReport:
+def check_readiness(
+    *, project: str | None = None, scope: ReadinessScope | None = None
+) -> ReadinessReport:
     settings = get_settings()
     project_name = project or settings.mars_default_project
+    scope = scope or ReadinessScope()
     checks = [
-        _check_llm_providers(),
+        _check_llm_providers(required_agents=scope.required_agents),
         _check_project_repo(project_name),
-        _check_schema_templates(),
+        _check_schema_templates(required_agents=scope.required_agents),
         _check_gates(),
-        _check_execution_device(),
-        _check_execution_backend(project_name),
     ]
+    if scope.requires_execution:
+        checks.extend((_check_execution_device(), _check_execution_backend(project_name)))
     blockers = [c for c in checks if c.severity == "blocker" and not c.ready]
     return ReadinessReport(
         ready=not blockers,
@@ -104,25 +119,41 @@ def check_readiness(*, project: str | None = None) -> ReadinessReport:
     )
 
 
-def assert_ready_for_run(*, project: str | None = None) -> None:
+def assert_ready_for_run(
+    *, project: str | None = None, scope: ReadinessScope | None = None
+) -> None:
     settings = get_settings()
     if not settings.is_production:
         return
-    report = check_readiness(project=project)
+    report = check_readiness(project=project, scope=scope)
     if not report.ready:
         raise ProductionReadinessError(report)
 
 
-def _check_llm_providers() -> ReadinessCheck:
+def _check_llm_providers(
+    *, required_agents: frozenset[str] | None = None
+) -> ReadinessCheck:
     settings = get_settings()
     configured = available_providers(include_mock=False)
     required: set[str] = set()
     missing: set[str] = set()
     mock_requested: list[str] = []
+    agent_configs = [
+        cfg for cfg in list_agent_configs()
+        if cfg.enabled and (required_agents is None or cfg.name in required_agents)
+    ]
+    selected_agents = {cfg.name for cfg in agent_configs}
+    missing_agents = (required_agents or frozenset()) - selected_agents
+    if missing_agents:
+        return ReadinessCheck(
+            name="llm_providers",
+            ready=False,
+            severity="blocker",
+            message="required agent configuration is missing or disabled",
+            details={"missing_agents": sorted(missing_agents)},
+        )
 
-    for cfg in list_agent_configs():
-        if not cfg.enabled:
-            continue
+    for cfg in agent_configs:
         provider = cfg.model_provider
         required.add(provider)
         if provider == "mock":
@@ -148,7 +179,10 @@ def _check_llm_providers() -> ReadinessCheck:
             ready=False,
             severity="blocker",
             message="strict real-LLM mode cannot use mock LLM providers",
-            details={"mock_requested_by": mock_requested},
+            details={
+                "mock_requested_by": mock_requested,
+                "agents": sorted(selected_agents),
+            },
         )
     if strict_real_llm and missing:
         return ReadinessCheck(
@@ -156,14 +190,22 @@ def _check_llm_providers() -> ReadinessCheck:
             ready=False,
             severity="blocker",
             message="strict real-LLM mode is missing required LLM provider configuration",
-            details={"missing": sorted(missing), "required": sorted(required)},
+            details={
+                "missing": sorted(missing),
+                "required": sorted(required),
+                "agents": sorted(selected_agents),
+            },
         )
     return ReadinessCheck(
         name="llm_providers",
         ready=True,
         severity="info",
         message="LLM provider configuration is acceptable for this runtime mode",
-        details={"configured": sorted(configured), "required": sorted(required)},
+        details={
+            "configured": sorted(configured),
+            "required": sorted(required),
+            "agents": sorted(selected_agents),
+        },
     )
 
 
@@ -195,13 +237,18 @@ def _check_project_repo(project: str) -> ReadinessCheck:
     )
 
 
-def _check_schema_templates() -> ReadinessCheck:
+def _check_schema_templates(
+    *, required_agents: frozenset[str] | None = None
+) -> ReadinessCheck:
     schemas_dir = repo_root() / "backend" / "app" / "harness" / "schema" / "schemas"
     templates_dir = repo_root() / "templates" / "artifacts"
     schema_ids = {
-        cfg.output_schema for cfg in list_agent_configs() if cfg.enabled and cfg.output_schema
+        cfg.output_schema for cfg in list_agent_configs()
+        if cfg.enabled and cfg.output_schema
+        and (required_agents is None or cfg.name in required_agents)
     }
-    schema_ids.add("diagnosis.v1")
+    if required_agents is None:
+        schema_ids.add("diagnosis.v1")
     missing_schema = [
         sid for sid in sorted(schema_ids) if not (schemas_dir / f"{sid}.json").exists()
     ]
@@ -219,6 +266,7 @@ def _check_schema_templates() -> ReadinessCheck:
             else "schema or artifact templates are missing"
         ),
         details={
+            "required": sorted(schema_ids),
             "missing_schema": missing_schema,
             "missing_template": missing_template,
         },
