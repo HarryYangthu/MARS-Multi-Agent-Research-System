@@ -2087,3 +2087,37 @@ export function researchSourceUrl(runId: string, sourceId: string): string {
   url.searchParams.set("source_id", sourceId);
   return url.toString();
 }
+
+export interface IdeaMaterial {
+  id: string;
+  kind: "paper" | "context" | "code" | "research" | "search";
+  title: string;
+  status: string;
+  description: string;
+  provenance: string;
+  source_url: string;
+  source_id: string;
+  archive_available: boolean;
+  source_type: string;
+  decision: string;
+  reason: string;
+  transfer: string;
+  read_windows: string[];
+  preview_available: boolean;
+}
+
+export interface IdeaMaterialsView {
+  run_id: string;
+  items: IdeaMaterial[];
+  warnings: string[];
+}
+
+export async function getIdeaMaterials(runId: string, signal?: AbortSignal): Promise<IdeaMaterialsView> {
+  return jsonOrThrow(await fetch(`${BASE}/api/artifacts/${encodeURIComponent(runId)}/idea/materials`, { signal, cache: "no-store" }));
+}
+
+export async function getIdeaMaterialContent(runId: string, materialId: string, signal?: AbortSignal): Promise<{ id: string; title: string; text: string }> {
+  const url = apiUrl(`${BASE}/api/artifacts/${encodeURIComponent(runId)}/idea/material-content`);
+  url.searchParams.set("material_id", materialId);
+  return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
+}

@@ -9,6 +9,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException
 
 from app.api.dependencies import get_run_store
+from app.api.idea_materials import enrich_source_errors
 from app.harness.tools.mcp_adapters import (
     AdapterKind,
     MCPTransportError,
@@ -120,7 +121,7 @@ async def list_run_tool_calls(
     entries.sort(key=lambda item: str(item.get("timestamp", "")))
     if limit > 0:
         entries = entries[-limit:]
-    return entries
+    return enrich_source_errors(run.root, entries)
 
 
 @run_router.get("/{run_id}/tools/approvals")
