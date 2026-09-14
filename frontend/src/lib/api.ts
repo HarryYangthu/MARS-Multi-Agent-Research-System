@@ -2081,3 +2081,9 @@ const BROWSER_ORIGIN = typeof window === "undefined" ? "" : window.location.orig
 export const WS_BASE =
   process.env.NEXT_PUBLIC_WS_URL ||
   (CONFIGURED_BACKEND_URL || BROWSER_ORIGIN).replace(/^http/, "ws");
+
+export function researchSourceUrl(runId: string, sourceId: string): string {
+  const url = apiUrl(`${BASE}/api/artifacts/${encodeURIComponent(runId)}/idea/research-source`);
+  url.searchParams.set("source_id", sourceId);
+  return url.toString();
+}

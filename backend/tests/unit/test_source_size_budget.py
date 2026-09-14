@@ -10,9 +10,9 @@ from app.settings import Settings
 
 def test_default_and_configured_size_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MARS_SOURCE_MAX_MIB", raising=False)
-    assert Settings().mars_source_max_mib == 12
+    assert Settings(_env_file=None).mars_source_max_mib == 12  # type: ignore[call-arg]
     monkeypatch.setenv("MARS_SOURCE_MAX_MIB", "32")
-    assert Settings().mars_source_max_mib == 32
+    assert Settings(_env_file=None).mars_source_max_mib == 32  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize("value", ["0", "65", "unbounded", "1.5"])

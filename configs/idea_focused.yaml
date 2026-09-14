@@ -1,0 +1,36 @@
+schema: idea.focused.config.v1
+author_agent: idea_author
+review_agent: idea_reviewer
+author:
+  thinking_enabled: true
+  reasoning_effort: low
+  temperature: 0.2
+  max_tokens: 32768
+  request_timeout_seconds: 180
+  max_retries: 1
+loop:
+  protocol: native_tools
+  native_observation_history: true
+  mode: reflection
+  trace: full
+  input_token_budget: 256000
+  observation_chars: 24000
+  max_model_calls: 36
+  max_tool_steps: 24
+  max_protocol_repairs: 4
+  max_validation_repairs: 4
+  author_empty_completion_repair_enabled: true
+  max_reflections: 4
+  reflection_thinking_enabled: true
+  reflection_reasoning_effort: high
+  reflection_format_repair_enabled: false
+tools:
+  - search.cvf_search
+  - search.neurips_search
+  - search.openalex_search
+  - search.arxiv_search
+  - search.web_search
+  - search.fetch_sources
+  - search.local_docs
+  - knowledge.kb_query
+  - code.repo_reader

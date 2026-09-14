@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -472,6 +473,29 @@ async def get_agent_workspace_file(
         size_bytes=size,
         content_type=_content_type_for_path(target),
     )
+
+
+@router.get("/{run_id}/{agent_dir}/research-source")
+async def get_research_source(run_id: str, agent_dir: str, source_id: str) -> FileResponse:
+    """Serve an actually archived source, never a caller-supplied filesystem path."""
+    import hashlib
+    if not re.fullmatch(r"source_[0-9a-f]{16}", source_id):
+        raise HTTPException(status_code=400, detail="invalid source id")
+    index = _resolve_agent_file(run_id, agent_dir, "research/downloads/source_fetch_index.v1.json")
+    rows = json.loads(index.read_text()) if index.is_file() else []
+    for row in rows:
+        if row.get("source_id") != source_id or not row.get("ok") or not row.get("archive_complete"):
+            continue
+        path = Path(str(row.get("download_path", ""))).resolve()
+        if (not path.is_relative_to(index.parent.resolve()) or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != row.get("sha256")):
+            raise HTTPException(status_code=409, detail="source archive is missing or changed")
+        is_pdf = row.get("source_type") == "pdf"
+        return FileResponse(path, media_type="application/pdf" if is_pdf else "application/octet-stream",
+                            filename=source_id + (".pdf" if is_pdf else ".html"),
+                            content_disposition_type="inline" if is_pdf else "attachment",
+                            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+    raise HTTPException(status_code=404, detail="archived source not found")
 
 
 @router.get("/{run_id}/{agent_dir}/workspace-tree", response_model=WorkspaceTreeView)

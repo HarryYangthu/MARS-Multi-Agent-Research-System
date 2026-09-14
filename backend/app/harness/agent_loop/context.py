@@ -92,6 +92,7 @@ def pack_context(
     reviewing: bool = False, review_issues: Sequence[str] = (),
     validation_issues: Sequence[str] = (),
     required_review_tools: tuple[str, ...] = (),
+    native_observation_history: bool = False,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if validation_issues and not reviewing:
@@ -154,7 +155,7 @@ def pack_context(
         # A separate reviewer reads evidence documents, not the generator's
         # native assistant/tool conversation. Its configured tool set is empty.
         group = ([Message(role="user", content=content) for content in contents]
-                 if reviewing else group_messages(rendering_items, contents))
+                 if reviewing or native_observation_history else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) > budget:
             compressed.append(index)
             # Preserve real page text prefixes before falling back to addresses.
@@ -165,14 +166,14 @@ def pack_context(
                 contents = ["[shortened actual Observation; leaf excerpts are incomplete]\n"
                             + canonical(compact(item, limit)) for item in items]
                 group = ([Message(role="user", content=content) for content in contents]
-                         if reviewing else group_messages(rendering_items, contents))
+                         if reviewing or native_observation_history else group_messages(rendering_items, contents))
                 if token_upper_bound(required + selected + group) <= budget:
                     break
             if token_upper_bound(required + selected + group) > budget:
                 contents = ["[compressed evidence reference]\n" + canonical(compact({k: item.get(k) for k in
                             ("tool", "args", "reason", "ok", "error", "raw_ref")}, 512)) for item in items]
                 group = ([Message(role="user", content=content) for content in contents]
-                         if reviewing else group_messages(rendering_items, contents))
+                         if reviewing or native_observation_history else group_messages(rendering_items, contents))
         if token_upper_bound(required + selected + group) <= budget:
             selected[0:0] = group
         else:

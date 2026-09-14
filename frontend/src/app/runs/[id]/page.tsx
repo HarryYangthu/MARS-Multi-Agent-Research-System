@@ -8,6 +8,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { IdeaProposalDetails } from "@/components/IdeaProposalDetails";
 import { AgentContextPanel } from "@/components/AgentContextPanel";
 import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
 import { ReportsPanel } from "@/components/ReportsPanel";
@@ -1318,6 +1319,8 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
                     text={editing ?? splitFrontmatter(artifact.text).body}
                     onChange={setEditing}
                     frontmatter={splitFrontmatter(artifact.text).frontmatter}
+                    metadata={artifact.metadata}
+                    runId={artifact.run_id}
                   />
                 </>
               ) : (
@@ -2888,10 +2891,14 @@ function ArtifactBodyEditor({
   text,
   onChange,
   frontmatter,
+  metadata,
+  runId,
 }: {
   text: string;
   onChange: (value: string) => void;
   frontmatter: string;
+  metadata?: Record<string, unknown>;
+  runId?: string;
 }): JSX.Element {
   const { t } = useI18n();
   const [mode, setMode] = useState<"preview" | "edit">("preview");
@@ -3001,6 +3008,7 @@ function ArtifactBodyEditor({
           >
             {text || "暂无正文"}
           </ReactMarkdown>
+          {metadata ? <IdeaProposalDetails metadata={metadata} runId={runId} /> : null}
         </div>
       )}
       {frontmatter ? (
@@ -3590,6 +3598,8 @@ function AgentWorkbench({
                 text={editing ?? splitFrontmatter(artifact.text).body}
                 onChange={onEdit}
                 frontmatter={splitFrontmatter(artifact.text).frontmatter}
+                    metadata={artifact.metadata}
+                    runId={artifact.run_id}
               />
             </div>
           ) : selectedFile?.exists ? (
@@ -3607,6 +3617,8 @@ function AgentWorkbench({
                 text={editing ?? splitFrontmatter(artifact.text).body}
                 onChange={onEdit}
                 frontmatter={splitFrontmatter(artifact.text).frontmatter}
+                    metadata={artifact.metadata}
+                    runId={artifact.run_id}
               />
             </div>
           ) : (

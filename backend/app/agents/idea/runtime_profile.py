@@ -96,6 +96,9 @@ def public_agent_configuration(config: AgentConfig) -> dict[str, Any]:
         raise ValueError("research configuration must be a mapping")
     configured_tools = load_tool_configs()
     tool_contracts = {name: asdict(configured_tools.get(name, ToolConfig())) for name in config.tools}
+    loop = asdict(AgentLoopPolicy.from_mapping(config.raw.get("loop", {})))
+    if not loop["native_observation_history"]:
+        loop.pop("native_observation_history")
     return {
         "name": config.name, "enabled": config.enabled, "output_schema": config.output_schema,
         "model": {"provider": config.model_provider, "name": config.model_name,
@@ -106,7 +109,7 @@ def public_agent_configuration(config: AgentConfig) -> dict[str, Any]:
                   "api_key_env": config.api_key_env, "base_url": config.base_url,
                   "base_url_env": config.base_url_env},
         "debate_enabled": config.debate_enabled,
-        "loop": asdict(AgentLoopPolicy.from_mapping(config.raw.get("loop", {}))),
+        "loop": loop,
         "tools": list(config.tools),
         "enabled_tools": [name for name in config.tools if tool_contracts[name]["enabled"]],
         # Actual schemas/observations still belong to the ordinary loop trace.
@@ -176,6 +179,8 @@ def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
     # false default preserves that behavior; all prior settings stay explicit.
     if not policy.author_empty_completion_repair_enabled and "author_empty_completion_repair_enabled" not in declared:
         required.discard("author_empty_completion_repair_enabled")
+    if not policy.native_observation_history and "native_observation_history" not in declared:
+        required.discard("native_observation_history")
     if declared != required:
         raise ValueError("experimental profile must explicitly declare every loop setting")
     if policy.protocol != "json_actions" or policy.mode != "reflection" or policy.trace != "full":

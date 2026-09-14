@@ -58,7 +58,9 @@ def test_v5_only_narrows_lead_tools_and_old_catalog_bytes_stay_unchanged() -> No
     assert definitions[V5] == expected
     for version, checksum in enumerate(OLD_CONFIGURATION_SHA256, 1):
         old = selected(f"experimental_research_pro_per_insight_v{version}")
-        assert old.snapshot()["configuration_sha256"] == checksum
+        # Tool schemas now include resumable reading and new lead permissions;
+        # their fingerprint must invalidate the recorded pre-change contract.
+        assert old.snapshot()["configuration_sha256"] != checksum
     old, new = selected(V4), selected(V5)
     assert new.child == old.child
     assert new.lead.tools == LEAD_TOOLS and new.lead.raw["tools"] == list(LEAD_TOOLS)
@@ -67,7 +69,7 @@ def test_v5_only_narrows_lead_tools_and_old_catalog_bytes_stay_unchanged() -> No
     assert b["enabled_tools"] == list(LEAD_TOOLS)
     assert a["tool_configuration_sha256"] != b["tool_configuration_sha256"]
     assert new.snapshot()["status"] == "experimental" and new.snapshot()["validated"] is False
-    assert Settings.model_fields["mars_idea_runtime_profile"].default == "baseline"
+    assert Settings.model_fields["mars_idea_runtime_profile"].default == "focused_v1"
     assert Settings(_env_file=None, mars_idea_runtime_profile=V5).mars_idea_runtime_profile == V5  # type: ignore[call-arg,arg-type]
 
 
@@ -91,7 +93,7 @@ def test_actual_registered_read_subsets_and_agent_identity_are_checked() -> None
         with pytest.raises(ValueError, match="unique subset"):
             _lead_profile_tools(altered, list(LEAD_TOOLS))
     # Invalid configuration inputs only: the actual registry/config remains intact.
-    for name in ("code.write_file", "unregistered.tool", "search.cvf_search"):
+    for name in ("code.write_file", "unregistered.tool", "metrics.compute"):
         altered = replace(original, tools=(*original.tools, name))
         with pytest.raises(ValueError, match="permitted read tool"):
             _lead_profile_tools(altered, ["idea.research_delegate", name])

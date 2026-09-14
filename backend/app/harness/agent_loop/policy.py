@@ -22,6 +22,7 @@ class AgentLoopPolicy:
     observation_chars: int = 6000
     reflection_format_repair_enabled: bool = False
     author_empty_completion_repair_enabled: bool = False
+    native_observation_history: bool = False
 
     def __post_init__(self) -> None:
         if self.protocol not in {"json_actions", "native_tools"}:
@@ -40,9 +41,13 @@ class AgentLoopPolicy:
             raise ValueError("author_empty_completion_repair_enabled must be a boolean")
         if self.author_empty_completion_repair_enabled and self.trace != "full":
             raise ValueError("author_empty_completion_repair_enabled requires full auditable traces")
+        if not isinstance(self.native_observation_history, bool):
+            raise ValueError("native_observation_history must be a boolean")
+        if self.native_observation_history and self.protocol != "native_tools":
+            raise ValueError("native_observation_history requires native_tools")
         for item in fields(self):
             if item.name in {"mode", "trace", "reflection_reasoning_effort", "reflection_thinking_enabled", "protocol",
-                             "reflection_format_repair_enabled", "author_empty_completion_repair_enabled"}:
+                             "reflection_format_repair_enabled", "author_empty_completion_repair_enabled", "native_observation_history"}:
                 continue
             value = getattr(self, item.name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -65,6 +70,8 @@ class AgentLoopPolicy:
             data["author_empty_completion_repair_contract_version"] = 1
         else:
             data.pop("author_empty_completion_repair_enabled")
+        if not self.native_observation_history:
+            data.pop("native_observation_history")
         return data
 
     @classmethod

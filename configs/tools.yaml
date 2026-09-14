@@ -3,7 +3,7 @@ tools:
     enabled: true
     description: Search an official NeurIPS yearly directory with short title keywords. Supports observed /paper_files/paper/{year}/hash/*-Abstract.html pages and their actual Paper buttons; unavailable years or other layouts fail explicitly. Returns verified original HTML/citation metadata and the actual PDF link, without downloading or reading PDFs. Alternate citation hosts are not verified PDF aliases. Use search.fetch_sources for body evidence.
     mutation_level: read
-    allowed_agents: [idea_research]
+    allowed_agents: [idea, idea_research]
     # Covers the configured metadata budget (at most 180s) plus local archival.
     timeout_seconds: 185
     network: true
@@ -27,7 +27,7 @@ tools:
     enabled: true
     description: Search the official CVF proceedings directory for a specified venue and year using short title keywords. Supports the /content/{VENUE}{YEAR}/ layout; older layouts or unavailable years fail explicitly. Returns only actual directory entries with verified landing-page citation metadata and original PDF links; does not download or read PDFs. Use search.fetch_sources for body evidence.
     mutation_level: read
-    allowed_agents: [idea_research]
+    allowed_agents: [idea, idea_research]
     # Covers the configurable metadata budget (maximum 180s) plus local archival.
     timeout_seconds: 185
     network: true
@@ -50,7 +50,7 @@ tools:
 
   search.openalex_search:
     enabled: true
-    description: Search OpenAlex metadata for papers with original PDF locations inside configured source domains. Returns explicit OpenAlex provenance; not MCP.
+    description: Discover papers using short topic keywords in OpenAlex. Prefer original PDF locations inside configured source domains; retain metadata-only candidates for screening. These are not method-reading evidence. Set require_pdf only to filter for permitted PDFs.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 40
@@ -62,6 +62,7 @@ tools:
       properties:
         query: {type: string, minLength: 1}
         top_k: {type: integer, minimum: 1, maximum: 10}
+        require_pdf: {type: boolean, default: false}
     output_schema:
       type: object
       required: [query, source, hits]
@@ -202,6 +203,8 @@ tools:
       additionalProperties: false
       properties:
         start_page: {type: integer, minimum: 1}
+        char_offset: {type: integer, minimum: 0, description: "Resume within the first PDF page or full HTML text; use the returned next_offset."}
+        format: {type: string, enum: [auto, html], description: "html preserves the supplied webpage URL instead of converting an arXiv abstract URL to PDF. Supply a full-text URL to read methods."}
         max_pages: {type: integer, minimum: 1, maximum: 10}
         max_chars: {type: integer, minimum: 1000, maximum: 16000}
         max_sources: {type: integer, minimum: 1, maximum: 5}
@@ -311,7 +314,7 @@ tools:
 
   code.repo_reader:
     enabled: true
-    description: Read bounded text files from project repo allowed paths.
+    description: Read text from a project file. When truncated is true, continue with the returned next_offset as char_offset; path must remain the exact file path, without fragment or class suffix.
     mutation_level: read
     allowed_agents: [idea, coding]
     timeout_seconds: 10
@@ -321,6 +324,7 @@ tools:
       additionalProperties: true
       properties:
         path: {type: string, minLength: 1}
+        char_offset: {type: integer, minimum: 0, default: 0}
     output_schema:
       type: object
       required: [repo_root, path, content]

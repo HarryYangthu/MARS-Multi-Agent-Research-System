@@ -124,7 +124,7 @@ def test_invalid_registered_arguments_and_parser_agree(change: dict[str, Any]) -
 def test_registration_is_read_only_opt_in_with_separate_metadata_budget() -> None:
     registry = get_registry(); spec = registry.spec("search.neurips_search")
     assert registry.has("search.neurips_search") and spec is not None
-    assert spec.policy.allowed_agents == ("idea_research",) and spec.policy.mutation_level == "read"
+    assert spec.policy.allowed_agents == ("idea", "idea_research") and spec.policy.mutation_level == "read"
     assert spec.policy.network and not spec.policy.requires_approval and not spec.bridge_only
     for name in ("idea", "idea_research"):
         assert "search.neurips_search" not in get_agent_config(name).tools

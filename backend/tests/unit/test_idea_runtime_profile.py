@@ -35,7 +35,7 @@ def profile() -> ResolvedIdeaProfile:
 def test_profile_selection_is_local_explicit_and_baseline_is_default() -> None:
     settings = Settings(_env_file=None, mars_idea_runtime_profile="baseline")  # type: ignore[call-arg]
     assert settings.mars_idea_runtime_profile == "baseline"
-    assert Settings.model_fields["mars_idea_runtime_profile"].default == "baseline"
+    assert Settings.model_fields["mars_idea_runtime_profile"].default == "focused_v1"
     assert resolve_idea_profile("baseline") is None
     for invalid in ("", "../agents.yaml", "/tmp/profile.yaml", "deepseek-v4-pro", "https://host/profile"):
         with pytest.raises(ValueError, match="unknown Idea runtime profile"):
@@ -69,7 +69,9 @@ def test_profile_adopts_declared_variant_models_protocol_and_budgets(profile: Re
         effective = snapshot["configuration"][role]
         for key, value in scenario[model_key].items():
             assert effective["model"][key] == value
-        assert effective["loop"] == asdict(AgentLoopPolicy.from_mapping(scenario[loop_key]))
+        expected_loop = asdict(AgentLoopPolicy.from_mapping(scenario[loop_key]))
+        expected_loop.pop("native_observation_history")  # Omitted opt-in preserves historical receipts.
+        assert effective["loop"] == expected_loop
         assert effective["model"]["api_key_env"] == "DEEPSEEK_API_KEY"
         assert effective["model"]["base_url_env"] == ""
         assert effective["model"]["base_url"] == "https://api.deepseek.com/v1"
