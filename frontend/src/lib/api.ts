@@ -711,6 +711,9 @@ export type KnowledgeSearchParams = {
 
 export type ProjectSummary = {
   name: string;
+  display_name?: string;
+  folder_path?: string;
+  project_type?: "configured" | "folder";
   description: string;
   domain: string;
   tags: string[];
@@ -2119,5 +2122,28 @@ export async function getIdeaMaterials(runId: string, signal?: AbortSignal): Pro
 export async function getIdeaMaterialContent(runId: string, materialId: string, signal?: AbortSignal): Promise<{ id: string; title: string; text: string }> {
   const url = apiUrl(`${BASE}/api/artifacts/${encodeURIComponent(runId)}/idea/material-content`);
   url.searchParams.set("material_id", materialId);
+  return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
+}
+
+export type ProjectContextDocument = { path: string; chars: number; sha256: string; role: string };
+export type ProjectAutoContext = { project: string; folder: string; total_chars: number; files: ProjectContextDocument[]; warnings: string[] };
+export type ProjectFolders = { path: string; parent: string; directories: { name: string; path: string }[]; has_more: boolean };
+
+export async function openProjectFolder(path: string, create = false): Promise<ProjectSummary> {
+  return jsonOrThrow(await fetch(`${BASE}/api/projects/folder`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, create }),
+  }));
+}
+export async function browseProjectFolders(path = "", signal?: AbortSignal): Promise<ProjectFolders> {
+  const url = apiUrl(`${BASE}/api/projects/folders`);
+  if (path) url.searchParams.set("path", path);
+  return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
+}
+export async function getProjectAutoContext(project: string, signal?: AbortSignal): Promise<ProjectAutoContext> {
+  return jsonOrThrow(await fetch(`${BASE}/api/projects/${encodeURIComponent(project)}/auto-context`, { signal, cache: "no-store" }));
+}
+export async function getProjectContextDocument(project: string, path: string, signal?: AbortSignal): Promise<ProjectContextDocument & { content: string }> {
+  const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/auto-context/document`);
+  url.searchParams.set("path", path);
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
 }

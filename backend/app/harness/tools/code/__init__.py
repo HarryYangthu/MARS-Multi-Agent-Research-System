@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.harness.tools.config import check_commands, command_timeout_seconds, tool_config
 from app.harness.tools.registry import ToolContext, ToolResult
 from app.settings import repo_root
@@ -431,7 +432,7 @@ def _project_root(ctx: ToolContext) -> Path | None:
     if raw_path.is_absolute():
         candidate = raw_path.resolve()
     else:
-        candidate = (repo_root() / "projects" / ctx.project / raw_path).resolve()
+        candidate = (project_root(ctx.project) / raw_path).resolve()
     return candidate if candidate.exists() else None
 
 
@@ -461,7 +462,7 @@ def _resolve_project_file(
 
 
 def _repo_link(project: str) -> dict[str, Any]:
-    path = repo_root() / "projects" / project / "repo_link.yaml"
+    path = project_root(project) / "repo_link.yaml"
     if not path.exists():
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from app.harness import project_workspace
+
 from app.bridge.candidate_workspace import (
     CandidateWorkspaceManager,
     CandidateWorkspaceReceipt,
@@ -57,6 +59,7 @@ def actual_code_path_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     folder.mkdir(parents=True)
     (folder / "repo_link.yaml").write_text("allowed_paths: [pkg/]\nread_only: false\n")
     monkeypatch.setattr(code_tools, "repo_root", lambda: root)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: root)
 
 
 @pytest.mark.asyncio

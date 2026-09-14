@@ -108,6 +108,9 @@ class Orchestrator:
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
         assert_ready_for_run(project=request.project)
+        from app.harness.context.folder_context import load_folder_context
+        from app.harness.agent_loop.trace import atomic_json
+        folder_context = load_folder_context(request.project)
         run = self.run_store.create(
             task=request.task,
             project=request.project,
@@ -115,6 +118,8 @@ class Orchestrator:
             user_request=request.user_request,
             data_source=request.data_source,
         )
+        if folder_context is not None:
+            atomic_json(run.root / "input/folder_context.v1.json", folder_context)
         graph = (
             build_standalone(request.entrypoint)
             if request.standalone and request.entrypoint != "pipeline"

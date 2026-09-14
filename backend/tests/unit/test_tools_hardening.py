@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from app.harness import project_workspace
+
 from app.bridge.commander_tools import (
     TOOLS,
     ToolContext as CommanderToolContext,
@@ -122,6 +124,7 @@ async def test_apply_patch_applies_after_gate_and_repo_checks(
     (repo / "libs" / "Model.py").write_text("VALUE = 1\n", encoding="utf-8")
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
 
     reg = reset_for_tests()
     diff = """diff --git a/libs/Model.py b/libs/Model.py
@@ -180,6 +183,7 @@ async def test_code_tools_follow_repo_link_local_path_end_to_end(
     )
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
 
     reg = reset_for_tests()
     ctx = ToolContext(
@@ -225,6 +229,7 @@ async def test_write_file_records_events_and_rolls_back(
     run_root = tmp_path / "runs" / "r1"
     run_root.mkdir(parents=True)
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
 
     reg = reset_for_tests()
     ctx = ToolContext(
@@ -283,6 +288,7 @@ async def test_delete_file_requires_approval_before_mutation(
     target = repo / "libs" / "delete_me.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
 
     reg = reset_for_tests()
     result = await reg.dispatch(
@@ -309,6 +315,7 @@ async def test_apply_patch_rejects_read_only_repo(
     _make_project_repo(tmp_path, read_only=True)
     repo = tmp_path / "workspace" / "repos" / "demo"
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
 
     reg = reset_for_tests()
     result = await reg.dispatch(
@@ -340,6 +347,7 @@ async def test_lint_blocks_non_allowlisted_config_command(
 ) -> None:
     repo = _make_project_repo(tmp_path, read_only=False)
     monkeypatch.setattr(code_tools, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         code_tools,
         "check_commands",

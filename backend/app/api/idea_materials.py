@@ -96,6 +96,17 @@ def collect_idea_materials(root: Path, run_id: str) -> IdeaMaterialsView:
     """Use saved observations; never reread live baseline code as historical input."""
     warnings: list[str] = []
     items: list[IdeaMaterial] = []
+    folder_context = _object(_json(root, root / "input/folder_context.v1.json", warnings))
+    folder_valid = folder_context.get("sha256") == digest({k: v for k, v in folder_context.items() if k != "sha256"})
+    for file in _rows(folder_context.get("files")):
+        content = file.get("content")
+        if isinstance(content, str):
+            relative = str(file.get("path") or "")
+            items.append(IdeaMaterial(id="folder-" + _id(relative), kind="context", title=relative,
+                status="已冻结上下文" if folder_valid and file.get("sha256") == digest(content) else "快照校验失败",
+                description="随项目自动加载的背景与约定，来自本次任务冻结的版本。",
+                provenance=str(folder_context.get("folder") or "") + "/" + relative,
+                text=content, preview_available=True))
     knowledge = _object(_json(root, root / "input/project_knowledge.v1.json", warnings))
     content = knowledge.get("content")
     if isinstance(content, str) and content:

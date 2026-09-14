@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.harness.kb.ingester import ingest_memory
 from app.harness.kb.models import MemoryType
 from app.harness.kb.stores import KBStores, get_stores
@@ -818,7 +819,7 @@ def _repo_link_path(project: str) -> Path:
     safe_project = project.strip() or "pimc"
     if "/" in safe_project or "\\" in safe_project or safe_project.startswith("."):
         raise ValueError("invalid project name")
-    return repo_root() / "projects" / safe_project / "repo_link.yaml"
+    return project_root(safe_project) / "repo_link.yaml"
 
 
 def _load_repo_link(project: str) -> dict[str, Any]:
@@ -833,7 +834,7 @@ def _resolve_project_repo_path(project: str, raw_path: str) -> Path:
     candidate = Path(raw_path)
     if candidate.is_absolute():
         return candidate
-    return (repo_root() / "projects" / project / candidate).resolve()
+    return (project_root(project) / candidate).resolve()
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.harness.llm.model_registry import (
     available_providers,
     list_agent_configs,
@@ -168,7 +169,7 @@ def _check_llm_providers() -> ReadinessCheck:
 
 
 def _check_project_repo(project: str) -> ReadinessCheck:
-    project_dir = repo_root() / "projects" / project
+    project_dir = project_root(project)
     repo_link = project_dir / "repo_link.yaml"
     if not project_dir.exists() or not repo_link.exists():
         return ReadinessCheck(

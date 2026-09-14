@@ -117,9 +117,11 @@ class BaseAgent(ABC):
         required = request.extra.get("required_upstream_refs", [])
         if not isinstance(required, list) or any(x not in request.upstream_artifacts for x in required):
             raise ValueError("required_upstream_refs must name supplied upstream artifacts")
-        project_path = repo_root() / "projects" / request.project
-        if not project_path.resolve().is_relative_to((repo_root() / "projects").resolve()):
-            raise ValueError("invalid project path")
+        from app.harness.project_workspace import project_root
+        from app.harness.context.folder_context import load_folder_context, render_folder_context
+        project_path = project_root(request.project)
+        folder_context = load_folder_context(
+            request.project, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
         rules_path = project_path / "AGENTS.md"
         rules = (rules_path.read_text() if sources["project_rules"] and rules_path.is_file()
                  else "No project-specific rules supplied in this context.")
@@ -127,10 +129,14 @@ class BaseAgent(ABC):
                         if sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
         metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources}
+        if folder_context is not None:
+            rules = render_folder_context(folder_context, include_instructions=sources["project_rules"])
+            metadata["folder_context"] = {k: v for k, v in folder_context.items() if k != "files"}
+            metadata["folder_context"]["files"] = [{k: v for k, v in f.items() if k != "content"} for f in folder_context["files"]]
         from app.harness.context.project_knowledge import load_project_knowledge
         knowledge, knowledge_record = (load_project_knowledge(
             project_path, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
-            if self.project_knowledge_enabled else ("", {}))
+            if self.project_knowledge_enabled and folder_context is None else ("", {}))
         if knowledge:
             rules_path_label = knowledge_record["source"]
             rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge

@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.settings import repo_root
 
 
@@ -45,7 +46,7 @@ class ProjectRepo:
 
 
 def load_project_repo(project: str) -> ProjectRepo:
-    project_dir = repo_root() / "projects" / project
+    project_dir = project_root(project)
     cfg_path = project_dir / "repo_link.yaml"
     raw: dict[str, Any] = {}
     if cfg_path.exists():

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from app.harness import project_workspace
+
 from app.agents.base import RunRequest
 from app.agents.experiment.agent import ExperimentAgent
 from app.harness.kb.stores import KBStores
@@ -17,6 +19,7 @@ def temporary_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return tmp_path
 
     monkeypatch.setattr(store, "repo_root", temporary_repo_root)
+    monkeypatch.setattr(project_workspace, "repo_root", temporary_repo_root)
     idea_root = tmp_path / "backend" / "app" / "agents" / "idea"
     (idea_root / "docs").mkdir(parents=True)
     (idea_root / "docs" / "principles.md").write_text("先调研，再提案。", encoding="utf-8")

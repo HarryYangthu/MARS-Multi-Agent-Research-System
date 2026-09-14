@@ -19,7 +19,8 @@ import { useProject } from "@/lib/project";
 
 export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) => void }): JSX.Element {
   const { t } = useI18n();
-  const { selectedProject } = useProject();
+  const { selectedProject, projects } = useProject();
+  const projectLabel = projects.find((project) => project.name === selectedProject)?.display_name || selectedProject;
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [trashedRuns, setTrashedRuns] = useState<TrashRunSummary[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -28,6 +29,8 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
 
   useEffect(() => {
     let alive = true;
+    setRuns([]);
+    setTrashedRuns([]);
     const refresh = async () => {
       try {
         const [r, tr, s] = await Promise.all([
@@ -89,7 +92,7 @@ export function ProjectsPanel({ onSelectRun }: { onSelectRun?: (runId: string) =
             {showTrash ? "↩" : "🗑"} {showTrash ? runs.length : trashedRuns.length}
           </button>
           <span className="text-[10px] text-slate-500">
-            {selectedProject} · {runs.length} · {stats?.runs_running ?? 0} {t("sidebar.running")}
+            {projectLabel} · {runs.length} 项任务
           </span>
         </div>
       </div>

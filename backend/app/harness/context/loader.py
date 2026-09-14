@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from app.harness.context.project_layer import ProjectLayer, build_project_layer
@@ -54,10 +55,11 @@ def build_context(
     user_request: str,
     upstream_handoff: dict[str, str] | None = None,
     kb_excerpts: list[str] | None = None,
+    run_root: Path | None = None,
 ) -> ContextPack:
     return ContextPack(
         system=build_system_layer(agent_role=agent_role, output_schema=output_schema),
-        project=build_project_layer(project=project),
+        project=build_project_layer(project=project, run_root=run_root),
         task=TaskLayer(
             user_request=user_request,
             kb_excerpts=list(kb_excerpts or []),

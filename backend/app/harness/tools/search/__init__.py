@@ -41,6 +41,15 @@ async def local_docs_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if not query:
         return ToolResult(ok=False, error="query (q) is required")
     top_k = int(args.get("top_k", 3) or 3)
+    from app.harness.context.folder_context import load_folder_context
+    folder = load_folder_context(ctx.project, Path(str(ctx.extra["run_root"])) if ctx.extra.get("run_root") else None)
+    if folder is not None:
+        terms = query.lower().split()
+        matches = [file for file in folder["files"] if any(term in (file["path"] + file["content"]).lower() for term in terms)]
+        return ToolResult(ok=True, output={"query": query, "project": ctx.project,
+            "hits": [{"path": file["path"], "excerpt": file["content"][:1200], "sha256": file["sha256"],
+                      "total_chars": file["chars"], "truncated": file["chars"] > 1200} for file in matches[:max(1, min(top_k, 30))]],
+            "uploaded_docs": [], "source": "project_folder", "warnings": folder["warnings"]})
 
     from app.harness.kb.retriever import query as kb_query
 

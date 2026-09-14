@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from app.harness import project_workspace
+
 from app.storage import coding_workspace_store as store
 
 
@@ -14,6 +16,7 @@ def temporary_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return tmp_path
 
     monkeypatch.setattr(store, "repo_root", temporary_repo_root)
+    monkeypatch.setattr(project_workspace, "repo_root", temporary_repo_root)
     from app.harness.kb.stores import reset_for_tests
     reset_for_tests(tmp_path / "knowledge")
 

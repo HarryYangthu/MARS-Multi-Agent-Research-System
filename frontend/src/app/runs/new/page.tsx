@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { TopBar } from "@/components/TopBar";
+import { ProjectContextFiles } from "@/components/ProjectContextFiles";
 import {
   createRun,
   dataSourceSpectrumUrl,
@@ -65,11 +66,9 @@ function NewRunInner(): JSX.Element {
   const entrypoint = VALID_ENTRYPOINTS.has(initialEntry) ? initialEntry : "pipeline";
   const usesTemplate = TEMPLATE_ENTRIES.has(entrypoint);
 
-  const [task, setTask] = useState("PIMC static 残差指标优化");
+  const [task, setTask] = useState("");
   const [project, setProject] = useState(selectedProject);
-  const [userRequest, setUserRequest] = useState(
-    "基于项目已有的 PIMC 知识，研究如何改善静态模型的残差指标。请核对当前可用的基线与数据资料，调研并读懂相关方法，提出一个有依据、可尝试的方案。",
-  );
+  const [userRequest, setUserRequest] = useState("");
 
   useEffect(() => {
     setProject(selectedProject);
@@ -79,13 +78,22 @@ function NewRunInner(): JSX.Element {
   const [ideaScope, setIdeaScope] = useState<"method_proposal" | "project_proposal">("method_proposal");
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [dataSource, setDataSource] = useState<DataSourceProfile | null>(null);
-  const [dataFsMhz, setDataFsMhz] = useState("184.32");
-  const [dataKind, setDataKind] = useState("paper_static");
-  const [dataChannels, setDataChannels] = useState("16");
+  const [dataFsMhz, setDataFsMhz] = useState("");
+  const [dataKind, setDataKind] = useState("auto");
+  const [dataChannels, setDataChannels] = useState("");
   const [dataDescription, setDataDescription] = useState("");
   const [dataBusy, setDataBusy] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previousProject = useRef(selectedProject);
+  useEffect(() => {
+    if (previousProject.current === selectedProject) return;
+    previousProject.current = selectedProject;
+    setTask(""); setUserRequest(""); setIdeaContext({}); setSeedArtifact("");
+    setDataSource(null); setDataFile(null); setDataError(null);
+    setDataFsMhz(""); setDataKind("auto"); setDataChannels(""); setDataDescription("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [selectedProject]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [schemaErrors, setSchemaErrors] = useState<{ path: string; message: string }[] | null>(
@@ -100,6 +108,7 @@ function NewRunInner(): JSX.Element {
     void load
       .then((profile) => {
         if (!alive) return;
+        if (profile.project !== project) throw new Error("数据源属于其他项目，请在当前项目重新选择");
         setDataSource(profile);
         setDataFile(null);
         setDataFsMhz(profile.fs_mhz === null ? "" : String(profile.fs_mhz));
@@ -263,14 +272,15 @@ function NewRunInner(): JSX.Element {
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="Task slug">
+            <Field label="任务名称">
               <input
                 value={task}
+                placeholder="例如：优化当前模型的残差指标"
                 onChange={(e) => setTask(e.target.value)}
                 className="input"
               />
             </Field>
-            <Field label="Project">
+            <Field label="所属项目">
               {projects.length > 0 ? (
                 <select
                   value={project}
@@ -282,7 +292,7 @@ function NewRunInner(): JSX.Element {
                 >
                   {projects.map((item) => (
                     <option key={item.name} value={item.name}>
-                      {item.name}
+                      {item.display_name || item.name}
                       {item.repo_exists ? "" : " (repo missing)"}
                     </option>
                   ))}
@@ -438,10 +448,13 @@ function NewRunInner(): JSX.Element {
             </div>
           </section>
 
+          <ProjectContextFiles project={project} />
+
           {!usesTemplate ? (
             <Field label={t("newrun.field.research")}>
               <textarea
                 value={userRequest}
+                placeholder="描述本次研究问题、目标和限制。项目背景会自动加载。"
                 onChange={(e) => setUserRequest(e.target.value)}
                 rows={6}
                 className="input font-mono"
