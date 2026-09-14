@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.harness.kb.selector import select_memory
 from app.settings import repo_root
 
@@ -214,7 +215,7 @@ def save_coding_memory_items(
 
 
 def _project_config(project: str) -> dict[str, Any]:
-    project_dir = repo_root() / "projects" / project
+    project_dir = project_root(project)
     path = project_dir / "repo_link.yaml"
     if not path.exists():
         return {}
@@ -249,7 +250,7 @@ def _resolve_repo_path(project: str, raw: str) -> Path:
     raw_path = Path(raw)
     if raw_path.is_absolute():
         return raw_path
-    return (repo_root() / "projects" / project / raw_path).resolve()
+    return (project_root(project) / raw_path).resolve()
 
 
 def _select_source(requested: str, sources: Sequence[CodeSource]) -> str:

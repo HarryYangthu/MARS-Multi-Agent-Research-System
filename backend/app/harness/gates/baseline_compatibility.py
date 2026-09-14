@@ -19,9 +19,9 @@ from typing import Any
 import yaml
 from loguru import logger
 
+from app.harness.project_workspace import folder_project, project_root
 from app.harness.gates.gate_base import GateOutcome
 from app.harness.tools.registry import GateDecision, ToolContext
-from app.settings import repo_root
 
 GATE_ID = "baseline_compatibility"
 
@@ -44,7 +44,7 @@ _FORWARD_OK_RE = re.compile(
 
 
 def _load_repo_link(project: str) -> dict[str, Any]:
-    p = repo_root() / "projects" / project / "repo_link.yaml"
+    p = project_root(project) / "repo_link.yaml"
     if not p.exists():
         return {}
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -151,7 +151,8 @@ def static_check(
                 reason=f"path '{tp}' is baseline-protected (pattern: {hit})",
             )
 
-    violation = _check_forward_signature(diff)
+    # Folder projects define their own interfaces; do not impose the legacy PIMC signature.
+    violation = _check_forward_signature(diff) if folder_project(project) is None else None
     if violation:
         return GateOutcome(
             gate_id=GATE_ID,

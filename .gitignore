@@ -49,6 +49,7 @@ posttrain/reports/
 posttrain/tensorboard/
 posttrain/wandb/
 workspace/uploads/
+workspace/folder_projects.json
 workspace/repos/*
 !workspace/repos/README.md
 

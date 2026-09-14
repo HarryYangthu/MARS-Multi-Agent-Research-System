@@ -259,6 +259,10 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _system_prompt(session: CommanderSession) -> str:
+    from app.harness.context.folder_context import load_folder_context, render_folder_context
+
+    folder_context = load_folder_context(session.project)
+    project_context = render_folder_context(folder_context) if folder_context is not None else ""
     targets = (
         json.dumps(session.metric_targets, ensure_ascii=False)
         if session.metric_targets
@@ -275,10 +279,13 @@ def _system_prompt(session: CommanderSession) -> str:
 6. **汇报**:对照用户设定的指标预期({targets})和项目真实指标语义判断是否达标;不要混用原始论文指标和 MARS 兼容诊断字段。
 
 ## 当前上下文
+- 当前项目: {session.project}
 - 会话状态(FSM): {session.state.value}
 - 关联 run: {session.linked_run_id or "(无)"}
 - 介入模式: {"全自动(只汇报)" if session.auto_mode else "半自动(每次拉回前征求同意)"}
 - 指标预期: {targets}
+
+{project_context}
 
 ## 可用工具
 {tools_for_prompt()}

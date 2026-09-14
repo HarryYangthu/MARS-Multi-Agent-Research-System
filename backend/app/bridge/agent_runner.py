@@ -244,6 +244,7 @@ async def run_agent_node(
             project=run.project,
             user_request=user_request,
             upstream_handoff=upstream,
+            run_root=run.root,
         )
         memory_ids_raw = context.metadata.get(f"{stage}_approved_memory_ids", [])
         memory_ids = (

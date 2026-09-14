@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from app.harness.project_workspace import project_root
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import repo_root
 from app.storage.run_store import RunHandle
@@ -83,7 +84,7 @@ class DiagnosisAnalysis:
 
 
 def load_diagnostics_config(project: str) -> DiagnosticsConfig:
-    path = repo_root() / "projects" / project / "diagnostics.yaml"
+    path = project_root(project) / "diagnostics.yaml"
     if not path.exists():
         return DiagnosticsConfig(project=project)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

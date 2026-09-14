@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from app.harness import project_workspace
+
 import app.bridge.candidate_workspace as candidate_workspace_module
 from app.bridge.candidate_workspace import (
     CandidateWorkspaceError,
@@ -55,6 +57,7 @@ def actual_code_path_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     folder.mkdir(parents=True)
     (folder / "repo_link.yaml").write_text("allowed_paths: [pkg/]\nread_only: false\n")
     monkeypatch.setattr(code_tools, "repo_root", lambda: root)
+    monkeypatch.setattr(project_workspace, "repo_root", lambda: root)
 
 
 def test_candidate_workspace_manager_never_edits_live_repo(tmp_path: Path) -> None:

@@ -171,7 +171,7 @@ class FocusedIdeaAgent(IdeaAgent):
     def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
         messages = [
             Message("system", "你是独立会话中的方法评审者，使用与生成者不同的模型。"
-                "基于原任务、PIMC知识、实际原文阅读窗口和候选方案检查，不把生成者的解释当作论文事实。"
+                "基于原任务、当前项目知识、实际原文阅读窗口和候选方案检查，不把生成者的解释当作论文事实。"
                 "判断核心方法是否真正读完整、选文是否相关有用、迁移假设是否合理、关键公式和实现是否自洽。"
                 "必须检查边界和退化输入，例如重复值、零分母、饱和区和有限精度；给出明确反例时要求修正。所有意见用中文。"
                 "首次评审尽量一次列全实质问题，交叉核对公式、步骤、初始化、handoff与摘要的一致性；"
