@@ -9,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { IdeaProposalDetails } from "@/components/IdeaProposalDetails";
+import { IdeaRunMaterials } from "@/components/IdeaRunMaterials";
 import { AgentContextPanel } from "@/components/AgentContextPanel";
 import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
 import { ReportsPanel } from "@/components/ReportsPanel";
@@ -3544,6 +3545,7 @@ function AgentWorkbench({
           ) : null}
           {isWorkLogPane ? (
             <WorkbenchWorkLogPanel
+              runId={run?.run_id ?? ""}
               workLog={workLog}
               workLogError={workLogError}
               workLogLoading={workLogLoading}
@@ -4260,6 +4262,7 @@ function WorkbenchContextFilePreview({
 }
 
 function WorkbenchWorkLogPanel({
+  runId,
   workLog,
   workLogError,
   workLogLoading,
@@ -4269,6 +4272,7 @@ function WorkbenchWorkLogPanel({
   onOpenArtifact,
   onOpenTimeline,
 }: {
+  runId: string;
   workLog: WorkLogView | null;
   workLogError: string;
   workLogLoading: boolean;
@@ -4339,6 +4343,8 @@ function WorkbenchWorkLogPanel({
           state={state}
         />
       ) : null}
+
+      {agent === "idea" && runId ? <IdeaRunMaterials runId={runId} running={!workFinished} /> : null}
 
       <div className="grid gap-2 border-b border-mars-border bg-mars-panel/15 p-3 sm:grid-cols-2 xl:grid-cols-4">
         <WorkLogMetric label="上下文装载" value={`${contextCount}`} detail="prompt 输入包、规则和上游交接" />
@@ -4474,7 +4480,7 @@ function WorkLogResultSummary({
   const summary = workLogResultText({ agent, artifactName, latest, state });
   return (
     <div className="border-b border-mars-border bg-mars-bg/70 p-4">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))" }}>
         <div className="rounded border border-mars-border bg-mars-panel/35 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-mars-bg px-2 py-0.5 font-mono text-xs text-slate-300">

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_run_store
+from app.api.idea_materials import enrich_source_errors
 from app.storage.run_store import RunHandle
 
 router = APIRouter(prefix="/api/timeline", tags=["timeline"])
@@ -99,7 +100,7 @@ def _event_items(events_dir: Path) -> list[TimelineItem]:
         return []
     items: list[TimelineItem] = []
     for path in sorted(events_dir.glob("*.jsonl")):
-        for index, payload in enumerate(_read_jsonl(path), start=1):
+        for index, payload in enumerate(enrich_source_errors(events_dir.parent, _read_jsonl(path)), start=1):
             event = str(payload.get("event") or payload.get("kind") or path.stem)
             items.append(
                 TimelineItem(
@@ -171,7 +172,8 @@ def _worklog_items(*, run: RunHandle, agent_filter: str = "") -> list[WorkLogIte
             continue
         items.append(_review_worklog(index=index, payload=payload))
 
-    for index, payload in enumerate(_read_jsonl(run.subdir("events") / "tool_calls.jsonl"), start=1):
+    tool_rows = enrich_source_errors(run.root, _read_jsonl(run.subdir("events") / "tool_calls.jsonl"))
+    for index, payload in enumerate(tool_rows, start=1):
         if not _belongs_to_agent(payload, agent_filter):
             continue
         items.append(_tool_call_worklog(index=index, payload=payload))
@@ -505,6 +507,21 @@ def _websocket_worklog(
 
 def _context_manifest_worklog(*, run: RunHandle, agent_filter: str) -> list[WorkLogItem]:
     items: list[WorkLogItem] = []
+    # Native Idea saves compiled packs rather than the legacy *manifest* filename.
+    for path in sorted((run.root / "context").glob("*_context_pack.v*.json")):
+        raw = _read_json(path)
+        if not isinstance(raw, dict):
+            continue
+        agent = str(raw.get("agent") or "")
+        manifest = _mapping(raw.get("compiled_manifest"))
+        if not agent or not manifest or (agent_filter and agent != agent_filter):
+            continue
+        items.append(WorkLogItem(
+            id=path.name, timestamp=str(raw.get("timestamp") or manifest.get("created_at") or ""),
+            agent=agent, kind="context", status="loaded", title="装载上下文包",
+            detail=f"已保存 {manifest.get('message_count', 0)} 条编译输入的装载记录；背景全文与代码读取内容可在材料区查看。",
+            evidence_refs=[f"context/{path.name}"],
+        ))
     for path in sorted((run.root / "context").glob("*manifest*.json")):
         if path.name == "trace_manifest.v2.json":
             continue

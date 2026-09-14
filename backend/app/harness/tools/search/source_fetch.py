@@ -406,7 +406,17 @@ async def _fetch_sources_tool(args: dict[str, Any], ctx: ToolContext, *, started
             finally:
                 atomic_json(index_path, previous)
     return ToolResult(ok=any(row["ok"] for row in rows),
-                      error=None if any(row["ok"] for row in rows) else "source fetch failed; see individual errors",
+                      error=None if any(row["ok"] for row in rows) else source_failure_summary(rows),
                       output={"download_dir": str(root), "index_path": str(index_path), "sources": rows,
                               "download_budget": budget, "elapsed_seconds": round(time.monotonic() - started, 3), **batch},
                       evidence_refs=[str(index_path)])
+
+
+def source_failure_summary(rows: list[dict[str, Any]]) -> str:
+    """Keep individual failures visible to both the model and compact audit UI."""
+    failures = [row for row in rows if not row.get("ok")]
+    parts = [f"{str(row.get('title') or 'Untitled source')[:180]} "
+             f"[{row.get('error_code') or 'unknown'}]: {str(row.get('error') or 'no reading receipt')[:300]}"
+             for row in failures[:4]]
+    suffix = f"; +{len(failures) - 4} more (see sources)" if len(failures) > 4 else ""
+    return f"{len(failures)} source(s) failed: " + "; ".join(parts) + suffix

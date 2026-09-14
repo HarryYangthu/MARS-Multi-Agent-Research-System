@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_event_bus, get_orchestrator, get_run_store
+from app.api.idea_materials import IdeaMaterialsView, collect_idea_materials
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps, parse as fm_parse
 from app.harness.schema.validator import validate_metadata
 from app.harness.sedimentation.hooks import sediment_approved_artifact
@@ -26,6 +27,23 @@ from app.reporting import generate_report_bundle
 from app.storage.artifact_store import ArtifactStore
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
+
+
+@router.get("/{run_id}/idea/materials", response_model=IdeaMaterialsView)
+def get_idea_materials(run_id: str) -> IdeaMaterialsView:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return collect_idea_materials(run.root, run_id)
+
+
+@router.get("/{run_id}/idea/material-content")
+def get_idea_material_content(run_id: str, material_id: str) -> dict[str, str]:
+    materials = get_idea_materials(run_id)
+    material = next((item for item in materials.items if item.id == material_id), None)
+    if material is None or not material.preview_available:
+        raise HTTPException(status_code=404, detail="material content not found")
+    return {"id": material.id, "title": material.title, "text": material.text}
 
 
 class ArtifactView(BaseModel):
@@ -484,7 +502,7 @@ async def get_research_source(run_id: str, agent_dir: str, source_id: str) -> Fi
     index = _resolve_agent_file(run_id, agent_dir, "research/downloads/source_fetch_index.v1.json")
     rows = json.loads(index.read_text()) if index.is_file() else []
     for row in rows:
-        if row.get("source_id") != source_id or not row.get("ok") or not row.get("archive_complete"):
+        if row.get("source_id") != source_id or not row.get("archive_complete"):
             continue
         path = Path(str(row.get("download_path", ""))).resolve()
         if (not path.is_relative_to(index.parent.resolve()) or not path.is_file()
