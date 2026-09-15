@@ -81,7 +81,8 @@ def _uniform01(size: int, *, seed: int, stream: int) -> NDArray[np.float64]:
     idx = np.arange(1, size + 1, dtype=np.float64)
     phase = idx * (12.9898 + 0.071 * stream) + (seed + stream * 1009) * 78.233
     raw = np.sin(phase) * 43758.5453123
-    return cast(NDArray[np.float64], raw - np.floor(raw))
+    values: NDArray[np.float64] = raw - np.floor(raw)
+    return values
 
 
 def _standard_normal(size: int, *, seed: int, stream: int) -> NDArray[np.float64]:
