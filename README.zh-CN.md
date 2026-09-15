@@ -37,15 +37,13 @@ beam/layer switching*。
   下一节点才启动;Reject 直接 halt 整条链路。
 - **5 个系统级 Gate** — 流程 Gate 1-4 + **Gate 5 hook 在 tool dispatch
   路径上**,根据项目 `AGENTS.md` 的静态规则拒绝任何会动 baseline 的修改。
-- **多模型辩论。** Idea / Writing 默认开 3 角色辩论;模式根据可用 API key
-  自动降级:`real_multi_model` → `single_model_simulated` → `mock_debate`。
+- **真实模型审查。** FocusedIdea 使用 Pro 提案与 Flash 审查；模型、工具或凭据缺失时明确失败。
 - **LLM 一层抽象。** 一等支持 Anthropic、OpenAI、Qwen、Gemini、**DeepSeek**、
   本地 vLLM,以及任何 OpenAI-compatible 自定义端点。
 - **4 区共享 KB**(文献 / 方法 / 代码资产 / 实验运行档案),开箱用
   确定性 hash embedding,后续可热替换为 ChromaDB / sentence-transformers。
-- **Mock-first。** 零 API key、零 GPU 时,完整 11 步 Demo 仍然能跑通,
-  靠 `mock_provider` + `mock_simulation` + `mock_debate` 兜底。CI 每个
-  PR 都跑这条路径。
+- **真实执行。** 缺数据或服务不生成成功结果。新增[本地 CLI 研究闭环](docs/cli-research.md)，
+  通过真实外部静态仓完成候选代码、CPU 实验、验证反馈和最终报告，无需前端。
 - **完整沉淀。** 每个任务在 `runs/<时间戳>_<任务名>/` 写 9 个子目录:
   input / context / 各 Agent 产物 / HITL / events,**全程可审计可回放**。
 - **Tools V2 平台。** Agent 与 Commander 共用 registry-backed 工具目录,
@@ -87,14 +85,14 @@ api  →  bridge  →  hitl  →  (agents | execution | workers)  →  storage  
 
 详细架构图见 [`docs/architecture.md`](docs/architecture.md)。
 
-## 快速开始(零依赖)
+## 本地开发
 
-不用 GPU、不用 LLM key、不用 Docker:
+启动界面可不使用 GPU 或 Docker；执行研究需要配置真实模型凭据和数据：
 
 ```bash
 git clone git@github.com:HarryYangthu/MARS-Multi-Agent-Research-System.git mars
 cd mars
-cp .env.example .env                 # 所有 key 留空也行 — 自动用 mock
+cp .env.example .env                 # 按实际模型填写凭据，不要提交 .env
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
@@ -106,11 +104,7 @@ cd frontend && npm install --legacy-peer-deps && npm run dev
 # 浏览器打开 http://localhost:3000
 ```
 
-跑标准 11 步 e2e demo(mock 模式):
-
-```bash
-python scripts/run_demo.py --port 8000 --mock-mode
-```
+只做研究与仿真时，使用 [`mars research` 的完整命令](docs/cli-research.md)，无需启动上述前后端。
 
 完整验收(mypy --strict + import-linter + 后端/前端检查 + Tools V2 audit + e2e):
 
@@ -163,8 +157,8 @@ mars/
 │  ├─ harness/               # runtime · schema · llm · context · kb · gates · tools · sedimentation
 │  ├─ agents/                # 5 个 Agent + debate runner
 │  ├─ hitl/                  # review_session · approval · audit_log · diff_view
-│  ├─ execution/             # mock_simulation · batch_runner · log_streamer · metrics_collector
-│  ├─ storage/               # run_store · artifact_store · file_store
+│  ├─ execution/             # 真实静态/通用适配器 · batch_runner · log_streamer · metrics_collector
+│  ├─ storage/               # run_store · artifact_store
 │  └─ workers/
 ├─ frontend/src/
 │  ├─ app/                   # Next.js 路由 — Lab 主页 / RunDetail / Multi view / Entries
@@ -215,6 +209,7 @@ V0 仍是当前稳定发布线(`v0.1.0`)。在 [`ACCEPTANCE_V2.md`](ACCEPTANCE_V
 
 ## 文档
 
+- [当前核心代码与实现思路](docs/core-code-map.md) · [完整目录与文件清单](docs/repository-inventory.md)
 - [`PRODUCT.md`](PRODUCT.md) — 产品定义(5 Agent、双形态、KB 区、决策日志)
 - [`DESIGN.md`](DESIGN.md) — 架构(分层、Schema、Harness 内部、运行时、前端)
 - [`ACCEPTANCE.md`](ACCEPTANCE.md) — V0 验收边界(Dev E2E + Hardware E2E)
