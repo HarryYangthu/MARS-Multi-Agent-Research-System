@@ -11,6 +11,8 @@
 
 [简体中文](README.zh-CN.md) · English · [Architecture](docs/architecture.md) · [Evaluation](docs/evaluation_system.md) · [Memory](docs/memory_system.md)
 
+**Local research CLI:** [Run a bounded PIMC research loop](docs/cli-research.md) with `mars doctor`, `mars research`, `mars status`, and `mars resume`. Uses real models and an external static checkout; no frontend is required. A real capture is required for experimental acceptance.
+
 <p align="center">
   <img src="docs/assets/readme/mars-hero.png" alt="MARS Mars planet hero" width="100%" />
 </p>
@@ -57,11 +59,11 @@ feed self-evolution records back into the knowledge system.
   <img src="docs/mars_memory_development_roadmap.svg" alt="MARS memory roadmap" width="48%" />
 </p>
 
-## What Is In Mars_V2.0
+## Components
 
-Mars_V2.0 is the current development line. It includes the original mock-first
-multi-agent pipeline plus the newer V2 workbench, evaluation, memory, and data
-preparation surfaces.
+The repository includes the native agent loop, workbench, evaluation, memory,
+data preparation, and local research CLI. Active research paths require real
+providers and execution evidence.
 
 | Area | What it does |
 |---|---|
@@ -121,9 +123,9 @@ backend/app/
 
 ## Quickstart
 
-The default path runs without API keys or a GPU. Missing LLM credentials fall
-back to `mock_provider`; missing execution hardware falls back to mock or CPU
-simulation paths.
+Research agents require configured real model credentials. Missing credentials,
+data, or execution dependencies fail explicitly. Local static PIMC experiments
+can use CPU; see the [CLI instructions](docs/cli-research.md).
 
 ### Windows one-click (V3.1 CPU)
 
@@ -252,6 +254,7 @@ mars/
 
 ## Documentation Map
 
+- [Current core implementation](docs/core-code-map.md) and [complete repository inventory](docs/repository-inventory.md)
 - [`AGENTS.md`](AGENTS.md) - hard project constraints for coding agents
 - [`PRODUCT.md`](PRODUCT.md) - product definition and agent responsibilities
 - [`DESIGN.md`](DESIGN.md) - tiered architecture, schemas, and dependency rules
