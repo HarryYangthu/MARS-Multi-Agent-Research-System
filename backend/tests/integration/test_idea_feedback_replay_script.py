@@ -10,7 +10,7 @@ import pytest
 from scripts.replay_idea_feedback_live import file_sha, load_parent, request_payload
 
 
-ARCHIVE = Path(__file__).resolve().parents[3] / "docs/evaluation/idea_multiagent_20260908/roles_attempt_02"
+ARCHIVE = Path(__file__).resolve().parents[3] / "backend/tests/fixtures/recorded_research/idea_multiagent_20260908/roles_attempt_02"
 
 
 def test_completed_real_archive_preserves_the_actual_parent_and_feedback() -> None:

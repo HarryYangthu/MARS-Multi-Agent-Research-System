@@ -1,6 +1,6 @@
 """Per-node state machine.
 
-State diagram (per ACCEPTANCE §11 Phase 2):
+State diagram:
 
     pending  ─► running ─► waiting_review ─► approved ─► done
        │           │              │              │

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 这是 MARS 项目的 AGENTS.md。Codex / Codex / Cowork 在 session 启动时自动加载。
-> 控制在 200 行内,只放硬约束 + 目录结构 + 风格规范。详细 Why / What / How 看 `PRODUCT.md` / `DESIGN.md` / `ACCEPTANCE.md`。
+> 控制在 200 行内,只放硬约束 + 目录结构 + 风格规范。使用说明见 `README.md`，架构见 `docs/architecture.md`，CLI 见 `docs/cli-research.md`。
 
 ## 项目一句话定义
 
@@ -21,7 +21,7 @@ MARS = 研究型多 Agent 系统的底座(Multi-Agent Research System)。
 
 ```
 mars/
-├─ AGENTS.md / PRODUCT.md / DESIGN.md / ACCEPTANCE.md / README.md
+├─ AGENTS.md / CLAUDE.md / README.md
 ├─ pyproject.toml / docker-compose.yml / .env.example
 ├─ configs/                    # 全局配置
 │  ├─ agents.yaml              # 5 Agent 各自的 model / debate / tools 配置
@@ -46,8 +46,7 @@ mars/
 │  ├─ agents/                  # 5 Agent + debate 子模块
 │  ├─ hitl/                    # 高频人工交互(review / diff / approval / audit)
 │  ├─ execution/               # 仿真运行(simulation_runner / log_streamer / metrics)
-│  ├─ storage/                 # 数据访问层(run_store / artifact_store / file_store)
-│  └─ workers/                 # 异步后台(agent_worker / simulation_worker / heartbeat)
+│  ├─ storage/                 # 数据访问层(run_store / artifact_store)
 │
 ├─ frontend/                   # Next.js 工作台
 ├─ workspace/repos/            # 接入真实研究代码仓(submodule / 软链接 / 镜像)
@@ -61,7 +60,7 @@ mars/
 └─ scripts/                    # dev.sh / run_agent.py / index_repo.py
 ```
 
-## 8 条硬约束
+## 硬约束
 
 1. **依赖方向单向**:`frontend → api → bridge → agents`,`bridge / agents → harness`,`harness/runtime` 不依赖任何上层。**禁止**反向 import。`harness/` 内部模块**禁止** import `agents/` 或 `bridge/`。
 
@@ -106,7 +105,8 @@ mars/
 
 ## 详细文档指针
 
-- 产品定义、5 Agent 各自做什么、典型工作流 → **PRODUCT.md**
-- 5 Tier 架构、依赖方向图、Schema 详细定义、Harness 内部、运行时、前端架构 → **DESIGN.md**
-- 验收边界、Demo 脚本、Eval 用例、性能指标 → **ACCEPTANCE.md**
-- 项目级约束(baseline 保护、领域规则)→ **projects/&lt;name&gt;/AGENTS.md**
+- 使用与配置 → **README.md**
+- 架构与依赖方向 → **docs/architecture.md**
+- CLI 研究执行 → **docs/cli-research.md**
+- 评测机制 → **docs/evaluation_system.md**；当前检查命令见 **.github/workflows/ci.yml**
+- 项目级约束 → **projects/<name>/AGENTS.md**

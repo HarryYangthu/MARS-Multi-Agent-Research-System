@@ -13,7 +13,6 @@ forbidden_modules =
     app.api
     app.hitl
     app.execution
-    app.workers
 
 [importlinter:contract:bridge-no-direct-agents]
 name = bridge/ must not import concrete agent implementations directly
@@ -43,7 +42,7 @@ layers =
     api
     bridge
     hitl
-    agents | execution | workers
+    agents | execution
     storage
     harness
 containers =

@@ -145,7 +145,7 @@ is_mock: false
 ---
 ```
 
-When `is_mock: true` the artifact came from `execution/mock_simulation.py`. Schema-shape is identical to a real run; downstream consumers can't distinguish without consulting `is_mock`.
+`is_mock` is retained to identify and reject historical simulated artifacts. Current execution must use real backends.
 
 ---
 
@@ -251,4 +251,4 @@ feedback-loop routing, benchmark reporting, and future post-training exports.
 
 ## Schema compliance test set
 
-`backend/tests/schema/test_schema_compliance.py` parametrizes ≥20 samples per schema (≥12 valid + ≥8 invalid). The aggregated valid-sample compliance rate is asserted to be ≥95% (matches PRODUCT.md §2 north-star indicator).
+`backend/tests/schema/test_schema_compliance.py` parametrizes ≥20 samples per schema (≥12 valid + ≥8 invalid). The aggregated valid-sample compliance rate is asserted to be ≥95%.

@@ -1,6 +1,6 @@
 """Run lifecycle: create / list / inspect ``runs/<timestamp>_<task>/`` directories.
 
-The 9 mandatory subdirectories from DESIGN §8 are created up-front so any
+The 9 mandatory run subdirectories are created up-front so any
 Phase that writes into a run can rely on the structure existing.
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _slugify(task: str) -> str:
 
 def _ts(now: datetime | None = None) -> str:
     now = now or datetime.now(tz=timezone.utc)
-    # ISO 8601 short, no separators in time, no colons; matches DESIGN §8 example.
+    # ISO 8601 short, no separators in time, no colons.
     return now.strftime("%Y-%m-%dT%H%M")
 
 

@@ -1,6 +1,6 @@
 """Write the Context Manifest into ``runs/<id>/context/``.
 
-The manifest is the audit hook described in DESIGN §7.2: every LLM call
+The manifest is an audit hook: every LLM call
 records what was loaded, why, and how big.
 """
 from __future__ import annotations

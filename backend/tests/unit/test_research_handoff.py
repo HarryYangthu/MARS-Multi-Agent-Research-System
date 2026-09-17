@@ -121,7 +121,7 @@ def test_checkpoint_symlink_cannot_escape_the_run(tmp_path: Path) -> None:
 def test_real_archived_checkpoint_alone_is_not_complete_evidence(tmp_path: Path) -> None:
     # Published 2026-09-08 attempt_04 is an original, unchanged subset archive.
     # It omits the parent event stream and PDF receipts, so it must not pass.
-    archive = Path(__file__).resolve().parents[3] / "docs/evaluation/idea_research_20260908/attempt_04"
+    archive = Path(__file__).resolve().parents[3] / "backend/tests/fixtures/recorded_research/idea_research_20260908/attempt_04"
     relative = Path("agent_traces/idea/251dcd370ed44b74ad21151d8eb390b7/checkpoint.json")
     source = archive / relative
     target = tmp_path / relative

@@ -136,8 +136,8 @@ services and run readiness, and opens `http://127.0.0.1:3001/`. The online,
 offline, strict production (including offline), status, and stop paths are documented in
 [`deploy/windows/README.md`](deploy/windows/README.md).
 
-See [the validation record](deploy/windows/VALIDATION.md) for the distinction
-between checked code, Linux-container smoke tests, and pending Windows-host acceptance.
+Script checks and Linux-container tests do not establish Windows-host acceptance.
+Validate deployment on the target Windows host.
 
 Native Windows Python and Windows containers are intentionally unsupported;
 the one-click package keeps Unix permissions, processes, and research
@@ -235,7 +235,7 @@ runs/
 
 ```text
 mars/
-  AGENTS.md / PRODUCT.md / DESIGN.md / ACCEPTANCE.md / README.md
+  AGENTS.md / CLAUDE.md / README.md
   configs/                 agents, tools, gates, knowledge, context, eval suites
   backend/app/
     api/                   REST and WebSocket routes
@@ -247,23 +247,18 @@ mars/
     storage/               local stores for runs, artifacts, data, evolution
   frontend/                Next.js workbench
   projects/pimc/           project metadata, AGENTS.md, data_gen.py
-  docs/                    architecture, evaluation, memory, run lifecycle
+  docs/                    architecture, evaluation, memory, CLI research
   scripts/                 demos, ingestion, evaluation, acceptance helpers
   templates/               artifact templates and code rules
 ```
 
 ## Documentation Map
 
-- [Current core implementation](docs/core-code-map.md) and [complete repository inventory](docs/repository-inventory.md)
+- [Current core implementation](docs/core-code-map.md)
 - [`AGENTS.md`](AGENTS.md) - hard project constraints for coding agents
-- [`PRODUCT.md`](PRODUCT.md) - product definition and agent responsibilities
-- [`DESIGN.md`](DESIGN.md) - tiered architecture, schemas, and dependency rules
-- [`ACCEPTANCE.md`](ACCEPTANCE.md) - V0 acceptance boundaries
-- [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) - V2 development gate
 - [`docs/architecture.md`](docs/architecture.md) - architecture notes and diagrams
 - [`docs/evaluation_system.md`](docs/evaluation_system.md) - evaluation harness design
 - [`docs/memory_system.md`](docs/memory_system.md) - memory system design
-- [`docs/run_lifecycle.md`](docs/run_lifecycle.md) - one task from input to report
 - [`docs/tools_catalog.md`](docs/tools_catalog.md) - tools, audit, and registry behavior
 - [`docs/tool_security.md`](docs/tool_security.md) - Gate 5, rollback, and network policy
 - [`docs/deployment_runbook.md`](docs/deployment_runbook.md) - production deployment notes

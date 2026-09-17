@@ -209,8 +209,7 @@ docker compose --project-directory . --env-file .env -f compose.yaml logs --tail
 
 - 已实现：面向 Windows x64 / Linux containers 的本地 CPU、在线构建、离线镜像
   导入、V3.1 Overlay、持久化 volume、只读真实 PIMC mounts 与一键入口。
-- 实测范围与未验收项见 [VALIDATION.md](./VALIDATION.md)。目标平台支持代码已
-  实现，不代表当前修订已在真实 Windows 主机验收；完整 x64 离线包也必须实际导出
+- 目标平台支持代码已实现，不代表当前修订已在真实 Windows 主机验收；完整 x64 离线包也必须实际导出
   并通过校验后才能移交，不能只复制这些脚本就宣称离线部署完成。
 - 未宣称：Windows 原生运行、Windows containers、真实 SSH GPU 已验证、内网模型
   网关已联通。

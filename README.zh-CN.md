@@ -148,7 +148,7 @@ python scripts/ingest_pdfs.py
 
 ```
 mars/
-├─ README.md / CLAUDE.md / PRODUCT.md / DESIGN.md / ACCEPTANCE.md
+├─ README.md / AGENTS.md / CLAUDE.md
 ├─ pyproject.toml · docker-compose.yml · .env.example
 ├─ configs/                  # agents/models/tools/gates/knowledge/execution 配置
 ├─ backend/app/
@@ -159,7 +159,6 @@ mars/
 │  ├─ hitl/                  # review_session · approval · audit_log · diff_view
 │  ├─ execution/             # 真实静态/通用适配器 · batch_runner · log_streamer · metrics_collector
 │  ├─ storage/               # run_store · artifact_store
-│  └─ workers/
 ├─ frontend/src/
 │  ├─ app/                   # Next.js 路由 — Lab 主页 / RunDetail / Multi view / Entries
 │  ├─ components/            # TopBar · ProjectsPanel · PipelineOverview · EventLog · KBPanel
@@ -171,58 +170,22 @@ mars/
 ├─ knowledge/                # 4 区 KB(首次摄入后 gitignore)
 ├─ runs/                     # 任务沉淀(gitignore)
 ├─ templates/                # artifact 模板 · 代码规范
-├─ scripts/                  # dev.sh · run_demo.py · acceptance.sh · ingest_repo.py · ingest_pdfs.py
-└─ docs/                     # architecture · agent_io_schema · run_lifecycle · phase status
+├─ scripts/                  # dev.sh · ingest_repo.py · ingest_pdfs.py
+└─ docs/                     # architecture · agent_io_schema
 ```
 
-## 项目状态
+## 验证
 
-**V0 验收已通过**(Dev E2E 通道)。完整审计见
-[`docs/implementation_report.md`](docs/implementation_report.md)。要点:
-
-| | |
-|---|---|
-| 后端测试 | unit / integration / gate 通过 |
-| 前端检查 | typecheck / lint / context smoke 通过 |
-| Tools V2 audit | catalogue / API filters / trace / execution artifacts 已验证 |
-| `mypy --strict` | 0 错 |
-| `import-linter` 4 条契约 | 全部 KEPT |
-| Schema 合规率 | ≥ 95% |
-| Baseline matcher 召回/精度 | 合成集 100% / 100% |
-| 11 步 e2e demo | 零外部依赖通过 |
-| `runs/<id>/` 完整性 | 9/9 子目录有内容 |
-
-## 路线图(V2 主题)
-
-V0 仍是当前稳定发布线(`v0.1.0`)。在 [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md)
-通过之前,V2 都按开发态处理,不要提前把 UI/API 版本标成稳定 V2。
-
-- **后训练流水线** — GRPO 训练器、从 `runs/<id>/hitl/*` 构造 preference
-  pair、复合 reward(schema 合规 × baseline 保护 × 下游指标)。
-- **streaming UX** — Coding Agent 逐 token 显示 LLM 输出;Schema 错误
-  一键"补全模板字段"修复。
-- **真实训练可观测** — 子进程 stdout → WS、GPU 利用率曲线 + loss 曲线并排。
-- **多 project 隔离** — 每 project 独立 `runs/` 和 `knowledge/`,Lab
-  主页加项目切换器。
-- **真实向量 KB** — 把 deterministic-hash embedder 替换为
-  sentence-transformers / ChromaDB,API 不变。
+当前软件检查以 `.github/workflows/ci.yml` 为准。真实研究需要有效模型服务、研究代码和数据；软件测试通过不代表研究目标已达成。CLI 使用方式见 [cli-research.md](docs/cli-research.md)。
 
 ## 文档
 
-- [当前核心代码与实现思路](docs/core-code-map.md) · [完整目录与文件清单](docs/repository-inventory.md)
-- [`PRODUCT.md`](PRODUCT.md) — 产品定义(5 Agent、双形态、KB 区、决策日志)
-- [`DESIGN.md`](DESIGN.md) — 架构(分层、Schema、Harness 内部、运行时、前端)
-- [`ACCEPTANCE.md`](ACCEPTANCE.md) — V0 验收边界(Dev E2E + Hardware E2E)
-- [`ACCEPTANCE_V2.md`](ACCEPTANCE_V2.md) — V2 稳定发布前的开发验收门槛
-- [`docs/V2_RELEASE_STATUS.md`](docs/V2_RELEASE_STATUS.md) — 最新 P3 发布门禁结果与命令
+- [当前核心代码与实现思路](docs/core-code-map.md)
 - [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) — 编码 Agent 使用的硬约束、目录结构和风格规范
 - [`docs/architecture.md`](docs/architecture.md) — 配套架构图
 - [`docs/agent_io_schema.md`](docs/agent_io_schema.md) — 5 个 schema 字段说明 + 示例
-- [`docs/run_lifecycle.md`](docs/run_lifecycle.md) — 一次任务从创建到归档的时序图
 - [`docs/tools_catalog.md`](docs/tools_catalog.md) — Tools V2 工具目录、API、审计记录、外部 smoke
 - [`docs/tool_security.md`](docs/tool_security.md) — dispatch 顺序、Gate 5、rollback、红action、网络策略
-- [`docs/V2_AGENT_TODO.md`](docs/V2_AGENT_TODO.md) — V2 清理与实现队列
-- [`docs/frontend_ux.md`](docs/frontend_ux.md) — P0 UI 契约
 
 ## 开源协议
 

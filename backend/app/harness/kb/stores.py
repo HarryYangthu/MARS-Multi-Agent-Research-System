@@ -1,11 +1,4 @@
-"""4-zone KB built atop a tiny in-memory vector store.
-
-The DESIGN spec says ChromaDB. For Dev E2E we want zero network/model
-dependencies, so V0 ships a pure-Python store with the same surface (add /
-query). When the host has a real ChromaDB available, ``stores.py`` could be
-swapped via the ``provider`` field in ``configs/knowledge.yaml`` — left as
-V2 work.
-"""
+"""Knowledge stores with file or Chroma persistence and deterministic embeddings."""
 from __future__ import annotations
 
 import json

@@ -2,7 +2,7 @@
 
 Looks up the run_archive zone for plans similar to the candidate plan.
 A match above ``match_threshold`` triggers the HITL "Reuse?" gate
-(DESIGN §7.3).
+for the requested project.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # 当前核心代码与实现思路
 
-本文按本次 CLI 合入版本的实际代码整理。完整目录及逐文件清单见 [repository-inventory.md](repository-inventory.md)，运行命令见 [cli-research.md](cli-research.md)。目录存在、软件测试通过、真实科研效果成立是不同层面的事实。
+本文按本次 CLI 合入版本的实际代码整理。运行命令见 [cli-research.md](cli-research.md)。目录存在、软件测试通过、真实科研效果成立是不同层面的事实。
 
 ## 先读哪些代码
 
@@ -28,7 +28,6 @@
 | `backend/app/hitl/` | 人工审查、审批记录、修订 | 旧产品审查路径；不能等同于 CLI 的模型自审 |
 | `backend/app/reporting/` | 报告、数据包和报告束 | CLI 另有固定模板汇总真实执行记录 |
 | `backend/app/api/`、`main.py` | FastAPI/Socket.IO 服务入口 | CLI 可独立运行 |
-| `backend/app/workers/` | 目前仅包初始化文件 | 不应据目录名认定已有后台 worker 集群 |
 | `configs/` | 模型、Agent、上下文、工具、门禁、执行和评测配置 | `cli_research.yaml` 固定本轮 CLI 协议 |
 | `templates/` | 产物格式和代码规则 | 与 JSON Schema 协同 |
 | `projects/` | 项目规则、接入元数据与示例适配器 | 实际私有 PIMC 源码和采集数据外置 |
@@ -55,7 +54,7 @@
 | `runtime/` | RunGraph、状态机、队列、事件总线、运行就绪检查 | 不在此硬编码业务阶段拓扑 |
 | `schema/` | frontmatter 解析、JSON Schema 与校验 | 软件契约校验，不是科学正确性证明 |
 | `sedimentation/` | 产物元数据、提取与沉淀 hook | 并非所有新路径自动复用全部沉淀流程 |
-| `tools/` | 统一注册、参数校验、权限、门禁、调用收据；搜索/代码/执行/知识等工具 | `mcp_adapters/` 目前只有初始化文件，不能称为已完成通用 MCP 接入 |
+| `tools/` | 统一注册、参数校验、权限、门禁、调用收据；搜索/代码/执行/知识等工具 | `mcp_adapters/__init__.py` 实现 stdio MCP 初始化、工具发现与调用；需配置并启动对应服务 |
 
 `harness/` 根目录还包含 `execution_intent.py`（执行意图）、`project_workspace.py`（项目定位）和 `research_trial.py`（本次 CLI 预算与比较规则）。完整递归目录见目录索引。
 

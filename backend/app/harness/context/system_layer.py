@@ -1,4 +1,4 @@
-"""System layer of the 3-layer context (DESIGN §7.2)."""
+"""System layer of the 3-layer context."""
 from __future__ import annotations
 
 from dataclasses import dataclass
