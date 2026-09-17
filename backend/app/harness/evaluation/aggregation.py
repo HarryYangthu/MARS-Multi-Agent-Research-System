@@ -20,7 +20,7 @@ _RANK: dict[EvaluationDecision, int] = {
 
 def worst_decision(reports: list[EvaluationReport]) -> EvaluationDecision:
     if not reports:
-        return "pass"
+        return "block"
     return max((report.decision for report in reports), key=lambda d: _RANK[d])
 
 
@@ -43,7 +43,7 @@ def build_scorecard(
         and _is_decision(decision := item.get("decision"))
     ]
     overall_decision = (
-        max(decisions, key=lambda d: _RANK[d]) if decisions else "pass"
+        max(decisions, key=lambda d: _RANK[d]) if decisions else "block"
     )
     scores = [
         float(item["overall_score"])
@@ -74,6 +74,9 @@ def build_scorecard(
         "project": project,
         "created": datetime.now(tz=timezone.utc).isoformat(),
         "overall_decision": overall_decision,
+        "evaluation_status": "evaluated" if decisions else "missing",
+        "validation_scope": "artifact_contract",
+        "scientific_validated": False,
         "overall_score": round(sum(scores) / len(scores), 6) if scores else None,
         "advisory_score": (
             round(sum(advisory_scores) / len(advisory_scores), 6)

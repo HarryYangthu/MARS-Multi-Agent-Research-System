@@ -23,7 +23,9 @@ from app.harness.tools.project_repo import (
     resolve_allowed_path,
     validate_repo_writable,
 )
-from app.settings import get_settings
+from app.settings import env_or_local
+from app.harness.llm.model_registry import get_agent_config
+from app.harness.tools.process_runtime import communicate_process, start_process
 
 
 _OPENCODE_TIMEOUT_SECONDS = 600
@@ -50,6 +52,8 @@ class OpenCodeAdapter:
         return shutil.which("opencode") is not None
 
     async def run(self, request: RunRequest, context: ContextPack) -> OpenCodeResult:
+        from app.harness.llm.accounting import require_accounted_model_backend
+        require_accounted_model_backend("opencode")
         fallback_root = Path(tempfile.gettempdir()) / "mars-opencode"
         run_root = Path(str(request.extra.get("run_root") or fallback_root))
         coding_dir = Path(str(request.extra.get("agent_dir") or run_root / "coding"))
@@ -74,20 +78,23 @@ class OpenCodeAdapter:
         )
 
         executable = shutil.which("opencode")
-        settings = get_settings()
         if executable is None:
             raise RuntimeError("MARS_CODING_BACKEND=opencode but opencode is not installed")
 
         prompt = _prompt_from_packet()
+        coding_config = get_agent_config("coding")
+        key_name = coding_config.api_key_env
+        scoped_credentials = {key_name: env_or_local(key_name)} if key_name and env_or_local(key_name) else {}
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *_opencode_command(
+            proc = await start_process(
+                _opencode_command(
                     executable=executable,
                     packet_path=packet_path,
                     project_root=project_repo.root,
                     prompt=prompt,
                 ),
                 cwd=str(project_repo.root),
+                credential_env=scoped_credentials,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -110,17 +117,10 @@ class OpenCodeAdapter:
 
         timed_out = False
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=_OPENCODE_TIMEOUT_SECONDS,
-            )
+            stdout, stderr = await communicate_process(proc, timeout=_OPENCODE_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             timed_out = True
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = b"", f"timed out after {_OPENCODE_TIMEOUT_SECONDS}s; process tree stopped".encode()
 
         out = stdout.decode("utf-8", errors="replace")
         err = stderr.decode("utf-8", errors="replace")

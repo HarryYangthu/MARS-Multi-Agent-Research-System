@@ -1,7 +1,7 @@
 """Memory v2 configuration helpers.
 
-The memory profile is deliberately environment-driven so dev E2E can remain
-mock-friendly while research/hardware runs fail closed on eval gates.
+The default research profile requires evidence and evaluation. Development
+profiles never allow fabricated sources to enter model recall.
 """
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def load_memory_config() -> dict[str, Any]:
 
 
 def current_profile() -> MemoryProfile:
-    raw = os.environ.get("MARS_MEMORY_PROFILE", "dev_e2e").strip()
+    raw = os.environ.get("MARS_MEMORY_PROFILE", "research").strip()
     if raw in {"dev_e2e", "research", "hardware"}:
         return raw  # type: ignore[return-value]
-    return "dev_e2e"
+    raise ValueError(f"unknown MARS_MEMORY_PROFILE: {raw}")
 
 
 def write_gate(profile: MemoryProfile | None = None) -> dict[str, Any]:

@@ -36,6 +36,9 @@ policy:
     max_allowed_decision: warn
     fail_on_blocking: true
     completion_gate:
+      # A task can set evaluation_policy.run.completion_gate.mode=enforce.
+      # Missing evaluator reports never authorize automatic artifact approval.
+      # Contract/rubric scores alone do not prove measured research improvement.
       mode: audit_only
 
 post_training_export:

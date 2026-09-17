@@ -36,6 +36,7 @@ knowledge/**/_web_cache/
 # Runtime KB indexes are local run state. This also catches Finder-created
 # duplicate files such as "_index 2.json" so V1 memory work does not get noisy.
 knowledge/*/_index*.json
+knowledge/**/*.lock
 /runs/
 conversations/
 deploy/windows/images/
@@ -77,4 +78,6 @@ htmlcov/
 .DS_Store
 
 /knowledge/_retrieval_receipts/
+/knowledge/_artifact_receipts/
 /release-evidence*/
+/workspace/runtime_e2e_regression_*/

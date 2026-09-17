@@ -4,21 +4,18 @@ Immutable record files are the source of truth.  Mutable indexes and latest
 pointers are written with ``os.replace`` so a reader sees either the old or
 the new complete document.  All multi-file mutations for one run share a
 single advisory lock, which makes read-modify-write operations safe across
-threads and worker processes on the supported POSIX deployment targets.
+threads and worker processes on Windows and POSIX deployment targets.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
-import os
-import tempfile
-import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from app.harness.persistence import atomic_write_json as _atomic_write_json, path_lock
 
 
 class DiscoveryStoreError(RuntimeError):
@@ -57,10 +54,6 @@ class DiscoveryPaths:
         return self.root / ".store.lock"
 
 
-_THREAD_LOCKS: dict[str, threading.RLock] = {}
-_THREAD_LOCKS_GUARD = threading.Lock()
-
-
 def stable_key(value: str) -> str:
     """Map an external identifier to a traversal-safe stable filename key."""
 
@@ -94,41 +87,15 @@ def read_json(path: Path) -> dict[str, Any]:
 def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     """Durably replace ``path`` with one complete JSON object."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(dict(payload), handle, indent=2, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        _fsync_directory(path.parent)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+    _atomic_write_json(path, payload)
 
 
 @contextmanager
 def discovery_lock(paths: DiscoveryPaths) -> Iterator[None]:
     """Acquire the run-wide discovery lock across threads and processes."""
 
-    paths.root.mkdir(parents=True, exist_ok=True)
-    lock_key = str(paths.lock_path.resolve())
-    with _THREAD_LOCKS_GUARD:
-        thread_lock = _THREAD_LOCKS.setdefault(lock_key, threading.RLock())
-    with thread_lock:
-        with paths.lock_path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with path_lock(paths.lock_path):
+        yield
 
 
 def model_payload(model: Any) -> dict[str, Any]:
@@ -158,16 +125,3 @@ def iter_json_files(directory: Path) -> list[Path]:
     if not directory.exists():
         return []
     return sorted(path for path in directory.glob("*.json") if path.is_file())
-
-
-def _fsync_directory(directory: Path) -> None:
-    try:
-        descriptor = os.open(directory, os.O_RDONLY)
-    except OSError:  # pragma: no cover - best effort on unusual filesystems
-        return
-    try:
-        os.fsync(descriptor)
-    except OSError:  # pragma: no cover - some filesystems do not support it
-        pass
-    finally:
-        os.close(descriptor)

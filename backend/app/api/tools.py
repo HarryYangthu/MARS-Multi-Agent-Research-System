@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -16,11 +17,13 @@ from app.harness.tools.mcp_adapters import (
     adapter_for_tool,
     adapter_status,
     all_adapter_statuses,
-    call_mcp_tool,
     list_mcp_tools,
 )
 from app.harness.tools.registry import ToolContext
 from app.harness.tools.registry import get_registry as get_tool_registry
+from app.harness.tools.config import load_tool_configs
+from app.harness.llm.model_registry import get_agent_config
+from app.harness.persistence import atomic_write_json, path_lock
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 run_router = APIRouter(prefix="/api/runs", tags=["tools"])
@@ -58,20 +61,42 @@ async def list_adapter_mcp_tools(kind: str) -> dict[str, Any]:
 async def call_adapter_mcp_tool(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     if kind not in {"chroma", "filesystem", "git", "github"}:
         raise HTTPException(status_code=404, detail=f"adapter '{kind}' not found")
+    run_id = str(payload.get("run_id") or "")
+    agent = str(payload.get("agent") or "")
+    if not run_id or not agent:
+        raise HTTPException(status_code=422, detail="run_id and configured agent are required")
+    if agent in {"bridge", "system"}:
+        raise HTTPException(status_code=403, detail="API callers cannot select privileged internal agents")
+    try:
+        agent_config = get_agent_config(agent)
+        run = get_run_store().get(run_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="invalid run or agent") from exc
+    if not agent_config.enabled:
+        raise HTTPException(status_code=403, detail="agent is disabled")
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if payload.get("project") is not None and payload.get("project") != run.project:
+        raise HTTPException(status_code=409, detail="project must match the stored run")
     tool_name = str(payload.get("tool_name") or payload.get("name") or "")
+    cfg = load_tool_configs().get(tool_name)
+    if cfg is None or cfg.mcp_kind != kind or not cfg.mcp_tool:
+        raise HTTPException(status_code=403, detail="MCP tool has no host-approved registry binding")
     arguments_raw = payload.get("arguments", {})
-    arguments = arguments_raw if isinstance(arguments_raw, dict) else {}
+    if not isinstance(arguments_raw, dict) or "_approval_id" in arguments_raw:
+        raise HTTPException(status_code=422, detail="arguments must be an object without internal approval fields")
     if not tool_name:
         raise HTTPException(status_code=422, detail="tool_name is required")
-    try:
-        result = await call_mcp_tool(
-            cast(AdapterKind, kind),
-            tool_name=tool_name,
-            arguments={str(key): value for key, value in arguments.items()},
-        )
-    except MCPTransportError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"ok": True, "kind": kind, "tool_name": tool_name, "result": result}
+    result = await get_tool_registry().dispatch(
+        tool_name, arguments_raw,
+        ToolContext(run_id=run.run_id, project=run.project, agent=agent,
+                    extra={"run_root": str(run.root)}),
+    )
+    response = {"ok": result.ok, "kind": kind, "tool_name": tool_name, "result": _result_to_dict(result)}
+    if not result.ok:
+        code = 403 if result.status in {"not_allowed", "disabled", "unknown_tool"} else 409
+        raise HTTPException(status_code=code, detail=response)
+    return response
 
 
 @router.get("/{name}")
@@ -154,14 +179,15 @@ async def approve_tool_call(
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     record_path = run.subdir("events") / "tool_approvals" / f"{call_id}.json"
-    record = _read_approval_record(record_path)
-    if record.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"approval is {record.get('status')}")
-    actor = str((payload or {}).get("actor") or "user")
-    record["status"] = "approved"
-    record["approved_at"] = _now()
-    record["approved_by"] = actor
-    _write_approval_record(record_path, record)
+    with path_lock(record_path.with_suffix(".lock")):
+        record = _read_approval_record(record_path)
+        if record.get("status") != "pending":
+            raise HTTPException(status_code=409, detail=f"approval is {record.get('status')}")
+        actor = str((payload or {}).get("actor") or "user")
+        record["status"] = "approved"
+        record["approved_at"] = _now()
+        record["approved_by"] = actor
+        _write_approval_record(record_path, record)
 
     raw_args = record.get("args", {})
     if not isinstance(raw_args, dict):
@@ -226,14 +252,15 @@ async def reject_tool_call(
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     record_path = run.subdir("events") / "tool_approvals" / f"{call_id}.json"
-    record = _read_approval_record(record_path)
-    if record.get("status") != "pending":
-        raise HTTPException(status_code=409, detail=f"approval is {record.get('status')}")
-    record["status"] = "rejected"
-    record["rejected_at"] = _now()
-    record["rejected_by"] = str((payload or {}).get("actor") or "user")
-    record["rejection_reason"] = str((payload or {}).get("reason") or "")
-    _write_approval_record(record_path, record)
+    with path_lock(record_path.with_suffix(".lock")):
+        record = _read_approval_record(record_path)
+        if record.get("status") != "pending":
+            raise HTTPException(status_code=409, detail=f"approval is {record.get('status')}")
+        record["status"] = "rejected"
+        record["rejected_at"] = _now()
+        record["rejected_by"] = str((payload or {}).get("actor") or "user")
+        record["rejection_reason"] = str((payload or {}).get("reason") or "")
+        _write_approval_record(record_path, record)
     return {"ok": True, "approval_id": call_id, "status": "rejected"}
 
 
@@ -268,6 +295,11 @@ def _spec_to_dict(spec: Any) -> dict[str, Any]:
     data = asdict(spec)
     adapter = adapter_for_tool(str(data.get("name", "")))
     data["mcp_adapter"] = asdict(adapter) if adapter is not None else None
+    cfg = load_tool_configs().get(str(data.get("name", "")))
+    if cfg is not None and cfg.mcp_kind:
+        data["mcp_binding"] = {"kind": cfg.mcp_kind, "tool": cfg.mcp_tool,
+                               "execution_backend": cfg.process_backend,
+                               "require_isolation": cfg.require_isolation}
     return data
 
 
@@ -293,7 +325,7 @@ def _read_approval_record(path: Any) -> dict[str, Any]:
 
 
 def _write_approval_record(path: Any, record: dict[str, Any]) -> None:
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    atomic_write_json(Path(path), record)
 
 
 def _result_to_dict(result: Any) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -11,6 +12,9 @@ from loguru import logger
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.agents.debate.roles import role_prompt
+from app.harness.llm.accounting import guarded_complete
+from app.harness.agent_loop.context import pack_context
+from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.llm.model_registry import (
     AgentConfig,
     available_providers,
@@ -255,7 +259,10 @@ async def run_debate(
             )
             try:
                 try:
-                    completion = await _complete_role_once(provider, messages, cfg)
+                    completion = await _complete_role_once(provider, messages, cfg,
+                        input_budget=AgentLoopPolicy.from_mapping(agent_config.raw.get("loop", {})).input_token_budget,
+                        run_root=Path(str(request.extra.get("run_root") or request.runtime.get("run_root")))
+                        if request.extra.get("run_root") or request.runtime.get("run_root") else None)
                 except LLMCompletionError as exc:
                     if exc.reason.get("code") != "empty_final_content":
                         raise
@@ -285,7 +292,10 @@ async def run_debate(
                     # The retry intentionally reuses the exact provider,
                     # config, and messages. A second empty completion is
                     # propagated unchanged and must never degrade to mock.
-                    completion = await _complete_role_once(provider, messages, cfg)
+                    completion = await _complete_role_once(provider, messages, cfg,
+                        input_budget=AgentLoopPolicy.from_mapping(agent_config.raw.get("loop", {})).input_token_budget,
+                        run_root=Path(str(request.extra.get("run_root") or request.runtime.get("run_root")))
+                        if request.extra.get("run_root") or request.runtime.get("run_root") else None)
                 role_text = _validate_role_completion(
                     role=role,
                     text=completion.text,
@@ -342,9 +352,11 @@ async def _complete_role_once(
     provider: LLMProvider,
     messages: list[Message],
     config: LLMConfig,
+    *, run_root: Path | None = None, input_budget: int = 24000,
 ) -> Completion:
+    messages, _ = pack_context(messages, [], "", "", budget=input_budget, observation_chars=1)
     return await asyncio.wait_for(
-        provider.complete(messages, config),
+        guarded_complete(provider, messages, config, run_root=run_root),
         timeout=llm_call_deadline_seconds(
             config,
             minimum_seconds=get_settings().mars_llm_timeout_seconds,

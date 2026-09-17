@@ -162,6 +162,15 @@ class CommanderAgent:
         suspected = [c.to_metadata() for c in analysis.suspected_causes]
         evidence_refs = list(analysis.evidence_refs)
 
+        if not analysis.evaluated:
+            return CommanderAttribution(
+                passed=False, should_continue=False, target_agent="writing", confidence=1.0,
+                reason="Metric acceptance was not evaluated: no enabled project criteria were supplied.",
+                expected_fix="Report actual measurements and the missing acceptance criteria; do not claim scientific validation.",
+                failed_metrics=failed_metrics, suspected_causes=suspected, evidence_refs=evidence_refs,
+                rejected_alternatives=[], budget_status="not_applicable", next_attempt=observation.attempt,
+            )
+
         if analysis.passed:
             return CommanderAttribution(
                 passed=True,
@@ -362,6 +371,7 @@ class CommanderAgent:
             "run_id": run.run_id,
             "attempt": observation.attempt,
             "passed": attribution.passed,
+            "metrics_evaluated": observation.analysis.evaluated,
             "failed_metrics": attribution.failed_metrics,
             "suspected_causes": attribution.suspected_causes,
             "recommended_target": attribution.target_agent,

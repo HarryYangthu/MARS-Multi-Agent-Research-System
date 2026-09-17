@@ -8,14 +8,28 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
 
 from app.harness.observability.langsmith_sink import get_langsmith_sink
+from app.harness.persistence import atomic_write_json, path_lock
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def _transaction(method: Callable[Concatenate["TraceRecorder", P], T]) -> Callable[Concatenate["TraceRecorder", P], T]:
+    @wraps(method)
+    def locked(self: "TraceRecorder", /, *args: P.args, **kwargs: P.kwargs) -> T:
+        with path_lock(self.lock_path):
+            return method(self, *args, **kwargs)
+    return locked
 
 
 class RunLike(Protocol):
@@ -44,12 +58,27 @@ class TraceRecorder:
     def __init__(self, run: RunLike) -> None:
         self.run = run
         self.path = run.subdir("context") / "trace_manifest.v2.json"
+        self.lock_path = self.path.with_name(f".{self.path.name}.lock")
 
+    @_transaction
     def ensure_manifest(self) -> dict[str, Any]:
         if self.path.exists():
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                return raw
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError(f"corrupt trace manifest: {self.path}") from exc
+            if (not isinstance(raw, dict) or raw.get("schema") != "trace_manifest.v2"
+                    or raw.get("run_id") != self.run.run_id
+                    or not isinstance(raw.get("trace_id"), str) or not raw["trace_id"]
+                    or not isinstance(raw.get("root_span_id"), str) or not raw["root_span_id"]
+                    or not isinstance(raw.get("spans"), list)
+                    or not all(isinstance(span, dict) and isinstance(span.get("span_id"), str)
+                               for span in raw["spans"])
+                    or not isinstance(raw.get("event_index"), list)):
+                raise ValueError(f"invalid trace manifest: {self.path}")
+            if len({span["span_id"] for span in raw["spans"]}) != len(raw["spans"]):
+                raise ValueError(f"duplicate span IDs in trace manifest: {self.path}")
+            return raw
         manifest: dict[str, Any] = {
             "schema": "trace_manifest.v2",
             "run_id": self.run.run_id,
@@ -98,6 +127,7 @@ class TraceRecorder:
             )
         return SpanContext(self, span.span_id)
 
+    @_transaction
     def finish_span(
         self,
         span_id: str,
@@ -134,6 +164,7 @@ class TraceRecorder:
                 span=finished_span,
             )
 
+    @_transaction
     def record_event_ref(
         self,
         *,
@@ -153,7 +184,9 @@ class TraceRecorder:
                 "attrs": {
                     key: value
                     for key, value in payload.items()
-                    if key in {"agent", "node", "run_id", "version", "from_state", "to_state"}
+                    if key in {"agent", "node", "run_id", "version", "from_state", "to_state",
+                               "task_id", "parent_task_id", "invocation_id", "parent_invocation_id",
+                               "trace_id", "node_id", "span_id", "parent_span_id", "correlation"}
                 },
             }
         )
@@ -171,6 +204,7 @@ class TraceRecorder:
                 return span
         return None
 
+    @_transaction
     def _append_span(self, span: TraceSpan) -> None:
         manifest = self.ensure_manifest()
         spans_raw = manifest.get("spans", [])
@@ -212,11 +246,7 @@ class TraceRecorder:
         return None
 
     def _write(self, manifest: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        atomic_write_json(self.path, manifest)
 
 
 class SpanContext(AbstractContextManager["SpanContext"]):

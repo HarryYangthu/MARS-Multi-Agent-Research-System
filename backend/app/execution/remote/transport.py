@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 from typing import Protocol
+from app.harness.tools.process_runtime import communicate_process, start_process
 
 
 @dataclass(frozen=True)
@@ -156,20 +157,15 @@ async def _run_argv(
 ) -> TransportResult:
     """Execute one local OpenSSH argv with bounded output and no shell."""
 
-    process = await asyncio.create_subprocess_exec(
-        *argv,
+    process = await start_process(
+        argv,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout_seconds,
-        )
+        stdout, stderr = await communicate_process(process, timeout=timeout_seconds)
     except TimeoutError:
-        process.kill()
-        await process.wait()
         return TransportResult(
             argv=argv,
             returncode=124,

@@ -1,0 +1,23 @@
+schema: agent_mutation_suite.v1
+agent: experiment
+validation_scope: agent_contract_behavior
+description: >
+  Held-out planning contract tasks evaluated with the configured real model.
+  Measures host acceptance and token use, not simulation performance or scientific correctness.
+  Missing credentials, real evidence, or measurable improvement blocks promotion.
+timeout_seconds: 300
+tasks:
+  - id: constrained_ablation
+    project: synthetic_regression
+    user_request: >
+      Design a bounded experiment plan comparing an unchanged baseline with one
+      candidate feature transformation on held-out regression data. No experiment
+      has run. Define controls, metrics, data split and an executable rejection
+      rule. Mark missing baseline or data context rather than inventing results.
+  - id: failed_candidate_diagnosis
+    project: synthetic_regression
+    user_request: >
+      Plan how to determine whether a proposed regression model change improves
+      held-out error without changing the inference interface. There are no
+      verified gains yet. Include a baseline comparison, an ablation, cost limits,
+      and the prerequisites that must be supplied before execution.

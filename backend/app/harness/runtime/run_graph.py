@@ -78,9 +78,16 @@ class RunGraph:
             raise GraphError(f"edge {src}->{dst} references unknown node")
         if src == dst:
             raise GraphError("self-loop disallowed")
+        if dst in self._out[src]:
+            return
         self._out[src].add(dst)
         self._in[dst].add(src)
-        self._check_acyclic()
+        try:
+            self._check_acyclic()
+        except GraphError:
+            self._out[src].remove(dst)
+            self._in[dst].remove(src)
+            raise
 
     def set_entrypoint(self, key: str) -> None:
         if key not in self._nodes:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
+import pytest
 
 from app.bridge.bridge_agent import BridgeAgent
 from app.bridge.diagnostics import DiagnosticsConfig, MetricRule, analyze_run, load_diagnostics_config
@@ -74,3 +76,25 @@ def test_bridge_agent_writes_schema_valid_diagnosis(tmp_path: Path) -> None:
         expected_schema="diagnosis.v1",
     )
     assert result.valid
+
+
+def test_missing_criteria_are_not_a_pass_or_an_automatic_repair(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task="no criterion", project="pimc")
+    config = DiagnosticsConfig(project="pimc")
+    analysis = analyze_run(run, config)
+    assert not analysis.evaluated and not analysis.passed
+    decision = BridgeAgent()._decide(config=config, analysis=analysis, attempt=1)
+    assert not decision.passed and not decision.should_continue
+    assert decision.recommended_target == "writing"
+
+
+@pytest.mark.parametrize("value", [None, math.nan, math.inf, -math.inf])
+def test_missing_or_nonfinite_measurement_is_never_zero_or_success(tmp_path: Path, value: float | None) -> None:
+    run = RunStore(tmp_path).create(task="invalid measurement", project="pimc")
+    rows = [{"metrics": {"score": 1.0}}, {"metrics": {} if value is None else {"score": value}}]
+    (run.root / "execution/metrics.json").write_text(json.dumps(rows))
+    config = DiagnosticsConfig(project="pimc", metric_rules=(MetricRule("score", 0.0, "gte"),))
+    analysis = analyze_run(run, config)
+    assert analysis.evaluated and not analysis.passed
+    assert analysis.failed_metrics[0].observed is None
+    assert analysis.failed_metrics[0].gap is None

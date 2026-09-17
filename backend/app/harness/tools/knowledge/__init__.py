@@ -11,8 +11,16 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.harness.kb.stores import MAIN_ZONES
+from app.harness.kb.stores import MAIN_ZONES, QUARANTINE_ZONE
 from app.harness.tools.registry import ToolContext, ToolResult
+
+
+def _source_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"schema", "artifact_schema", "record_id", "zone", "memory_type",
+               "source_path", "url", "title", "run_id", "agent", "project", "content_hash",
+               "approved", "scientific_validated", "source_sha256", "valid_from", "ttl_days",
+               "embedding_version"}
+    return {key: value for key, value in metadata.items() if key in allowed}
 
 
 def _render_hits(
@@ -48,9 +56,9 @@ def _render_hits(
             "hits": [
                 {
                     "score": round(h.score, 4),
-                    "excerpt": h.record.metadata.get("summary") or h.record.text[:280],
-                    "meta": h.record.metadata,
-                    "metadata": h.record.metadata,
+                    "excerpt": h.record.text[:700],
+                    "meta": _source_metadata(h.record.metadata),
+                    "metadata": _source_metadata(h.record.metadata),
                     "evidence_ref": f"knowledge/{zone}/{h.record.id}",
                 }
                 for h in hits
@@ -133,27 +141,32 @@ async def ingest_document_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRe
         return ToolResult(ok=False, error="text is required")
     metadata_raw = args.get("metadata", {})
     metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+    reported_mock = bool(metadata.get("is_mock", False))
     metadata = {
-        **metadata,
+        "title": str(metadata.get("title", "")),
         "source": metadata.get("source", "tool"),
         "run_id": ctx.run_id,
         "agent": ctx.agent,
+        "project": ctx.project,
+        "origin": "agent_unreviewed",
+        "proposed_zone": zone,
+        "scientific_validated": False,
     }
     count = write_to_zone(
-        zone=zone,
+        zone=QUARANTINE_ZONE,
         text=text,
         metadata=metadata,
-        source_path=str(metadata.get("source_path", "")),
+        source_path="",
         run_id=ctx.run_id,
         agent=ctx.agent,
-        schema=str(metadata.get("schema", "")),
-        is_mock=bool(metadata.get("is_mock", False)),
-        approved=bool(metadata.get("approved", True)),
+        is_mock=reported_mock,
+        approved=False,
     )
     return ToolResult(
         ok=True,
-        output={"zone": zone, "records_written": count},
-        evidence_refs=[f"knowledge/{zone}/_index.json"],
+        output={"zone": QUARANTINE_ZONE, "requested_zone": zone, "records_written": count,
+                "approval_status": "pending", "recall_eligible": False},
+        evidence_refs=[f"knowledge/{QUARANTINE_ZONE}/_index.json"],
     )
 
 

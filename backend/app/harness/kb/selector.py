@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from app.harness.kb.config import selector_config
-from app.harness.kb.embedder import cosine, embed, tokenize
+from app.harness.kb.embedder import configured_embed, embedding_spec, retrieval_similarity
 from app.harness.kb.models import MemoryRecord, memory_from_kb_record
 from app.harness.kb.stores import KBRecord, KBStores, MAIN_ZONES, get_stores
 
@@ -36,13 +36,16 @@ def select_memory(
 ) -> list[MemoryHit]:
     if include_mock:
         raise ValueError("mock Memory cannot be injected into agent context")
+    if not query.strip() or top_k <= 0:
+        return []
     selected_zones = list(zones or MAIN_ZONES)
     s = stores or get_stores()
     cfg = selector_config()
     weights_raw = cfg.get("weights", {})
     weights = weights_raw if isinstance(weights_raw, dict) else {}
-    q_vec = embed(query)
-    q_terms = set(tokenize(query))
+    spec = embedding_spec()
+    q_vec = configured_embed(query, spec=spec) if spec.provider != "lexical_unicode" else None
+    min_similarity = float(cfg.get("min_similarity", 0.12))
     graph_related = _graph_related_ids(query=query, stores=s)
     hits: list[MemoryHit] = []
     filters: dict[str, Any] = {}
@@ -52,22 +55,27 @@ def select_memory(
         filters["project"] = project
     for zone in selected_zones:
         filters.pop("approved", None)
-        if approved_only and zone != "literature":
+        if approved_only:
             filters["approved"] = True
         for record in s.zone(zone).all(
             filters=filters,
             exclude_superseded=not include_superseded,
             exclude_mock=not include_mock,
         ):
+            if approved_only and record.metadata.get("approved") is not True:
+                continue
             memory = memory_from_kb_record(
                 record_id=record.id,
                 zone=record.zone,
                 text=record.text,
                 metadata=record.metadata,
             )
-            sim = cosine(q_vec, record.embedding)
-            lexical = _lexical_overlap(q_terms, set(tokenize(record.text)))
-            combined_similarity = min(1.0, max(0.0, sim + lexical * 0.1))
+            sim = retrieval_similarity(query, record.text, record.embedding, record.metadata,
+                                       spec=spec, query_vector=q_vec)
+            combined_similarity = min(1.0, max(0.0, sim))
+            # Recency/confidence/graph links may rerank relevant candidates only.
+            if combined_similarity <= 0 or combined_similarity < min_similarity:
+                continue
             graph_bonus = 0.08 if record.id in graph_related else 0.0
             score = (
                 min(1.0, combined_similarity + graph_bonus)
@@ -84,10 +92,12 @@ def select_memory(
                     similarity=combined_similarity,
                     record=record,
                     memory=memory,
-                    injected_text=memory.summary or memory.text[:700],
+                    # Summary metadata is editable; only receipt-bound source
+                    # text is allowed into the model context.
+                    injected_text=memory.text[:700],
                 )
             )
-    hits.sort(key=lambda hit: hit.score, reverse=True)
+    hits.sort(key=lambda hit: (-hit.score, hit.record.zone, hit.record.id))
     selected = hits[:top_k]
     if update_access:
         _record_access(selected, stores=s)
@@ -116,6 +126,8 @@ def _recency(valid_from: str) -> float:
         dt = datetime.fromisoformat(valid_from.replace("Z", "+00:00"))
     except ValueError:
         return 0.4
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     age_days = max(0.0, (datetime.now(tz=timezone.utc) - dt).total_seconds() / 86400)
     return math.exp(-age_days / 180.0)
 

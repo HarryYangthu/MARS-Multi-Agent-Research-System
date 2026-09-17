@@ -128,20 +128,17 @@ class DiscoveryCheckpointStore:
     def latest(self) -> DiscoveryCheckpoint | None:
         if not self.paths.root.exists():
             return None
-        if self.latest_path.exists():
-            try:
-                latest = DiscoveryCheckpoint.model_validate(read_json(self.latest_path))
-                self._verify_hash(latest)
-                return latest
-            except (DiscoveryCorruptionError, ValueError):
-                pass
-        history = self.replay()
-        return history[-1] if history else None
+        # A valid latest pointer can still lag a committed history record after
+        # a crash. Immutable records, not cache validity, determine the cursor.
+        with discovery_lock(self.paths):
+            history = self._replay_unlocked()
+            return history[-1] if history else None
 
     def replay(self) -> list[DiscoveryCheckpoint]:
         if not self.paths.root.exists():
             return []
-        return self._replay_unlocked()
+        with discovery_lock(self.paths):
+            return self._replay_unlocked()
 
     def replay_state(self, *, sequence: int | None = None) -> dict[str, Any] | None:
         history = self.replay()
@@ -318,6 +315,8 @@ class DiscoveryCheckpointStore:
         previous_hash = ""
         for path in iter_json_files(self.checkpoints_dir):
             checkpoint = DiscoveryCheckpoint.model_validate(read_json(path))
+            if path.name != f"{expected_sequence:020d}.json":
+                raise DiscoveryCorruptionError(f"checkpoint filename/sequence mismatch: {path}")
             if checkpoint.run_id != self.paths.run_id:
                 raise DiscoveryCorruptionError(f"checkpoint run_id mismatch: {path}")
             if checkpoint.sequence != expected_sequence:

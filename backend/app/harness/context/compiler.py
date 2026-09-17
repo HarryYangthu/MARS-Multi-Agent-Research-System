@@ -32,6 +32,7 @@ def compile_agent_context(
     agent_name: str,
     output_schema: str,
     schema_template: str = "",
+    preserve_upstream: bool = False,
 ) -> CompiledContext:
     """Compile legacy messages and a v2 fallback manifest from the same inputs."""
     sys_text = _system_prompt(
@@ -48,7 +49,8 @@ def compile_agent_context(
         messages.append(Message(role="system", content=project))
         source_refs.append(_source_ref(role="system", source="project", content=project))
     for label, content in upstream.items():
-        distilled = distill_handoff(label=label, content=content)
+        distilled = (f"[untrusted upstream:{label}]\n{content}" if preserve_upstream
+                     else distill_handoff(label=label, content=content))
         messages.append(Message(role="user", content=distilled))
         source_refs.append(
             _source_ref(role="user", source=f"upstream:{label}", content=distilled)

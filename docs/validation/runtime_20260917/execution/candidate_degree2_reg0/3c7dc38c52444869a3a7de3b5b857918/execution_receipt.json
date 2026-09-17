@@ -1,0 +1,39 @@
+{
+  "argv": [
+    "/workspace/scratch/503bc40507e3/mars-audit/.venv-ci/bin/python",
+    "/workspace/scratch/e838b3fad9a5/mars-main-audit/scripts/run_runtime_e2e.py",
+    "--regression-command",
+    "--fixture",
+    "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/runtime_e2e_regression_clean_20260917"
+  ],
+  "command_files": [
+    {
+      "path": "/root/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11",
+      "sha256": "sha256:1e761eb19d6f2594ab8dc64bd99ad4e1753589f3bf1ec199e4eef3aaa21e3930"
+    },
+    {
+      "path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/scripts/run_runtime_e2e.py",
+      "sha256": "sha256:5299dbaafd3fc072ea023cf0335a07ae249332b9da1275d6962677bb55a44021"
+    }
+  ],
+  "duration_seconds": 0.4723319410040858,
+  "error": "",
+  "evidence": [
+    {
+      "bytes": 1570,
+      "kind": "measurement_evidence",
+      "path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/measurement.json",
+      "sha256": "sha256:8c2eb520a0ada41b0599abb7cc15f2d23efbbe5c9c3c79dd91a81c14dd142562"
+    }
+  ],
+  "execution_backend": "local_process",
+  "experiment_id": "candidate_degree2_reg0",
+  "invocation_id": "3c7dc38c52444869a3a7de3b5b857918",
+  "os_isolated": false,
+  "request_sha256": "sha256:4571962573e06baf700149b1f6db723e114e92fe8ad3da3e51b353097a61b8c3",
+  "result_sha256": "sha256:dc5ceaad3456a4ef91f52bb662fe5316ec7ce60c8fc55eaefb28f23998dede55",
+  "returncode": 0,
+  "run_id": "2026-09-17T1724_real_cpu_polynomial_regression",
+  "schema": "local_command_receipt.v1",
+  "status": "completed"
+}

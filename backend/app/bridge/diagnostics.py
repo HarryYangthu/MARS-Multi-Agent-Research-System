@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
@@ -26,6 +27,12 @@ class MetricRule:
     tolerance: float = 0.0
     aggregation: str = "mean"
 
+    def __post_init__(self) -> None:
+        if (not math.isfinite(self.target) or not math.isfinite(self.tolerance) or self.tolerance < 0
+                or self.direction not in {"lte", "gte", "minimize", "maximize"}
+                or self.aggregation not in {"mean", "min", "max", "best"}):
+            raise ValueError("invalid metric acceptance rule")
+
 
 @dataclass(frozen=True)
 class DiagnosticsConfig:
@@ -42,10 +49,10 @@ class DiagnosticsConfig:
 @dataclass(frozen=True)
 class MetricFailure:
     metric: str
-    observed: float
+    observed: float | None
     target: float
     direction: str
-    gap: float
+    gap: float | None
     aggregation: str
 
     def to_metadata(self) -> dict[str, Any]:
@@ -81,6 +88,7 @@ class DiagnosisAnalysis:
     failed_metrics: tuple[MetricFailure, ...]
     suspected_causes: tuple[SuspectedCause, ...]
     evidence_refs: tuple[str, ...]
+    evaluated: bool = True
 
 
 def load_diagnostics_config(project: str) -> DiagnosticsConfig:
@@ -174,8 +182,9 @@ def analyze_run(run: RunHandle, config: DiagnosticsConfig) -> DiagnosisAnalysis:
             suspected_causes.append(cause)
             evidence_refs.append("coding/code_spec.approved.md")
 
-    passed = not failed_metrics
-    if not suspected_causes and not passed:
+    evaluated = bool(config.metric_rules) and config.analyzers.get("metrics_gap", True)
+    passed = evaluated and not failed_metrics
+    if not suspected_causes and evaluated and not passed:
         suspected_causes.append(
             SuspectedCause(
                 kind="unknown",
@@ -189,6 +198,7 @@ def analyze_run(run: RunHandle, config: DiagnosticsConfig) -> DiagnosisAnalysis:
         failed_metrics=tuple(failed_metrics),
         suspected_causes=tuple(suspected_causes),
         evidence_refs=tuple(dict.fromkeys(evidence_refs)),
+        evaluated=evaluated,
     )
 
 
@@ -225,14 +235,14 @@ def _analyze_metric_gaps(
     failures: list[MetricFailure] = []
     for rule in rules:
         values = [row[rule.name] for row in rows if rule.name in row]
-        if not values:
+        if not values or len(values) != len(rows) or not all(math.isfinite(value) for value in values):
             failures.append(
                 MetricFailure(
                     metric=rule.name,
-                    observed=0.0,
+                    observed=None,
                     target=rule.target,
                     direction=rule.direction,
-                    gap=abs(rule.target),
+                    gap=None,
                     aggregation=rule.aggregation,
                 )
             )
@@ -265,6 +275,8 @@ def _aggregate(values: list[float], mode: str) -> float:
 
 
 def _passes(observed: float, rule: MetricRule) -> bool:
+    if not math.isfinite(observed):
+        return False
     if rule.direction in {"lte", "minimize"}:
         return observed <= rule.target + rule.tolerance
     return observed >= rule.target - rule.tolerance

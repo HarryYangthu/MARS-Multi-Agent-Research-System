@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from app.harness.persistence import append_jsonl
 
 Severity = Literal["debug", "info", "warning", "error", "critical"]
 
@@ -49,6 +50,7 @@ def make_event(
     severity: Severity = "info",
     evidence: Sequence[str] = (),
     timestamp: str | None = None,
+    correlation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema": "event.v1",
@@ -60,7 +62,7 @@ def make_event(
         "kind": kind,
         "severity": severity,
         "source": dict(source),
-        "correlation": {},
+        "correlation": redact(dict(correlation or {})),
         "evidence": [str(item) for item in evidence],
         "payload": redact(payload),
     }
@@ -76,6 +78,7 @@ def write_event(
     payload: Mapping[str, Any],
     severity: Severity = "info",
     evidence: Sequence[str] = (),
+    correlation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     event = make_event(
         run_id=run.run_id,
@@ -86,11 +89,12 @@ def write_event(
         payload=payload,
         severity=severity,
         evidence=evidence,
+        correlation=correlation,
     )
     path = run.subdir("events") / f"{stream}.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    # Retain the legacy conversion of dates/paths to strings before the strict
+    # durable sink serializes the envelope.
+    append_jsonl(path, json.loads(json.dumps(event, ensure_ascii=False, default=str)))
     return event
 
 
@@ -105,6 +109,7 @@ def normalize_event(
     if raw.get("schema") == "event.v1":
         event = dict(raw)
         event["payload"] = redact(_mapping(event.get("payload")))
+        event["correlation"] = redact(_mapping(event.get("correlation")))
         return event
     kind = str(raw.get("event") or default_kind)
     channel = str(raw.get("channel") or default_channel)
@@ -118,6 +123,7 @@ def normalize_event(
         severity=_severity_from_kind(kind),
         evidence=[],
         timestamp=_timestamp_from_raw(raw),
+        correlation=_mapping(raw.get("correlation")),
     )
 
 
@@ -143,7 +149,7 @@ def _mapping(value: object) -> Mapping[str, Any]:
 
 
 def _timestamp_from_raw(raw: Mapping[str, Any]) -> str:
-    for key in ("timestamp", "created", "created_at", "reviewed_at"):
+    for key in ("timestamp", "time", "created", "created_at", "reviewed_at"):
         value = raw.get(key)
         if isinstance(value, str) and value:
             return value

@@ -5,8 +5,11 @@ import hashlib
 from pathlib import Path
 from typing import Any, Iterable
 
-from app.harness.kb.embedder import embed
+from filelock import FileLock
+
+from app.harness.kb.embedder import configured_embed, embedding_metadata, embedding_spec
 from app.harness.kb.models import EvalStatus, MemoryRecord, MemoryType, infer_memory_type
+from app.harness.kb.provenance import verified_memory
 from app.harness.kb.resolver import resolve_for_write
 from app.harness.kb.stores import KBRecord, KBStores, get_stores
 
@@ -32,18 +35,19 @@ def ingest(
     stores: KBStores | None = None,
 ) -> list[KBRecord]:
     s = stores or get_stores()
+    spec = embedding_spec()
     z = s.zone(zone)
     out: list[KBRecord] = []
     for i, chunk in enumerate(_chunk(text, size=chunk_size, overlap=overlap)):
-        rec_id = hashlib.sha256(f"{zone}:{i}:{chunk[:64]}".encode("utf-8")).hexdigest()[:16]
+        rec_id = hashlib.sha256(f"{zone}:{(metadata or {}).get('project', '')}:{i}:{chunk}".encode("utf-8")).hexdigest()[:16]
         rec = KBRecord(
             id=rec_id,
             zone=zone,
             text=chunk,
-            metadata=dict(metadata or {}),
-            embedding=embed(chunk),
+            metadata={**dict(metadata or {}), **embedding_metadata(spec)},
+            embedding=configured_embed(chunk, spec=spec),
         )
-        z.add(rec)
+        z.upsert(rec)
         out.append(rec)
     return out
 
@@ -69,16 +73,17 @@ def ingest_memory(
     stores: KBStores | None = None,
 ) -> list[KBRecord]:
     s = stores or get_stores()
+    spec = embedding_spec()
     z = s.zone(zone)
     base_meta = dict(metadata or {})
     inferred_type = memory_type or infer_memory_type(
         zone=zone, kind=str(base_meta.get("kind", ""))
     )
     chunks = list(_chunk(text, size=chunk_size, overlap=overlap))
+    if not chunks:
+        return []
     effective_source = source_path or str(base_meta.get("source_path", ""))
-    if effective_source:
-        z.delete_by_source(effective_source)
-    out: list[KBRecord] = []
+    prepared: list[KBRecord] = []
     for i, chunk in enumerate(chunks):
         record = MemoryRecord.create(
             zone=zone,
@@ -94,22 +99,43 @@ def ingest_memory(
             salience=salience,
             ttl_days=ttl_days,
             approved=approved,
-            extra_id_seed=str(i),
+            extra_id_seed=f"project:{base_meta.get('project', '')}:chunk:{i}",
         )
-        meta = {**base_meta, **record.to_metadata(), "chunk_index": i}
+        meta = {**base_meta, **record.to_metadata(), "chunk_index": i, **embedding_metadata(spec)}
         rec = KBRecord(
             id=record.record_id,
             zone=zone,
             text=chunk,
             metadata=meta,
-            embedding=embed(chunk),
+            embedding=configured_embed(chunk, spec=spec),
         )
-        resolved = resolve_for_write(record=rec, stores=s, replace_source=False)
-        if resolved is None:
-            continue
-        z.upsert(resolved)
-        _index_semantics(base=s.base, record=resolved)
-        out.append(resolved)
+        prepared.append(rec)
+    # All real embeddings must succeed before a replacement can touch old
+    # records. Serialize source replacements across store instances/processes.
+    s.base.mkdir(parents=True, exist_ok=True)
+    out: list[KBRecord] = []
+    with FileLock(str(s.base / "_ingestion.lock")):
+        prior: list[KBRecord] = []
+        if effective_source:
+            prior = [old for old in z.all() if old.metadata.get("source_path") == effective_source
+                     and old.metadata.get("project", "") == base_meta.get("project", "")]
+            trusted_input = approved and all(verified_memory(item.text, item.metadata, base=s.base) for item in prepared)
+            if not trusted_input and any(old.metadata.get("approved") is True
+                                         and verified_memory(old.text, old.metadata, base=s.base) for old in prior):
+                raise ValueError("cannot replace approved memory without approved receipt-backed input")
+        for rec in prepared:
+            resolved = rec if effective_source else resolve_for_write(record=rec, stores=s, replace_source=False)
+            if resolved is None:
+                continue
+            z.upsert(resolved)
+            _index_semantics(base=s.base, record=resolved)
+            out.append(resolved)
+        # Publish new chunks before deleting superseded chunks; an interrupted
+        # replacement retains the previous source instead of erasing it.
+        keep = {record.id for record in out}
+        for old in prior:
+            if old.id not in keep:
+                z.delete(old.id)
     return out
 
 

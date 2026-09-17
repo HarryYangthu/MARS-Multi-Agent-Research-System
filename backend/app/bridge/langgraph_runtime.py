@@ -1,8 +1,4 @@
-"""LangGraph runtime facade for MARS V2.
-
-The existing V2 orchestrator remains the compatibility driver while V2 moves
-workflow topology, checkpoint metadata, and HITL events toward LangGraph.
-"""
+"""Compatibility topology and event export; MARS Orchestrator owns execution."""
 from __future__ import annotations
 
 import json
@@ -43,52 +39,19 @@ class LangGraphRuntimeFacade:
     def compile(self, graph: RunGraph) -> LangGraphCompileResult:
         nodes = list(graph.nodes.keys())
         edges = [{"src": edge.src, "dst": edge.dst} for edge in graph.edges]
-        if not self.enabled():
-            return LangGraphCompileResult(
-                engine="legacy",
-                compiled=None,
-                nodes=nodes,
-                edges=edges,
-                entrypoints=graph.entrypoints,
-                fallback_reason="MARS_GRAPH_ENGINE=legacy",
-            )
-        try:
-            from langgraph.graph import END, START, StateGraph
-        except Exception as exc:  # pragma: no cover - optional runtime fallback
-            return LangGraphCompileResult(
-                engine="langgraph",
-                compiled=None,
-                nodes=nodes,
-                edges=edges,
-                entrypoints=graph.entrypoints,
-                fallback_reason=f"langgraph unavailable: {exc}",
-            )
-
-        builder = StateGraph(MarsGraphState)
-        for node_key in nodes:
-            builder.add_node(node_key, _node_passthrough(node_key))
-        entrypoints = graph.entrypoints or [node for node in nodes if not graph.predecessors(node)]
-        for entrypoint in entrypoints:
-            builder.add_edge(START, entrypoint)
-        for edge in graph.edges:
-            builder.add_edge(edge.src, edge.dst)
-        terminal_nodes = [node for node in nodes if not graph.successors(node)]
-        for node_key in terminal_nodes:
-            builder.add_edge(node_key, END)
-        compiled = builder.compile()
-        return LangGraphCompileResult(
-            engine="langgraph",
-            compiled=compiled,
-            nodes=nodes,
-            edges=edges,
-            entrypoints=entrypoints,
-        )
+        # Compatibility API: this object exports topology only. Agent work is
+        # executed by Orchestrator, never by placeholder LangGraph nodes.
+        return LangGraphCompileResult(engine="mars_native", compiled=None, nodes=nodes,
+            edges=edges, entrypoints=graph.entrypoints)
 
     def write_manifest(self, *, run: RunHandle, graph: RunGraph) -> dict[str, Any]:
         result = self.compile(graph)
         manifest = {
             "schema": "langgraph_runtime.v2",
             "engine": result.engine,
+            "execution_engine": "mars_native",
+            "runtime_role": "graph_export_only",
+            "graph_format": "langgraph_compatible",
             "run_id": run.run_id,
             "created_at": datetime.now(tz=timezone.utc).isoformat(),
             "nodes": result.nodes,
@@ -120,6 +83,8 @@ class LangGraphRuntimeFacade:
             return
         payload = {
             "event": event,
+            "execution_engine": "mars_native",
+            "runtime_role": "compatibility_event",
             "run_id": run.run_id,
             "node": node_key,
             "from_state": from_state.value,
@@ -128,15 +93,6 @@ class LangGraphRuntimeFacade:
         }
         run.write_event("langgraph_events", payload)
         await bus.publish(f"run.{run.run_id}.langgraph", payload)
-
-
-def _node_passthrough(node_key: str) -> Any:
-    def _run(state: MarsGraphState) -> MarsGraphState:
-        states = dict(state.get("states", {}))
-        states[node_key] = "visited"
-        return {"run_id": state.get("run_id", ""), "node": node_key, "states": states}
-
-    return _run
 
 
 def _transition_event(state: NodeState) -> str:

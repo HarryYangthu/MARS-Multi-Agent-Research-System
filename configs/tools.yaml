@@ -1,3 +1,15 @@
+# MCP tools are opt-in host bindings. Remote tools/list never grants access.
+# A binding must use an mcp.* name plus mcp_kind, mcp_tool, allowed_agents and
+# explicit input/output schemas. Omitted mutation_level defaults to write;
+# writes always require approval. Add the local name to the agent's tools too.
+# mcp_env is an explicit list of environment names passed only to that server;
+# ambient provider credentials are otherwise removed. Never take this from a model.
+# Process tools use process_backend: local_process (trusted commands, NOT an OS
+# sandbox). require_isolation: true fails closed until an isolation backend exists.
+# Host-only MARS_TOOLS_CONFIG_PATH / MARS_EXECUTION_CONFIG_PATH may point to
+# absolute deployment configuration files outside a candidate's writable repo.
+# local_command reads MARS_JOB_REQUEST and must write MARS_RESULT_PATH using
+# local_command_result.v1 plus actual evidence files; stdout is never acceptance.
 tools:
   search.neurips_search:
     enabled: true
@@ -226,16 +238,19 @@ tools:
 
   knowledge.kb_query:
     enabled: true
-    description: Query one KB zone (literature/methodology/code_assets/run_archive) for PIM-cancellation evidence.
+    description: Query verified project-scoped evidence from literature, methodology, code_assets or run_archive.
     mutation_level: read
     allowed_agents: [idea, experiment, idea_research]
     timeout_seconds: 10
-    input_schema:
+    input_schema: &knowledge_query_schema
       type: object
       additionalProperties: true
+      anyOf:
+        - required: [q]
+        - required: [query]
       properties:
-        q: {type: string}
-        query: {type: string}
+        q: {type: string, minLength: 1}
+        query: {type: string, minLength: 1}
         zone: {type: string}
         top_k: {type: integer, minimum: 1, maximum: 20}
     output_schema: &knowledge_hits_schema
@@ -245,7 +260,7 @@ tools:
 
   knowledge.baseline_match:
     enabled: true
-    description: Match a candidate PIM ablation plan against prior runs (run_archive) to reuse a baseline.
+    description: Match a candidate experiment plan against verified prior project runs to identify reusable baselines.
     mutation_level: read
     allowed_agents: [idea, experiment, idea_research]
     timeout_seconds: 10
@@ -263,34 +278,38 @@ tools:
 
   knowledge.experiment_memory:
     enabled: true
-    description: Query prior PIM ablation runs (RES/loss per memory-depth/router config) from run_archive.
+    description: Search prior project experiment designs and measured results; supply q or query.
     mutation_level: read
     allowed_agents: [experiment]
     timeout_seconds: 10
+    input_schema: *knowledge_query_schema
     output_schema: *knowledge_hits_schema
 
   knowledge.code_assets:
     enabled: true
-    description: Query reusable canceller / router code assets (kept Gate-5-safe, additive-only).
+    description: Search verified reusable project code assets; supply q or query.
     mutation_level: read
     allowed_agents: [coding]
     timeout_seconds: 10
+    input_schema: *knowledge_query_schema
     output_schema: *knowledge_hits_schema
 
   knowledge.methodology:
     enabled: true
-    description: Query methodology memory (RES/PIM/APE measurement + ablation-design protocol).
+    description: Search verified methodology and measurement protocols; supply q or query.
     mutation_level: read
     allowed_agents: [writing]
     timeout_seconds: 10
+    input_schema: *knowledge_query_schema
     output_schema: *knowledge_hits_schema
 
   knowledge.run_archive:
     enabled: true
-    description: Query the run archive (prior run_log.v1 results — RES/loss per ablation) for the report.
+    description: Search prior project runs and measured results for reporting; supply q or query.
     mutation_level: read
     allowed_agents: [writing]
     timeout_seconds: 10
+    input_schema: *knowledge_query_schema
     output_schema: *knowledge_hits_schema
 
   knowledge.ingest_document:

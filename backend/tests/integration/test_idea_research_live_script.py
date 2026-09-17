@@ -26,7 +26,9 @@ def test_public_request_has_no_preselected_papers_or_private_context(tmp_path: P
     assert "16×16" in request.user_request and "双线性" in request.user_request
     assert "https://" not in request.user_request
     assert request.upstream_artifacts == {}
-    assert request.extra["context_sources"] == {"project_rules": False, "code_repositories": False}
+    assert request.extra["context_sources"] == {"project_rules": False, "code_repositories": False,
+                                               "agent_resources": False, "memory": False,
+                                               "project_references": False}
     assert request.extra["idea_requirements"]["min_pdfs"] == 2
 
 

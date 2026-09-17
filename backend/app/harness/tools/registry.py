@@ -96,6 +96,8 @@ class ToolPolicy:
     network: bool = False
     command_allowlist: tuple[tuple[str, ...], ...] = ()
     redaction: tuple[str, ...] = ()
+    process_backend: str = "local_process"
+    require_isolation: bool = False
 
 
 @dataclass(frozen=True)
@@ -143,8 +145,11 @@ class ToolRegistry:
     ) -> None:
         if name in self._tools and not override:
             raise ValueError(f"tool '{name}' already registered")
+        effective = _spec_from_config(spec or _default_spec(name))
+        Draft202012Validator.check_schema(effective.input_schema)
+        Draft202012Validator.check_schema(effective.output_schema)
         self._tools[name] = fn
-        self._specs[name] = _spec_from_config(spec or _default_spec(name))
+        self._specs[name] = effective
 
     def fork(self) -> "ToolRegistry":
         """Isolate run-local registrations while preserving dispatch policies and gates."""
@@ -268,7 +273,8 @@ class ToolRegistry:
             _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
             return result
 
-        schema_error = _validate_args(args, spec.input_schema)
+        public_args = {key: value for key, value in args.items() if key != "_approval_id"}
+        schema_error = _validate_args(public_args, spec.input_schema)
         if schema_error is not None:
             result = ToolResult(ok=False, error=schema_error, status="error")
             _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
@@ -327,6 +333,8 @@ class ToolRegistry:
                 _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
                 return result
         try:
+            from app.harness.tools.process_runtime import require_process_backend
+            require_process_backend(spec.policy.process_backend, require_isolation=spec.policy.require_isolation)
             result = await asyncio.wait_for(
                 self._tools[tool_name](args, ctx),
                 timeout=spec.policy.timeout_seconds,
@@ -335,6 +343,20 @@ class ToolRegistry:
                 result.status = "success" if result.ok else "error"
             if result.status == "requires_approval":
                 result.requires_approval = True
+            if result.ok:
+                try:
+                    validate(instance=result.output, schema=spec.output_schema)
+                except ValidationError as exc:
+                    result.ok = False
+                    result.status = "output_validation_error"
+                    result.error = "tool output failed schema validation: " + exc.message
+                    result.metadata["output_validation_path"] = list(exc.absolute_path)
+                    # An invalid observation must not be fed back as trusted output.
+                    result.output = None
+        except asyncio.CancelledError:
+            result = ToolResult(ok=False, error="tool execution cancelled", status="cancelled")
+            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            raise
         except Exception as exc:
             logger.exception("tool '{}' raised", tool_name)
             result = ToolResult(ok=False, error=str(exc), status="error")
@@ -358,6 +380,7 @@ def get_registry() -> ToolRegistry:
         _registry = ToolRegistry()
         _install_default_gates(_registry)
         _install_default_tools(_registry)
+        _install_mcp_tools(_registry)
         _validate_agent_tool_references(_registry)
     return _registry
 
@@ -367,6 +390,7 @@ def reset_for_tests() -> ToolRegistry:
     _registry = ToolRegistry()
     _install_default_gates(_registry)
     _install_default_tools(_registry)
+    _install_mcp_tools(_registry)
     _validate_agent_tool_references(_registry)
     return _registry
 
@@ -376,6 +400,18 @@ def _install_default_gates(reg: ToolRegistry) -> None:
     from app.harness.gates.baseline_compatibility import gate_check
 
     reg.install_gate(gate_check)
+
+
+def _install_mcp_tools(reg: ToolRegistry) -> None:
+    """Only host-declared names acquire policies; discovery never grants access."""
+    from app.harness.tools.config import load_tool_configs
+    from app.harness.tools.mcp_adapters import configured_mcp_handler, validate_mcp_config
+
+    for name, cfg in load_tool_configs().items():
+        if not (cfg.mcp_kind or cfg.mcp_tool):
+            continue
+        validate_mcp_config(name, cfg)
+        reg.register(name, configured_mcp_handler(cfg))
 
 
 def _install_default_tools(reg: ToolRegistry) -> None:
@@ -693,9 +729,11 @@ def _default_spec(name: str, *, bridge_only: bool = False) -> ToolSpec:
 
 
 def _spec_from_config(spec: ToolSpec) -> ToolSpec:
-    from app.harness.tools.config import tool_config
+    from app.harness.tools.config import load_tool_configs
 
-    cfg = tool_config(spec.name)
+    cfg = load_tool_configs().get(spec.name)
+    if cfg is None:
+        return spec
     policy = ToolPolicy(
         mutation_level=cfg.mutation_level or spec.policy.mutation_level,
         allowed_agents=cfg.allowed_agents or spec.policy.allowed_agents,
@@ -704,6 +742,8 @@ def _spec_from_config(spec: ToolSpec) -> ToolSpec:
         network=cfg.network or spec.policy.network,
         command_allowlist=cfg.command_allowlist or spec.policy.command_allowlist,
         redaction=cfg.redaction or spec.policy.redaction,
+        process_backend=cfg.process_backend,
+        require_isolation=cfg.require_isolation or spec.policy.require_isolation,
     )
     return ToolSpec(
         name=spec.name,
@@ -730,12 +770,12 @@ def _approval_required_reason(
     ctx: ToolContext,
     spec: ToolSpec,
 ) -> str:
-    if spec.policy.mutation_level != "write":
-        return ""
     if _approval_is_valid(tool_name=tool_name, args=args, ctx=ctx):
         return ""
     if spec.policy.requires_approval:
         return f"tool '{tool_name}' requires approval by policy"
+    if spec.policy.mutation_level != "write":
+        return ""
     if tool_name == "code.delete_file":
         return "delete_file requires human approval"
     touched = _touched_files(args)
@@ -806,7 +846,7 @@ def _approval_is_valid(*, tool_name: str, args: dict[str, Any], ctx: ToolContext
     if ctx.approval_mode != "approved" or ctx.agent not in {"bridge", "system"}:
         return False
     approval_id = str(args.get("_approval_id", "") or "")
-    if not approval_id:
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", approval_id):
         return False
     run_root = _run_root(ctx)
     if run_root is None:
@@ -823,6 +863,8 @@ def _approval_is_valid(*, tool_name: str, args: dict[str, Any], ctx: ToolContext
         and record.get("status") == "approved"
         and record.get("tool") == tool_name
         and record.get("run_id") == ctx.run_id
+        and record.get("project") == ctx.project
+        and record.get("args") == {key: value for key, value in args.items() if key != "_approval_id"}
     )
 
 

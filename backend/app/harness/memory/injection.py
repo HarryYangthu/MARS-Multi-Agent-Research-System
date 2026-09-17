@@ -44,6 +44,7 @@ def build_memory_segments(
                 include_mock=default_include_mock(),
                 include_superseded=False,
                 approved_only=True,
+                update_access=False,
                 stores=stores,
             )
         )

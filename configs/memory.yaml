@@ -35,6 +35,7 @@ lifecycle:
 
 selector:
   hybrid: true
+  min_similarity: 0.12
   weights:
     similarity: 0.4
     recency: 0.2
@@ -44,6 +45,15 @@ selector:
   rerank: true
   exclude_superseded: true
   inject: summary
+
+injection:
+  max_tokens: 1800
+  # Conservative UTF-8 byte upper bound, not an exact model tokenizer count.
+  max_item_tokens: 700
+  top_k: 6
+  require_approved: true
+  require_verified_receipt: true
+  freeze_per_node: true
 
 profiles_vs_collections:
   baseline_current: profile

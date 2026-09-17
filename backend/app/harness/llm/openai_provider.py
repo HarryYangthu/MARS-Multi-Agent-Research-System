@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from app.harness.llm.provider_base import (
     Message,
     ReasoningEffort,
     ToolCall,
+    public_endpoint_url,
 )
 
 
@@ -86,12 +88,19 @@ class _OpenAICompatProvider(LLMProvider):
         if not api_key:
             raise ValueError(f"{provider_name or 'openai'} provider requires API key")
         self._api_key = api_key
-        self._base_url = base_url
+        # Freeze the SDK environment default so checkpoint identity and the
+        # later lazy client cannot resolve different endpoints.
+        self._base_url = base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         if provider_name:
             self.name = provider_name
         self._default_thinking_enabled = default_thinking_enabled
         self._default_reasoning_effort = default_reasoning_effort
         self._client: Any = None
+
+    @property
+    def base_url(self) -> str:
+        endpoint = str(self._client.base_url) if self._client is not None else self._base_url
+        return public_endpoint_url(endpoint)
 
     async def close(self) -> None:
         if self._client is not None:

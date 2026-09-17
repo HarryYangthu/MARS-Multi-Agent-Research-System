@@ -279,22 +279,22 @@ def collect_segments(
 
 
 def _collect_memory_segments(data: CompileContextInput) -> list[ContextSegment]:
-    if not _settings_bool("mars_context_memory_injection", True):
+    if not _settings_bool("mars_context_memory_injection", True) or "approved_memory" in data.upstream:
         return []
-    try:
-        from app.harness.memory.injection import build_memory_segments
+    if data.run_root is not None:
+        from app.harness.context.injection_runtime import prepare_memory_context
 
-        result = build_memory_segments(
-            agent=data.agent,
-            node_key=data.node_key or data.agent,
-            project=data.project,
-            task=data.task,
-            purpose=data.purpose,
-            run_root=data.run_root,
-        )
-        return result.segments
-    except Exception:
-        return []
+        frozen = prepare_memory_context(run_root=data.run_root, agent=data.agent,
+                                        node_key=data.node_key or data.agent, project=data.project,
+                                        task=data.task, purpose=data.purpose)
+        return [_segment(kind="memory", title="Approved memory snapshot", source_ref=str(frozen.manifest_path),
+                         text=frozen.text, priority="medium",
+                         reason=f"governed immutable pre-call memory; digest={frozen.digest}")] if frozen.text else []
+    from app.harness.memory.injection import build_memory_segments
+
+    return build_memory_segments(agent=data.agent, node_key=data.node_key or data.agent,
+                                 project=data.project, task=data.task, purpose=data.purpose,
+                                 run_root=None).segments
 
 
 def select_segments(

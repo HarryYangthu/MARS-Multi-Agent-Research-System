@@ -1,8 +1,7 @@
-"""Optional MCP adapter metadata and health checks for MARS tools.
+"""MCP transport plus host-configured ToolRegistry bindings.
 
-MARS tools remain the public capability boundary. These adapters describe and
-health-check optional MCP backends; tool dispatch, Gate checks, HITL and run
-sedimentation stay in the local ToolRegistry path.
+Server-discovered capabilities do not grant permissions. Public invocation is
+through ToolRegistry; this module's transport helpers are for trusted callers.
 """
 from __future__ import annotations
 
@@ -12,7 +11,14 @@ import json
 import os
 import shutil
 import shlex
-from typing import Literal
+import re
+from typing import Literal, cast
+
+from jsonschema import Draft202012Validator
+
+from app.harness.tools.config import ToolConfig
+from app.harness.tools.process_runtime import require_process_backend, start_process, terminate_process_tree
+from app.harness.tools.registry import ToolContext, ToolFn, ToolResult
 
 
 AdapterKind = Literal["chroma", "filesystem", "git", "github"]
@@ -77,7 +83,7 @@ def adapter_status(kind: AdapterKind) -> AdapterStatus:
                 fallback="local JSON/Chroma-compatible KB store",
                 tools=tools,
             )
-        available = _command_executable(command) if command else configured
+        available = bool(command and _command_executable(command))
         return AdapterStatus(
             kind=kind,
             configured=configured,
@@ -98,7 +104,7 @@ def adapter_status(kind: AdapterKind) -> AdapterStatus:
         return AdapterStatus(
             kind=kind,
             configured=configured,
-            available=_command_executable(command) if command else bool(roots),
+            available=bool(command and _command_executable(command)),
             detail=(
                 f"MCP command configured: {command}"
                 if command
@@ -129,7 +135,7 @@ def adapter_status(kind: AdapterKind) -> AdapterStatus:
     return AdapterStatus(
         kind=kind,
         configured=enabled,
-        available=(_command_executable(command) if command else token_configured) and enabled,
+        available=bool(command and _command_executable(command)) and enabled,
         detail=(
             f"GitHub MCP command configured: {command}"
             if command
@@ -154,53 +160,92 @@ async def call_mcp_tool(
     tool_name: str,
     arguments: dict[str, object],
     timeout_seconds: float = 10.0,
+    credential_env_names: tuple[str, ...] = (),
 ) -> dict[str, object]:
     command = _require_adapter_command(kind)
-    async with _StdioMCPClient(command=command, timeout_seconds=timeout_seconds) as client:
+    async with _StdioMCPClient(command=command, timeout_seconds=timeout_seconds,
+                              credential_env_names=credential_env_names) as client:
         return await client.request(
             "tools/call",
             {"name": tool_name, "arguments": arguments},
         )
 
 
+def validate_mcp_config(name: str, cfg: ToolConfig) -> None:
+    if not name.startswith("mcp.") or cfg.mcp_kind not in ADAPTER_KINDS or not cfg.mcp_tool:
+        raise ValueError("MCP bindings require mcp.* name, known mcp_kind and explicit mcp_tool")
+    if not cfg.allowed_agents or cfg.input_schema is None or cfg.output_schema is None:
+        raise ValueError("MCP bindings require explicit allowed_agents and input/output schemas")
+    if cfg.mutation_level not in {"read", "write"}:
+        raise ValueError("MCP mutation_level must explicitly describe read or write access")
+    if cfg.mutation_level == "write" and not cfg.requires_approval:
+        raise ValueError("MCP write tools require approval; server annotations cannot bypass it")
+    if cfg.timeout_seconds <= 0:
+        raise ValueError("MCP timeout must be positive")
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in cfg.mcp_env):
+        raise ValueError("mcp_env contains invalid environment variable names")
+    Draft202012Validator.check_schema(cfg.input_schema)
+    Draft202012Validator.check_schema(cfg.output_schema)
+
+
+def configured_mcp_handler(cfg: ToolConfig) -> ToolFn:
+    async def invoke(args: dict[str, object], ctx: ToolContext) -> ToolResult:
+        if not ctx.run_id or not ctx.project or not ctx.agent or not ctx.extra.get("run_root"):
+            return ToolResult(ok=False, status="not_allowed", error="MCP execution requires run/project/agent context")
+        require_process_backend(cfg.process_backend, require_isolation=cfg.require_isolation)
+        result = await call_mcp_tool(
+            cast(AdapterKind, cfg.mcp_kind), tool_name=cfg.mcp_tool,
+            arguments={key: value for key, value in args.items() if key != "_approval_id"},
+            timeout_seconds=cfg.timeout_seconds, credential_env_names=cfg.mcp_env,
+        )
+        failed = result.get("isError") is True
+        return ToolResult(ok=not failed, output=result,
+                          error="MCP server reported a tool error" if failed else None,
+                          metadata={"adapter": cfg.mcp_kind, "remote_tool": cfg.mcp_tool,
+                                    "execution_backend": "local_process", "os_isolated": False})
+    return invoke
+
+
 class _StdioMCPClient:
-    def __init__(self, *, command: str, timeout_seconds: float) -> None:
+    def __init__(self, *, command: str, timeout_seconds: float,
+                 credential_env_names: tuple[str, ...] = ()) -> None:
         self.command = command
         self.timeout_seconds = timeout_seconds
         self._process: asyncio.subprocess.Process | None = None
         self._next_id = 1
+        self.credential_env_names = credential_env_names
 
     async def __aenter__(self) -> "_StdioMCPClient":
         argv = shlex.split(self.command)
         if not argv:
             raise MCPTransportError("MCP command is empty")
-        self._process = await asyncio.create_subprocess_exec(
-            *argv,
+        self._process = await start_process(
+            argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            credential_env={name: os.environ[name] for name in self.credential_env_names if name in os.environ},
         )
-        await self.request(
-            "initialize",
-            {
-                "protocolVersion": _MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "mars", "version": "v1"},
-            },
-        )
-        await self.notify("notifications/initialized", {})
+        try:
+            await self.request(
+                "initialize",
+                {
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "mars", "version": "v1"},
+                },
+            )
+            await self.notify("notifications/initialized", {})
+        except BaseException:
+            await terminate_process_tree(self._process)
+            raise
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
         process = self._process
         if process is None:
             return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=1.0)
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+        await terminate_process_tree(process)
 
     async def notify(self, method: str, params: dict[str, object]) -> None:
         await self._write({"jsonrpc": "2.0", "method": method, "params": params})
@@ -216,7 +261,10 @@ class _StdioMCPClient:
                 "params": params,
             }
         )
-        return await self._read_response(request_id)
+        try:
+            return await asyncio.wait_for(self._read_response(request_id), timeout=self.timeout_seconds)
+        except TimeoutError as exc:
+            raise MCPTransportError("MCP request exceeded its total time budget") from exc
 
     async def _write(self, payload: dict[str, object]) -> None:
         process = self._process

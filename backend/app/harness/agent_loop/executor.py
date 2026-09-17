@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -22,10 +22,25 @@ from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, ac
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
+from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.tools.registry import ToolContext, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
 ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
+CONTEXT_FORMAT_VERSION = 9
+
+
+def generation_fingerprint(config: LLMConfig, provider: LLMProvider) -> str:
+    """Bind generation/retry controls and the actual endpoint, never credentials.
+
+    Only the digest is persisted. The runtime callback is not generation input;
+    every other configuration field (including provider-specific extras) is.
+    """
+    configuration = {item.name: getattr(config, item.name) for item in fields(config)
+                     if item.name != "attempt_observer"}
+    return digest({"configuration": configuration,
+                   "implementation": type(provider).__module__ + "." + type(provider).__qualname__,
+                   "endpoint_sha256": digest(provider.base_url)})
 
 
 def truncation_recovery(reason: object, *, repairs: int, limit: int, effort: str | None) -> dict[str, Any] | None:
@@ -64,6 +79,8 @@ class LoopInput:
     review_plan_contract_id: str | None = None
     review_provider: LLMProvider | None = None
     review_config: LLMConfig | None = None
+    correlation: dict[str, str] = field(default_factory=dict)
+    context_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -235,16 +252,15 @@ class NativeAgentLoop:
         instructions = action_instructions(specs, native=native, final_schema=request.final_schema)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
         fingerprint = digest({"messages": [x.to_wire() for x in pinned], "policy": p.fingerprint_data(),
-                              "model": request.config.model, "provider": request.config.provider,
+                              "generation": generation_fingerprint(request.config, request.provider),
                               "project": request.tool_context.project, "tools": specs,
-                              "context_format_version": 8})
+                              "context_format_version": CONTEXT_FORMAT_VERSION})
         if native:
             fingerprint = digest({"base": fingerprint, "wire_tools": wire_tools})
         if request.review_config is not None:
-            rc = request.review_config
-            fingerprint = digest({"base": fingerprint, "review_model": rc.model,
-                                  "review_provider": rc.provider,
-                                  "review_max_tokens": rc.max_tokens, "review_temperature": rc.temperature})
+            assert request.review_provider is not None
+            fingerprint = digest({"base": fingerprint, "review_generation": generation_fingerprint(
+                request.review_config, request.review_provider)})
         if request.required_review_tools:
             fingerprint = digest({"base": fingerprint, "required_review_tools": request.required_review_tools})
         if request.review_messages is not None:
@@ -257,9 +273,14 @@ class NativeAgentLoop:
         if request.review_plan_factory is not None:
             validate_review_provider(request.provider, configured_provider=request.config.provider)
             fingerprint = digest({"base": fingerprint, "reflection_rubric": request.reflection_rubric})
-        trace = LoopTrace(request.trace_root, p.trace, resume=request.resume)
+        correlation = dict(request.correlation)
+        correlation.setdefault("invocation_id", request.trace_root.name)
+        correlation.setdefault("trace_id", request.tool_context.run_id)
+        correlation.setdefault("node_id", request.tool_context.agent)
+        trace = LoopTrace(request.trace_root, p.trace, resume=request.resume, correlation=correlation)
         state: dict[str, Any] = {
-            "fingerprint": fingerprint, "status": "running", "pending": None,
+            "fingerprint": fingerprint, "context_format_version": CONTEXT_FORMAT_VERSION,
+            "status": "running", "pending": None,
             "counts": {k: 0 for k in ("model_requests", "model_responses", "tool_dispatches",
                                      "observations", "sdk_attempts", "action_rounds", "protocol_repairs",
                                      "validation_repairs", "reflections")},
@@ -267,6 +288,7 @@ class NativeAgentLoop:
             "usage_complete": True, "history": [], "candidate": "", "feedback": "",
             "next_phase": "act", "seen": {}, "reflection_accepted": False,
             "review_issues": [], "reviewed_candidate_sha": "",
+            "correlation": correlation, "context_metadata": request.context_metadata,
         }
         if request.review_plan_factory is not None:
             state["review_plan_contract_id"] = request.review_plan_contract_id
@@ -274,6 +296,9 @@ class NativeAgentLoop:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
             state = json.loads((request.trace_root / "checkpoint.json").read_text())
+            if state.get("context_format_version") != CONTEXT_FORMAT_VERSION:
+                raise ValueError("resume checkpoint context format is incompatible; use its original runtime "
+                                 "to resume it; automatic replay with this runtime is forbidden")
             allowed_status = {"running", "interrupted", "model_error"}
             if request.external_review:
                 allowed_status.add("passed")
@@ -497,8 +522,17 @@ class NativeAgentLoop:
                 trace.snapshot(state)
                 try:
                     completion = await asyncio.wait_for(
-                        (request.review_provider if reviewing and request.review_provider else request.provider).complete(messages, call_config),
+                        guarded_complete(
+                            request.review_provider if reviewing and request.review_provider else request.provider,
+                            messages, call_config,
+                            run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)),
+                            correlation=correlation),
                         timeout=llm_call_deadline_seconds(call_config))
+                except ResourceBudgetError as exc:
+                    state["status"] = "budget_exhausted"
+                    state["pending"] = None
+                    trace.emit("resource_budget_exhausted", {"reason": str(exc), "request_sent": False})
+                    break
                 except Exception as exc:
                     usage(getattr(exc, "usage", None))
                     rejected_response: dict[str, Any] | None = None

@@ -160,6 +160,7 @@ experiment:
   debate:
     enabled: false
   loop:
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -198,6 +199,7 @@ coding:
   - python_research
   - c_production
   loop:
+    input_token_budget: 128000
     max_validation_repairs: 2
     max_tool_steps: 20
   tools:
@@ -231,11 +233,10 @@ execution:
   debate:
     enabled: false
   loop:
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 6
   tools:
-  - execution.simulation_runner
-  - execution.batch_runner
   - execution.log_streamer
   - execution.metrics_collector
 writing:
@@ -257,7 +258,7 @@ writing:
       max_retries: 3
       base_delay_seconds: 1
   debate:
-    enabled: true
+    enabled: false
     rounds: 1
     participants:
     - role: critic
@@ -267,6 +268,8 @@ writing:
       provider: deepseek
       model: deepseek-v4-pro
   loop:
+    mode: reflection
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:

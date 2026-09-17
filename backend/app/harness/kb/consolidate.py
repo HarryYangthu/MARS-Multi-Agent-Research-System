@@ -61,7 +61,10 @@ def consolidate(stores: KBStores | None = None) -> ConsolidationReport:
                         },
                     )
                     expired += 1
-            decay = math.pow(0.5, age_days / half_life) if half_life > 0 else 1.0
+            # Decay only the interval since the previous consolidation, not
+            # the full lifetime on every invocation.
+            decay_age = _age_days(str(record.metadata.get("last_consolidated_at") or memory.valid_from), now)
+            decay = math.pow(0.5, decay_age / half_life) if half_life > 0 else 1.0
             new_confidence = max(0.0, min(memory.confidence, memory.confidence * decay))
             new_salience = max(0.0, min(memory.salience, memory.salience * decay))
             if new_confidence < memory.confidence or new_salience < memory.salience:
@@ -70,6 +73,7 @@ def consolidate(stores: KBStores | None = None) -> ConsolidationReport:
                     {
                         "confidence": round(new_confidence, 4),
                         "salience": round(new_salience, 4),
+                        "last_consolidated_at": now.isoformat(),
                     },
                 )
                 decayed += 1
@@ -89,6 +93,8 @@ def _age_days(raw: str, now: datetime) -> float:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     return max(0.0, (now - dt).total_seconds() / 86400)
 
 

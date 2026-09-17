@@ -28,6 +28,8 @@ from app.bridge.workflow_service import (
     EntryPoint,
     build_pipeline,
     build_standalone,
+    ready_batch,
+    scheduler_parallelism,
 )
 from app.harness.observability.tracing import TraceRecorder
 from app.harness.runtime.event_bus import EventBus, InProcessEventBus
@@ -78,6 +80,7 @@ class RunSession:
     waiting_for_feedback: bool = False
     read_only: bool = False
     termination: dict[str, Any] | None = None
+    state_revision: int = 0
 
 
 class Orchestrator:
@@ -96,6 +99,8 @@ class Orchestrator:
         self.langgraph_runtime = LangGraphRuntimeFacade()
         self._sessions: dict[str, RunSession] = {}
         self.owned_tasks = OwnedRunTasks()
+        self.max_parallel_nodes = scheduler_parallelism()
+        self._resume_invocations: dict[tuple[str, str], str] = {}
 
     # --------------------------------------------------------------- create
 
@@ -104,6 +109,17 @@ class Orchestrator:
         from app.bridge.idea_input_context import validate_idea_extra
 
         research_context = validate_idea_extra(request.extra)
+        from app.bridge.evaluation_policy import policy_for_task
+        evaluation_policy = policy_for_task(request.extra.get("evaluation_policy"))
+        skills = request.extra.get("selected_skills_by_agent", {})
+        if (not isinstance(skills, dict) or set(skills) - set(LINEAR_STAGES)
+                or any(not isinstance(names, list) or any(not isinstance(name, str) or not name.strip() for name in names)
+                       for names in skills.values())):
+            raise ValueError("selected_skills_by_agent must map pipeline agent names to explicit skill names")
+        execution_context = request.extra.get("execution_context", {})
+        if not isinstance(execution_context, dict) or any(not isinstance(key, str) or not isinstance(value, str)
+                                                        or not value.strip() for key, value in execution_context.items()):
+            raise ValueError("execution_context must contain named nonempty text")
         settings = get_settings()
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
@@ -118,6 +134,9 @@ class Orchestrator:
             user_request=request.user_request,
             data_source=request.data_source,
         )
+        run.meta["evaluation_policy"] = evaluation_policy
+        run.meta["selected_skills_by_agent"] = skills
+        atomic_json(run.root / "run_meta.json", run.meta)
         if folder_context is not None:
             atomic_json(run.root / "input/folder_context.v1.json", folder_context)
         graph = (
@@ -158,7 +177,8 @@ class Orchestrator:
         if self._stopping(session):
             return False
         return self.owned_tasks.spawn(session.run.run_id, operation, factory,
-                                      finished=lambda: self._finish_owned_stop(session))
+                                      finished=lambda: self._finish_owned_stop(session),
+                                      lock_path=session.run.root / "runtime.driver.lock")
 
     def start_owned_run(self, run_id: str) -> dict[str, Any]:
         session = self.session(run_id)
@@ -174,6 +194,44 @@ class Orchestrator:
             return {"ok": False, "status": "already_finished", "run_id": run_id}
         started = self._spawn_owned(session, "start", lambda: self.run(run_id))
         return {"ok": started, "status": "started" if started else "not_startable", "run_id": run_id}
+
+    def resume_owned_run(self, run_id: str) -> dict[str, Any]:
+        """Explicitly continue persisted loops; never turn start into an implicit replay."""
+        from app.bridge.task_runtime import resumable_task
+        session = self.session(run_id)
+        if self.owned_tasks.active(run_id) is not None:
+            return {"ok": True, "status": "already_running", "run_id": run_id}
+        if session.read_only or self._stopping(session) or self.owned_tasks.closing:
+            return {"ok": False, "status": "not_resumable", "run_id": run_id}
+        candidates = [key for key, state in session.graph.all_states().items()
+                      if state in {NodeState.RUNNING, NodeState.FAILED}]
+        if not candidates:
+            return {"ok": False, "status": "no_interrupted_loop", "run_id": run_id,
+                    "error": "use start for pending work or the review API for completed drafts"}
+        try:
+            tasks = {key: resumable_task(session.run, key) for key in candidates}
+        except (OSError, ValueError, KeyError) as exc:
+            return {"ok": False, "status": "recovery_blocked", "run_id": run_id, "error": str(exc)}
+
+        async def resume() -> None:
+            from app.harness.llm.accounting import run_resource_scope
+            with run_resource_scope(session.run.root):
+                for key, task in tasks.items():
+                    # Repeat under the process-wide driver lock before any mutation.
+                    if resumable_task(session.run, key) != task:
+                        raise ValueError("resume contract changed after admission")
+                    self._resume_invocations[(run_id, key)] = task.invocation_id
+                    session.run.write_event("agent_events", {"event": "agent.resume_requested", "run_id": run_id,
+                        "node": key, "invocation_id": task.invocation_id, "task_id": task.task_id})
+                    try:
+                        await self._advance(session, key)
+                    finally:
+                        self._resume_invocations.pop((run_id, key), None)
+                await self._run(run_id)
+
+        started = self._spawn_owned(session, "resume", resume)
+        return {"ok": started, "status": "resuming" if started else "driver_busy", "run_id": run_id,
+                "invocations": {key: task.invocation_id for key, task in tasks.items()}}
 
     def _finish_owned_stop(self, session: RunSession) -> None:
         """Commit cancellation only after the owned coroutine's real cleanup."""
@@ -252,6 +310,11 @@ class Orchestrator:
         return list(await asyncio.gather(*(self._wait_owned_stop(item, grace_seconds=grace_seconds) for item in requested)))
 
     async def run(self, run_id: str) -> None:
+        from app.harness.llm.accounting import run_resource_scope
+        with run_resource_scope(self.session(run_id).run.root):
+            await self._run(run_id)
+
+    async def _run(self, run_id: str) -> None:
         session = self.session(run_id)
         if self._stopping(session):
             return
@@ -272,7 +335,7 @@ class Orchestrator:
             if session.waiting_for_feedback:
                 self._persist_state(session, status="waiting_feedback")
                 return
-            ready = graph.ready_nodes()
+            ready = ready_batch(graph, self.max_parallel_nodes)
             if not ready:
                 await asyncio.sleep(0)
                 # If no node is ready and we're not complete, that means
@@ -291,37 +354,40 @@ class Orchestrator:
             if loops > max_loops:
                 logger.error("orchestrator stuck after {} loops", loops)
                 break
-            for node_key in ready:
-                if self._stopping(session):
-                    return
-                await self._advance(session, node_key)
-                if session.waiting_for_feedback:
-                    self._persist_state(session, status="waiting_feedback")
-                    return
+            async with asyncio.TaskGroup() as group:
+                for node_key in ready:
+                    if self._stopping(session):
+                        break
+                    group.create_task(self._advance(session, node_key), name=f"node:{run_id}:{node_key}")
+            if session.waiting_for_feedback:
+                self._persist_state(session, status="waiting_feedback")
+                return
 
         if self._stopping(session):
             return
-        await self._write_evaluation_scorecard(session)
+        quality_gate = await self._write_evaluation_scorecard(session)
         states = graph.all_states()
         failed_nodes = sorted(
             key for key, state in states.items() if state == NodeState.FAILED
         )
-        terminal_status = "failed" if failed_nodes else "completed"
-        lifecycle_event = "run.failed" if failed_nodes else "run.completed"
+        quality_blocked = quality_gate.get("completion_allowed") is False
+        terminal_status = "failed" if failed_nodes or quality_blocked else "completed"
+        lifecycle_event = "run.failed" if terminal_status == "failed" else "run.completed"
         self._persist_state(session, status=terminal_status)
         await self._publish_state(session, channel="run.lifecycle", payload={
             "event": lifecycle_event,
             "run_id": run_id,
             "states": {key: state.value for key, state in states.items()},
             "failed_nodes": failed_nodes,
+            "quality_gate": quality_gate,
             "failure_summary": (
                 f"{len(failed_nodes)} run node(s) failed"
                 if failed_nodes
-                else None
+                else "run completion quality gate rejected the result" if quality_blocked else None
             ),
         })
 
-    async def _write_evaluation_scorecard(self, session: RunSession) -> None:
+    async def _write_evaluation_scorecard(self, session: RunSession) -> dict[str, Any]:
         try:
             from app.bridge.evaluation_service import emit_scorecard_event
             from app.harness.evaluation.aggregation import write_scorecard
@@ -347,12 +413,19 @@ class Orchestrator:
                 path=event_path,
                 bus=session.bus,
             )
-        except Exception as exc:  # pragma: no cover - scorecard is non-blocking
+            gate_path = session.run.subdir("events") / "evaluation_quality_gate.json"
+            return json.loads(gate_path.read_text())  # type: ignore[no-any-return]
+        except Exception as exc:
             logger.warning(
                 "evaluation scorecard write failed: run={} error={}",
                 session.run.run_id,
                 exc,
             )
+            from app.bridge.evaluation_policy import policy_for_task
+            policy = policy_for_task(session.run.meta.get("evaluation_policy"))
+            enforced = policy["run"]["completion_gate"]["mode"] == "enforce"
+            return {"completion_allowed": not enforced, "quality_status": "error",
+                    "error": "evaluation scorecard unavailable", "scientific_validated": False}
 
     async def _advance(self, session: RunSession, node_key: str) -> None:
         if self._stopping(session):
@@ -441,11 +514,20 @@ class Orchestrator:
                 else:
                     await runner(session.run, node_key)
         except Exception as exc:
+            from app.harness.runtime.task_contract import FailureEnvelope
+            from app.harness.agent_loop.trace import atomic_json
+            details = getattr(exc, "reason", {})
+            code = str(details.get("code", "agent_node_failed")) if isinstance(details, dict) else "agent_node_failed"
+            failure = FailureEnvelope(task_id=f"{session.run.run_id}:{node_key}", code=code,
+                message=str(exc) or type(exc).__name__,
+                invocation_id=self._resume_invocations.get((session.run.run_id, node_key)),
+                outcome_known=code == "handoff_context_missing")
+            atomic_json(session.run.root / "input/node_failures" / (node_key + ".json"), failure.model_dump())
             await self._transition(session, node_key, NodeState.FAILED)
             await self._publish_state(
                 session,
                 channel=f"run.{session.run.run_id}.failure",
-                payload={"node": node_key, "error": str(exc)},
+                payload={"node": node_key, "error": str(exc), "failure": failure.model_dump()},
             )
             return False
         return True
@@ -625,7 +707,10 @@ class Orchestrator:
         if parse_node_key(node_key).stage == "execution":
             await self._transition(session, node_key, NodeState.RUNNING)
             try:
-                from app.bridge.agent_runner import _run_execution_batch
+                from app.bridge.agent_runner import _run_execution_batch, load_agent_handoff_context
+                from app.bridge.task_runtime import admit_handoffs
+                supplied, _ = load_agent_handoff_context(session.run, node_key, registry=self.registry)
+                admit_handoffs(session.run, node_key, supplied_context=supplied)
                 from app.harness.tools.registry import (
                     ToolContext,
                     get_registry as get_tool_registry,
@@ -641,12 +726,14 @@ class Orchestrator:
                         bus=session.bus,
                     )
                     summary_path = session.run.subdir("execution") / "batch_summary.json"
-                    summary = (
-                        summary_path.read_text(encoding="utf-8")
-                        if summary_path.exists()
-                        else "{}"
-                    )
-                    return {"summary": summary}
+                    import json
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    metrics = json.loads((session.run.subdir("execution") / "metrics.json").read_text())
+                    return {
+                        "backend": summary["runtime_backend"], "run_id": session.run.run_id,
+                        "max_concurrency": summary["max_concurrency"], "results": metrics,
+                        "failures": summary["failures"], "summary": summary,
+                    }
 
                 tool_result = await get_tool_registry().dispatch(
                     "execution.batch_runner",
@@ -874,7 +961,10 @@ class Orchestrator:
         from app.bridge.agent_runner import run_agent_node
 
         async def _real(run: RunHandle, key: str) -> None:
-            await run_agent_node(run, key, bus=self.bus, registry=self.registry)
+            session = self.session(run.run_id)
+            await run_agent_node(run, key, bus=self.bus, registry=self.registry,
+                resume_invocation=self._resume_invocations.get((run.run_id, key)),
+                predecessor_task_ids=[f"{run.run_id}:{parent}" for parent in sorted(session.graph.predecessors(key))])
 
         return _real
 
@@ -1183,6 +1273,7 @@ class Orchestrator:
             waiting_for_feedback=waiting,
             read_only=read_only,
             termination=snapshot.termination if snapshot is not None else None,
+            state_revision=snapshot.revision if snapshot is not None else 0,
         )
         self._sessions[run_id] = session
         return session
@@ -1285,7 +1376,7 @@ class Orchestrator:
         return payload if isinstance(payload, dict) else {}
 
     def _persist_state(self, session: RunSession, *, status: str) -> None:
-        RunStateStore(session.run).write(
+        session.state_revision = RunStateStore(session.run).write(
             graph=session.graph,
             request={
                 "task": session.request.task,
@@ -1298,6 +1389,7 @@ class Orchestrator:
             },
             status=status,
             termination=session.termination,
+            expected_revision=session.state_revision,
         )
 
     @staticmethod

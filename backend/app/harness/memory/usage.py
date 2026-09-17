@@ -42,6 +42,7 @@ def append_memory_usage(
         rows.append(
             {
                 "schema": "memory_usage.v1",
+                "phase": "prepared_for_context",
                 "created_at": created,
                 "agent": agent,
                 "node_key": node_key,

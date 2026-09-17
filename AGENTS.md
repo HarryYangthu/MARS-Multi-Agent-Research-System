@@ -12,7 +12,7 @@ MARS = 研究型多 Agent 系统的底座(Multi-Agent Research System)。
 
 - 后端:Python 3.11 / FastAPI / python-socketio / asyncio / Redis
 - 前端:Next.js 15 / Tailwind / shadcn/ui / Socket.IO 客户端
-- Agent 编排:LangGraph(V0 默认实现,但 BaseAgent 接口不绑死,可替换)
+- Agent 编排:MARS native runtime(真实调度与恢复);LangGraph 仅导出拓扑,BaseAgent 执行器可替换
 - 知识库:ChromaDB(4 个独立 collection)
 - LLM Backends:Anthropic / OpenAI / Qwen / Gemini API + 本地 vLLM serve
 - 部署:Docker Compose,单机 4 × NVIDIA L40S

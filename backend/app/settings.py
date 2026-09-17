@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # === Mode flags ===
     mars_runtime_mode: Literal["development", "staging", "production"] = "development"
     mars_mock_mode: Literal["never"] = "never"
-    mars_graph_engine: Literal["langgraph", "legacy"] = "langgraph"
+    mars_graph_engine: Literal["mars_native", "langgraph", "legacy"] = "mars_native"
     mars_distribution: Literal["v30-core", "v31-wireless"] = "v30-core"
     mars_project_pack_paths: str = ""
     mars_execution_backend: Literal[
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
         "opencode",
         "codex",
         "claude_code",
-    ] = "opencode"
+    ] = "native_llm"
     mars_log_level: str = "INFO"
     mars_default_project: str = "pimc"
     mars_folder_projects_registry: str = ""
@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     mars_context_max_tokens: int = 32_000
     mars_context_target_tokens: int = 24_000
     mars_context_auto_compress: bool = True
+    mars_context_memory_injection: bool = True
     mars_context_tool_raw_externalize: bool = True
     mars_context_workbench_enabled: bool = True
 

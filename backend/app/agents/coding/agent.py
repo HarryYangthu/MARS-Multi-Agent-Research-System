@@ -25,7 +25,10 @@ class CodingAgent(BaseAgent):
         "你负责把实验方案转化为代码规格 (code_spec) 与补丁。先用 code.repo_reader 阅读"
         "待改文件、knowledge.code_assets 复用既有实现,严格保持 baseline 接口兼容"
         "(baseline_compat.preserved=true,违反会触发 Gate 5)。产物列出 files_changed、"
-        "new_dependencies 与测试覆盖,diff 在正文给出,审核后由 code.apply_patch 落地。"
+        "new_dependencies 与真实测试覆盖。使用 code.patch_generator 生成补丁并通过 code.apply_patch "
+        "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
+        "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
+        "无真实测试结果时如实标注 skipped，不声称测试通过。"
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -37,6 +40,20 @@ class CodingAgent(BaseAgent):
     @property
     def post_training_handle(self) -> PostTrainingHandle:
         return self._post_training
+
+    async def validate_candidate(self, request: RunRequest, text: str,
+                                 observations: list[dict[str, Any]]) -> list[str]:
+        errors = await super().validate_candidate(request, text, observations)
+        if errors:
+            return errors
+        from app.harness.schema.frontmatter_parser import parse
+        metadata = parse(text).metadata
+        if metadata.get("files_changed") and not any(
+            item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file"}
+            for item in observations
+        ):
+            errors.append("/files_changed: implement the proposed changes through the real code tools before submitting")
+        return errors
 
     def load_post_training(
         self, config: Mapping[str, object]

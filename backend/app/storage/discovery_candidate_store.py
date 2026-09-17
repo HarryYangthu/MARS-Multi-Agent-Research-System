@@ -13,6 +13,7 @@ from app.harness.discovery.models import (
 )
 from app.storage.discovery_common import (
     DiscoveryConflictError,
+    DiscoveryCorruptionError,
     DiscoveryPaths,
     InvalidDiscoveryTransition,
     atomic_write_json,
@@ -275,8 +276,17 @@ class CandidateStore:
                     history_files = iter_json_files(directory)
                     if not history_files:
                         continue
-                    latest = CandidateRecord.model_validate(read_json(history_files[-1]))
-                    current = self._get_unlocked(latest.candidate_id)
+                    if [path.name for path in history_files] != [f"{i:020d}.json" for i in range(1, len(history_files) + 1)]:
+                        raise DiscoveryCorruptionError(f"candidate history sequence gap: {directory}")
+                    history = [CandidateRecord.model_validate(read_json(path)) for path in history_files]
+                    latest = history[-1]
+                    if any(record.run_id != self.paths.run_id or record.candidate_id != latest.candidate_id
+                           for record in history) or directory.name != stable_key(latest.candidate_id):
+                        raise DiscoveryCorruptionError(f"candidate history identity mismatch: {directory}")
+                    try:
+                        current = self._get_unlocked(latest.candidate_id)
+                    except (DiscoveryCorruptionError, ValueError):
+                        current = None  # Mutable pointer is repairable from validated immutable history.
                     if current != latest:
                         atomic_write_json(self._candidate_path(latest.candidate_id), model_payload(latest))
                         repaired += 1

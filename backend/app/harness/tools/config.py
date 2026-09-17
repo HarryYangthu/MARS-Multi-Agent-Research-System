@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,11 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     description: str = ""
+    mcp_kind: str = ""
+    mcp_tool: str = ""
+    mcp_env: tuple[str, ...] = ()
+    process_backend: str = "local_process"
+    require_isolation: bool = False
 
 
 @dataclass(frozen=True)
@@ -36,7 +42,7 @@ class CommandSpec:
 
 
 def load_tool_configs() -> dict[str, ToolConfig]:
-    path = repo_root() / "configs" / "tools.yaml"
+    path = _host_config_path("MARS_TOOLS_CONFIG_PATH", "tools.yaml")
     raw = _load_yaml(path)
     tools_raw = raw.get("tools", {})
     out: dict[str, ToolConfig] = {}
@@ -44,13 +50,14 @@ def load_tool_configs() -> dict[str, ToolConfig]:
         return out
     for name, cfg_raw in tools_raw.items():
         cfg = cfg_raw if isinstance(cfg_raw, dict) else {}
+        remote = bool(cfg.get("mcp_kind") or cfg.get("mcp_tool"))
         out[str(name)] = ToolConfig(
             enabled=bool(cfg.get("enabled", True)),
             adapter=str(cfg.get("adapter", "local") or "local"),
-            mutation_level=str(cfg.get("mutation_level", "read") or "read"),
+            mutation_level=str(cfg.get("mutation_level", "write" if remote else "read") or "write"),
             allowed_agents=_str_tuple(cfg.get("allowed_agents")),
             timeout_seconds=_float(cfg.get("timeout_seconds"), 30.0),
-            requires_approval=bool(cfg.get("requires_approval", False)),
+            requires_approval=bool(cfg.get("requires_approval", remote)),
             network=bool(cfg.get("network", False)),
             bridge_only=bool(cfg.get("bridge_only", False)),
             runtime_bound=bool(cfg.get("runtime_bound", False)),
@@ -59,6 +66,11 @@ def load_tool_configs() -> dict[str, ToolConfig]:
             input_schema=cfg.get("input_schema") if isinstance(cfg.get("input_schema"), dict) else None,
             output_schema=cfg.get("output_schema") if isinstance(cfg.get("output_schema"), dict) else None,
             description=str(cfg.get("description", "") or ""),
+            mcp_kind=str(cfg.get("mcp_kind") or ""),
+            mcp_tool=str(cfg.get("mcp_tool") or ""),
+            mcp_env=_str_tuple(cfg.get("mcp_env")),
+            process_backend=str(cfg.get("process_backend") or "local_process"),
+            require_isolation=bool(cfg.get("require_isolation", False)),
         )
     return out
 
@@ -68,7 +80,7 @@ def tool_config(name: str) -> ToolConfig:
 
 
 def load_execution_config() -> dict[str, Any]:
-    path = repo_root() / "configs" / "execution.yaml"
+    path = _host_config_path("MARS_EXECUTION_CONFIG_PATH", "execution.yaml")
     raw = _load_yaml(path)
     settings = get_settings()
     execution = raw.get("execution", {})
@@ -155,3 +167,14 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _host_config_path(variable: str, filename: str) -> Path:
+    """Host-only override, never selected by tool arguments or candidate files."""
+    configured = os.environ.get(variable, "")
+    if not configured:
+        return repo_root() / "configs" / filename
+    path = Path(configured)
+    if not path.is_absolute() or not path.is_file():
+        raise ValueError(f"{variable} must identify an existing absolute host configuration file")
+    return path.resolve()
