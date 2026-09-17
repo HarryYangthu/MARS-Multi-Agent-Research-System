@@ -1,0 +1,13 @@
+[
+  {
+    "run_id": "2026-09-17T1932_real_cpu_polynomial_regression_quadratic_ols_candidate_vs_linear_ridge_baseline",
+    "metrics": {
+      "baseline_mse": 31.110267053009647,
+      "candidate_mse": 1.1175529490631001e-30,
+      "candidate_terms": 3.0,
+      "improvement": 31.110267053009647
+    },
+    "fingerprint_hash": "sha256:9df42596e293f5d2f00f2a610b8bb160dbfc113b253ede940cb27271579aae12",
+    "duration_seconds": 0.44444166000175755
+  }
+]

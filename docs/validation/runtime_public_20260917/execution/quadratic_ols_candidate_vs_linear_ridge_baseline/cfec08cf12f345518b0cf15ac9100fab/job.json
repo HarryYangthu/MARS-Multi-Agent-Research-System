@@ -1,0 +1,17 @@
+{
+  "config": {
+    "attempt": 1,
+    "data_path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/uploads/datasets/20260917T193218_folder_3d60b6ac4cc842a498b7e65534660f3d_dataset_6a49e7bd/dataset.json",
+    "data_source_id": "20260917T193218_folder_3d60b6ac4cc842a498b7e65534660f3d_dataset_6a49e7bd",
+    "label": "quadratic_ols_candidate_vs_linear_ridge_baseline",
+    "seed": 0
+  },
+  "experiment_id": "quadratic_ols_candidate_vs_linear_ridge_baseline",
+  "invocation_id": "cfec08cf12f345518b0cf15ac9100fab",
+  "output_dir": "/workspace/scratch/e838b3fad9a5/mars-main-audit/runs/2026-09-17T1932_real_cpu_polynomial_regression/execution/local_commands/quadratic_ols_candidate_vs_linear_ridge_baseline/cfec08cf12f345518b0cf15ac9100fab",
+  "project": "folder_3d60b6ac4cc842a498b7e65534660f3d",
+  "run_id": "2026-09-17T1932_real_cpu_polynomial_regression",
+  "schema": "local_command_request.v1",
+  "seed": 0,
+  "steps": 120
+}

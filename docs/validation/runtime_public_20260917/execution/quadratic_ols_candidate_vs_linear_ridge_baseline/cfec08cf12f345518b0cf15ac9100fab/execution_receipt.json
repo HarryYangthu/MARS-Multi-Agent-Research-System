@@ -1,0 +1,39 @@
+{
+  "argv": [
+    "/workspace/scratch/503bc40507e3/mars-audit/.venv-ci/bin/python",
+    "/workspace/scratch/e838b3fad9a5/mars-main-audit/scripts/run_runtime_e2e.py",
+    "--regression-command",
+    "--fixture",
+    "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/runtime_e2e_public_20260917"
+  ],
+  "command_files": [
+    {
+      "path": "/root/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11",
+      "sha256": "sha256:1e761eb19d6f2594ab8dc64bd99ad4e1753589f3bf1ec199e4eef3aaa21e3930"
+    },
+    {
+      "path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/scripts/run_runtime_e2e.py",
+      "sha256": "sha256:ed162317931926f4bbbff15b36bb53932890b9311396c81b9c8a1a205a04f901"
+    }
+  ],
+  "duration_seconds": 0.44444166000175755,
+  "error": "",
+  "evidence": [
+    {
+      "bytes": 1550,
+      "kind": "measurement_evidence",
+      "path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/runs/2026-09-17T1932_real_cpu_polynomial_regression/execution/local_commands/quadratic_ols_candidate_vs_linear_ridge_baseline/cfec08cf12f345518b0cf15ac9100fab/measurement.json",
+      "sha256": "sha256:460639aee5b56a807b34f16d62b29f11b020a7d307f11945d16035ec3579a7f9"
+    }
+  ],
+  "execution_backend": "local_process",
+  "experiment_id": "quadratic_ols_candidate_vs_linear_ridge_baseline",
+  "invocation_id": "cfec08cf12f345518b0cf15ac9100fab",
+  "os_isolated": false,
+  "request_sha256": "sha256:ad015b659765040b81391a83ce662b7ea13c556f2a7e724aab13c06312bc39cd",
+  "result_sha256": "sha256:bb33d3d0fc9257be88a07264f25097f17d0c2842b8923c888c99cd9c25d13c57",
+  "returncode": 0,
+  "run_id": "2026-09-17T1932_real_cpu_polynomial_regression",
+  "schema": "local_command_receipt.v1",
+  "status": "completed"
+}

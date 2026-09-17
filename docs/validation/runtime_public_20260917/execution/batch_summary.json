@@ -1,0 +1,46 @@
+{
+  "experiments": [
+    "quadratic_ols_candidate_vs_linear_ridge_baseline"
+  ],
+  "failures": [],
+  "max_concurrency": 1,
+  "configured_max_concurrency": 1,
+  "attempt": 1,
+  "total": 1,
+  "plan_source": "execution_run_log",
+  "planned_before_intent_count": 1,
+  "intent_experiment_count": 1,
+  "intent_requested_sweep": false,
+  "configured_backend": "local_command",
+  "runtime_backend": "local_command",
+  "data_source": {
+    "channel_count": null,
+    "checksum": "sha256:ac4a2f1fe65591e1cc0ca8add1944cdc03851223d67790af71ed82b6c44c8a90",
+    "created_at": "2026-09-17T19:32:18.444063+00:00",
+    "description": "Actual fixed synthetic numerical x/y pairs copied byte-for-byte from the public synthetic_regression pack. Use seed 0: shuffle indices, train on first eight samples and assess on last three, no overlap. Fit actual normalized polynomial ridge regressions; normalization uses training inputs only. This is an engineering fixture, not a claim about PIMC captures or scientific novelty.",
+    "dict_entries": [],
+    "dtype": "float64",
+    "format": "json",
+    "fs_mhz": null,
+    "id": "20260917T193218_folder_3d60b6ac4cc842a498b7e65534660f3d_dataset_6a49e7bd",
+    "is_default": false,
+    "kind": "auto",
+    "original_name": "dataset.json",
+    "preview_key": "dataset.json",
+    "project": "folder_3d60b6ac4cc842a498b7e65534660f3d",
+    "sample_points": 11,
+    "sample_rate_hz": null,
+    "shape": [
+      11
+    ],
+    "size_bytes": 263,
+    "spectrum_available": true,
+    "spectrum_path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/uploads/datasets/20260917T193218_folder_3d60b6ac4cc842a498b7e65534660f3d_dataset_6a49e7bd/spectrum.png",
+    "stored_path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/uploads/datasets/20260917T193218_folder_3d60b6ac4cc842a498b7e65534660f3d_dataset_6a49e7bd/dataset.json",
+    "warnings": [
+      "matplotlib \u4e0d\u53ef\u7528\uff0c\u4f7f\u7528\u7b80\u6613 PNG \u9891\u8c31\u9884\u89c8\uff1aNo module named 'matplotlib'"
+    ]
+  },
+  "data_source_passed_to_backend": true,
+  "data_source_consumed_by_backend": null
+}
