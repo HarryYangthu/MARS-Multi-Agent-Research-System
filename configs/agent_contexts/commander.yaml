@@ -2,11 +2,11 @@ agent: commander
 research_sites:
   - id: local_project_docs
     label: Local Project Docs
-    url: file://PRODUCT.md
+    url: file://README.md
     enabled: true
     source: default
-  - id: local_acceptance_docs
-    label: Local Acceptance Docs
-    url: file://ACCEPTANCE.md
+  - id: local_architecture_docs
+    label: Local Architecture Docs
+    url: file://docs/architecture.md
     enabled: true
     source: default

@@ -1,4 +1,4 @@
-"""3-layer context loader (DESIGN §7.2)."""
+"""3-layer context loader."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

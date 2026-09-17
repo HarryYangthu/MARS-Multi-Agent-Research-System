@@ -80,7 +80,7 @@ async def test_api_context_reaches_idea_and_experiment_after_recovery(
 
     # A previously recorded model document exercises full downstream carriage.
     # No Agent is run and no approval or measured success is fabricated here.
-    proposal = (repo_root() / "docs/evaluation/idea_delivery_proposal_20260907.md").read_text(encoding="utf-8")
+    proposal = (repo_root() / "backend/tests/fixtures/recorded_research/idea_delivery_proposal_20260907.md").read_text(encoding="utf-8")
     (session.run.subdir("idea") / "idea_proposal.approved.md").write_text(proposal, encoding="utf-8")
     downstream, _ = load_agent_handoff_context(recovered.run, "experiment")
     assert downstream["baseline_code"] == baseline

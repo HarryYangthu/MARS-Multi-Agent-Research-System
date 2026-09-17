@@ -1,6 +1,6 @@
 """Schema compliance test suite.
 
-Per ACCEPTANCE §4: each schema gets ≥20 samples (mix valid + invalid).
+Each schema gets ≥20 samples (mix valid + invalid).
 We use fixture functions that construct minimally-valid metadata, then
 parameterize valid variants and invalid mutations.
 

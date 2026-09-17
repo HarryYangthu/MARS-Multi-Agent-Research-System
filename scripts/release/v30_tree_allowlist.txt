@@ -4,11 +4,8 @@
 .env.example
 .env.production.example
 .importlinter
-ACCEPTANCE.md
 AGENTS.md
-DESIGN.md
 LICENSE
-PRODUCT.md
 README.md
 README.zh-CN.md
 backend/**

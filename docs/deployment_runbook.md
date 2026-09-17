@@ -127,7 +127,7 @@ run, receive events, approve HITL steps, and fetch artifacts.
 2. Run `bash scripts/acceptance.sh`.
 3. Deploy backend staging with `MARS_RUNTIME_MODE=staging`.
 4. Deploy Vercel Preview using the staging API URL.
-5. Run a mock/demo task and one real-provider smoke task.
+5. Run a bounded task with a real provider and inspect its recorded outputs.
 6. Deploy backend production.
 7. Deploy or promote Vercel production.
 8. Check `/health`, `/api/readiness`, WebSocket events, and one full run.
@@ -180,7 +180,7 @@ Recommended controls:
 Concurrency guardrails:
 
 - Tune `configs/execution.yaml::execution.max_concurrency`.
-- Keep expensive execution backends at lower concurrency than mock.
+- Set execution concurrency according to measured CPU/GPU capacity.
 - Use provider-side LLM rate limits and separate API keys for staging/prod.
 - Monitor Redis and backend memory with `docker stats`.
 
@@ -292,9 +292,9 @@ Gate 5 should block protected baseline paths, but allowed paths can still be
 too broad. Tighten `allowed_paths` and `protected_paths` in
 `projects/<name>/repo_link.yaml`, then add a gate/tool regression test.
 
-### Agents fall back to mock in production.
+### Model calls fail in production.
 
-They should not. Confirm:
+Failures must remain explicit; there is no supported mock fallback. Confirm:
 
 ```env
 MARS_RUNTIME_MODE=production

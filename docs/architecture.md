@@ -1,6 +1,6 @@
 # MARS Architecture
 
-> 当前代码架构速览。详细产品语义见 `PRODUCT.md`,详细模块设计见 `DESIGN.md`。
+> 当前代码架构速览。使用说明见 `../README.md`，CLI 研究流程见 `cli-research.md`。
 
 ## 1. One-screen Overview
 
@@ -171,7 +171,7 @@ backend/app/harness/evaluation/             Eval reports and scorecards
 backend/app/harness/kb/models.py            MemoryRecord v2
 backend/app/storage/self_evolution_store.py Manual-review self-evolution
 backend/app/harness/observability/          Events, traces, LangSmith mirror
-backend/app/execution/                      Mock/local execution runners
+backend/app/execution/                      Local and remote execution runners
 configs/agents.yaml                         Agent/model/tool config
 configs/tools.yaml                          Tool control plane
 configs/memory.yaml                         Memory governance
@@ -181,10 +181,6 @@ configs/observability.yaml                  Observability sinks
 
 ## 9. Reading Order
 
-1. `PRODUCT.md`: what the product is.
-2. `DESIGN.md`: current implementation design.
-3. `docs/run_lifecycle.md`: run timeline.
 4. `docs/tools_catalog.md`: tool list and audit contract.
 5. `docs/evaluation_system.md`: evaluation model.
-6. `docs/observability_design.md`: event/trace model.
 7. `docs/tool_security.md`: dispatch, rollback, network policy.
