@@ -138,6 +138,10 @@ async def test_real_training_and_sealed_finalization_on_tensor_fixture(tmp_path:
     assert trained["optimizer_steps"] == 2
     assert trained["stop_reason"] == "max_steps"
     assert trained["training_diagnostics"]["first_update_loss"] > 0
+    curve = trained["training_curve"]
+    assert curve["optimizer_observations"] == 2 and curve["validation_observations"] >= 2
+    assert curve["contains_test_data"] is False
+    assert Path(curve["path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert len((tmp_path / "train/steps.jsonl").read_text().splitlines()) == 2
     assert trained["selected_optimizer_steps"] <= 2
     assert "test" not in trained

@@ -20,6 +20,7 @@ async def run_worker(job: dict[str, Any], output: Path, timeout: int) -> dict[st
     with (output / "worker.log").open("w", encoding="utf-8") as log:
         process = await start_process(command, cwd=Path(job["repo"]), stdout=log, stderr=asyncio.subprocess.STDOUT,
             env=sanitized_subprocess_environment(overrides={"PYTHONDONTWRITEBYTECODE": "1", "CUDA_VISIBLE_DEVICES": "",
+                "MPLCONFIGDIR": str(output / ".matplotlib"), "XDG_CACHE_HOME": str(output / ".cache"),
                 "PIMC_CFG": str(Path(job["repo"]) / "configs/base.yaml"),
                 "PYTHONPATH": str(Path(__file__).resolve().parents[2])}))
         atomic_json(output / "process.json", {"pid": process.pid, "command": command})

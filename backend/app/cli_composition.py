@@ -9,7 +9,9 @@ from loguru import logger
 
 from app.agents.base import BaseAgent, RunRequest
 from app.agents.idea.focused_agent import FocusedIdeaAgent
-from app.agents.research_cli import ResearchAnalysisAgent, ResearchCodingAgent
+from app.agents.research_cli import (
+    ResearchAnalysisAgent, ResearchCodingAgent, ResearchExperimentAgent, ResearchFinalReportAgent,
+)
 
 
 class CliAgents:
@@ -28,8 +30,12 @@ class CliAgents:
                      "如用基线权重分解初始化，仅可在工厂内构造未训练的基线并分解，明确接口包装、复数因子尺度与退化处理。")
         elif stage == "coding":
             agent = ResearchCodingAgent(self.model, self.loop)
+        elif stage == "experiment":
+            agent = ResearchExperimentAgent(self.model, self.loop)
         elif stage == "analysis":
             agent = ResearchAnalysisAgent(self.model, self.loop)
+        elif stage == "final_report":
+            agent = ResearchFinalReportAgent(self.model, self.loop)
         else:
             raise ValueError("Unknown CLI research stage")
         logger.info("{}: {} / {}", stage, agent.name, agent.config.model_name)
@@ -45,7 +51,9 @@ class CliAgents:
             extra={"run_root": str(root), "scope": "project_proposal",
                    "required_upstream_refs": list(upstream),
                    "idea_requirements": requirements,
-                   "context_sources": {"project_rules": True, "code_repositories": False}})
+                   "context_sources": {"project_rules": True, "code_repositories": False,
+                       # Source context already contains the frozen project reference files.
+                       "project_references": "source_code" not in upstream}})
         context = await agent.build_context(request)
         artifact = await agent.run_loop(request, context)
         return artifact.text

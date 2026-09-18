@@ -14,19 +14,22 @@ from filelock import FileLock
 from loguru import logger
 import yaml
 
+from app.bridge.cli_research_report import write_report as write_report
 from app.execution.research_process import run_worker
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.harness.agent_loop.trace import atomic_json
+from app.harness.context.folder_context import discover_folder_context
 from app.harness.discovery.code_candidate import CodeCandidateSpec, TensorInterfaceSpec, code_candidate_spec_sha256
 from app.harness.discovery.code_materialization import (
     CodeBlobOperation, CodeMaterializationBundle, content_blob_path, content_sha256,
     materialize_code_workspace,
 )
 from app.harness.discovery.snapshots import SnapshotPolicy, create_snapshot, verify_snapshot
-from app.harness.discovery.source_commit import archive_source_commit
-from app.harness.project_workspace import open_folder
+from app.harness.discovery.source_commit import archive_source_commit, source_commit_diff
+from app.harness.project_workspace import folder_project, open_folder
+from app.harness.research_selection import freeze_selection, load_selection, worker_identity
 from app.harness.research_trial import ResearchBudget, compare, file_sha256, read_record, select_candidate
-from app.harness.schema.frontmatter_parser import dumps, parse
+from app.harness.schema.frontmatter_parser import parse
 from app.harness.schema.validator import validate_document
 from app.harness.tools.registry import ToolContext, get_registry
 from app.settings import repo_root
@@ -34,6 +37,13 @@ from app.settings import repo_root
 
 class ResearchAgents(Protocol):
     async def invoke(self, stage: str, project: str, task: str, upstream: dict[str, str], root: Path) -> str: ...
+
+
+def trial_retryable(state: dict[str, Any], name: str) -> bool:
+    previous = state["trials"].get(name)
+    if name.startswith("round_") and f"writing/{name}.md" in state.get("artifacts", {}):
+        return False
+    return previous is None or (previous.get("status") != "completed" and int(state["attempts"].get(name, 0)) < 2)
 
 
 def failed_stage_context(stage_root: Path) -> dict[str, str]:
@@ -109,6 +119,7 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
     for name in ("input", "context", "idea", "experiment", "coding", "execution", "writing", "hitl", "events"):
         (output / name).mkdir()
     project = open_folder(str(repo))
+    folder_context = discover_folder_context(project)
     source_files: list[str] = []
     for prefix in cfg["source_paths"]:
         path = repo / prefix
@@ -117,10 +128,17 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
                 relative = item.relative_to(repo)
                 if not any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
                     source_files.append(relative.as_posix())
+    source_files.extend(item["path"] for item in folder_context["files"])
     snapshot = create_snapshot(source_root=repo, cache_root=output / "source_snapshots", project=project.name,
         source_ref=str(repo), policy=SnapshotPolicy(allowed_paths=tuple(sorted(set(source_files))),
         ignore_patterns=("__pycache__/", "*.pyc", ".env*", "**/.env*")))
     context = {name: (snapshot.root / name).read_text(encoding="utf-8") for name in cfg["context_files"]}
+    for item in folder_context["files"]:
+        context[item["path"]] = (snapshot.root / item["path"]).read_text(encoding="utf-8")
+    for pattern in cfg.get("optional_context_files", []):
+        for path in sorted(snapshot.root.glob(pattern)):
+            if path.is_file():
+                context[path.relative_to(snapshot.root).as_posix()] = path.read_text(encoding="utf-8")
     frozen_commit = archive_source_commit(source_root=snapshot.root, git_dir=output / "source_commits/baseline.git",
         paths=[item.path for item in snapshot.manifest.files], environment=sanitized_subprocess_environment())
     atomic_json(output / "context/source.json", context)
@@ -129,6 +147,7 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
     source_status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True)
     manifest = {"schema": "cli_research.run.v1", "created_at": datetime.now(timezone.utc).isoformat(),
         "project": project.name, "repo": str(repo), "data": str(data), "task": task, "model": model,
+        "folder_context_files": {item["path"]: item["sha256"] for item in folder_context["files"]},
         "budget": budget.model_dump(), "source_snapshot": str(snapshot.root), "runtime_hashes": runtime_hashes(),
         "environment": runtime_environment(),
         "source_commit": revision.stdout.strip() if revision.returncode == 0 else None,
@@ -159,6 +178,12 @@ def verify_run(root: Path, manifest: dict[str, Any], state: dict[str, Any]) -> N
     if protocol["data_sha256"] is not None and file_sha256(Path(manifest["data"])) != protocol["data_sha256"]:
         raise ValueError("Dataset changed since the protocol was frozen")
     snapshot = verify_snapshot(Path(manifest["source_snapshot"]))
+    project = folder_project(manifest["project"])
+    if project is None or project.root != Path(manifest["repo"]):
+        raise ValueError("Registered project identity changed")
+    current_context = discover_folder_context(project)
+    if {item["path"]: item["sha256"] for item in current_context["files"]} != manifest.get("folder_context_files", {}):
+        raise ValueError("Project context changed; start a new run")
     # Research read tools use the connected checkout; it must still match the frozen source.
     for item in snapshot.manifest.files:
         if "sha256:" + file_sha256(Path(manifest["repo"]) / item.path) != item.sha256:
@@ -195,10 +220,17 @@ async def materialize(root: Path, manifest: dict[str, Any], candidate_id: str, d
         allowed_paths=tuple(manifest["configuration"]["source_paths"]), expected_touched_paths=(relative,),
         expected_entrypoint=relative, protected_paths=("tools", "configs", "libs/model.py"))
     candidate_commit = archive_source_commit(source_root=workspace.root, git_dir=root / "source_commits" / f"{candidate_id}.git",
-        paths=[item.path for item in workspace.manifest.files], environment=sanitized_subprocess_environment())
+        paths=[item.path for item in workspace.manifest.files], environment=sanitized_subprocess_environment(),
+        parent_git_dir=root / "source_commits/baseline.git", parent_commit=manifest["frozen_source_commit"])
+    patch_path = root / "coding" / f"{candidate_id}.patch"
+    patch_path.write_text(source_commit_diff(git_dir=root / "source_commits" / f"{candidate_id}.git",
+        commit=candidate_commit, parent_commit=manifest["frozen_source_commit"],
+        environment=sanitized_subprocess_environment()), encoding="utf-8")
     atomic_json(root / "coding" / f"{candidate_id}.receipt.json", {
         "spec": spec.model_dump(mode="json"), "bundle": bundle.model_dump(mode="json"),
         "workspace_manifest_sha256": workspace.manifest_sha256, "source_commit": candidate_commit, "gate5": "passed",
+        "parent_source_commit": manifest["frozen_source_commit"], "diff_path": str(patch_path),
+        "diff_sha256": file_sha256(patch_path), "upstream_source_commit": manifest["source_commit"],
         "scope": "add isolated candidate only; baseline/evaluator/config files protected"})
     return workspace.root / relative
 
@@ -227,6 +259,10 @@ class CliResearchService:
                 "frozen_protocol": json.dumps(protocol, ensure_ascii=False),
                 "goal": json.dumps(budget.model_dump(), ensure_ascii=False)}
             try:
+                selection = load_selection(root, state)
+                if selection is not None:
+                    await self.finalize(root, manifest, state, selection, base_context, budget)
+                    return state
                 preflight = await self.trial(root, manifest, state, "baseline_preflight", None, operation="preflight")
                 if preflight["status"] != "completed":
                     raise RuntimeError("Baseline/data preflight failed before model calls; see execution/baseline_preflight")
@@ -234,6 +270,11 @@ class CliResearchService:
                 state["status"] = "researching"
                 atomic_json(root / "state.json", state)
                 proposal = await self.artifact(root, manifest, state, "research", "idea/proposal.md", base_context)
+                state["status"] = "designing_experiment"
+                atomic_json(root / "state.json", state)
+                plan = await self.artifact(root, manifest, state, "experiment", "experiment/plan.md",
+                    {**base_context, "proposal": proposal})
+                base_context["experiment_plan"] = plan
                 if prepare_only:
                     code = await self.artifact(root, manifest, state, "coding", "coding/round_01.md", {**base_context, "proposal": proposal})
                     candidate_path = await materialize(root, manifest, "round_01", code)
@@ -256,7 +297,7 @@ class CliResearchService:
                         code = await self.artifact(root, manifest, state, "coding", f"coding/{candidate_id}.md",
                             {**base_context, "proposal": proposal, "experiments": json.dumps(previous, ensure_ascii=False),
                              "previous_analysis": feedback, "previous_code": previous_code})
-                        if candidate_id not in state["trials"]:
+                        if trial_retryable(state, candidate_id):
                             try:
                                 candidate_path = await materialize(root, manifest, candidate_id, code)
                                 result = await self.trial(root, manifest, state, candidate_id, candidate_path)
@@ -273,20 +314,10 @@ class CliResearchService:
                              "goal": base_context["goal"], "remaining_rounds": str(budget.rounds-index)})
                     candidates = [c for name, c in state["trials"].items() if name.startswith("round_")]
                     selected = select_candidate(baseline, candidates, budget)
-                    # Freeze selection before any final-test worker is launched. Never loop back after test.
-                    state["selected"] = selected["candidate_id"] if selected else None
-                    state["status"] = "finalizing"
-                    atomic_json(root / "state.json", state)
-                    if selected:
-                        final_baseline = await self.trial(root, manifest, state, "final_baseline", None, checkpoint=baseline)
-                        candidate_path = Path(selected["candidate_path"])
-                        final_candidate = await self.trial(root, manifest, state, "final_candidate", candidate_path, checkpoint=selected)
-                        if final_baseline["status"] != "completed" or final_candidate["status"] != "completed":
-                            raise RuntimeError("Final evaluation failed; no success claim is permitted")
-                        state["final_comparison"] = compare(final_baseline, final_candidate, budget, split="test")
-                        state["status"] = "goal_met_within_budget" if state["final_comparison"]["passed"] else "goal_not_met"
-                    else:
-                        state["status"] = "goal_not_met"
+                    freeze_selection(root, state, baseline, selected)
+                    selection = load_selection(root, state)
+                    assert selection is not None
+                    await self.finalize(root, manifest, state, selection, base_context, budget)
                 if state["status"] != "prepared_only":
                     state.pop("error", None)
             except (Exception, KeyboardInterrupt, asyncio.CancelledError) as exc:
@@ -298,11 +329,43 @@ class CliResearchService:
                 write_report(root, manifest, state)
             return state
 
+    async def finalize(self, root: Path, manifest: dict[str, Any], state: dict[str, Any],
+                       selection: dict[str, Any], base_context: dict[str, str], budget: ResearchBudget) -> None:
+        """A sealed run can only evaluate the chosen checkpoints and produce its report."""
+        baseline, selected = selection["baseline"], selection["candidate"]
+        if selected:
+            final_baseline = await self.trial(root, manifest, state, "final_baseline", None, checkpoint=baseline)
+            candidate_path = Path(selected["candidate_path"])
+            final_candidate = await self.trial(root, manifest, state, "final_candidate", candidate_path, checkpoint=selected)
+            if final_baseline["status"] != "completed" or final_candidate["status"] != "completed":
+                raise RuntimeError("Final evaluation failed; no success claim is permitted")
+            state["final_comparison"] = compare(final_baseline, final_candidate, budget, split="test")
+            state["status"] = "goal_met_within_budget" if state["final_comparison"]["passed"] else "goal_not_met"
+        else:
+            state["status"] = "goal_not_met"
+        numerical_status = state["status"]
+        state["numerical_status"] = numerical_status
+        state["status"] = "writing_report"
+        atomic_json(root / "state.json", state)
+        await self.artifact(root, manifest, state, "final_report", "writing/final.md",
+            {"proposal": (root / "idea/proposal.md").read_text(encoding="utf-8"),
+                 "experiment_plan": (root / "experiment/plan.md").read_text(encoding="utf-8"),
+             "frozen_protocol": base_context["frozen_protocol"], "goal": base_context["goal"],
+             "actual_results": json.dumps(state["trials"], ensure_ascii=False),
+             "selection": json.dumps({"selected": state.get("selected"),
+                 "comparison": state.get("final_comparison"), "numerical_status": numerical_status}, ensure_ascii=False),
+             "code_receipts": json.dumps({p.name: read_record(p) for p in sorted((root / "coding").glob("*.receipt.json"))}, ensure_ascii=False),
+             "failure_history": json.dumps(state.get("stage_failures", {}), ensure_ascii=False)})
+        state["status"] = numerical_status
+        state["completed_at"] = datetime.now(timezone.utc).isoformat()
+        state.pop("error", None)
+
     async def artifact(self, root: Path, manifest: dict[str, Any], state: dict[str, Any], stage: str,
                        relative: str, upstream: dict[str, str]) -> str:
         verify_run(root, manifest, state)
         path = root / relative
-        schema = {"research": "proposal.v1", "coding": "code_spec.v1", "analysis": "report.v1"}[stage]
+        schema = {"research": "proposal.v1", "experiment": "experiment_plan.v1", "coding": "code_spec.v1",
+                  "analysis": "report.v1", "final_report": "report.v1"}[stage]
         if relative in state["artifacts"]:
             return path.read_text(encoding="utf-8")
         attempts = state.setdefault("agent_attempts", {})
@@ -336,8 +399,14 @@ class CliResearchService:
                     candidate: Path | None, *, checkpoint: dict[str, Any] | None = None,
                     operation: Literal["train", "preflight"] = "train") -> dict[str, Any]:
         verify_run(root, manifest, state)
-        if name in state["trials"]:
+        identity = worker_identity(manifest, candidate, checkpoint, operation)
+        previous = state["trials"].get(name)
+        if previous is not None and previous.get("worker_identity") != identity:
+            raise ValueError("Cached worker result belongs to different inputs")
+        if not trial_retryable(state, name):
             return dict(state["trials"][name])
+        if name in state["trials"]:
+            state.setdefault("trial_history", {}).setdefault(name, []).append(state["trials"][name])
         budget = ResearchBudget.model_validate(manifest["budget"])
         attempt = int(state["attempts"].get(name, 0)) + 1
         if attempt > 2:
@@ -358,7 +427,8 @@ class CliResearchService:
         verify_run(root, manifest, state)
         if candidate and file_sha256(candidate) != candidate_hash:
             raise ValueError("Candidate source changed during execution")
-        result.update({"candidate_id": name, "candidate_path": str(candidate) if candidate else None})
+        result.update({"candidate_id": name, "candidate_path": str(candidate) if candidate else None,
+                       "worker_identity": identity})
         state["trials"][name] = result
         relative = Path(result["output"]).relative_to(root) / "result.json"
         state["artifacts"][relative.as_posix()] = file_sha256(root / relative)
@@ -366,32 +436,3 @@ class CliResearchService:
             state["artifacts"][candidate.relative_to(root).as_posix()] = file_sha256(candidate)
         atomic_json(root / "state.json", state)
         return result
-
-
-def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) -> None:
-    budget = ResearchBudget.model_validate(manifest["budget"])
-    body = [f"# CLI 研究报告\n\n状态：{state['status']}\n\n任务：{manifest['task']}",
-        f"\n目标：参数减少至少 {budget.reduction:.0%}；RES 退化不超过 {budget.max_degradation_db:g} dB。",
-        f"\n预算：每个方法最多 {budget.max_steps} 个 Adam 更新、{budget.timeout_seconds} 秒，最多 {budget.rounds} 轮候选。",
-        "\n基线与候选使用同一固定种子、划分、损失和预算。候选只依据验证集选择；选定后分别测试基线和候选。",
-        "\n此结果只代表固定数据划分与计算预算；少量更新不能证明模型收敛、多种子稳定性或普遍性能不变。",
-        "\n| 实验 | 状态 | 实参数量 | 验证 RES(dB) | 测试 RES(dB) | 更新数 |\n|---|---|---:|---:|---:|---:|"]
-    for name, trial in state["trials"].items():
-        body.append(f"| {name} | {trial['status']} | {trial.get('real_parameters', '—')} | "
-                    f"{trial.get('validation', {}).get('RES_db', '—')} | {trial.get('test', {}).get('RES_db', '—')} | {trial.get('optimizer_steps', '—')} |")
-    if state.get("error"):
-        body.append("\n阻塞或错误：" + state["error"])
-    if state.get("final_comparison"):
-        body.append("\n最终判定：\n```json\n" + json.dumps(state["final_comparison"], ensure_ascii=False, indent=2) + "\n```")
-    body.append("\n## 可复查证据\n\n固定输入与源码哈希：input/manifest.json；评测协议：experiment/protocol.json。")
-    for relative in state["artifacts"]:
-        if relative.endswith(".md"):
-            body.append(f"\n- [{relative}]({relative})")
-    body.append("\n模型调用与工具收据：stages/；候选代码与 Gate 5 收据：coding/、candidates/；实验日志、逐轮验证曲线和最优权重：execution/。")
-    metadata = {"schema": "report.v1", "project": manifest["project"], "agent": "writing",
-                "deliverable_type": "research_report", "target_audience": "研究者",
-                "chain_refs": {"proposal": "idea/proposal.md", "plan": "experiment/protocol.json", "runs": list(state["trials"])}}
-    text = dumps(metadata, "\n".join(body))
-    if not validate_document(text, expected_schema="report.v1").valid:
-        raise ValueError("Host report schema validation failed")
-    (root / "report.md").write_text(text, encoding="utf-8")

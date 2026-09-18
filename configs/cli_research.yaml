@@ -1,7 +1,10 @@
 schema: cli_research.config.v1
 adapter: pimc_static
 source_config: configs/static_cpu_50steps.yaml
-source_paths: [libs, tools, configs, AGENTS.md, README.md, docs, data/static/README.md]
+source_paths: [libs, tools, configs, AGENTS.md, README.md, docs, context, data/static/README.md]
+optional_context_files:
+  - context/**/*.md
+  - docs/PIMC_BACKGROUND.md
 context_files:
   - AGENTS.md
   - data/static/README.md
