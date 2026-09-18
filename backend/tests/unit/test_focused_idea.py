@@ -72,6 +72,25 @@ def test_actual_focused_configuration_uses_different_models_and_no_delegation() 
     assert "min_sources" not in research_schema()["properties"]
 
 
+def test_cli_author_configuration_is_frozen_without_changing_independent_review() -> None:
+    from app.bridge.cli_research_service import configuration
+    from app.agents.research_cli import ResearchCodingAgent
+
+    settings = configuration()
+    normal = FocusedIdeaAgent()
+    bounded = FocusedIdeaAgent(author_settings=settings["research_author"])
+    assert not bounded.config.thinking_enabled
+    assert bounded.config.request_timeout_seconds == 360
+    assert normal.config.thinking_enabled
+    assert bounded.service_profile_snapshot["reviewer"] == normal.service_profile_snapshot["reviewer"]
+    assert bounded.service_profile_snapshot["source_sha256"] != normal.service_profile_snapshot["source_sha256"]
+    assert bounded.service_profile_snapshot["author"]["model"] != bounded.service_profile_snapshot["reviewer"]["model"]
+    coding = ResearchCodingAgent("deepseek-v4-flash", settings["coding_loop"], generation=settings["generation"])
+    assert not coding.config.thinking_enabled
+    assert coding.config.request_timeout_seconds == 360
+    assert coding.config.raw["loop"]["mode"] == "reflection"
+
+
 @pytest.mark.asyncio
 async def test_actual_focused_permissions_reach_schema_validation_before_network(tmp_path: Path) -> None:
     agent = FocusedIdeaAgent()

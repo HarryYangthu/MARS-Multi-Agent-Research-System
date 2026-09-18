@@ -57,9 +57,11 @@ research_context不是旧的research_assessment/research_links，不生成委派
 class FocusedIdeaAgent(IdeaAgent):
     agent_brief = BRIEF
 
-    def __init__(self) -> None:
+    def __init__(self, *, author_settings: dict[str, Any] | None = None) -> None:
         path = repo_root() / "configs/idea_focused.yaml"
         settings = yaml.safe_load(path.read_text())
+        if author_settings is not None:
+            settings["author"] = {**settings["author"], **author_settings}
         if not get_settings().mars_web_search_provider:
             settings["tools"] = [tool for tool in settings["tools"] if tool != "search.web_search"]
         original = get_agent_config(settings.get("author_agent", "idea"))

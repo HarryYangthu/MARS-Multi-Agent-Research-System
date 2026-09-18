@@ -1,11 +1,53 @@
 """Immutable validation-only selection and exact worker input identities."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import re
 from typing import Any
 
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.research_trial import file_sha256, read_record
+
+
+_SERVICE_FIELDS = frozenset({"candidate_id", "candidate_path", "worker_identity"})
+
+
+def verify_trial_archive(root: Path, state: dict[str, Any], name: str,
+                         trial: dict[str, Any]) -> None:
+    """Match cached measurements to their receipt, retaining legacy raw archives."""
+    output = trial.get("output")
+    if output is None:
+        # Gate/materialization failures precede a worker and contain no measurements.
+        if (trial.get("status") != "failed" or trial.get("candidate_id") != name
+                or not isinstance(trial.get("error"), str)
+                or set(trial) - {"status", "candidate_id", "error"}):
+            raise ValueError("Worker evidence has no archived output")
+        return
+    if not isinstance(output, str):
+        raise ValueError("Worker output path is invalid")
+    directory = Path(output)
+    expected_parent = (root / "execution" / name).resolve()
+    if (directory.is_symlink() or directory.resolve().parent != expected_parent
+            or re.fullmatch(r"attempt_[0-9]{2}", directory.name) is None):
+        raise ValueError("Worker output does not belong to the recorded trial")
+    path = directory / "result.json"
+    relative = path.resolve().relative_to(root.resolve()).as_posix()
+    if path.is_symlink() or state["artifacts"].get(relative) != file_sha256(path):
+        raise ValueError("Archived worker result changed or lacks a receipt")
+    archived = read_record(path)
+    if trial.get("candidate_id") != name:
+        raise ValueError("Cached worker name changed")
+    # Existing result.json files omit the three fields added by the service.
+    # Accept enriched archives too, but never discard a conflicting envelope.
+    for key in _SERVICE_FIELDS.intersection(archived):
+        if key not in trial or archived[key] != trial[key]:
+            raise ValueError("Archived worker envelope differs from state")
+    cached_payload = {k: v for k, v in trial.items() if k not in _SERVICE_FIELDS}
+    archived_payload = {k: v for k, v in archived.items() if k not in _SERVICE_FIELDS}
+    if json.dumps(cached_payload, sort_keys=True, allow_nan=False) != json.dumps(
+            archived_payload, sort_keys=True, allow_nan=False):
+        raise ValueError("Cached worker measurements differ from archived results")
 
 
 def load_selection(root: Path, state: dict[str, Any]) -> dict[str, Any] | None:

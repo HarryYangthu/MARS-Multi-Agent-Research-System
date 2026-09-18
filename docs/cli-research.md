@@ -37,7 +37,7 @@ mars resume ./runs/pimc20
 
 上述步骤适用于包含本次 CLI 改动的主干版本。需要复现实验时，记录实际 `git rev-parse HEAD`，使用该提交重新创建运行；历史下载补丁只用于对应旧基点，不应重复应用到已包含这些改动的主干。
 
-`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Analysis 模型，调研仍使用现有 `configs/idea_focused.yaml` 的 Pro 作者与 Flash 审查者；各 Agent 保留独立模型配置。研究命令启用公共文献检索并保存工具收据，默认来源域名见 `configs/cli_research.yaml`。
+`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型，调研仍使用 Pro 作者与 Flash 审查者。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：生成阶段关闭 thinking、单请求上限 360 秒，独立研究审查保持原有 thinking 配置。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。
 
 ## 一次运行发生什么
 

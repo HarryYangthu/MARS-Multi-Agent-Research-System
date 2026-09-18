@@ -15,27 +15,29 @@ from app.agents.research_cli import (
 
 
 class CliAgents:
-    def __init__(self, model: str, loop: dict[str, Any]) -> None:
+    def __init__(self, model: str, loop: dict[str, Any], *, research_author: dict[str, Any] | None = None,
+                 generation: dict[str, Any] | None = None) -> None:
         self.model, self.loop = model, loop
+        self.research_author, self.generation = research_author, generation
 
     async def invoke(self, stage: str, project: str, task: str, upstream: dict[str, str],
                      root: Path) -> str:
         agent: BaseAgent
         if stage == "research":
-            agent = FocusedIdeaAgent()
+            agent = FocusedIdeaAgent(author_settings=self.research_author)
             task += ("\n本次 CLI 执行契约：只新增 libs/research_candidate.py，提供 build_model(config) 工厂。"
                      "config 只有 channels=16、baseline 架构配置和 context；返回保持 complex64 [time,16] 的模型。"
                      "可以复用已有模型组件，但不能修改 tools/、configs/、libs/model.py 或评测器。"
                      "所有方法从固定种子重新初始化并使用相同更新预算；不得使用训练后的基线 checkpoint 或追加拟合预算。"
                      "如用基线权重分解初始化，仅可在工厂内构造未训练的基线并分解，明确接口包装、复数因子尺度与退化处理。")
         elif stage == "coding":
-            agent = ResearchCodingAgent(self.model, self.loop)
+            agent = ResearchCodingAgent(self.model, self.loop, generation=self.generation)
         elif stage == "experiment":
-            agent = ResearchExperimentAgent(self.model, self.loop)
+            agent = ResearchExperimentAgent(self.model, self.loop, generation=self.generation)
         elif stage == "analysis":
-            agent = ResearchAnalysisAgent(self.model, self.loop)
+            agent = ResearchAnalysisAgent(self.model, self.loop, generation=self.generation)
         elif stage == "final_report":
-            agent = ResearchFinalReportAgent(self.model, self.loop)
+            agent = ResearchFinalReportAgent(self.model, self.loop, generation=self.generation)
         else:
             raise ValueError("Unknown CLI research stage")
         logger.info("{}: {} / {}", stage, agent.name, agent.config.model_name)

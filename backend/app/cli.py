@@ -105,7 +105,9 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
     if not env_or_local("MARS_WEB_SEARCH_ALLOWLIST"):
         set_runtime_env({"MARS_WEB_SEARCH_ALLOWLIST": ",".join(manifest["configuration"]["source_domains"])})
     set_runtime_env({"MARS_ENABLE_NETWORK_TOOLS": "true"})
-    service = CliResearchService(CliAgents(manifest["model"], manifest["configuration"]["coding_loop"]))
+    service = CliResearchService(CliAgents(manifest["model"], manifest["configuration"]["coding_loop"],
+        research_author=manifest["configuration"].get("research_author"),
+        generation=manifest["configuration"].get("generation")))
     state = await service.run(root, prepare_only=bool(getattr(options, "prepare_only", False)))
     return {"status": state["status"], "error": state.get("error"), "run": str(root), "report": str(root / "report.md"),
             "final_comparison": state.get("final_comparison")}

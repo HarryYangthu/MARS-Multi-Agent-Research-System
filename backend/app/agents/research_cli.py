@@ -55,10 +55,10 @@ class ResearchCodingAgent(BaseAgent):
         "when present in host feedback; never predict fabricated achieved scores. Explain in Chinese."
     )
 
-    def __init__(self, model: str, loop: dict[str, Any]) -> None:
+    def __init__(self, model: str, loop: dict[str, Any], *, generation: dict[str, Any] | None = None) -> None:
         original = get_agent_config(self.name)
         super().__init__(agent_config=replace(original, model_name=model, tools=(),
-            raw={**original.raw, "loop": loop}, debate_enabled=False))
+            raw={**original.raw, "loop": loop}, debate_enabled=False, **(generation or {})))
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
         return await self._draft_via_llm(request, context)

@@ -27,7 +27,7 @@ from app.harness.discovery.code_materialization import (
 from app.harness.discovery.snapshots import SnapshotPolicy, create_snapshot, verify_snapshot
 from app.harness.discovery.source_commit import archive_source_commit, source_commit_diff
 from app.harness.project_workspace import folder_project, open_folder
-from app.harness.research_selection import freeze_selection, load_selection, worker_identity
+from app.harness.research_selection import freeze_selection, load_selection, verify_trial_archive, worker_identity
 from app.harness.research_trial import ResearchBudget, compare, file_sha256, read_record, select_candidate
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.schema.validator import validate_document
@@ -191,6 +191,8 @@ def verify_run(root: Path, manifest: dict[str, Any], state: dict[str, Any]) -> N
     for relative, expected in state["artifacts"].items():
         if file_sha256(root / relative) != expected:
             raise ValueError(f"Archived evidence changed: {relative}")
+    for name, trial in state["trials"].items():
+        verify_trial_archive(root, state, name, trial)
 
 
 async def materialize(root: Path, manifest: dict[str, Any], candidate_id: str, document: str) -> Path:
@@ -243,7 +245,10 @@ class CliResearchService:
         with FileLock(str(root / "run.lock"), timeout=0):
             manifest, state = read_record(root / "input/manifest.json"), read_record(root / "state.json")
             verify_run(root, manifest, state)
+            selection = load_selection(root, state)
             if state["status"] in {"goal_met_within_budget", "goal_not_met"}:
+                if selection is None:
+                    raise ValueError("Terminal research run requires a frozen selection")
                 return state
             budget = ResearchBudget.model_validate(manifest["budget"])
             protocol = read_record(root / "experiment/protocol.json")
@@ -259,7 +264,6 @@ class CliResearchService:
                 "frozen_protocol": json.dumps(protocol, ensure_ascii=False),
                 "goal": json.dumps(budget.model_dump(), ensure_ascii=False)}
             try:
-                selection = load_selection(root, state)
                 if selection is not None:
                     await self.finalize(root, manifest, state, selection, base_context, budget)
                     return state
