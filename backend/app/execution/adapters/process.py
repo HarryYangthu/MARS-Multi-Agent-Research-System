@@ -20,6 +20,7 @@ from app.execution.adapters.workspace import (
     workspace_binding_for_receipt,
 )
 from app.execution.subprocess_env import sanitized_subprocess_environment
+from app.harness.tools.process_runtime import communicate_process, require_process_backend, start_process
 from app.harness.discovery.code_workspace_transfer import (
     CodeWorkspaceTransferPackage,
     CodeWorkspaceTransferError,
@@ -38,12 +39,15 @@ class ProcessAdapter:
     env: dict[str, str] | None = None
     workspace_resolver: WorkspaceResolver | None = None
     workspace_required: bool = False
+    process_backend: str = "local_process"
+    require_isolation: bool = False
 
     def __post_init__(self) -> None:
         if not self.argv or not self.argv[0].strip():
             raise ValueError("adapter argv must not be empty")
         if self.timeout_seconds <= 0:
             raise ValueError("adapter timeout must be positive")
+        require_process_backend(self.process_backend, require_isolation=self.require_isolation)
 
     async def invoke(self, request: AdapterRequest) -> AdapterResponse:
         if WORKSPACE_CONFIG_KEY in request.config:
@@ -117,8 +121,8 @@ class ProcessAdapter:
         cwd: Path | None,
     ) -> AdapterResponse:
         try:
-            process = await asyncio.create_subprocess_exec(
-                *self.argv,
+            process = await start_process(
+                self.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -141,13 +145,8 @@ class ProcessAdapter:
             )
         payload = request.model_dump_json().encode("utf-8")
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(payload),
-                timeout=self.timeout_seconds,
-            )
+            stdout, stderr = await communicate_process(process, input_data=payload, timeout=self.timeout_seconds)
         except TimeoutError:
-            process.kill()
-            await process.wait()
             return AdapterResponse(
                 request_id=request.request_id,
                 status="failed",

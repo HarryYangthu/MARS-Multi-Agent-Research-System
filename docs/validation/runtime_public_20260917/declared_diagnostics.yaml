@@ -1,0 +1,9 @@
+loop:
+  default_budget: 1
+  max_iterations: 1
+metrics:
+  improvement:
+    aggregation: min
+    direction: gte
+    target: 1.0e-12
+project: folder_3d60b6ac4cc842a498b7e65534660f3d

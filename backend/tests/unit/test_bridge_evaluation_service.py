@@ -85,3 +85,17 @@ async def test_emit_artifact_evaluation_event_writes_file_and_publishes(
         for line in events_path.read_text(encoding="utf-8").splitlines()
     ]
     assert events[-1]["event"] == "evaluation.artifact_evaluated"
+
+
+def test_missing_reports_are_not_automatically_approved(tmp_path: Path) -> None:
+    from app.storage.artifact_store import ArtifactRef
+    run = RunStore(tmp_path).create(task="missing-evaluation", project="pimc")
+    path = run.subdir("idea") / "idea_proposal.v1.md"
+    path.write_text(_proposal_text())
+    # An actual on-disk artifact without any evaluator output.
+    ref = ArtifactRef(run_id=run.run_id, agent_dir="idea", stem="idea_proposal", version="1", path=path)
+    summary = build_artifact_evaluation_summary(run=run, ref=ref)
+    assert summary["decision"] == "block"
+    assert summary["evaluation_status"] == "missing"
+    assert summary["policy"]["auto_approval_allowed"] is False
+    assert summary["policy"]["auto_approval_enforced"] is True

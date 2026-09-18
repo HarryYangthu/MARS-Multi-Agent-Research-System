@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
+
+from filelock import FileLock, Timeout
 
 from loguru import logger
 
@@ -26,9 +29,15 @@ class OwnedRunTasks:
         return run_id in self._cancelled
 
     def spawn(self, run_id: str, operation: str, factory: Callable[[], Awaitable[None]],
-              *, finished: Callable[[], None]) -> bool:
+              *, finished: Callable[[], None], lock_path: Path | None = None) -> bool:
         if self.closing or self.stopping(run_id) or self.active(run_id) is not None:
             return False
+        lock = FileLock(str(lock_path)) if lock_path is not None else None
+        if lock is not None:
+            try:
+                lock.acquire(timeout=0)
+            except Timeout:
+                return False
 
         async def execute() -> None:
             await factory()
@@ -44,7 +53,11 @@ class OwnedRunTasks:
                 if error is not None:
                     logger.error("Owned run task failed: run={} type={}", run_id, type(error).__name__)
             # Also executes when cancellation happened before execute() started.
-            finished()
+            try:
+                finished()
+            finally:
+                if lock is not None:
+                    lock.release()
 
         task.add_done_callback(done)
         return True

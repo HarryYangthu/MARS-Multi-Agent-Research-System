@@ -135,3 +135,15 @@ def test_concurrent_checkpoints_have_contiguous_sequences(tmp_path: Path) -> Non
 
     assert sorted(sequences) == list(range(1, 25))
     assert [item.sequence for item in store.replay()] == list(range(1, 25))
+
+
+def test_valid_but_stale_latest_cannot_hide_a_committed_checkpoint(tmp_path: Path) -> None:
+    store = DiscoveryCheckpointStore(tmp_path / "run", run_id="run-1")
+    first = store.checkpoint(phase="search", iteration=0, state={"cursor": 1}, idempotency_key="one")
+    stale = store.latest_path.read_bytes()
+    second = store.checkpoint(phase="search", iteration=1, state={"cursor": 2}, idempotency_key="two")
+    store.latest_path.write_bytes(stale)
+    assert second.sequence == first.sequence + 1
+    assert store.latest() == second
+    recovered = store.recover()
+    assert recovered is not None and recovered.state == {"cursor": 2}

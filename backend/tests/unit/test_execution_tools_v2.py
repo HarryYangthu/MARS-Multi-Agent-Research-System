@@ -27,7 +27,7 @@ async def test_unconfigured_batch_cannot_fabricate_execution_artifacts(tmp_path:
         ToolContext(
             run_id="r1",
             project="pimc",
-            agent="execution",
+            agent="bridge",
             extra={"run_root": str(run_root)},
         ),
     )
@@ -55,7 +55,7 @@ async def test_removed_metric_echo_command_is_rejected(tmp_path: Path) -> None:
         ToolContext(
             run_id="r1",
             project="pimc",
-            agent="execution",
+            agent="bridge",
             extra={"run_root": str(run_root)},
         ),
     )
@@ -77,7 +77,7 @@ async def test_non_mock_backend_requires_bridge_callback(tmp_path: Path) -> None
         ToolContext(
             run_id="r1",
             project="pimc",
-            agent="execution",
+            agent="bridge",
             extra={"run_root": str(run_root)},
         ),
     )
@@ -98,7 +98,7 @@ async def test_remote_gpu_backend_is_interface_only(tmp_path: Path) -> None:
         ToolContext(
             run_id="r1",
             project="pimc",
-            agent="execution",
+            agent="bridge",
             extra={"run_root": str(run_root)},
         ),
     )

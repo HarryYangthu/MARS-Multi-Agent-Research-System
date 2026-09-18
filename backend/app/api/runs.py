@@ -39,6 +39,9 @@ class CreateRunPayload(BaseModel):
     idea_context: dict[str, str] | None = None
     idea_scope: Literal["method_proposal", "project_proposal"] | None = None
     idea_requirements: IdeaRequirements | None = None
+    execution_context: dict[str, str] = Field(default_factory=dict)
+    evaluation_policy: dict[str, Any] | None = None
+    selected_skills_by_agent: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("idea_mode", mode="before")
     @classmethod
@@ -127,6 +130,12 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         request_extra["idea_budget_profile"] = payload.idea_budget_profile
     if payload.project_inputs:
         request_extra["project_inputs"] = dict(payload.project_inputs)
+    if payload.execution_context:
+        request_extra["execution_context"] = dict(payload.execution_context)
+    if payload.evaluation_policy is not None:
+        request_extra["evaluation_policy"] = dict(payload.evaluation_policy)
+    if payload.selected_skills_by_agent:
+        request_extra["selected_skills_by_agent"] = dict(payload.selected_skills_by_agent)
     request = RunRequest(
         task=payload.task,
         project=payload.project,
@@ -371,6 +380,21 @@ async def start_run(run_id: str) -> dict[str, str]:
     if not result["ok"]:
         raise HTTPException(status_code=409, detail=result)
     return {"status": str(result["status"]), "run_id": run_id}
+
+
+@router.post("/{run_id}/resume", status_code=202)
+async def resume_run(run_id: str) -> dict[str, Any]:
+    _ensure_active_run(run_id)
+    orch = get_orchestrator()
+    session = orch.session(run_id)
+    try:
+        assert_ready_for_run(project=session.run.project)
+    except ProductionReadinessError as exc:
+        raise HTTPException(status_code=503, detail=exc.report.to_dict()) from exc
+    result = orch.resume_owned_run(run_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 @router.post("/{run_id}/agents/{agent}/retry", status_code=202)

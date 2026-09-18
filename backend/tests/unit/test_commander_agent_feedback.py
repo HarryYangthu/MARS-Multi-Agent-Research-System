@@ -372,26 +372,26 @@ def test_self_evolution_mutation_requires_gate_and_approval(
     )
 
     assert proposal["status"] == "pending_review"
-    assert proposal["eval_gate"]["passed"] is True
+    assert proposal["proposal_gate"]["passed"] is True
+    assert proposal["eval_gate"]["passed"] is False
     assert context_store.list_agent_context_files("coding")[0].content == original.content
 
-    applied = approve_self_evolution_mutation(
-        run=run,
-        mutation_id=str(proposal["id"]),
-        reviewer_note="approved by HITL",
-        stores=stores,
-    )
+    with pytest.raises(ValueError, match="did not pass eval gate"):
+        approve_self_evolution_mutation(
+            run=run,
+            mutation_id=str(proposal["id"]),
+            reviewer_note="human review alone does not supply measured comparison",
+            stores=stores,
+        )
 
     loaded = {
         item.path: item
         for item in context_store.list_agent_context_files("coding", include_runtime_code=False)
     }
-    assert applied["status"] == "applied"
-    assert loaded[original.path].content == "Prefer focused patches and preserve tests."
-    assert list_self_evolution_mutations(run=run)[-1]["status"] == "applied"
+    assert loaded[original.path].content == original.content
+    assert list_self_evolution_mutations(run=run)[-1]["status"] == "pending_review"
     kb_records = stores.zone("methodology").all(exclude_mock=False)
-    assert kb_records
-    assert kb_records[-1].metadata["source_path"] == "agents/coding/prompts/repair.md"
+    assert not kb_records
 
 
 def test_self_evolution_mutation_reject_does_not_apply(

@@ -1,0 +1,29 @@
+{
+  "status": "passed",
+  "counts": {
+    "action_rounds": 2,
+    "model_requests": 3,
+    "model_responses": 3,
+    "observations": 2,
+    "protocol_repairs": 0,
+    "reflections": 0,
+    "sdk_attempts": 3,
+    "tool_dispatches": 2,
+    "validation_repairs": 0
+  },
+  "usage": {
+    "completion_tokens": 5594,
+    "prompt_tokens": 23030,
+    "total_tokens": 28624
+  },
+  "usage_complete": true,
+  "fingerprint": "b2922591125313e5acfb9155075c5b7cb0af0931e9b847ce7b6c19eae43a3c6f",
+  "correlation": {
+    "invocation_id": "1de0edd1c88a42d0bdae81e2c5039902",
+    "node_id": "experiment",
+    "parent_task_id": "2026-09-17T1932_real_cpu_polynomial_regression",
+    "task_id": "2026-09-17T1932_real_cpu_polynomial_regression:experiment",
+    "trace_id": "2026-09-17T1932_real_cpu_polynomial_regression"
+  },
+  "event_seq": 22
+}

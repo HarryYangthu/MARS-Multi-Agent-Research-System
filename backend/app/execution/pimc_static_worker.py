@@ -8,7 +8,6 @@ This process isolation is not an OS security sandbox for hostile Python code.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import importlib
 import importlib.util
 import json
@@ -18,8 +17,9 @@ import sys
 import time
 from typing import Any
 
+from app.execution.pimc_diagnostics import data_diagnostics, training_curve
 from app.harness.agent_loop.trace import atomic_json
-from app.harness.research_trial import file_sha256, read_record
+from app.harness.research_trial import candidate_factory_config, file_sha256, read_record
 
 
 def dependencies(repo: Path) -> tuple[Any, Any, Any, Any]:
@@ -45,7 +45,7 @@ def load_model(torch: Any, models: Any, cfg: dict[str, Any], candidate: Path | N
     # Dataclasses and postponed annotations resolve their defining module here.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    model = module.build_model({"channels": 16, "baseline": deepcopy(cfg["baseline"]), "context": cfg["context"]})
+    model = module.build_model(candidate_factory_config(cfg))
     if not isinstance(model, torch.nn.Module):
         raise TypeError("build_model(config) must return torch.nn.Module")
     return model
@@ -68,7 +68,8 @@ def check_model(torch: Any, evaluator: Any, model: Any, cfg: dict[str, Any]) -> 
     return dict(evaluator.parameter_counts(model))
 
 
-def load_splits(torch: Any, cfg: dict[str, Any], *, final: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+def load_splits(torch: Any, cfg: dict[str, Any], *, final: bool,
+                raw_metadata: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     path = Path(cfg["data_path"])
     if file_sha256(path) != cfg["data_sha256"]:
         raise ValueError("Dataset changed since the protocol was frozen")
@@ -79,6 +80,11 @@ def load_splits(torch: Any, cfg: dict[str, Any], *, final: bool) -> tuple[dict[s
     shape = arrays["x"].shape
     if len(shape) != 2 or shape[1] != 16 or any(v.shape != shape or not torch.isfinite(v).all() for v in arrays.values()):
         raise ValueError("Dataset requires equal finite x/y/nf arrays stored as [16,time]")
+    if raw_metadata is not None:
+        for name in arrays:
+            # Record structural metadata, without amplitude statistics from held-out samples.
+            source = torch.as_tensor(raw[name])
+            raw_metadata[name] = {"shape": list(source.shape), "dtype": str(source.dtype), "all_finite": True}
     n, guard, context = shape[0], cfg["split_guard"], cfg["context"]
     a = int(n * cfg["train_fraction"])
     b = int(n * (cfg["train_fraction"] + cfg["validation_fraction"]))
@@ -124,6 +130,8 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg["epochs"], eta_min=cfg["min_learning_rate"])
     best, selected, completed, best_epoch = float("inf"), {}, 0, 0
     training_steps: list[dict[str, Any]] = []
+    validation_history: list[dict[str, Any]] = []
+    curve: dict[str, Any] = {}
     started = time.monotonic()
     history = out / "history.jsonl"
     for epoch in range(cfg["epochs"] + 1):
@@ -149,10 +157,13 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
                 training_steps.append(update)
                 with (out / "steps.jsonl").open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(update, allow_nan=False) + "\n")
+                if completed == 1:
+                    curve = training_curve(training_steps, validation_history, out)
             if len(updates) == len(order):
                 scheduler.step()
         validation = score(evaluator, model, splits["validation"], cfg)
         row = {"epoch": epoch, "optimizer_steps": completed, "validation": validation}
+        validation_history.append(row)
         with history.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, allow_nan=False) + "\n")
         if validation["RES_db"] < best:
@@ -161,6 +172,7 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
             temporary = out / "best.tmp.pt"
             torch.save({"model": model.state_dict()}, temporary)
             temporary.replace(out / "best.pt")
+        curve = training_curve(training_steps, validation_history, out)
         if completed >= cfg["max_steps"] or epoch-best_epoch >= cfg["patience"]:
             break
     if completed < 1:
@@ -169,6 +181,7 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
     return {"validation": selected["validation"], "selected_epoch": selected["epoch"],
             "selected_optimizer_steps": selected["optimizer_steps"], "optimizer_steps": completed,
             "stop_reason": reason, "epochs_run": epoch, "requested_max_steps": cfg["max_steps"],
+            "training_curve": curve,
             "training_diagnostics": {"first_update_loss": training_steps[0]["training_loss"],
                 "last_update_loss": training_steps[-1]["training_loss"],
                 "min_gradient_norm": min(s["gradient_norm"] for s in training_steps),
@@ -199,9 +212,11 @@ def execute(job: dict[str, Any]) -> dict[str, Any]:
               "candidate_sha256": file_sha256(candidate) if candidate else None}
     if job["operation"] == "preflight":
         if cfg["data_sha256"] is not None:
-            _, bounds = load_splits(torch, cfg, final=False)
+            raw_metadata: dict[str, Any] = {}
+            splits, bounds = load_splits(torch, cfg, final=False, raw_metadata=raw_metadata)
             result["data_verified"] = True
             result["split_samples"] = bounds
+            result["data_diagnostics"] = data_diagnostics(torch, np, splits["train"], cfg, raw_metadata, out)
         return result
     final = job["operation"] == "finalize"
     splits, bounds = load_splits(torch, cfg, final=final)

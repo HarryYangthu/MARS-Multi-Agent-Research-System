@@ -19,6 +19,9 @@ from app.bridge.agent_registry import AgentRegistry, get_registry
 from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
+from app.bridge.task_runtime import admit_handoffs, bind_task
+from app.harness.agent_loop.trace import atomic_json
+from app.harness.runtime.task_contract import FailureEnvelope, ResultEnvelope
 from app.harness.execution_intent import (
     requested_experiment_count,
     wants_execution_sweep,
@@ -38,6 +41,8 @@ async def run_agent_node(
     bus: Any | None = None,
     revision_reason: str = "",
     registry: AgentRegistry | None = None,
+    resume_invocation: str | None = None,
+    predecessor_task_ids: list[str] | None = None,
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
@@ -66,6 +71,7 @@ async def run_agent_node(
         if (
             attempt == 1
             and not revision_reason
+            and resume_invocation is None
             and (run.subdir(stage) / f"{stem}.v1.md").exists()
         ):
             logger.info(
@@ -83,6 +89,7 @@ async def run_agent_node(
         user_request = user_request_path.read_text(encoding="utf-8")
 
     upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+    admit_handoffs(run, node_key, supplied_context=upstream)
     if revision_reason:
         run.write_event(
             "agent_events",
@@ -108,6 +115,21 @@ async def run_agent_node(
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
     request_extra = _load_run_request_extra(run)
+    skill_selection = request_extra.get("selected_skills_by_agent", {})
+    if not isinstance(skill_selection, dict):
+        raise ValueError("selected_skills_by_agent must be an object")
+    selected_skills = skill_selection.get(stage, [])
+    if not isinstance(selected_skills, list) or any(not isinstance(name, str) for name in selected_skills):
+        raise ValueError("selected skills must be explicit names")
+    request_extra["skills"] = selected_skills
+    task = bind_task(run, node_key, goal=user_request, upstream=upstream,
+                    output_schema=str(agent.output_schema), resume_invocation=resume_invocation,
+                    predecessor_task_ids=predecessor_task_ids)
+    request_extra.update(task.model_dump(include={"task_id", "parent_task_id", "node_id", "invocation_id", "parent_invocation_id"}))
+    request_extra["trace_id"] = run.run_id
+    request_extra["task_contract"] = task.model_dump()
+    if resume_invocation is not None:
+        request_extra["resume_invocation"] = resume_invocation
     request_extra.update(
         {
             "debate_progress_path": str(debate_path),
@@ -138,6 +160,12 @@ async def run_agent_node(
         else:
             artifact = await agent.draft(request, context)
     except Exception as exc:
+        failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+            code="agent_execution_failed", message=str(exc) or type(exc).__name__, outcome_known=False,
+            evidence_refs=[f"agent_traces/{stage}/{task.invocation_id}"])
+        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
+                    ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+                                   status="failed", failure=failure).model_dump())
         _write_agent_failure_diagnostic(
             run=run,
             node_key=node_key,
@@ -147,55 +175,27 @@ async def run_agent_node(
         )
         raise
 
-    # Validate; ALWAYS persist the artifact under <agent>/<stem>.v1.md, even
-    # when schema validation fails — the HITL UI will then show the validation
-    # errors and let the human fix the markdown directly. Never silently drop
-    # an invalid output (that used to cause the orchestrator to "latest is
-    # None"-fallback into auto-approve, skipping HITL entirely).
+    # Invalid output is evidence of failure, never a successful artifact version.
     validation = await agent.validate_output(artifact)
     art_store = ArtifactStore(run)
 
-    target_text = artifact.text
     if not validation.valid:
-        target_text = artifact.text + "\n\n<!-- VALIDATION ERRORS -->\n" + "\n".join(
-            f"- {e.path}: {e.message}" for e in validation.errors
-        )
-
-    try:
-        ref = art_store.write(text=artifact.text)
-    except ArtifactValidationError as exc:
-        # Schema-invalid output: write a v1 anyway (raw, bypassing validation)
-        # so HITL has something to render and edit.
-        from app.storage.artifact_store import SCHEMA_TO_AGENT, ArtifactRef
-
-        stem_for_node = next(
-            (s for _sid, (d, s) in SCHEMA_TO_AGENT.items() if d == stage),
-            stage,
-        )
-        target_dir = run.subdir(stage)
-        target_dir.mkdir(exist_ok=True)
-        target_path = target_dir / f"{stem_for_node}.v1.md"
-        annotated = artifact.text + "\n\n<!-- VALIDATION ERRORS -->\n" + "\n".join(
-            f"- {e.path}: {e.message}" for e in exc.result.errors
-        )
-        target_path.write_text(annotated, encoding="utf-8")
-        logger.warning(
-            "agent {} schema-invalid; v1 written for HITL ({}): {}",
-            node_key,
-            target_path.name,
-            exc.result.first_error(),
-        )
-        ref = ArtifactRef(
-            run_id=run.run_id,
-            agent_dir=stage,
-            stem=stem_for_node,
-            version="v1",
-            path=target_path,
-        )
-        art_store.write_eval_reports(
-            ref,
-            expected_schema=getattr(agent, "output_schema", None),
-        )
+        target = run.subdir(stage) / "invalid_outputs" / (task.invocation_id + ".md")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("x", encoding="utf-8") as handle:
+            handle.write(artifact.text)
+        failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+            code="output_schema_invalid", message=str(validation.first_error()),
+            evidence_refs=[target.relative_to(run.root).as_posix()])
+        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
+            ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="invalid",
+                           failure=failure).model_dump())
+        raise ArtifactValidationError(validation)
+    ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
+    atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
+        ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
+            artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
+            artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()).model_dump())
 
     logger.info("agent {} wrote {}", node_key, ref.path.relative_to(run.root))
     try:
@@ -215,7 +215,7 @@ async def run_agent_node(
             ref.path.name,
             exc,
         )
-    if stage == "coding" and attempt > 1:
+    if stage == "coding":
         _write_patch_diff(run=run, version=ref.version, artifact_text=artifact.text)
     # Phase 4: orchestrator owns the approval transition (HITL or auto).
 
@@ -232,84 +232,24 @@ async def run_agent_node(
             except OSError:
                 pass
 
-    # Phase 5: Context Manifest.
+    # Preserve the manifest from the actual model context; never reload live
+    # knowledge after execution and mislabel that reconstruction as consumed.
     try:
-        from app.harness.context.loader import build_context
-        from app.harness.context.manifest import write as write_manifest
         from app.harness.context.compiler import write_compiled_manifest
-
-        pack = build_context(
-            agent_role=stage,
-            output_schema=getattr(agent, "output_schema", ""),
-            project=run.project,
-            user_request=user_request,
-            upstream_handoff=upstream,
-            run_root=run.root,
-        )
-        memory_ids_raw = context.metadata.get(f"{stage}_approved_memory_ids", [])
-        memory_ids = (
-            [str(item) for item in memory_ids_raw]
-            if isinstance(memory_ids_raw, list)
-            else []
-        )
-        if memory_ids:
-            pack.metadata["memory_sources"] = {
-                "long_term_memory": "approved_only",
-                "long_term_memory_ids": memory_ids,
-            }
-        if feedback_context is not None:
-            budget_policy = feedback_context.get("budget_policy", {})
-            budget_policy_map = budget_policy if isinstance(budget_policy, dict) else {}
-            pack.metadata["feedback_context"] = {
-                "path": feedback_context["path"],
-                "target_agent": stage,
-                "attempt": attempt,
-                "original_chars": feedback_context["original_chars"],
-                "compressed_chars": feedback_context["compressed_chars"],
-                "max_tokens": feedback_context["max_tokens"],
-                "max_chars": feedback_context.get("max_chars"),
-                "clipped": feedback_context.get("clipped", False),
-                "context_refs": feedback_context.get("context_refs", []),
-                "loaded_refs": feedback_context.get("context_refs", []),
-                "prune_reasons": feedback_context.get("prune_reasons", []),
-                "budget_policy": budget_policy_map,
-                "injected": True,
-            }
-            pack.metadata["compression"] = {
-                "strategy": feedback_context.get("strategy", "bounded_commander_feedback"),
-                "clipped": feedback_context.get("clipped", False),
-                "original_chars": feedback_context["original_chars"],
-                "compressed_chars": feedback_context["compressed_chars"],
-                "dropped_full_diagnosis": bool(
-                    budget_policy_map.get("drop_full_diagnosis", True)
-                ),
-                "dropped_full_logs": bool(
-                    budget_policy_map.get("drop_full_logs", True)
-                ),
-                "dropped_full_curves": bool(
-                    budget_policy_map.get("drop_full_curves", True)
-                ),
-                "prune_reasons": feedback_context.get("prune_reasons", []),
-            }
-            memory_sources = pack.metadata.setdefault("memory_sources", {})
-            if isinstance(memory_sources, dict):
-                memory_sources["transient_feedback"] = True
-                memory_sources["episode_memory"] = "run-local"
-                memory_sources["long_term_memory"] = "approved_only"
-            pack.metadata["pollution_guards"] = {
-                "target_only": True,
-                "long_term_memory_requires_review": True,
-            }
-        write_manifest(run_root=run.root, pack=pack, agent_name=node_key)
         compiled_manifest = context.metadata.get("last_compiled_manifest")
         if isinstance(compiled_manifest, dict):
-            write_compiled_manifest(
-                run_root=run.root,
-                manifest=compiled_manifest,
-                agent_name=node_key,
-            )
-    except Exception as exc:  # pragma: no cover (manifest is best-effort)
-        logger.warning("manifest write failed: {}", exc)
+            write_compiled_manifest(run_root=run.root, manifest=compiled_manifest, agent_name=node_key)
+        atomic_json(run.root / "context" / (task.invocation_id + ".source_receipt.json"), {
+            "schema_id": "context.consumed_sources.v1", "invocation_id": task.invocation_id,
+            "task_id": task.task_id, "source": "actual_agent_context_metadata",
+            "compiled_manifest_available": isinstance(compiled_manifest, dict),
+            "required_upstream_refs": context.metadata.get("required_upstream_refs", []),
+            "feedback_context": feedback_context,
+            "sources": {key: value for key, value in context.metadata.items()
+                        if "skill" in key or "memory" in key or key in {"project_knowledge", "folder_context"}},
+        })
+    except Exception as exc:
+        logger.warning("actual context manifest persistence failed: {}", type(exc).__name__)
 
     if stage == "idea":
         try:
@@ -407,7 +347,13 @@ def load_agent_handoff_context(
     # Pick up upstream approved artifacts as handoff.
     from app.bridge.research_context import load_research_context
 
-    upstream = load_research_context(run, _load_run_request_extra(run, strict=True), allow_legacy=stage == "idea")
+    extras = _load_run_request_extra(run, strict=True)
+    upstream = load_research_context(run, extras, allow_legacy=stage == "idea")
+    execution_context = extras.get("execution_context", {})
+    if not isinstance(execution_context, dict) or any(not isinstance(k, str) or not isinstance(v, str)
+                                                    or not v.strip() for k, v in execution_context.items()):
+        raise ValueError("execution_context must contain named nonempty text")
+    upstream.update(execution_context)
     selected_data_source = _load_selected_data_source(run)
     if selected_data_source:
         upstream["input.selected_data_source"] = selection_summary(selected_data_source)
@@ -678,14 +624,23 @@ def _execution_intent_text(run: RunHandle) -> str:
     return "\n\n".join(part for part in parts if part.strip())
 
 
+def _planned_seed(name: str, config: dict[str, Any]) -> int:
+    seed = config.get("seed")
+    if seed is None:
+        return _stable_seed(name)
+    if type(seed) is not int or seed < 0:
+        raise ValueError("approved experiment seed must be a nonnegative integer")
+    return seed
+
+
 async def _run_execution_batch(
     *, run: RunHandle, node_key: str, bus: Any | None = None
 ) -> None:
     """Trigger the approved execution simulation batch.
 
     Reads `execution/run_log.approved.md` for the human-approved execution
-    plan. If the plan is absent, falls back to experiment-plan ablations and
-    then to a bounded default sweep. Publishes per-experiment WS events via the
+    plan. If the plan is absent, reads experiment-plan ablations; missing plans
+    fail closed. Publishes per-experiment WS events via the
     orchestrator's bus when provided.
     """
     from app.execution.batch_runner import BatchConfig, run_batch
@@ -807,7 +762,7 @@ async def _run_execution_batch(
             experiment_id=name,
             project=run.project,
             config={**cfg, "label": name, "attempt": attempt},
-            seed=_stable_seed(name),
+            seed=_planned_seed(name, cfg),
             run_root=run.root,
             plot_every_steps=int(cfg.get("plot_every_steps", 5)),
         )
@@ -822,8 +777,7 @@ async def _run_execution_batch(
 
     for r in outcome.results:
         write_run_log(run_root=run.root, result=r, project=run.project)
-        # Persist the REAL loss curve when the runner captured one; otherwise
-        # fall back to a re-derived synthetic curve.
+        # Only persist measured curve values; absence is not synthetic evidence.
         curve_values = r.loss_curve if getattr(r, "loss_curve", None) else []
         write_curve(
             run_root=run.root,
@@ -831,7 +785,7 @@ async def _run_execution_batch(
             metric_name="loss",
             values=curve_values,
         )
-    if outcome.results:
+    if any(result.loss_curve for result in outcome.results):
         from app.execution.pim_cancellation import plot_loss_curves
 
         batch_plot_curves = {
@@ -845,7 +799,7 @@ async def _run_execution_batch(
         plot_loss_curves(
             batch_plot_curves,
             run.subdir("execution") / "loss_curves_16.png",
-            title=f"{len(batch_plot_curves)}-experiment PIM Cancellation Loss",
+            title=f"{len(batch_plot_curves)}-experiment measured loss",
         )
     write_metrics_json(run_root=run.root, results=outcome.results)
 
@@ -864,13 +818,16 @@ async def _run_execution_batch(
         "configured_backend": backend,
         "runtime_backend": runtime_backend,
         "data_source": selected_data_source or {},
-        "data_source_consumed_by_backend": bool(
-            selected_data_source and runtime_backend == "paper_static"
-        ),
+        "data_source_passed_to_backend": bool(selected_data_source),
+        # Local commands receive the selected path, but generic dispatch cannot
+        # attest consumption; the command's own measurement evidence must do so.
+        "data_source_consumed_by_backend": True if selected_data_source and runtime_backend == "paper_static" else None,
     }
     (run.subdir("execution") / "batch_summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
+    if outcome.failures or len(outcome.results) != len(specs):
+        raise RuntimeError("actual execution batch failed; inspect execution/batch_summary.json")
 
 
 def _representative_execution_spec() -> tuple[str, dict[str, Any]]:

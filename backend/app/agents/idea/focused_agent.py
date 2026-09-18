@@ -15,6 +15,7 @@ from app.agents.idea.agent import IdeaAgent
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.delivery import delivery_errors
 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, research_schema
+from app.agents.idea.parameter_schema import parameter_budget_schema
 from app.agents.idea.runtime_profile import public_agent_configuration
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import get_agent_config, select_provider
@@ -57,9 +58,11 @@ research_context不是旧的research_assessment/research_links，不生成委派
 class FocusedIdeaAgent(IdeaAgent):
     agent_brief = BRIEF
 
-    def __init__(self) -> None:
+    def __init__(self, *, author_settings: dict[str, Any] | None = None) -> None:
         path = repo_root() / "configs/idea_focused.yaml"
         settings = yaml.safe_load(path.read_text())
+        if author_settings is not None:
+            settings["author"] = {**settings["author"], **author_settings}
         if not get_settings().mars_web_search_provider:
             settings["tools"] = [tool for tool in settings["tools"] if tool != "search.web_search"]
         original = get_agent_config(settings.get("author_agent", "idea"))
@@ -137,7 +140,7 @@ class FocusedIdeaAgent(IdeaAgent):
         req = request.extra.get("idea_requirements", {})
         if req.get("require_parameter_budget") or req.get("max_parameter_ratio"):
             schema["required"].append("parameter_budget")
-            schema["properties"]["parameter_budget"] = {"type": "object", "minProperties": 1}
+            schema["properties"]["parameter_budget"] = parameter_budget_schema()
         if req.get("require_evaluation_protocol"):
             from app.agents.idea.protocol import protocol_schema
             schema["required"].append("evaluation_protocol")

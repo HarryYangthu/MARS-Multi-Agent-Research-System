@@ -1,0 +1,18 @@
+version: 1
+skills:
+  evidence_research:
+    version: "1.0.0"
+    instructions: skills/evidence_research.md
+    required_tools: [knowledge.kb_query]
+    projects: []
+    acceptance:
+      output_schemas: [proposal.v1, research_report.v1]
+      required_tool_successes: [knowledge.kb_query]
+  baseline_change_review:
+    version: "1.0.0"
+    instructions: skills/baseline_change_review.md
+    required_tools: [code.repo_reader]
+    projects: []
+    acceptance:
+      output_schemas: [proposal.v1, experiment_plan.v1, code_spec.v1]
+      required_tool_successes: [code.repo_reader]

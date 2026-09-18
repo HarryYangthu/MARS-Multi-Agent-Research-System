@@ -38,6 +38,8 @@ def parser() -> argparse.ArgumentParser:
         else:
             command.add_argument("--task", default="在静态 PIMC 上减少至少20%的实参数量，RES性能不下降。完成调研、假设、代码修改、实验、分析与迭代。")
             command.add_argument("--output", type=Path)
+            command.add_argument("--reuse-research-from", type=Path,
+                                 help="Reuse a passed, audited research stage from an identical pre-test run; no new research API call")
             command.add_argument("--reduction", type=float, default=cfg["reduction"])
             command.add_argument("--max-degradation-db", type=float, default=cfg["max_degradation_db"])
             command.add_argument("--rounds", type=int, default=cfg["rounds"])
@@ -97,7 +99,8 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
         root = (options.output or repo / ".mars/runs" / stamp).expanduser().resolve()
         budget = ResearchBudget(reduction=options.reduction, max_degradation_db=options.max_degradation_db,
             rounds=options.rounds, max_steps=options.max_steps, timeout_seconds=options.timeout_seconds)
-        initialize(repo, data, root, options.task, options.model, budget)
+        initialize(repo, data, root, options.task, options.model, budget,
+                   reuse_research_from=options.reuse_research_from.expanduser().resolve() if options.reuse_research_from else None)
     else:
         root = options.run.expanduser().resolve()
     manifest = read_record(root / "input/manifest.json")
@@ -105,7 +108,9 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
     if not env_or_local("MARS_WEB_SEARCH_ALLOWLIST"):
         set_runtime_env({"MARS_WEB_SEARCH_ALLOWLIST": ",".join(manifest["configuration"]["source_domains"])})
     set_runtime_env({"MARS_ENABLE_NETWORK_TOOLS": "true"})
-    service = CliResearchService(CliAgents(manifest["model"], manifest["configuration"]["coding_loop"]))
+    service = CliResearchService(CliAgents(manifest["model"], manifest["configuration"]["coding_loop"],
+        research_author=manifest["configuration"].get("research_author"),
+        generation=manifest["configuration"].get("generation")))
     state = await service.run(root, prepare_only=bool(getattr(options, "prepare_only", False)))
     return {"status": state["status"], "error": state.get("error"), "run": str(root), "report": str(root / "report.md"),
             "final_comparison": state.get("final_comparison")}

@@ -16,6 +16,7 @@ from app.harness.discovery.models import (
 from app.storage.discovery_candidate_store import CandidateStore
 from app.storage.discovery_common import (
     DiscoveryConflictError,
+    DiscoveryCorruptionError,
     InvalidDiscoveryTransition,
     stable_key,
 )
@@ -159,6 +160,17 @@ def test_recovery_rebuilds_missing_current_pointer(tmp_path: Path) -> None:
 
     assert report.repaired_pointers == 1
     assert store.get("candidate-1") is not None
+
+
+def test_recovery_repairs_damaged_current_but_rejects_damaged_history(tmp_path: Path) -> None:
+    store = CandidateStore(tmp_path / "run", run_id="run-1")
+    original = store.put(_candidate("candidate-1"))
+    next(store.current_dir.glob("*.json")).write_text("truncated")
+    assert store.recover().repaired_pointers == 1
+    assert store.get("candidate-1") == original
+    next(store.history_root.glob("*/*.json")).write_text("truncated")
+    with pytest.raises(DiscoveryCorruptionError):
+        store.recover()
 
 
 def test_concurrent_candidate_writes_do_not_lose_records(tmp_path: Path) -> None:

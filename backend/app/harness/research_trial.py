@@ -1,6 +1,7 @@
 """Auditable trial identities and validation-only selection, independent of agents."""
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -17,6 +18,11 @@ class ResearchBudget(BaseModel):
     rounds: int = Field(default=3, ge=1, le=20)
     max_steps: int = Field(default=50, ge=1, le=100000)
     timeout_seconds: int = Field(default=1800, ge=1, le=86400)
+
+
+def candidate_factory_config(protocol: dict[str, Any]) -> dict[str, Any]:
+    """One exact factory interface shared by planning and the actual worker."""
+    return {"channels": 16, "baseline": deepcopy(protocol["baseline"]), "context": protocol["context"]}
 
 
 def file_sha256(path: Path) -> str:

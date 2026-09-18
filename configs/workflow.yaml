@@ -1,5 +1,8 @@
 workflow:
-  engine: langgraph
+  engine: mars_native
+  scheduler:
+    max_parallel_nodes: 2
+  graph_export: langgraph_compatible
   legacy_readonly_restore: true
   entrypoints:
     pipeline:

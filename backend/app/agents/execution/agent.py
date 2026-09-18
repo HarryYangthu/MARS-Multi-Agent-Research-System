@@ -1,109 +1,56 @@
-"""Execution Agent — request an execution plan; the bridge owns actual simulation."""
+"""Execution planning uses the real Agent loop; the bridge executes approved jobs."""
 from __future__ import annotations
 
+from typing import Any
+
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
-from app.harness.execution_intent import default_experiment_count, wants_execution_sweep
-from app.harness.schema.frontmatter_parser import dumps as fm_dumps
-
-
-def _representative_execution_plan() -> dict[str, object]:
-    return {
-        "name": "mem_16_lr_0p065",
-        "config": {
-            "expert_count": 16,
-            "learning_rate": 0.065,
-            "plot_every_steps": 5,
-        },
-    }
-
-
-def _default_execution_plan(*, limit: int | None = None) -> list[dict[str, object]]:
-    if limit == 1:
-        return [_representative_execution_plan()]
-
-    memories = [2, 4, 8, 16]
-    learning_rates = [0.045, 0.055, 0.065, 0.08]
-    out: list[dict[str, object]] = []
-    for memory in memories:
-        for lr in learning_rates:
-            out.append(
-                {
-                    "name": f"mem_{memory:02d}_lr_{str(lr).replace('.', 'p')}",
-                    "config": {
-                        "expert_count": memory,
-                        "learning_rate": lr,
-                        "plot_every_steps": 5,
-                    },
-                }
-            )
-    if limit is not None:
-        return out[:limit]
-    return out
+from app.harness.agent_loop.trace import digest
+from app.harness.schema.frontmatter_parser import parse
 
 
 class ExecutionAgent(BaseAgent):
     name = "execution"
     output_schema = "run_log.v1"
+    native_structured_delivery = True
     agent_brief = (
-        "你负责把代码规格转化为可执行的仿真批次并汇总 run_log。实际仿真由 Execution "
-        "流水线驱动(缺少真实执行依赖时明确失败);可用 execution.metrics_collector / "
-        "execution.log_streamer 读取已完成 run 的指标与日志来汇总结果。"
+        "根据已批准的 experiment_plan 与 code_spec 生成当前项目的真实执行计划。"
+        "planned_experiments 每项含唯一 name 和 config，config 必须保留方案明确指定的 seed。"
+        "只安排用户要求的实验，不套用其他项目的参数或默认扫描。"
+        "实际执行由 bridge 在批准后启动；本阶段不得调用执行工具或声称已有实验结果。"
+        "输出 execution_phase=planned、status=interrupted、is_mock=false，"
+        "metrics 只包含 planned_experiments 的数量。fingerprint_hash 是宿主给出的输入摘要，"
+        "不是实验测量收据。正文说明待执行计划与约束，不编造耗时、设备或指标。"
     )
 
-    async def draft(
-        self, request: RunRequest, context: ContextPack
-    ) -> Artifact:
-        intent_text = f"{request.user_request}\n\n{context.task}"
-        experiment_count = default_experiment_count(intent_text)
-        experiments = _default_execution_plan(limit=experiment_count)
-        max_concurrency = min(16, max(1, len(experiments)))
-        plan_kind = "参数扫描" if wants_execution_sweep(intent_text) else "按任务意图"
-        metadata = {
-            "schema": self.output_schema,
-            "project": request.project,
-            "agent": self.name,
-            "upstream_artifact": "code_spec.approved.md",
-            "run_id": "pending-human-approval",
-            "batch_size": 512,
-            "gpu_used": ["cpu-local"],
-            "duration_seconds": 0,
-            "status": "interrupted",
-            "metrics": {
-                "planned_experiments": len(experiments),
-                "max_concurrency": max_concurrency,
-                "plot_every_steps": 5,
-            },
-            "fingerprint_hash": "sha256:0000000000000000",
-            "is_mock": False,
-            "planned_experiments": experiments,
-            "requires_human_approval": True,
-        }
-        rows = "\n".join(
-            "| {idx} | `{name}` | `{expert}` | `{lr}` |".format(
-                idx=i + 1,
-                name=exp["name"],
-                expert=(exp["config"] if isinstance(exp["config"], dict) else {}).get(
-                    "expert_count", ""
-                ),
-                lr=(exp["config"] if isinstance(exp["config"], dict) else {}).get(
-                    "learning_rate", ""
-                ),
-            )
-            for i, exp in enumerate(experiments)
-        )
-        body = (
-            "# 执行计划\n\n"
-            f"Execution Agent 将在人工批准后运行以下 {len(experiments)} 组 PIM cancellation CPU 仿真"
-            f"（{plan_kind}）。\n"
-            "每组仿真每 5 次迭代覆盖刷新一次 loss PNG，前端可以在执行过程中看到曲线逐步下降。\n\n"
-            "| # | 实验 | Expert / memory taps | Learning rate |\n"
-            "|---:|---|---:|---:|\n"
-            f"{rows}\n\n"
-            f"批准该产物后，将启动 {len(experiments)} 组仿真批处理。"
-        )
-        return Artifact(
-            text=fm_dumps(metadata, body),
-            schema_id=self.output_schema,
-            metadata=metadata,
-            body=body,
-        )
+    def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
+        schema = super().submission_schema(request)
+        assert schema is not None
+        schema["required"] = list(dict.fromkeys(schema["required"] + ["planned_experiments", "execution_phase", "is_mock"]))
+        schema["properties"].update({
+            "status": {"const": "interrupted"},
+            "execution_phase": {"const": "planned"},
+            "is_mock": {"const": False},
+            "fingerprint_hash": {"const": "sha256:" + digest(request.upstream_artifacts)},
+            "metrics": {"type": "object", "required": ["planned_experiments"], "additionalProperties": False,
+                        "properties": {"planned_experiments": {"type": "integer", "minimum": 1}}},
+            "planned_experiments": {"type": "array", "minItems": 1, "items": {
+                "type": "object", "required": ["name", "config"], "additionalProperties": False,
+                "properties": {"name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$"},
+                               "config": {"type": "object", "properties": {"seed": {"type": "integer", "minimum": 0}}}}}},
+        })
+        return schema
+
+    async def validate_candidate(self, request: RunRequest, text: str, observations: list[dict[str, Any]]) -> list[str]:
+        errors = await super().validate_candidate(request, text, observations)
+        if errors:
+            return errors
+        metadata = parse(text).metadata
+        plans = metadata["planned_experiments"]
+        if len({item["name"] for item in plans}) != len(plans):
+            errors.append("/planned_experiments: experiment names must be unique")
+        if metadata["metrics"]["planned_experiments"] != len(plans):
+            errors.append("/metrics/planned_experiments: count must equal the actual plan length")
+        return errors
+
+    async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
+        return await self._draft_via_llm(request, context)

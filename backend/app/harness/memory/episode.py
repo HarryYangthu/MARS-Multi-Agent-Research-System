@@ -6,9 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-from app.harness.kb.embedder import cosine, embed
+from app.harness.kb.embedder import LEXICAL_VERSION, embed, lexical_similarity
 
 
 def index_episode_event(
@@ -24,6 +22,7 @@ def index_episode_event(
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "text": text,
         "embedding": embed(text).tolist(),
+        "embedding_version": LEXICAL_VERSION,
         "event": event,
     }
     with path.open("a", encoding="utf-8") as fh:
@@ -40,14 +39,14 @@ def search_episode_index(
     path = run_root / "memory" / "episode_index.jsonl"
     if not path.exists() or not query.strip():
         return []
-    q_vec = embed(query)
     hits: list[tuple[float, dict[str, Any]]] = []
     for row in _read_rows(path):
-        emb = row.get("embedding")
-        if not isinstance(emb, list):
+        text = row.get("text")
+        if not isinstance(text, str):
             continue
-        score = cosine(q_vec, np.array(emb, dtype=np.float32))
-        hits.append((score, row))
+        score = lexical_similarity(query, text)
+        if score >= 0.12:
+            hits.append((score, row))
     hits.sort(key=lambda item: item[0], reverse=True)
     return [{**row, "score": round(score, 6)} for score, row in hits[:top_k]]
 

@@ -54,6 +54,9 @@ def test_cycle_rejected() -> None:
     g.add_edge("a", "b")
     with pytest.raises(GraphError):
         g.add_edge("b", "a")
+    assert g.topological_order() == ["a", "b"]
+    assert g.successors("b") == set()
+    assert g.predecessors("a") == set()
 
 
 def test_unknown_edge_rejected() -> None:

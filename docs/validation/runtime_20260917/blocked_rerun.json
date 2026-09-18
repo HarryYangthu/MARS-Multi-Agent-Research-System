@@ -1,0 +1,104 @@
+{
+  "run_id": "2026-09-17T1739_real_cpu_polynomial_regression",
+  "project": "folder_09389e8f98994574b7d4cb1acfd77e77",
+  "status": "running",
+  "run_state": {
+    "created_at": "2026-09-17T17:39:58.491976+00:00",
+    "entrypoint": "pipeline",
+    "graph": {
+      "edges": [
+        {
+          "dst": "experiment",
+          "src": "idea"
+        },
+        {
+          "dst": "coding",
+          "src": "experiment"
+        },
+        {
+          "dst": "execution",
+          "src": "coding"
+        },
+        {
+          "dst": "writing",
+          "src": "execution"
+        }
+      ],
+      "entrypoints": [
+        "idea"
+      ],
+      "nodes": [
+        {
+          "key": "idea",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "idea"
+          },
+          "state": "running"
+        },
+        {
+          "key": "experiment",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "experiment"
+          },
+          "state": "pending"
+        },
+        {
+          "key": "coding",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "coding"
+          },
+          "state": "pending"
+        },
+        {
+          "key": "execution",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "execution"
+          },
+          "state": "pending"
+        },
+        {
+          "key": "writing",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "writing"
+          },
+          "state": "pending"
+        }
+      ]
+    },
+    "project": "folder_09389e8f98994574b7d4cb1acfd77e77",
+    "run_id": "2026-09-17T1739_real_cpu_polynomial_regression",
+    "states": {
+      "coding": "pending",
+      "execution": "pending",
+      "experiment": "pending",
+      "idea": "running",
+      "writing": "pending"
+    },
+    "status": "running",
+    "task": "real-cpu-polynomial-regression",
+    "termination": null
+  },
+  "created_at": "2026-09-17T17:39:58.295962+00:00",
+  "request_sha256": "c5bfa1371fbe142d43896ac713194a361d6e5fc6c1c4ebf9b41b1848e5352d89",
+  "task_config_sha256": "9755e42ca51b648ebe924c7dc6ecfa79e1de1289ca069fe0643f467a43bb8043",
+  "recorded_at": "2026-09-17T17:53:07.252531+00:00",
+  "completion_verified": false,
+  "runtime_commit": "faed677",
+  "external_blocker": {
+    "source": "execution automatic approval review",
+    "reason": "The triggering action starts an explicit GLM/Zhipu adapter check, so a DeepSeek connection is not a reasonable consequence of this command and lacks authorization in this request’s causal context.",
+    "workaround_attempted": false
+  },
+  "actual_config_path": "workspace/runtime_e2e_regression_verified_20260917/.mars/diagnostics.yaml",
+  "config_loader_verified": true
+}

@@ -17,6 +17,7 @@ from app.harness.agent_loop.executor import ProgressSink
 from app.harness.agent_loop.stop import StopCondition
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
+from app.harness.llm.accounting import guarded_complete, run_resource_scope
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 from app.harness.schema.validator import ValidationResult, validate_document
 from app.settings import repo_root
@@ -58,6 +59,7 @@ class ContextPack:
             agent_name=agent_name,
             output_schema=output_schema,
             schema_template=load_schema_template(output_schema),
+            preserve_upstream=True,
         )
         self.metadata["last_compiled_manifest"] = compiled.manifest
         return compiled.messages
@@ -110,19 +112,24 @@ class BaseAgent(ABC):
         from app.storage.agent_context_store import load_agent_code_repositories
         sources = {"project_rules": True, "code_repositories": True}
         configured = request.extra.get("context_sources", {})
-        if (not isinstance(configured, dict) or set(configured) - set(sources)
+        if (not isinstance(configured, dict) or set(configured) - (set(sources) | {"agent_resources", "memory", "project_references"})
                 or any(not isinstance(value, bool) for value in configured.values())):
-            raise ValueError("context_sources accepts only project_rules/code_repositories booleans")
+            raise ValueError("context_sources accepts only project_rules/code_repositories/agent_resources/memory/project_references booleans")
         sources.update(configured)
         required = request.extra.get("required_upstream_refs", [])
         if not isinstance(required, list) or any(x not in request.upstream_artifacts for x in required):
             raise ValueError("required_upstream_refs must name supplied upstream artifacts")
-        from app.harness.project_workspace import project_root
+        from app.harness.project_workspace import folder_project, project_root
         from app.harness.context.folder_context import load_folder_context, render_folder_context
         project_path = project_root(request.project)
-        folder_context = load_folder_context(
+        folder_context = (load_folder_context(
             request.project, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
-        rules_path = project_path / "AGENTS.md"
+            if sources.get("project_references", True) else None)
+        folder = folder_project(request.project) if sources["project_rules"] else None
+        rules_root = folder.root if folder is not None else project_path
+        rules_path = rules_root / "AGENTS.md"
+        if sources["project_rules"] and not rules_path.resolve().is_relative_to(rules_root.resolve()):
+            raise ValueError("project rules must remain inside the project folder")
         rules = (rules_path.read_text() if sources["project_rules"] and rules_path.is_file()
                  else "No project-specific rules supplied in this context.")
         repositories = (load_agent_code_repositories(self.name, project=request.project)
@@ -136,7 +143,8 @@ class BaseAgent(ABC):
         from app.harness.context.project_knowledge import load_project_knowledge
         knowledge, knowledge_record = (load_project_knowledge(
             project_path, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
-            if self.project_knowledge_enabled and folder_context is None else ("", {}))
+            if self.project_knowledge_enabled and sources.get("project_references", True)
+            and folder_context is None else ("", {}))
         if knowledge:
             rules_path_label = knowledge_record["source"]
             rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge
@@ -145,11 +153,65 @@ class BaseAgent(ABC):
             upstream[f"{self.name}_code_repositories"] = json.dumps(
                 [asdict(repository) for repository in repositories], ensure_ascii=False)
             metadata[f"{self.name}_code_repository_count"] = len(repositories)
+        self._prepare_runtime_context(request, upstream, metadata)
         return ContextPack(
             system=f"MARS {self.name} agent. {self.agent_brief}",
             project=f"Project: {request.project}.\nProject constraints:\n{rules}",
             task=request.user_request, upstream=upstream, metadata=metadata,
         )
+
+    def _prepare_runtime_context(self, request: RunRequest, upstream: dict[str, str],
+                                 metadata: dict[str, Any]) -> None:
+        from app.storage.agent_context_store import SUPPORTED_AGENTS, load_agent_runtime_resources
+        from app.harness.skills import load_selected_skills
+        from app.harness.context.injection_runtime import prepare_memory_context
+        from app.harness.agent_loop.trace import atomic_json, digest
+        from app.harness.persistence import path_lock
+        from app.harness.tools.config import tool_config
+
+        root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
+                        repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()
+        request.runtime["run_root"] = str(root)
+        invocation = str(request.extra.get("resume_invocation") or request.extra.get("invocation_id")
+                         or request.runtime.get("invocation_id") or digest({"root": str(root), "agent": self.name,
+                             "task": request.user_request, "upstream": request.upstream_artifacts})[:32])
+        if not invocation.replace("-", "").isalnum():
+            raise ValueError("invalid invocation ID")
+        request.runtime["invocation_id"] = invocation
+        metadata["run_root"] = str(root)
+        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        selected = request.extra.get("skills", [])
+        if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
+            raise ValueError("skills must be a list of registered skill IDs")
+        selection = load_selected_skills(selected, granted_tools=tools, project=request.project)
+        resources = (load_agent_runtime_resources(self.name,
+                     overrides=request.runtime.get("agent_resource_overrides"))
+                     if self.name in SUPPORTED_AGENTS and metadata["context_sources"].get("agent_resources", True) else None)
+        frozen = {"schema": "agent.context_resources.v1", "skills": selection.manifest,
+                  "resources": resources.manifest if resources else None}
+        path = root / "context" / "resources" / (digest({"agent": self.name, "invocation": invocation}) + ".json")
+        with path_lock(path.with_suffix(".lock")):
+            if path.exists():
+                if json.loads(path.read_text()) != frozen:
+                    raise ValueError("agent resources or skill version changed; start a new invocation")
+            else:
+                atomic_json(path, frozen)
+        if selection.context:
+            upstream["selected_skills"] = selection.context
+        if resources and resources.context:
+            upstream["agent_resources"] = resources.context
+        metadata["skills"] = selection.manifest
+        metadata["agent_resources"] = resources.manifest if resources else None
+        metadata["resource_snapshot"] = str(path)
+        request.runtime["skill_selection"] = selection
+        memory = prepare_memory_context(run_root=root, agent=self.name, node_key=invocation,
+                                        project=request.project, task=request.user_request,
+                                        max_tokens=None if metadata["context_sources"].get("memory", True) else 0)
+        if memory.text:
+            upstream["approved_memory"] = memory.text
+        metadata["memory"] = {"digest": memory.digest, "manifest_path": str(memory.manifest_path),
+                              "record_ids": [item["record_id"] for item in memory.manifest["records"]]}
+        request.runtime["memory_snapshot"] = memory
 
     async def validate_output(self, artifact: Artifact) -> ValidationResult:
         return validate_document(artifact.text, expected_schema=self.output_schema)
@@ -171,11 +233,43 @@ class BaseAgent(ABC):
         return await self.run_loop(request, await self.build_context(request))
 
     async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
-        artifact = await self.draft(request, context)
-        result = await self.validate_output(artifact)
-        if not result.valid:
-            raise RuntimeError("Agent output is not schema-valid: " + str(result.first_error()))
-        return artifact
+        from app.harness.context.injection_runtime import complete_memory_usage
+        outcome = "failed"
+        try:
+            root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
+                            repo_root() / "runs" / ("agent_" + uuid.uuid4().hex)))
+            request.extra["run_root"] = str(root)
+            with run_resource_scope(root):
+                artifact = await self.draft(request, context)
+            result = await self.validate_output(artifact)
+            if not result.valid:
+                raise RuntimeError("Agent output is not schema-valid: " + str(result.first_error()))
+            selection = request.runtime.get("skill_selection")
+            if selection is not None:
+                from app.harness.skills import skill_acceptance_errors
+                errors = skill_acceptance_errors(selection, output_schema=self.output_schema,
+                    observations=request.runtime.get("observations", []))
+                if errors:
+                    raise RuntimeError("Agent skill acceptance failed: " + "; ".join(errors))
+            outcome = "completed"
+            return artifact
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            snapshot = request.runtime.get("memory_snapshot")
+            if snapshot is not None:
+                try:
+                    complete_memory_usage(snapshot=snapshot, outcome=outcome)
+                except Exception as exc:
+                    # Usage feedback is ancillary. Preserve the original
+                    # execution exception/cancellation and expose the write
+                    # failure rather than turning a completed artifact into
+                    # an unexplained task failure.
+                    from loguru import logger
+                    request.runtime["memory_usage_error"] = str(exc)
+                    context.metadata["memory_usage_error"] = str(exc)
+                    logger.error("memory usage persistence failed: {}", exc)
 
     def _select_provider(self) -> tuple[LLMProvider, LLMConfig]:
         return select_provider(self._config)
@@ -189,7 +283,7 @@ class BaseAgent(ABC):
         if debate_role:
             config.extra["debate_role"] = debate_role
         try:
-            return await asyncio.wait_for(provider.complete(list(messages), config),
+            return await asyncio.wait_for(guarded_complete(provider, list(messages), config),
                                           timeout=llm_call_deadline_seconds(config))
         finally:
             await provider.close()
@@ -247,13 +341,44 @@ class BaseAgent(ABC):
             if submission_schema is not None:
                 errors.extend("/" + "/".join(str(p) for p in error.absolute_path) + ": " + error.message
                               for error in Draft202012Validator(submission_schema).iter_errors(validation.metadata))
+        selection = request.runtime.get("skill_selection")
+        if selection is not None:
+            from app.harness.skills import skill_acceptance_errors
+            errors.extend(skill_acceptance_errors(selection, output_schema=self.output_schema,
+                                                   observations=observations))
         return errors
 
     def reflection_rubric(self) -> str:
         return "Verify evidence, definitions, every numerical claim, falsifiability, and downstream implementation completeness."
 
     def loop_progress_sink(self, request: RunRequest, invocation: str) -> ProgressSink | None:
-        return request.progress_sink
+        sink = request.progress_sink
+        if sink is None:
+            return None
+
+        async def emit(event: dict[str, Any]) -> None:
+            kind = str(event.get("kind", ""))
+            messages = {
+                "started": "开始处理任务。", "action": "正在调用工具。",
+                "observation": "已收到工具观察。", "candidate": "候选产物已生成，等待验收。",
+                "validation": "正在检查产物约束。", "review": "已收到独立审查结果。",
+                "review_unit": "已完成一项审查。", "review_format_repaired": "审查格式已修复，等待独立复核。",
+                "finished": "本次执行已结束，结果以验收状态为准。",
+            }
+            if kind not in messages:
+                return
+            payload = {"kind": "review" if kind.startswith("review_") else kind,
+                       "phase": str(event.get("phase", kind)), "invocation": invocation,
+                       "message": messages[kind]}
+            try:
+                await sink(payload)
+            except Exception as exc:
+                # The loop's durable trace is authoritative; UI delivery must
+                # not turn a completed operation into a failed/replayed one.
+                from loguru import logger
+                logger.warning("Agent progress delivery failed: {}", type(exc).__name__)
+
+        return emit
 
     def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message] | None:
         return None
@@ -262,6 +387,7 @@ class BaseAgent(ABC):
         if not self.native_structured_delivery:
             return None
         schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
+        schema["properties"]["project"] = {**schema["properties"]["project"], "const": request.project}
         return schema
 
     def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
@@ -285,14 +411,23 @@ class BaseAgent(ABC):
         from app.harness.tools.registry import ToolContext
         from app.harness.tools.config import tool_config
         from app.harness.agent_loop.review import ExternalReview
-        run_root = Path(str(request.extra.get("run_root") or
+        run_root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
                             repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()
         request.extra["run_root"] = str(run_root)
-        invocation = str(request.extra.get("resume_invocation") or uuid.uuid4().hex)
+        invocation = str(request.extra.get("resume_invocation") or request.extra.get("invocation_id")
+                         or request.runtime.get("invocation_id") or uuid.uuid4().hex)
         if not invocation.replace("-", "").isalnum():
             raise ValueError("invalid invocation ID")
         trace_root = run_root / "agent_traces" / self.name / invocation
         context.metadata["loop_trace_root"] = str(trace_root)
+        correlation = {key: str(request.extra[key]) for key in
+                       ("task_id", "parent_task_id", "parent_invocation_id", "trace_id", "node_id")
+                       if request.extra.get(key) is not None}
+        correlation.update({str(key): str(value) for key, value in request.extra.get("correlation", {}).items()})
+        correlation.update(invocation_id=invocation)
+        correlation.setdefault("trace_id", str(request.extra.get("run_id", run_root.name)))
+        correlation.setdefault("node_id", str(request.extra.get("node_key", self.name)))
+        correlation.setdefault("task_id", correlation["node_id"])
         tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
         registry = self.loop_registry(request, context)
         read_tools = self.configured_read_tools()
@@ -313,8 +448,9 @@ class BaseAgent(ABC):
             review_provider=review[0] if review else None, review_config=review[1] if review else None,
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
                                      project=request.project, agent=self.name,
-                                     extra={"run_root": str(run_root)}, configured_read_scope=read_scope),
+                                     extra={"run_root": str(run_root), "correlation": correlation}, configured_read_scope=read_scope),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
+            correlation=correlation, context_metadata=dict(context.metadata),
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),
             progress_sink=self.loop_progress_sink(request, invocation),
             review_messages=self.review_messages(request, context),
@@ -326,6 +462,7 @@ class BaseAgent(ABC):
                              if "external_review" in request.extra else None),
         ))
         context.metadata["loop_status"] = result.status
+        request.runtime["observations"] = result.observations
         context.metadata["reflection_accepted"] = result.reflection_accepted
         if result.status != "passed":
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")

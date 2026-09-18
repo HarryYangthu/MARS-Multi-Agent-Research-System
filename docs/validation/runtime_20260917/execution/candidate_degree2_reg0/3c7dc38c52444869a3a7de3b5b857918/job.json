@@ -1,0 +1,17 @@
+{
+  "config": {
+    "attempt": 1,
+    "data_path": "/workspace/scratch/e838b3fad9a5/mars-main-audit/workspace/uploads/datasets/20260917T172424_folder_6dffbd8f7afc43dc99bc9d814673e3c9_dataset_fcbadc7c/dataset.json",
+    "data_source_id": "20260917T172424_folder_6dffbd8f7afc43dc99bc9d814673e3c9_dataset_fcbadc7c",
+    "label": "candidate_degree2_reg0",
+    "seed": 0
+  },
+  "experiment_id": "candidate_degree2_reg0",
+  "invocation_id": "3c7dc38c52444869a3a7de3b5b857918",
+  "output_dir": "/workspace/scratch/e838b3fad9a5/mars-main-audit/runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918",
+  "project": "folder_6dffbd8f7afc43dc99bc9d814673e3c9",
+  "run_id": "2026-09-17T1724_real_cpu_polynomial_regression",
+  "schema": "local_command_request.v1",
+  "seed": 0,
+  "steps": 120
+}

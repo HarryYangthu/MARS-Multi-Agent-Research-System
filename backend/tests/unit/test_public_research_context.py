@@ -20,8 +20,12 @@ async def test_public_evaluation_excludes_real_project_rules_and_repository_meta
     agent = IdeaAgent(agent_config=replace(get_agent_config("idea"), tools=PUBLIC_RESEARCH_TOOLS))
     context = await agent.build_context(request)
     assert not context.upstream
-    assert context.metadata["context_sources"] == {"project_rules": False, "code_repositories": False}
+    assert context.metadata["context_sources"] == {"project_rules": False, "code_repositories": False,
+                                                   "agent_resources": False, "memory": False,
+                                                   "project_references": False}
     assert "No project-specific rules supplied" in context.project
+    assert "project_knowledge" not in context.metadata
+    assert "folder_context" not in context.metadata
     assert context.task.startswith(scenario["question"])
     original = await agent.build_context(RunRequest(project="pimc", user_request="Authored context comparison"))
     assert original.project != context.project
@@ -33,6 +37,21 @@ async def test_public_evaluation_excludes_real_project_rules_and_repository_meta
     assert "code.repo_reader" not in agent.config.tools
     assert "search.local_docs" not in agent.config.tools
     assert "knowledge.baseline_match" not in agent.config.tools
+
+
+@pytest.mark.asyncio
+async def test_public_delegated_request_does_not_reintroduce_private_resource_sources(tmp_path: Path) -> None:
+    from scripts.run_idea_research_live import evaluation_request as delegated_request
+    scenario = yaml.safe_load((repo_root() / "configs/evaluation/idea_research_delegated_real.yaml").read_text())
+    request = delegated_request(scenario, tmp_path)
+    agent = IdeaAgent()
+    context = await agent.build_context(request)
+    assert not context.upstream
+    assert "project_knowledge" not in context.metadata
+    assert "folder_context" not in context.metadata
+    assert context.metadata["agent_resources"] is None
+    assert context.metadata["memory"]["record_ids"] == []
+    assert not (tmp_path / "input/project_knowledge.v1.json").exists()
 
 
 @pytest.mark.parametrize("sources", [{"project_rules": "false"}, {"unknown": False}, []])

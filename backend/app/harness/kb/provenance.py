@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,8 @@ def record_retrieval(*, text: str, url: str, run_id: str, title: str, base: Path
     atomic_json(target, receipt)
     return {"origin": "real_retrieval", "retrieval_receipt": str(target),
             "retrieval_receipt_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-            "url": url, "title": title, "run_id": run_id}
+            "url": url, "title": title, "run_id": run_id,
+            "valid_from": datetime.now(tz=timezone.utc).isoformat()}
 
 
 def record_artifact(*, path: Path, run_id: str, project: str,
@@ -46,7 +48,8 @@ def record_artifact(*, path: Path, run_id: str, project: str,
     atomic_json(target, receipt)
     return {"origin": "local_artifact", "artifact_receipt": str(target),
             "artifact_receipt_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-            "source_sha256": receipt["source_sha256"], "run_id": run_id, "project": project}
+            "source_sha256": receipt["source_sha256"], "run_id": run_id, "project": project,
+            "valid_from": datetime.now(tz=timezone.utc).isoformat()}
 
 
 def verified_memory(text: str, metadata: dict[str, Any], *, base: Path | None = None) -> bool:

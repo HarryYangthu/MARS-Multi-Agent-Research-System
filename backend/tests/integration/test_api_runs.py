@@ -512,7 +512,8 @@ def test_feedback_packet_and_run_memory_endpoints(
     assert mutation.status_code == 200, mutation.text
     mutation_payload = mutation.json()
     assert mutation_payload["status"] == "pending_review"
-    assert mutation_payload["eval_gate"]["passed"] is True
+    assert mutation_payload["proposal_gate"]["passed"] is True
+    assert mutation_payload["eval_gate"]["passed"] is False
 
     mutations = client.get(f"/api/runs/{run_id}/self-evolution/mutations")
     assert mutations.status_code == 200, mutations.text
@@ -522,14 +523,14 @@ def test_feedback_packet_and_run_memory_endpoints(
         f"/api/runs/{run_id}/self-evolution/mutations/{mutation_payload['id']}/approve",
         json={"reviewer_note": "approved in API test"},
     )
-    assert approved_mutation.status_code == 200, approved_mutation.text
-    assert approved_mutation.json()["status"] == "applied"
+    assert approved_mutation.status_code == 422, approved_mutation.text
+    assert "did not pass eval gate" in approved_mutation.text
     updated_files = {
         item.path: item
         for item in context_store.list_agent_context_files("coding", include_runtime_code=False)
     }
     assert updated_files[context_item.path].content == (
-        "Keep feedback patches narrow and preserve tests."
+        "Keep feedback patches narrow."
     )
 
     observability = client.get(f"/api/runs/{run_id}/commander-observability")
@@ -545,8 +546,8 @@ def test_feedback_packet_and_run_memory_endpoints(
     assert run_view["timeline"][0]["schema"] == "event.v1"
     assert run_view["audit"]["feedback_packet_count"] == 1
     assert run_view["audit"]["self_evolution_mutations"] == 1
-    assert run_view["audit"]["self_evolution_mutation_reviews"] == 1
-    assert run_view["audit"]["pending_self_evolution_mutations"] == 0
+    assert run_view["audit"]["self_evolution_mutation_reviews"] == 0
+    assert run_view["audit"]["pending_self_evolution_mutations"] == 1
 
     health = client.get(f"/api/runs/{run_id}/health")
     assert health.status_code == 200, health.text

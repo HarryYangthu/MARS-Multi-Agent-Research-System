@@ -4,12 +4,17 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Iterable, Sequence, cast
+from typing import Any, Iterable, Iterator, Sequence, cast
 
 import numpy as np
+from filelock import FileLock
+
+from app.harness.agent_loop.trace import atomic_json
 
 from app.harness.kb.backends import (
     KBRecord as KBRecord,
@@ -18,7 +23,7 @@ from app.harness.kb.backends import (
     ZoneBackend,
 )
 from app.harness.kb.config import backend_store
-from app.harness.kb.embedder import cosine, embed
+from app.harness.kb.embedder import configured_embed, embed, embedding_spec, retrieval_similarity
 from app.harness.kb.models import memory_from_kb_record
 from app.settings import repo_root
 
@@ -40,13 +45,20 @@ class FileZoneBackend:
         self._lock = threading.Lock()
         self._load()
 
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock, FileLock(str(self.path) + ".lock"):
+            self._load()
+            yield
+
     def add(self, record: KBRecord) -> None:
-        with self._lock:
+        with self._transaction():
             self._records.append(record)
             self._save()
 
     def upsert(self, record: KBRecord) -> None:
-        with self._lock:
+        with self._transaction():
             self._records = [r for r in self._records if r.id != record.id]
             self._records.append(record)
             self._save()
@@ -54,7 +66,7 @@ class FileZoneBackend:
     def delete_by_source(self, source_path: str) -> int:
         if not source_path:
             return 0
-        with self._lock:
+        with self._transaction():
             before = len(self._records)
             self._records = [
                 r for r in self._records
@@ -66,7 +78,7 @@ class FileZoneBackend:
             return deleted
 
     def delete(self, record_id: str) -> bool:
-        with self._lock:
+        with self._transaction():
             before = len(self._records)
             self._records = [r for r in self._records if r.id != record_id]
             deleted = len(self._records) != before
@@ -75,7 +87,7 @@ class FileZoneBackend:
             return deleted
 
     def update_metadata(self, record_id: str, patch: dict[str, Any]) -> bool:
-        with self._lock:
+        with self._transaction():
             changed = False
             for record in self._records:
                 if record.id != record_id:
@@ -96,8 +108,9 @@ class FileZoneBackend:
         exclude_superseded: bool = True,
         exclude_mock: bool = True,
     ) -> list[tuple[float, KBRecord]]:
-        q_vec = embed(query)
-        with self._lock:
+        spec = embedding_spec()
+        query_vector = configured_embed(query, spec=spec) if spec.provider != "lexical_unicode" else None
+        with self._transaction():
             candidates = [
                 r for r in self._records
                 if _record_matches(
@@ -107,7 +120,8 @@ class FileZoneBackend:
                     exclude_mock=exclude_mock,
                 )
             ]
-            scored = [(cosine(q_vec, r.embedding), r) for r in candidates]
+            scored = [(retrieval_similarity(query, r.text, r.embedding, r.metadata,
+                                           spec=spec, query_vector=query_vector), r) for r in candidates]
         scored.sort(key=lambda t: t[0], reverse=True)
         return scored[:top_k]
 
@@ -118,7 +132,7 @@ class FileZoneBackend:
         exclude_superseded: bool = False,
         exclude_mock: bool = False,
     ) -> list[KBRecord]:
-        with self._lock:
+        with self._transaction():
             return [
                 r for r in self._records
                 if _record_matches(
@@ -130,19 +144,20 @@ class FileZoneBackend:
             ]
 
     def delete_all(self) -> None:
-        with self._lock:
+        with self._transaction():
             self._records.clear()
             self._save()
 
     # ------------------------------------------------------------ persist
 
     def _load(self) -> None:
+        self._records = []
         if not self.path.exists():
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"corrupt memory index: {self.path}") from exc
         for raw in data:
             self._records.append(
                 KBRecord(
@@ -166,9 +181,7 @@ class FileZoneBackend:
             }
             for r in self._records
         ]
-        self.path.write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-        )
+        atomic_json(self.path, payload)
 
 
 class FileMemoryBackend:
@@ -238,7 +251,11 @@ class ChromaZoneBackend:
         self._collection.add(
             ids=[record.id],
             documents=[record.text],
-            embeddings=[_embedding_to_list(record.embedding)],
+            # Native Chroma vectors retain the historical 256-dimension
+            # lexical space. The versioned provider vector is losslessly
+            # stored in metadata, so changing embedding models never mixes
+            # vector spaces or breaks an existing Chroma collection.
+            embeddings=[_embedding_to_list(embed(record.text))],
             metadatas=[_chroma_metadata(record)],
         )
 
@@ -246,7 +263,7 @@ class ChromaZoneBackend:
         self._collection.upsert(
             ids=[record.id],
             documents=[record.text],
-            embeddings=[_embedding_to_list(record.embedding)],
+            embeddings=[_embedding_to_list(embed(record.text))],
             metadatas=[_chroma_metadata(record)],
         )
 
@@ -295,13 +312,15 @@ class ChromaZoneBackend:
         exclude_superseded: bool = True,
         exclude_mock: bool = True,
     ) -> list[tuple[float, KBRecord]]:
-        q_vec = embed(query)
+        spec = embedding_spec()
+        query_vector = configured_embed(query, spec=spec) if spec.provider != "lexical_unicode" else None
         candidates = self.all(
             filters=filters,
             exclude_superseded=exclude_superseded,
             exclude_mock=exclude_mock,
         )
-        scored = [(cosine(q_vec, record.embedding), record) for record in candidates]
+        scored = [(retrieval_similarity(query, record.text, record.embedding, record.metadata,
+                                       spec=spec, query_vector=query_vector), record) for record in candidates]
         scored.sort(key=lambda item: item[0], reverse=True)
         return scored[:top_k]
 
@@ -504,6 +523,7 @@ def _chroma_metadata(record: KBRecord) -> dict[str, str | int | float | bool]:
             sort_keys=True,
             default=str,
         ),
+        "_mars_embedding_json": json.dumps(_embedding_to_list(record.embedding)),
         "zone": record.zone,
         "source_path": memory.source_path,
         "project": str(record.metadata.get("project", "")),
@@ -528,14 +548,18 @@ def _records_from_chroma_result(*, zone: str, result: dict[str, Any]) -> list[KB
         text = _sequence_item(documents, index)
         if not isinstance(text, str):
             text = ""
-        metadata = _metadata_from_chroma(_sequence_item(metadatas, index))
+        raw_metadata = _sequence_item(metadatas, index)
+        metadata = _metadata_from_chroma(raw_metadata)
+        vector = _sequence_item(embeddings, index)
+        if isinstance(raw_metadata, dict) and isinstance(raw_metadata.get("_mars_embedding_json"), str):
+            vector = json.loads(raw_metadata["_mars_embedding_json"])
         records.append(
             KBRecord(
                 id=record_id,
                 zone=zone,
                 text=text,
                 metadata=metadata,
-                embedding=_embedding_from_chroma(_sequence_item(embeddings, index), text),
+                embedding=_embedding_from_chroma(vector, text),
             )
         )
     return records
@@ -583,6 +607,8 @@ def _record_matches(
     exclude_superseded: bool,
     exclude_mock: bool,
 ) -> bool:
+    if (exclude_mock or exclude_superseded) and memory_is_expired(record):
+        return False
     memory = memory_from_kb_record(
         record_id=record.id,
         zone=record.zone,
@@ -612,6 +638,28 @@ def _record_matches(
         if key == "source_path" and memory.source_path != str(value):
             return False
     return True
+
+
+def memory_is_expired(record: KBRecord, *, now: datetime | None = None) -> bool:
+    """Read-time TTL enforcement also works when maintenance never ran."""
+    metadata = record.metadata
+    if metadata.get("expired") or metadata.get("archived") or metadata.get("revoked"):
+        return True
+    ttl = metadata.get("ttl_days", None if record.zone == "literature" else 180)
+    if ttl is None:
+        return False
+    raw_date = metadata.get("valid_from") or metadata.get("created")
+    if not raw_date:
+        return True  # Unknown-age, finite-TTL data must be reviewed again.
+    try:
+        ttl_days = int(ttl)
+        valid_from = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return True
+    if valid_from.tzinfo is None:
+        valid_from = valid_from.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(tz=timezone.utc)
+    return ttl_days <= 0 or (current - valid_from).total_seconds() >= ttl_days * 86400
 
 
 _default_stores: KBStores | None = None

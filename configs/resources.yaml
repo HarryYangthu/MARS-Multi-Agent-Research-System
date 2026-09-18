@@ -1,0 +1,11 @@
+schema: runtime.resources.v1
+limits:
+  max_model_requests: 256
+  max_total_tokens: 4000000
+  max_parallel_model_calls: 6
+  max_elapsed_seconds: 14400
+  max_cost: null
+# Optional explicit prices per million tokens, in one declared currency.
+# A monetary hard limit requires a matching provider/model price entry.
+currency: USD
+prices: {}

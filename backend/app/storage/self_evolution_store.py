@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,10 @@ from app.storage.agent_context_store import (
     list_agent_context_files,
     sync_agent_context_file_to_memory,
     update_agent_context_file,
+    _resource_lock,
 )
+from app.harness.agent_loop.trace import atomic_json
+from app.harness.persistence import atomic_write_text
 from app.storage.run_store import RunHandle
 
 CANDIDATE_LIFECYCLE_STATUSES: frozenset[str] = frozenset(
@@ -26,7 +30,7 @@ REVIEWABLE_CANDIDATE_STATUSES: frozenset[str] = frozenset(
     {"pending_review", "approved"}
 )
 MUTATION_LIFECYCLE_STATUSES: frozenset[str] = frozenset(
-    {"pending_review", "applied", "rejected", "failed"}
+    {"pending_review", "evaluating", "applying", "applied", "rolled_back", "rejected", "failed"}
 )
 MUTATION_CATEGORIES: frozenset[str] = frozenset({"prompt", "few_shot", "eval"})
 
@@ -65,7 +69,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     text = "".join(
         json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in rows
     )
-    path.write_text(text, encoding="utf-8")
+    atomic_write_text(path, text)
 
 
 def append_learning_event(
@@ -163,6 +167,8 @@ def build_self_evolution_levers(
             "review_lever",
             "create_mutation_proposal",
             "approve_mutation_proposal",
+            "evaluate_mutation_proposal",
+            "rollback_mutation_proposal",
             "reject_mutation_proposal",
             "approve_memory_candidate",
             "reject_memory_candidate",
@@ -214,6 +220,7 @@ def create_self_evolution_mutation(
         agent=normalized_agent,
         path=normalized_path,
         proposed_content=proposed_content,
+        current_content=current_content,
     )
     mutation = {
         "schema": "self_evolution_mutation.v1",
@@ -227,13 +234,26 @@ def create_self_evolution_mutation(
         "status": "pending_review",
         "rationale": rationale,
         "current_hash": _content_hash(current_content),
+        "current_content": current_content,
         "proposed_hash": _content_hash(proposed_content),
         "proposed_content": proposed_content,
         "text_preview": _preview(proposed_content),
-        "eval_gate": gate,
+        "proposal_gate": gate,
+        "eval_gate": {"passed": False, "decision": "block", "blocking": True,
+                      "reason": "real baseline/candidate task comparison required", "scientific_validated": False},
         "created": created,
     }
-    _append_jsonl(_memory_dir(run) / "self_evolution_mutations.jsonl", mutation)
+    target = _memory_dir(run) / "self_evolution_mutations.jsonl"
+    with _resource_lock(target):
+        existing = next((item for item in read_jsonl(target) if item.get("id") == mutation_id), None)
+        if existing is not None:
+            return existing
+        snapshot = _mutation_snapshot_dir(run, mutation_id)
+        snapshot.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(snapshot / "before.md", current_content)
+        atomic_write_text(snapshot / "after.md", proposed_content)
+        mutation["snapshot_ref"] = snapshot.relative_to(run.root).as_posix()
+        _append_jsonl(target, mutation)
     return mutation
 
 
@@ -251,27 +271,149 @@ def approve_self_evolution_mutation(
     gate = mutation.get("eval_gate")
     if not isinstance(gate, dict) or gate.get("passed") is not True:
         raise ValueError(f"self-evolution mutation '{mutation_id}' did not pass eval gate")
+    _verify_mutation_receipt(run=run, mutation=mutation)
     agent = str(mutation.get("agent", ""))
     path = str(mutation.get("path", ""))
     proposed_content = str(mutation.get("proposed_content", ""))
-    updated = update_agent_context_file(
-        agent,
-        path=path,
-        content=proposed_content,
-    )
-    sync_agent_context_file_to_memory(
-        agent,
-        updated,
-        project=run.project,
-        stores=stores,
-    )
-    return _set_mutation_status(
-        run=run,
-        mutation_id=mutation_id,
-        status="applied",
-        reviewer_note=reviewer_note,
-        applied_path=f"agents/{agent}/{path}",
-    )
+    target = _memory_dir(run) / "self_evolution_mutations.jsonl"
+    with _resource_lock(target):
+        if _get_mutation(run=run, mutation_id=mutation_id).get("status") != "pending_review":
+            raise ValueError("mutation is no longer pending review")
+        _set_mutation_status(run=run, mutation_id=mutation_id, status="applying", reviewer_note=reviewer_note)
+        try:
+            updated = update_agent_context_file(agent, path=path, content=proposed_content,
+                expected_sha256=str(mutation["current_hash"]))
+            sync_agent_context_file_to_memory(agent, updated, project=run.project, stores=stores)
+        except Exception:
+            _set_mutation_status(run=run, mutation_id=mutation_id, status="failed",
+                reviewer_note="application failed; snapshot retained; inspect target before retry")
+            raise
+        return _set_mutation_status(
+            run=run,
+            mutation_id=mutation_id,
+            status="applied",
+            reviewer_note=reviewer_note,
+            applied_path=f"agents/{agent}/{path}",
+        )
+
+
+async def evaluate_self_evolution_mutation(
+    *, run: RunHandle, mutation_id: str, suite_id: str,
+) -> dict[str, Any]:
+    """Run registered real-model tasks for both frozen resource versions."""
+    from app.harness.evaluation.mutation import execute_mutation_comparison, file_digest
+    mutation = _get_mutation(run=run, mutation_id=mutation_id)
+    if mutation.get("status") != "pending_review" or mutation.get("proposal_gate", {}).get("passed") is not True:
+        raise ValueError("mutation must pass proposal checks and be pending review before evaluation")
+    before, after = _verify_mutation_snapshots(run=run, mutation=mutation)
+    if before != mutation.get("current_content") or after != mutation.get("proposed_content"):
+        raise ValueError("mutation contents differ from their frozen snapshots")
+    if _content_hash(_read_context_content(str(mutation["agent"]), str(mutation["path"])) or "") != mutation["current_hash"]:
+        raise ValueError("agent context changed after proposal creation; create a new mutation")
+    target = _memory_dir(run) / "self_evolution_mutations.jsonl"
+    with _resource_lock(target):
+        if _get_mutation(run=run, mutation_id=mutation_id).get("status") != "pending_review":
+            raise ValueError("mutation is already being evaluated")
+        rows = read_jsonl(target)
+        for row in rows:
+            if row.get("id") == mutation_id:
+                row["eval_gate"] = {"passed": False, "decision": "block", "blocking": True,
+                                    "reason": "evaluation in progress"}
+                row.pop("evaluation_receipt", None)
+        _write_jsonl(target, rows)
+        _set_mutation_status(run=run, mutation_id=mutation_id, status="evaluating")
+    root = _memory_dir(run) / "mutation_evaluations" / _content_hash(mutation_id).removeprefix("sha256:") / uuid.uuid4().hex
+    try:
+        receipt = await execute_mutation_comparison(mutation=mutation, evaluation_root=root, suite_id=suite_id)
+        reference = {"path": (root / "receipt.json").relative_to(run.root).as_posix(),
+                     "sha256": file_digest(root / "receipt.json")}
+        with _resource_lock(target):
+            rows = read_jsonl(target)
+            for row in rows:
+                if row.get("id") == mutation_id:
+                    row["evaluation_receipt"] = reference
+                    row["eval_gate"] = {"passed": receipt["passed"], "decision": "pass" if receipt["passed"] else "block",
+                        "blocking": not receipt["passed"], "validation_scope": "agent_contract_behavior",
+                        "scientific_validated": False, "reason": "real held-out task comparison"}
+                    row["status"] = "pending_review"
+            _write_jsonl(target, rows)
+        return receipt
+    except BaseException:
+        with _resource_lock(target):
+            _set_mutation_status(run=run, mutation_id=mutation_id, status="pending_review",
+                reviewer_note="evaluation interrupted or failed; approval remains blocked")
+        raise
+
+
+def rollback_self_evolution_mutation(
+    *, run: RunHandle, mutation_id: str, reviewer_note: str = "", stores: KBStores | None = None,
+) -> dict[str, Any]:
+    """Restore the frozen old version only if no subsequent edit would be lost."""
+    target = _memory_dir(run) / "self_evolution_mutations.jsonl"
+    with _resource_lock(target):
+        mutation = _get_mutation(run=run, mutation_id=mutation_id)
+        if mutation.get("status") not in {"applied", "failed", "applying"}:
+            raise ValueError("only an applied or interrupted application can be rolled back")
+        before, _after = _verify_mutation_snapshots(run=run, mutation=mutation)
+        updated = update_agent_context_file(str(mutation["agent"]), path=str(mutation["path"]),
+            content=before, expected_sha256=str(mutation["proposed_hash"]))
+        sync_agent_context_file_to_memory(str(mutation["agent"]), updated, project=run.project, stores=stores)
+        return _set_mutation_status(run=run, mutation_id=mutation_id, status="rolled_back", reviewer_note=reviewer_note)
+
+
+def _mutation_snapshot_dir(run: RunHandle, mutation_id: str) -> Path:
+    return _memory_dir(run) / "mutation_snapshots" / _content_hash(mutation_id).removeprefix("sha256:")
+
+
+def _verify_mutation_snapshots(*, run: RunHandle, mutation: dict[str, Any]) -> tuple[str, str]:
+    root = _mutation_snapshot_dir(run, str(mutation["id"]))
+    if not root.resolve().is_relative_to(run.root.resolve()):
+        raise ValueError("mutation snapshot escaped run directory")
+    before = (root / "before.md").read_bytes().decode("utf-8")
+    after = (root / "after.md").read_bytes().decode("utf-8")
+    if _content_hash(before) != mutation["current_hash"] or _content_hash(after) != mutation["proposed_hash"]:
+        raise ValueError("mutation snapshot hash mismatch")
+    return before, after
+
+
+def _verify_mutation_receipt(*, run: RunHandle, mutation: dict[str, Any]) -> None:
+    from app.harness.evaluation.mutation import (compare_task_results, file_digest, load_mutation_suite,
+                                               runtime_digest, verify_task_evidence)
+    _verify_mutation_snapshots(run=run, mutation=mutation)
+    reference = mutation.get("evaluation_receipt")
+    if not isinstance(reference, dict) or not isinstance(reference.get("path"), str):
+        raise ValueError("real mutation evaluation receipt required")
+    path = (run.root / reference["path"]).resolve()
+    if not path.is_relative_to(run.root.resolve()) or not path.is_file() or file_digest(path) != reference.get("sha256"):
+        raise ValueError("mutation evaluation receipt missing or changed")
+    receipt = json.loads(path.read_text())
+    if not isinstance(receipt, dict) or receipt.get("passed") is not True:
+        raise ValueError("real mutation evaluation did not pass")
+    for key in ("current_hash", "proposed_hash"):
+        if receipt.get(key) != mutation[key]:
+            raise ValueError("mutation evaluation is bound to a different resource version")
+    if receipt.get("mutation_id") != mutation["id"] or receipt.get("runtime_sha256") != runtime_digest():
+        raise ValueError("mutation runtime changed after evaluation")
+    suite, suite_path = load_mutation_suite(str(receipt.get("suite_id", "")))
+    from app.settings import repo_root
+    if (receipt.get("suite_sha256") != file_digest(suite_path)
+            or receipt.get("evaluator_sha256") != file_digest(repo_root() / "scripts/evaluators/agent_mutation_task.py")):
+        raise ValueError("mutation evaluator or held-out suite changed after evaluation")
+    rows = receipt.get("rows", {})
+    for variant, hash_key in (("baseline", "current_hash"), ("candidate", "proposed_hash")):
+        items = rows.get(variant, [])
+        if [r.get("task_id") for r in items] != [t["id"] for t in suite["tasks"]]:
+            raise ValueError("mutation comparison does not cover the complete task set")
+        for row in items:
+            task_root = path.parent / variant / row["task_id"]
+            for relative, expected_hash in row.get("evidence_files", {}).items():
+                evidence_path = (task_root / relative).resolve()
+                if not evidence_path.is_relative_to(task_root.resolve()) or not evidence_path.is_file() or file_digest(evidence_path) != expected_hash:
+                    raise ValueError("mutation task evidence changed after evaluation")
+            if verify_task_evidence(task_root, row, context_sha256=str(mutation[hash_key]).removeprefix("sha256:")):
+                raise ValueError("mutation task lacks verified real model execution")
+    if not compare_task_results(rows["baseline"], rows["candidate"])["passed"]:
+        raise ValueError("mutation has no verified non-regressing improvement")
 
 
 def reject_self_evolution_mutation(
@@ -280,12 +422,12 @@ def reject_self_evolution_mutation(
     mutation_id: str,
     reviewer_note: str = "",
 ) -> dict[str, Any]:
-    return _set_mutation_status(
-        run=run,
-        mutation_id=mutation_id,
-        status="rejected",
-        reviewer_note=reviewer_note,
-    )
+    target = _memory_dir(run) / "self_evolution_mutations.jsonl"
+    with _resource_lock(target):
+        if _get_mutation(run=run, mutation_id=mutation_id).get("status") != "pending_review":
+            raise ValueError("only pending mutations may be rejected")
+        return _set_mutation_status(run=run, mutation_id=mutation_id,
+            status="rejected", reviewer_note=reviewer_note)
 
 
 def approve_memory_candidate(
@@ -574,8 +716,10 @@ def _mutation_id(
     agent: str,
     path: str,
     proposed_content: str,
+    current_content: str,
 ) -> str:
-    raw = "|".join([run_id, lever_id, agent, path, proposed_content])
+    raw = json.dumps([run_id, lever_id, agent, path, _content_hash(current_content),
+                      _content_hash(proposed_content)], ensure_ascii=False, separators=(",", ":"))
     return "mut_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 

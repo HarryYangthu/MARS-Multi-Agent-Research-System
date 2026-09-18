@@ -170,7 +170,11 @@ def test_evaluation_reports_are_sedimented_as_memory(tmp_path: Path) -> None:
 
     assert result["is_mock"] is False
     assert result["evaluation_chunks_written"] >= 1
-    records = stores.zone("methodology").all(exclude_mock=False)
+    # Default research governance retains failed evaluation evidence in
+    # quarantine, without making it approved research context.
+    assert result["profile"] == "research"
+    assert result["eval_passed"] is False
+    records = stores.zone("quarantine").all(exclude_mock=False)
     eval_records = [
         record
         for record in records

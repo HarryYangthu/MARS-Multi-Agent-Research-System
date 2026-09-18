@@ -24,6 +24,7 @@ from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
+from app.harness.llm.accounting import guarded_complete
 from app.harness.llm.provider_base import (
     LLMConfig,
     LLMProvider,
@@ -34,7 +35,7 @@ from app.harness.runtime.conversation_state import (
     ConversationState,
     can_transition,
 )
-from app.settings import get_settings
+from app.settings import get_settings, repo_root
 from app.storage.run_store import RunStore
 
 DEFAULT_MAX_REACT_STEPS = 4
@@ -137,7 +138,9 @@ class Commander:
         messages = self._build_messages(session)
         try:
             completion = await asyncio.wait_for(
-                self._provider.complete(messages, self._llm_config),
+                guarded_complete(self._provider, messages, self._llm_config,
+                    run_root=repo_root() / "conversations" / session.conv_id,
+                    correlation={"trace_id": session.conv_id, "node_id": "commander"}),
                 timeout=llm_call_deadline_seconds(
                     self._llm_config,
                     minimum_seconds=get_settings().mars_llm_timeout_seconds,

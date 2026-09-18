@@ -7,6 +7,7 @@ guardrails, and run completion quality gates.
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from pathlib import Path
 from typing import Any, Literal, TypeGuard, overload
 
@@ -78,6 +79,51 @@ def reset_evaluation_policy_cache_for_tests() -> None:
     load_evaluation_policy.cache_clear()
 
 
+def policy_for_task(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate a task's quality policy before persisting the effective snapshot.
+
+    Task policy changes enforcement, never the meaning of the underlying grader.
+    Contract/rubric scores do not establish measured scientific improvement.
+    """
+    if overrides is None:
+        return _deep_merge(load_evaluation_policy(), {})
+    if not isinstance(overrides, dict):
+        raise ValueError("evaluation_policy must be an object")
+    _validate_policy_override(overrides, _DEFAULT_POLICY, "evaluation_policy")
+    return _deep_merge(load_evaluation_policy(), overrides)
+
+
+def _validate_policy_override(value: dict[str, Any], template: dict[str, Any], path: str) -> None:
+    for key, item in value.items():
+        if key not in template:
+            raise ValueError(f"unknown evaluation policy field: {path}.{key}")
+        expected = template[key]
+        label = f"{path}.{key}"
+        if isinstance(expected, dict):
+            if not isinstance(item, dict):
+                raise ValueError(f"{label} must be an object")
+            _validate_policy_override(item, expected, label)
+        elif isinstance(expected, bool):
+            if not isinstance(item, bool):
+                raise ValueError(f"{label} must be a boolean")
+        elif isinstance(expected, float):
+            if (isinstance(item, bool) or not isinstance(item, (int, float))
+                    or not math.isfinite(item) or not 0 <= item <= 1):
+                raise ValueError(f"{label} must be a finite number between zero and one")
+        elif key == "mode":
+            if not isinstance(item, str) or item not in {"audit_only", "enforce"}:
+                raise ValueError(f"{label} must be audit_only or enforce")
+        elif key == "allow_gates":
+            if not isinstance(item, list) or not item or any(not isinstance(x, str) or x not in _GATE_RANK for x in item):
+                raise ValueError(f"{label} must contain known gate names")
+        elif key == "max_allowed_decision":
+            if not isinstance(item, str) or item not in _DECISION_RANK:
+                raise ValueError(f"{label} must be an evaluation decision")
+        elif key in {"pass", "warn", "revise", "block"}:
+            if not isinstance(item, str) or item not in {"normal", "elevated", "high", "critical"}:
+                raise ValueError(f"{label} must be a review priority")
+
+
 def evaluate_artifact_summary(
     summary: dict[str, Any],
     *,
@@ -87,7 +133,7 @@ def evaluate_artifact_summary(
     artifact_cfg = _as_dict(cfg.get("artifact"))
     reasons: list[str] = []
 
-    decision = _as_decision(summary.get("decision")) or "pass"
+    decision = _as_decision(summary.get("decision")) or "block"
     gate = _gate_from_decision(decision)
     if decision != "pass":
         reasons.append(f"evaluation decision is {decision}")
@@ -130,6 +176,16 @@ def evaluate_artifact_summary(
     if summary.get("blocking") is True:
         auto_allowed = False
 
+    # Missing/failed evaluation is never implicitly approved, even when quality
+    # scoring is advisory for this task. Preserve the reason for UI and replay.
+    missing = (summary.get("evaluation_status") in {"missing", "failed"}
+               or summary.get("report_count") == 0 or not _as_dict_list(summary.get("reports")))
+    if missing:
+        gate = "block"
+        auto_allowed = False
+        auto_enforced = True
+        reasons.append("required artifact evaluation is missing or failed")
+
     if not reasons:
         reasons.append("evaluation policy passed")
 
@@ -160,7 +216,7 @@ def evaluate_scorecard(
     run_cfg = _as_dict(cfg.get("run"))
     reasons: list[str] = []
 
-    decision = _as_decision(scorecard.get("overall_decision")) or "pass"
+    decision = _as_decision(scorecard.get("overall_decision")) or "block"
     gate = _gate_from_decision(decision)
     if decision != "pass":
         reasons.append(f"overall decision is {decision}")
@@ -193,8 +249,16 @@ def evaluate_scorecard(
         gate = _max_gate(gate, "block")
         reasons.append("blocker finding present")
 
+    missing_evaluation = (scorecard.get("evaluation_status") in {"missing", "failed"}
+                          or not _as_dict_list(scorecard.get("reports")))
+    if missing_evaluation:
+        gate = "block"
+        reasons.append("run evaluation is missing or failed")
+
     completion_cfg = _as_dict(run_cfg.get("completion_gate"))
     mode = str(completion_cfg.get("mode", "audit_only") or "audit_only")
+    if mode not in {"audit_only", "enforce"}:
+        raise ValueError("completion gate mode must be audit_only or enforce")
     completion_allowed = mode != "enforce" or gate != "block"
     if not reasons:
         reasons.append("run quality gate passed")
@@ -207,6 +271,9 @@ def evaluate_scorecard(
         "review_priority": _priority_for_gate(gate, cfg),
         "completion_allowed": completion_allowed,
         "enforcement_mode": mode,
+        "validation_scope": "artifact_contract",
+        "scientific_validated": False,
+        "quality_status": "missing" if missing_evaluation else str(scorecard.get("evaluation_status", "evaluated")),
         "thresholds": {
             "pass_min_score": pass_min,
             "warn_below_score": warn_below,
@@ -263,10 +330,11 @@ def _as_float(value: object, default: float | None = None) -> float | None:
     if isinstance(value, bool):
         return default
     if isinstance(value, int | float):
-        return float(value)
+        return float(value) if math.isfinite(value) else default
     if isinstance(value, str):
         try:
-            return float(value)
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) else default
         except ValueError:
             return default
     return default
@@ -331,5 +399,6 @@ __all__ = [
     "evaluate_artifact_summary",
     "evaluate_scorecard",
     "load_evaluation_policy",
+    "policy_for_task",
     "reset_evaluation_policy_cache_for_tests",
 ]

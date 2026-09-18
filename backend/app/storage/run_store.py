@@ -9,10 +9,12 @@ import builtins
 import json
 import re
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from app.harness.persistence import append_jsonl, atomic_write_json, atomic_write_text
 
 from app.settings import repo_root
 from app.storage.data_source_store import selection_summary
@@ -92,10 +94,11 @@ class RunHandle:
         return self.root / name
 
     def write_event(self, channel: str, payload: dict[str, Any]) -> None:
+        if not _RUN_ID_RE.fullmatch(channel) or channel in {".", ".."}:
+            raise ValueError("invalid event channel")
         events_dir = self.subdir("events")
         target = events_dir / f"{channel}.jsonl"
-        with target.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        append_jsonl(target, payload)
 
 
 @dataclass
@@ -140,13 +143,15 @@ class RunStore:
         slug = _slugify(task)
         run_id = f"{ts}_{slug}"
         root = self.runs_root / run_id
-        if root.exists():
-            # collision — append microsecond suffix
-            ms = (now or datetime.now(tz=timezone.utc)).strftime("%S%f")
-            run_id = f"{ts}_{slug}_{ms}"
-            root = self.runs_root / run_id
-
-        root.mkdir(parents=True, exist_ok=False)
+        while True:
+            try:
+                root.mkdir(parents=True, exist_ok=False)
+                break
+            except FileExistsError:
+                # mkdir is the cross-process reservation; timestamps alone
+                # collide under concurrent callers or fixed clocks.
+                run_id = f"{ts}_{slug}_{uuid.uuid4().hex[:12]}"
+                root = self.runs_root / run_id
         for sub in RUN_SUBDIRS:
             (root / sub).mkdir(exist_ok=True)
 
@@ -160,10 +165,6 @@ class RunStore:
         }
         if data_source:
             meta["data_source"] = data_source
-        (root / "run_meta.json").write_text(
-            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-
         if user_request or data_source:
             enriched_request = user_request
             if data_source:
@@ -172,23 +173,14 @@ class RunStore:
                     if user_request.strip()
                     else selection_summary(data_source) + "\n"
                 )
-            (root / "input" / "user_request.md").write_text(
-                enriched_request, encoding="utf-8"
-            )
+            atomic_write_text(root / "input" / "user_request.md", enriched_request)
         if data_source:
-            payload = json.dumps(data_source, indent=2, ensure_ascii=False)
-            (root / "input" / "selected_data_source.json").write_text(
-                payload,
-                encoding="utf-8",
-            )
-            (root / "context" / "selected_data_source.json").write_text(
-                payload,
-                encoding="utf-8",
-            )
-            (root / "context" / "selected_data_source.md").write_text(
-                selection_summary(data_source) + "\n",
-                encoding="utf-8",
-            )
+            atomic_write_json(root / "input" / "selected_data_source.json", data_source)
+            atomic_write_json(root / "context" / "selected_data_source.json", data_source)
+            atomic_write_text(root / "context" / "selected_data_source.md", selection_summary(data_source) + "\n")
+
+        # Registry visibility commits only after all required inputs exist.
+        atomic_write_json(root / "run_meta.json", meta)
 
         return RunHandle(
             run_id=run_id,
@@ -275,7 +267,7 @@ class RunStore:
                 "trash_retention_days": TRASH_RETENTION_DAYS,
             }
         )
-        meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_json(meta_path, meta)
         return self._trash_handle(target, meta)
 
     def list_trashed(
@@ -327,7 +319,7 @@ class RunStore:
         meta = dict(trashed.meta)
         for key in ("deleted_at", "expires_at", "trash_retention_days"):
             meta.pop(key, None)
-        meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_json(meta_path, meta)
         return RunHandle(
             run_id=run_id,
             root=target,

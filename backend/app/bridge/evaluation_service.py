@@ -5,9 +5,10 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from app.bridge.evaluation_policy import evaluate_artifact_summary, evaluate_scorecard
+from app.bridge.evaluation_policy import evaluate_artifact_summary, evaluate_scorecard, policy_for_task
 from app.harness.evaluation.artifacts import read_reports_for_artifact
 from app.harness.evaluation.models import EvaluationDecision
+from app.harness.evaluation.runner import EvaluationRunner
 from app.harness.runtime.event_bus import EventBus
 from app.storage.artifact_store import ArtifactRef
 from app.storage.run_store import RunHandle
@@ -35,6 +36,10 @@ def build_artifact_evaluation_summary(
         version=ref.version,
     )
     report_items = [_compact_report(report) for report in reports]
+    required_evaluators = {evaluator.id for evaluator in EvaluationRunner().evaluators}
+    completed_evaluators = {str(item.get("evaluator")) for item in report_items
+                            if _as_decision(item.get("decision")) is not None}
+    missing_evaluators = sorted(required_evaluators - completed_evaluators)
     decisions: list[EvaluationDecision] = []
     for item in report_items:
         item_decision = _as_decision(item.get("decision"))
@@ -47,10 +52,10 @@ def build_artifact_evaluation_summary(
     ]
     decision = (
         max(decisions, key=lambda value: _DECISION_RANK[value])
-        if decisions
-        else "pass"
+        if decisions and not missing_evaluators
+        else "block"
     )
-    blocking = any(
+    blocking = bool(missing_evaluators) or not decisions or any(
         bool(item.get("blocking")) or item.get("decision") in {"block", "fail"}
         for item in report_items
     )
@@ -64,11 +69,15 @@ def build_artifact_evaluation_summary(
         "decision": decision,
         "blocking": blocking,
         "report_count": len(report_items),
+        "evaluation_status": "evaluated" if decisions and not missing_evaluators else "missing",
+        "missing_evaluators": missing_evaluators,
+        "validation_scope": "artifact_contract",
+        "scientific_validated": False,
         "overall_score": round(sum(scores) / len(scores), 6) if scores else None,
         "top_findings": _top_findings(report_items),
         "reports": report_items,
     }
-    summary["policy"] = evaluate_artifact_summary(summary)
+    summary["policy"] = evaluate_artifact_summary(summary, policy=policy_for_task(run.meta.get("evaluation_policy")))
     return summary
 
 
@@ -121,7 +130,7 @@ def _quality_gate_for_scorecard(*, run: RunHandle, relative_path: str) -> dict[s
         loaded = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             scorecard = loaded
-    quality_gate = evaluate_scorecard(scorecard)
+    quality_gate = evaluate_scorecard(scorecard, policy=policy_for_task(run.meta.get("evaluation_policy")))
     target = run.subdir("events") / "evaluation_quality_gate.json"
     target.write_text(json.dumps(quality_gate, indent=2, ensure_ascii=False), encoding="utf-8")
     return quality_gate

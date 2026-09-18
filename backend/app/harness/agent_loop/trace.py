@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,29 +17,17 @@ def digest(value: Any) -> str:
 
 
 def atomic_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = canonical(value)
-    fd, name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(data + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(name, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    # Preserve exact canonical encoding for historical checkpoint digests.
+    from app.harness.persistence import atomic_write_text
+    atomic_write_text(path, canonical(value) + "\n")
 
 
 class LoopTrace:
-    def __init__(self, root: Path, mode: str, *, resume: bool = False) -> None:
+    def __init__(self, root: Path, mode: str, *, resume: bool = False,
+                 correlation: dict[str, str] | None = None) -> None:
         self.root = root
         self.mode = mode
+        self.correlation = dict(correlation or {})
         self.root.mkdir(parents=True, exist_ok=True)
         self.events = root / "events.jsonl"
         self.seq = 0
@@ -61,12 +47,14 @@ class LoopTrace:
             "event_seq": self.seq,
             "time": datetime.now(timezone.utc).isoformat(),
             "kind": kind,
+            "correlation": self.correlation,
             **payload,
         }
         if visible is not None:
             row["visible_sha256"] = digest(visible)
             if self.mode == "full":
                 row["visible"] = visible
+        import os
         with self.events.open("a", encoding="utf-8") as handle:
             handle.write(canonical(row) + "\n")
             handle.flush()
@@ -79,6 +67,8 @@ class LoopTrace:
             state["review_checkpoint_seq"] = self.seq
         facts = {k: state[k] for k in ("status", "counts", "usage", "usage_complete", "fingerprint", "pending")}
         facts.update(event_seq=self.seq, trace_mode=self.mode, resume_available=self.mode == "full")
+        facts["correlation"] = self.correlation
+        facts["context_metadata"] = state.get("context_metadata", {})
         atomic_json(self.root / "facts.json", facts)
         if self.mode == "full":
             atomic_json(self.root / "checkpoint.json", state)

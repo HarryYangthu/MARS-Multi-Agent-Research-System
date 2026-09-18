@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.bridge.evaluation_policy import evaluate_artifact_summary, evaluate_scorecard
+import pytest
+from app.bridge.evaluation_policy import evaluate_artifact_summary, evaluate_scorecard, policy_for_task
 
 
 def test_artifact_policy_escalates_low_score_to_revision() -> None:
@@ -10,7 +11,7 @@ def test_artifact_policy_escalates_low_score_to_revision() -> None:
             "blocking": False,
             "overall_score": 0.6,
             "top_findings": [],
-            "reports": [],
+            "reports": [{"decision": "pass", "overall_score": 0.6}],
         }
     )
 
@@ -27,7 +28,7 @@ def test_artifact_policy_blocks_on_blocker_finding() -> None:
             "blocking": False,
             "overall_score": 0.9,
             "top_findings": [{"severity": "blocker", "message": "bad schema"}],
-            "reports": [],
+            "reports": [{"decision": "warn", "overall_score": 0.9}],
         }
     )
 
@@ -50,3 +51,15 @@ def test_run_quality_gate_is_audit_only_by_default() -> None:
     assert gate["completion_allowed"] is True
     assert gate["enforcement_mode"] == "audit_only"
     assert gate["action"] == "complete_with_quality_exception"
+
+
+def test_task_can_enforce_missing_evaluation_without_claiming_scientific_success() -> None:
+    policy = policy_for_task({"run": {"completion_gate": {"mode": "enforce"}}})
+    gate = evaluate_scorecard({}, policy=policy)
+    assert gate["completion_allowed"] is False
+    assert gate["quality_status"] == "missing"
+    assert gate["scientific_validated"] is False
+    with pytest.raises(ValueError, match="unknown"):
+        policy_for_task({"shell": "arbitrary"})
+    with pytest.raises(ValueError, match="finite"):
+        policy_for_task({"run": {"pass_min_score": float("nan")}})

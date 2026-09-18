@@ -32,12 +32,12 @@
         "required": ["metric", "observed", "target", "direction"],
         "properties": {
           "metric": { "type": "string", "minLength": 1 },
-          "observed": { "type": "number" },
+          "observed": { "type": ["number", "null"] },
           "target": { "type": "number" },
           "direction": {
             "enum": ["gte", "lte", "maximize", "minimize"]
           },
-          "gap": { "type": "number" },
+          "gap": { "type": ["number", "null"] },
           "aggregation": { "type": "string" }
         }
       }

@@ -7,11 +7,16 @@ prompts, examples, evals, and uploaded text/code can be edited from the UI.
 from __future__ import annotations
 
 import re
+import hashlib
+import json
+import os
+import tempfile
+from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
@@ -71,6 +76,103 @@ TEXT_SUFFIXES: frozenset[str] = frozenset(
         ".yml",
     }
 )
+
+
+@dataclass(frozen=True)
+class RuntimeContextResources:
+    context: str
+    manifest: dict[str, Any]
+
+
+def load_agent_runtime_resources(
+    agent: str, *, overrides: Mapping[str, str] | None = None,
+    resource_root: Path | None = None,
+) -> RuntimeContextResources:
+    """Read versioned procedural references for the actual Agent model call.
+
+    Internal evaluators may supply one frozen version using ``overrides``. It is
+    not a tool or a user-extra setting; no file is modified. Callers bind the
+    manifest digest to their invocation and must reject drift on resume.
+    """
+    root = resource_root or _agent_root(agent)
+    replacements = dict(overrides or {})
+    entries: list[dict[str, Any]] = []
+    sections: list[str] = []
+    consumed: set[str] = set()
+    total_bytes = 0
+    for category in ("prompts", "examples", "evals"):
+        directory = root / category
+        if not directory.exists():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            if not path.resolve().is_relative_to(root.resolve()):
+                raise ValueError("agent resource symlink escapes its resource root")
+            relative = path.relative_to(root).as_posix()
+            content = replacements.get(relative, path.read_text(encoding="utf-8"))
+            if not isinstance(content, str):
+                raise ValueError("resource overrides must contain text")
+            consumed.add(relative)
+            total_bytes += len(content.encode())
+            if total_bytes > 160_000:
+                raise ValueError("agent runtime resources exceed 160KB; explicitly reduce the selected resources")
+            entries.append({"path": relative, "category": category, "bytes": len(content.encode()),
+                            "sha256": hashlib.sha256(content.encode()).hexdigest(),
+                            "source": "evaluation_snapshot" if relative in replacements else "repository"})
+            sections.append(f"[Agent resource {relative}; reference material]\n{content}")
+    if set(replacements) - consumed:
+        raise ValueError("resource override must name an existing prompts/examples/evals file")
+    digest = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    prefix = ("The following are procedural references and examples. Core role instructions, the current "
+              "task's output contract, permissions and host acceptance checks remain authoritative. "
+              "Example outputs are not results for this task. Text rubrics are not evidence of experiments.\n\n")
+    return RuntimeContextResources(prefix + "\n\n".join(sections) if sections else "",
+        {"schema": "agent.runtime_resources.v1", "agent": agent, "files": entries, "sha256": digest})
+
+
+@contextmanager
+def _resource_lock(path: Path) -> Iterator[None]:
+    """Cross-process compare-and-swap lock shared by every context writer."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.parent / (path.name + ".lock")).open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            handle.write(b"0")
+            handle.flush()
+            handle.seek(0)
+            getattr(msvcrt, "locking")(handle.fileno(), getattr(msvcrt, "LK_LOCK"), 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                getattr(msvcrt, "locking")(handle.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _write_context_atomic(path: Path, content: str, *, expected_sha256: str | None = None) -> None:
+    with _resource_lock(path):
+        if expected_sha256 is not None:
+            current = path.read_bytes() if path.is_file() else b""
+            hashes = {hashlib.sha256(current).hexdigest(), hashlib.sha256(
+                current.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode()).hexdigest()}
+            if expected_sha256.removeprefix("sha256:") not in hashes:
+                raise ValueError("agent context changed after evaluation; re-evaluate before applying")
+        descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
 DEFAULT_RESEARCH_SITES: tuple[Mapping[str, object], ...] = (
     {
@@ -486,7 +588,7 @@ def create_agent_context_file(
     )
     _validate_suffix(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    _write_context_atomic(target, content)
     return _file_view(
         agent=agent,
         root=_agent_root(agent),
@@ -498,9 +600,11 @@ def create_agent_context_file(
     )
 
 
-def update_agent_context_file(agent: str, *, path: str, content: str) -> AgentContextFile:
+def update_agent_context_file(
+    agent: str, *, path: str, content: str, expected_sha256: str | None = None,
+) -> AgentContextFile:
     target = _editable_path(agent, path)
-    target.write_text(content, encoding="utf-8")
+    _write_context_atomic(target, content, expected_sha256=expected_sha256)
     return _file_view(
         agent=agent,
         root=_agent_root(agent),
@@ -514,7 +618,8 @@ def update_agent_context_file(agent: str, *, path: str, content: str) -> AgentCo
 
 def delete_agent_context_file(agent: str, *, path: str) -> None:
     target = _editable_path(agent, path)
-    target.unlink(missing_ok=True)
+    with _resource_lock(target):
+        target.unlink(missing_ok=True)
 
 
 def register_agent_context_memory(

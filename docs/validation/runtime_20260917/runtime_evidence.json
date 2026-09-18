@@ -1,0 +1,620 @@
+{
+  "final_rerun": {
+    "run_id": "2026-09-17T1739_real_cpu_polynomial_regression",
+    "last_observed_status": "running",
+    "completion_verified": false,
+    "blocker": "Execution auto-review rejected ongoing DeepSeek access after an explicit GLM adapter check, citing causal authorization mismatch. No bypass or fabricated result."
+  },
+  "schema": "mars.development_validation.v1",
+  "base_main_commit": "005591a57ccc19af78811ec971c8e3887b86e3b9",
+  "runtime_commit": "00971f1",
+  "final_fix_commit": "faed677",
+  "run_id": "2026-09-17T1724_real_cpu_polynomial_regression",
+  "project": "folder_6dffbd8f7afc43dc99bc9d814673e3c9",
+  "status": "completed",
+  "approval_mode": "auto",
+  "validation_scope": "actual_pipeline_execution_and_artifact_contracts; metric gate was explicitly unevaluated due to fixture config location",
+  "scientific_validated": false,
+  "blind_holdout": false,
+  "manual_recovery_actions": [],
+  "run_state": {
+    "created_at": "2026-09-17T17:24:24.597748+00:00",
+    "entrypoint": "pipeline",
+    "graph": {
+      "edges": [
+        {
+          "dst": "experiment",
+          "src": "idea"
+        },
+        {
+          "dst": "coding",
+          "src": "experiment"
+        },
+        {
+          "dst": "execution",
+          "src": "coding"
+        },
+        {
+          "dst": "writing",
+          "src": "execution"
+        }
+      ],
+      "entrypoints": [
+        "idea"
+      ],
+      "nodes": [
+        {
+          "key": "idea",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "idea"
+          },
+          "state": "done"
+        },
+        {
+          "key": "experiment",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "experiment"
+          },
+          "state": "done"
+        },
+        {
+          "key": "coding",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "coding"
+          },
+          "state": "done"
+        },
+        {
+          "key": "execution",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "execution"
+          },
+          "state": "done"
+        },
+        {
+          "key": "writing",
+          "kind": "agent",
+          "metadata": {
+            "attempt": 1,
+            "stage": "writing"
+          },
+          "state": "done"
+        }
+      ]
+    },
+    "project": "folder_6dffbd8f7afc43dc99bc9d814673e3c9",
+    "run_id": "2026-09-17T1724_real_cpu_polynomial_regression",
+    "states": {
+      "coding": "done",
+      "execution": "done",
+      "experiment": "done",
+      "idea": "done",
+      "writing": "done"
+    },
+    "status": "completed",
+    "task": "real-cpu-polynomial-regression",
+    "termination": null
+  },
+  "request_sha256": "17d7703df6b8be9757df134045fc2d20f4eca1a24da421b36b44951a310cc0f0",
+  "task_config_sha256": "79e3889ae81ef782dee23fbd625c4488c2bf21ec42abf9da10bde2829288c603",
+  "model_responses": 25,
+  "tool_observations": 16,
+  "experiments_executed": 1,
+  "usage": {
+    "completion_tokens": 62115,
+    "prompt_tokens": 315563,
+    "total_tokens": 377678
+  },
+  "monetary_cost": null,
+  "glm_adapter_generation": {
+    "scope": "actual_MARS_adapter_generation",
+    "provider": "zhipu",
+    "model": "glm-4.7",
+    "text": "MARS connection verified.",
+    "usage": {
+      "completion_tokens": 5,
+      "prompt_tokens": 14,
+      "total_tokens": 19,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "finish_reason": "stop",
+    "is_mock": false
+  },
+  "model_configuration": [
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek"
+    },
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
+    {
+      "credential_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek"
+    }
+  ],
+  "stages": {
+    "idea": {
+      "invocations": [
+        {
+          "trace": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/idea/f571cf288886414b951993412b76e7fd/events.jsonl",
+            "bytes": 597665,
+            "sha256": "c4a2c600a82bcea5ff9623208d5f3f1d5b4790b4f4374ca034b7c7d3a4104d5d"
+          },
+          "facts": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/idea/f571cf288886414b951993412b76e7fd/facts.json",
+            "bytes": 3888,
+            "sha256": "53f3bf78c4d33f66e71a9af55b105a4cd2bf5c2170215e56b67813f7b4205688"
+          },
+          "status": "passed",
+          "counts": {
+            "action_rounds": 6,
+            "model_requests": 9,
+            "model_responses": 9,
+            "observations": 6,
+            "protocol_repairs": 3,
+            "reflections": 1,
+            "sdk_attempts": 9,
+            "tool_dispatches": 6,
+            "validation_repairs": 1
+          },
+          "usage": {
+            "completion_tokens": 40472,
+            "prompt_tokens": 153209,
+            "total_tokens": 193681
+          },
+          "usage_complete": true
+        }
+      ],
+      "elapsed_seconds": 441.237233,
+      "started_at": "2026-09-17T17:24:25.617150+00:00",
+      "finished_at": "2026-09-17T17:31:46.854383+00:00",
+      "model_responses": 9,
+      "tool_observations": 6,
+      "tool_failures": [],
+      "protocol_errors": 3,
+      "failed_validations": 1,
+      "rejected_reflections": 0,
+      "runtime_errors": 0,
+      "tools": {
+        "code.repo_reader": 3,
+        "search.openalex_search": 1,
+        "search.arxiv_search": 1,
+        "search.fetch_sources": 1
+      },
+      "approved_artifacts": [
+        {
+          "original": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/idea/idea_proposal.approved.md",
+            "bytes": 8715,
+            "sha256": "82edf78f6baa12c09db22216791d7418f5993d1126345d62f2bcfa5b72d34c14"
+          },
+          "archived": {
+            "path": "docs/validation/runtime_20260917/idea_idea_proposal.approved.md",
+            "bytes": 8715,
+            "sha256": "82edf78f6baa12c09db22216791d7418f5993d1126345d62f2bcfa5b72d34c14"
+          }
+        }
+      ]
+    },
+    "experiment": {
+      "invocations": [
+        {
+          "trace": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/experiment/0722eb39f5184d9ba8a5c0ba7b524968/events.jsonl",
+            "bytes": 107687,
+            "sha256": "76d2d265e0452997df6065c080283111154d064af13e570a2b4776fb380d16c1"
+          },
+          "facts": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/experiment/0722eb39f5184d9ba8a5c0ba7b524968/facts.json",
+            "bytes": 3039,
+            "sha256": "96d495ba418375fb5c3f3422eb248d516ba593b0fc10331b4c49cd869fd0837a"
+          },
+          "status": "passed",
+          "counts": {
+            "action_rounds": 2,
+            "model_requests": 3,
+            "model_responses": 3,
+            "observations": 2,
+            "protocol_repairs": 0,
+            "reflections": 0,
+            "sdk_attempts": 3,
+            "tool_dispatches": 2,
+            "validation_repairs": 0
+          },
+          "usage": {
+            "completion_tokens": 4053,
+            "prompt_tokens": 22813,
+            "total_tokens": 26866
+          },
+          "usage_complete": true
+        }
+      ],
+      "elapsed_seconds": 62.794684,
+      "started_at": "2026-09-17T17:31:47.690899+00:00",
+      "finished_at": "2026-09-17T17:32:50.485583+00:00",
+      "model_responses": 3,
+      "tool_observations": 2,
+      "tool_failures": [],
+      "protocol_errors": 0,
+      "failed_validations": 0,
+      "rejected_reflections": 0,
+      "runtime_errors": 0,
+      "tools": {
+        "knowledge.baseline_match": 1,
+        "knowledge.experiment_memory": 1
+      },
+      "approved_artifacts": [
+        {
+          "original": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/experiment/experiment_plan.approved.md",
+            "bytes": 5396,
+            "sha256": "631b32151f10a9f8a71da282f533ae8c5aa43a6926f0162646f2bb02178a58de"
+          },
+          "archived": {
+            "path": "docs/validation/runtime_20260917/experiment_experiment_plan.approved.md",
+            "bytes": 5396,
+            "sha256": "631b32151f10a9f8a71da282f533ae8c5aa43a6926f0162646f2bb02178a58de"
+          }
+        }
+      ]
+    },
+    "coding": {
+      "invocations": [
+        {
+          "trace": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/coding/51f84c53128b4da0a4d63c408b6cfc7c/events.jsonl",
+            "bytes": 344761,
+            "sha256": "d03c32d698ce709f98a87aef57a221b616d152ed44aff390d39344e10aa2fb8a"
+          },
+          "facts": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/coding/51f84c53128b4da0a4d63c408b6cfc7c/facts.json",
+            "bytes": 3020,
+            "sha256": "a3ee3a462e70a732b1f646780eef5d01dc7661061acd60137ef90663420a80a6"
+          },
+          "status": "passed",
+          "counts": {
+            "action_rounds": 6,
+            "model_requests": 8,
+            "model_responses": 8,
+            "observations": 6,
+            "protocol_repairs": 1,
+            "reflections": 0,
+            "sdk_attempts": 8,
+            "tool_dispatches": 6,
+            "validation_repairs": 0
+          },
+          "usage": {
+            "completion_tokens": 8325,
+            "prompt_tokens": 80414,
+            "total_tokens": 88739
+          },
+          "usage_complete": true
+        }
+      ],
+      "elapsed_seconds": 138.990383,
+      "started_at": "2026-09-17T17:32:51.761949+00:00",
+      "finished_at": "2026-09-17T17:35:10.752332+00:00",
+      "model_responses": 8,
+      "tool_observations": 6,
+      "tool_failures": [
+        {
+          "tool": "code.test_runner",
+          "error": "no test commands configured; not executed",
+          "time": "2026-09-17T17:34:22.103511+00:00"
+        }
+      ],
+      "protocol_errors": 1,
+      "failed_validations": 0,
+      "rejected_reflections": 0,
+      "runtime_errors": 0,
+      "tools": {
+        "code.repo_reader": 3,
+        "code.write_file": 1,
+        "code.test_runner": 2
+      },
+      "approved_artifacts": [
+        {
+          "original": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/coding/code_spec.approved.md",
+            "bytes": 2991,
+            "sha256": "4760960e6f381694f9e9f292d284b224cb1e7e976e857394912fdc40156e5f6d"
+          },
+          "archived": {
+            "path": "docs/validation/runtime_20260917/coding_code_spec.approved.md",
+            "bytes": 2991,
+            "sha256": "4760960e6f381694f9e9f292d284b224cb1e7e976e857394912fdc40156e5f6d"
+          }
+        }
+      ]
+    },
+    "execution": {
+      "invocations": [
+        {
+          "trace": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/execution/550c2b700d1445bbac5b253ed53019b6/events.jsonl",
+            "bytes": 41548,
+            "sha256": "35a28d0ddfb872a50a6f53003be58da9c389249ad797157732b33c5cd2532ef4"
+          },
+          "facts": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/execution/550c2b700d1445bbac5b253ed53019b6/facts.json",
+            "bytes": 3055,
+            "sha256": "e5b2cc35585839dde28cd8275b26278982d0b20d5763029f9062e7f529792439"
+          },
+          "status": "passed",
+          "counts": {
+            "action_rounds": 0,
+            "model_requests": 1,
+            "model_responses": 1,
+            "observations": 0,
+            "protocol_repairs": 0,
+            "reflections": 0,
+            "sdk_attempts": 1,
+            "tool_dispatches": 0,
+            "validation_repairs": 0
+          },
+          "usage": {
+            "completion_tokens": 2209,
+            "prompt_tokens": 9130,
+            "total_tokens": 11339
+          },
+          "usage_complete": true
+        }
+      ],
+      "elapsed_seconds": 41.219397,
+      "started_at": "2026-09-17T17:35:11.349026+00:00",
+      "finished_at": "2026-09-17T17:35:52.568423+00:00",
+      "model_responses": 1,
+      "tool_observations": 0,
+      "tool_failures": [],
+      "protocol_errors": 0,
+      "failed_validations": 0,
+      "rejected_reflections": 0,
+      "runtime_errors": 0,
+      "tools": {},
+      "approved_artifacts": [
+        {
+          "original": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/run_log.approved.md",
+            "bytes": 2232,
+            "sha256": "593cd5c46e1f45fa77f6b797d9e062b7004dc92f982cbc7965dda55273e7d513"
+          },
+          "archived": {
+            "path": "docs/validation/runtime_20260917/execution_run_log.approved.md",
+            "bytes": 2232,
+            "sha256": "593cd5c46e1f45fa77f6b797d9e062b7004dc92f982cbc7965dda55273e7d513"
+          }
+        }
+      ]
+    },
+    "writing": {
+      "invocations": [
+        {
+          "trace": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/writing/567fa7e089dc4fcdab9458785fd81a6b/events.jsonl",
+            "bytes": 216211,
+            "sha256": "9b7bdfadb4a245d765036372b49e8f1b660db7e916f23e60dd68b3ed35bf6be0"
+          },
+          "facts": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/agent_traces/writing/567fa7e089dc4fcdab9458785fd81a6b/facts.json",
+            "bytes": 3142,
+            "sha256": "b500336640c6b165e1d7bc17a24285df2981227142a597fc0adfa8e2dae9b24e"
+          },
+          "status": "passed",
+          "counts": {
+            "action_rounds": 2,
+            "model_requests": 4,
+            "model_responses": 4,
+            "observations": 2,
+            "protocol_repairs": 0,
+            "reflections": 1,
+            "sdk_attempts": 4,
+            "tool_dispatches": 2,
+            "validation_repairs": 0
+          },
+          "usage": {
+            "completion_tokens": 7056,
+            "prompt_tokens": 49997,
+            "total_tokens": 57053
+          },
+          "usage_complete": true
+        }
+      ],
+      "elapsed_seconds": 107.691051,
+      "started_at": "2026-09-17T17:35:54.008109+00:00",
+      "finished_at": "2026-09-17T17:37:41.699160+00:00",
+      "model_responses": 4,
+      "tool_observations": 2,
+      "tool_failures": [],
+      "protocol_errors": 0,
+      "failed_validations": 0,
+      "rejected_reflections": 0,
+      "runtime_errors": 0,
+      "tools": {
+        "knowledge.run_archive": 1,
+        "knowledge.methodology": 1
+      },
+      "approved_artifacts": [
+        {
+          "original": {
+            "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/writing/research_report.approved.md",
+            "bytes": 4994,
+            "sha256": "c476083ecae73aa38404c6259712408037d7afe1765197ea44cabf9cdb809e5b"
+          },
+          "archived": {
+            "path": "docs/validation/runtime_20260917/writing_research_report.approved.md",
+            "bytes": 4994,
+            "sha256": "c476083ecae73aa38404c6259712408037d7afe1765197ea44cabf9cdb809e5b"
+          }
+        }
+      ]
+    }
+  },
+  "execution_metrics": [
+    {
+      "duration_seconds": 0.4723319410040858,
+      "fingerprint_hash": "sha256:48d7eff8954592a42c0c024eff298a9f6a896498636addaa1470bb773f81650f",
+      "metrics": {
+        "baseline_mse": 31.110267053009647,
+        "candidate_mse": 1.1175529490631001e-30,
+        "candidate_terms": 3.0,
+        "improvement": 31.110267053009647
+      },
+      "run_id": "2026-09-17T1724_real_cpu_polynomial_regression_candidate_degree2_reg0"
+    }
+  ],
+  "execution_evidence": [
+    {
+      "execution_receipt.json": {
+        "original": {
+          "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/execution_receipt.json",
+          "bytes": 1689,
+          "sha256": "48d7eff8954592a42c0c024eff298a9f6a896498636addaa1470bb773f81650f"
+        },
+        "archived": {
+          "path": "docs/validation/runtime_20260917/execution/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/execution_receipt.json",
+          "bytes": 1689,
+          "sha256": "48d7eff8954592a42c0c024eff298a9f6a896498636addaa1470bb773f81650f"
+        }
+      },
+      "measurement.json": {
+        "original": {
+          "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/measurement.json",
+          "bytes": 1570,
+          "sha256": "8c2eb520a0ada41b0599abb7cc15f2d23efbbe5c9c3c79dd91a81c14dd142562"
+        },
+        "archived": {
+          "path": "docs/validation/runtime_20260917/execution/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/measurement.json",
+          "bytes": 1570,
+          "sha256": "8c2eb520a0ada41b0599abb7cc15f2d23efbbe5c9c3c79dd91a81c14dd142562"
+        }
+      },
+      "result.json": {
+        "original": {
+          "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/result.json",
+          "bytes": 384,
+          "sha256": "dc5ceaad3456a4ef91f52bb662fe5316ec7ce60c8fc55eaefb28f23998dede55"
+        },
+        "archived": {
+          "path": "docs/validation/runtime_20260917/execution/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/result.json",
+          "bytes": 384,
+          "sha256": "dc5ceaad3456a4ef91f52bb662fe5316ec7ce60c8fc55eaefb28f23998dede55"
+        }
+      },
+      "job.json": {
+        "original": {
+          "path": "runs/2026-09-17T1724_real_cpu_polynomial_regression/execution/local_commands/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/job.json",
+          "bytes": 859,
+          "sha256": "4571962573e06baf700149b1f6db723e114e92fe8ad3da3e51b353097a61b8c3"
+        },
+        "archived": {
+          "path": "docs/validation/runtime_20260917/execution/candidate_degree2_reg0/3c7dc38c52444869a3a7de3b5b857918/job.json",
+          "bytes": 859,
+          "sha256": "4571962573e06baf700149b1f6db723e114e92fe8ad3da3e51b353097a61b8c3"
+        }
+      }
+    }
+  ],
+  "diagnosis": {
+    "agent": "commander",
+    "attempt": 1,
+    "attempt_ledger_ref": "diagnosis/attempt_ledger_summary.md",
+    "attribution": {
+      "expected_fix": "Report actual measurements and the missing acceptance criteria; do not claim scientific validation.",
+      "target_agent": "writing",
+      "why_this_agent": "Metric acceptance was not evaluated: no enabled project criteria were supplied."
+    },
+    "budget_status": "not_applicable",
+    "confidence": 1.0,
+    "created": "2026-09-17T17:35:53.710439+00:00",
+    "evidence_refs": [
+      "execution/metrics.json"
+    ],
+    "failed_metrics": [],
+    "feedback_packet_ref": "",
+    "max_iterations": 2,
+    "memory_candidates": [],
+    "metrics_evaluated": false,
+    "passed": false,
+    "project": "folder_6dffbd8f7afc43dc99bc9d814673e3c9",
+    "recommended_action": "Report actual measurements and the missing acceptance criteria; do not claim scientific validation.",
+    "recommended_target": "writing",
+    "rejected_alternatives": [],
+    "requires_human": false,
+    "run_id": "2026-09-17T1724_real_cpu_polynomial_regression",
+    "schema": "diagnosis.v1",
+    "suspected_causes": []
+  },
+  "declared_acceptance": {
+    "path": "docs/validation/runtime_20260917/declared_diagnostics.yaml",
+    "bytes": 179,
+    "sha256": "e50c861f0dcb18eecf2f16d532f6473d093d589760db8d5b9eb858d8cc2a8ca0"
+  },
+  "verification_errors": [],
+  "local_command_verification_errors": [],
+  "full_regression_at_commit": "00971f1",
+  "full_regression": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "169",
+    "tests": "2361",
+    "time": "185.042",
+    "timestamp": "2026-09-18T02:54:13.798228+09:30",
+    "hostname": "localhost"
+  },
+  "post_fix_targeted_tests": {
+    "tests": 14,
+    "passed": 14,
+    "failed": 0,
+    "scope": "real fixture creation, actual config loader, actual code checking and diagnostic rules"
+  },
+  "strict_mypy": {
+    "source_files": 550,
+    "errors": 0
+  },
+  "import_contracts": {
+    "kept": 4,
+    "broken": 0
+  },
+  "limitations": [
+    "Metric acceptance was not evaluated in this completed run. Config location is fixed and covered by actual loader tests, but its final full rerun was blocked by execution approval.",
+    "Synthetic 11-sample CPU fixture; not PIMC or scientific novelty validation.",
+    "Agents can read all values; the held-out split is not a blind evaluation.",
+    "Model and tool corrections are included in per-stage evidence; completion does not mean zero model mistakes.",
+    "GLM real generation was separately verified through its MARS adapter; this research run used DeepSeek only.",
+    "Local process isolation does not provide OS sandboxing or multi-tenant authentication.",
+    "Missing external dependencies account for skipped tests; skips are not passes."
+  ],
+  "elapsed_seconds": 797.306978
+}

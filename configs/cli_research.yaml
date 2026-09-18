@@ -1,7 +1,10 @@
 schema: cli_research.config.v1
 adapter: pimc_static
 source_config: configs/static_cpu_50steps.yaml
-source_paths: [libs, tools, configs, AGENTS.md, README.md, docs, data/static/README.md]
+source_paths: [libs, tools, configs, AGENTS.md, README.md, docs, context, data/static/README.md]
+optional_context_files:
+  - context/**/*.md
+  - docs/PIMC_BACKGROUND.md
 context_files:
   - AGENTS.md
   - data/static/README.md
@@ -16,6 +19,20 @@ max_steps: 50
 timeout_seconds: 1800
 candidate_path: libs/research_candidate.py
 source_domains: [arxiv.org, export.arxiv.org, openreview.net, proceedings.neurips.cc, openaccess.thecvf.com, api.openalex.org, doi.org]
+# CLI generation favors bounded visible delivery; the focused cross-model
+# reviewer retains its separately configured thinking and acceptance checks.
+research_author:
+  thinking_enabled: false
+  reasoning_effort: null
+  max_tokens: 24576
+  request_timeout_seconds: 360
+  max_retries: 1
+generation:
+  thinking_enabled: false
+  reasoning_effort: null
+  max_tokens: 24576
+  request_timeout_seconds: 360
+  max_retries: 1
 coding_loop:
   protocol: native_tools
   mode: reflection

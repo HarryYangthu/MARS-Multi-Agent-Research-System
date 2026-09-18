@@ -82,7 +82,9 @@ def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
     return RunRequest(project=str(scenario["project"]), user_request=str(scenario["question"]),
                       extra={"run_id": root.name, "run_root": str(root), "scope": "method_proposal",
                              "idea_requirements": requirements, "idea_mode": "fast",
-                             "context_sources": {"project_rules": False, "code_repositories": False}})
+                             "context_sources": {"project_rules": False, "code_repositories": False,
+                                                 "agent_resources": False, "memory": False,
+                                                 "project_references": False}})
 
 
 def public_config(config: AgentConfig) -> dict[str, Any]:

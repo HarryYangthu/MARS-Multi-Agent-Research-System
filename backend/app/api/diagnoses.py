@@ -14,6 +14,8 @@ from app.storage.self_evolution_store import (
     approve_self_evolution_mutation,
     build_self_evolution_levers,
     create_self_evolution_mutation,
+    evaluate_self_evolution_mutation,
+    rollback_self_evolution_mutation,
     list_self_evolution_mutations,
     read_jsonl,
     reject_self_evolution_mutation,
@@ -66,6 +68,11 @@ class SelfEvolutionMutationPayload(BaseModel):
 
 class SelfEvolutionMutationDecisionPayload(BaseModel):
     reviewer_note: str = ""
+
+
+class SelfEvolutionMutationEvaluationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    suite_id: str = Field(..., min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class SelfEvolutionMutationDecisionView(BaseModel):
@@ -249,7 +256,35 @@ async def approve_self_evolution_mutation_proposal(
             mutation_id=mutation_id,
             reviewer_note=payload.reviewer_note if payload is not None else "",
         )
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return SelfEvolutionMutationDecisionView(**result)
+
+
+@router.post("/{run_id}/self-evolution/mutations/{mutation_id}/evaluate")
+async def evaluate_self_evolution_mutation_proposal(
+    run_id: str, mutation_id: str, payload: SelfEvolutionMutationEvaluationPayload,
+) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        return await evaluate_self_evolution_mutation(run=run, mutation_id=mutation_id, suite_id=payload.suite_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{run_id}/self-evolution/mutations/{mutation_id}/rollback", response_model=SelfEvolutionMutationDecisionView)
+async def rollback_self_evolution_mutation_proposal(
+    run_id: str, mutation_id: str, payload: SelfEvolutionMutationDecisionPayload | None = None,
+) -> SelfEvolutionMutationDecisionView:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        result = rollback_self_evolution_mutation(run=run, mutation_id=mutation_id,
+            reviewer_note=payload.reviewer_note if payload else "")
+    except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SelfEvolutionMutationDecisionView(**result)
 

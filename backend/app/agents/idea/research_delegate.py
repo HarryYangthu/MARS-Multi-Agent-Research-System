@@ -471,10 +471,18 @@ class ResearchSession:
 
         try:
             provider, model = select_provider(self.config)
+            parent = dict(tool_context.extra.get("correlation", {}))
+            child_correlation = {"trace_id": str(parent.get("trace_id", tool_context.run_id)),
+                                 "parent_task_id": str(parent.get("task_id", "idea")),
+                                 "task_id": identifier, "node_id": "idea_research",
+                                 "invocation_id": identifier}
+            if parent.get("invocation_id"):
+                child_correlation["parent_invocation_id"] = str(parent["invocation_id"])
             result = await NativeAgentLoop().run(LoopInput(messages=messages, provider=provider, config=model,
                 registry=self.registry, tool_context=self.research_tool_context(run_id=tool_context.run_id,
                     project=tool_context.project, root=root), tools=tools, policy=policy,
                 trace_root=trace, validate=validate, final_schema=research_submission_schema(), progress_sink=progress,
+                correlation=child_correlation,
                 reflection_rubric=RESEARCH_REVIEW_RUBRIC,
                 review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
                     supplied_context={ref: self.context.upstream[ref] for ref in refs}, research_unit=self.research_unit),

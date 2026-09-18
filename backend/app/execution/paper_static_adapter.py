@@ -22,6 +22,7 @@ import yaml
 
 from app.execution.results import SimulationResult
 from app.execution.subprocess_env import sanitized_subprocess_environment
+from app.harness.tools.process_runtime import start_process, terminate_process_tree
 from app.settings import repo_root
 
 _EPOCH_RE = re.compile(
@@ -116,10 +117,13 @@ async def run_paper_static_simulation(
     done_path: Path | None = None
     returncode = -1
     timed_out = False
+    process: asyncio.subprocess.Process | None = None
 
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
+        process = await start_process(
+            argv,
+            backend=str(cfg.get("process_backend", "local_process")),
+            require_isolation=bool(cfg.get("require_isolation", False)),
             cwd=str(repo_path),
             env=_subprocess_env(run_root=run_root, spec=spec),
             stdout=asyncio.subprocess.PIPE,
@@ -128,7 +132,7 @@ async def run_paper_static_simulation(
 
         async def read_stdout() -> None:
             nonlocal done_path
-            if process.stdout is None:
+            if process is None or process.stdout is None:
                 return
             async for raw in process.stdout:
                 line = raw.decode("utf-8", errors="replace").rstrip()
@@ -157,7 +161,7 @@ async def run_paper_static_simulation(
                     done_path = Path(match.group("path").strip())
 
         async def read_stderr() -> None:
-            if process.stderr is None:
+            if process is None or process.stderr is None:
                 return
             async for raw in process.stderr:
                 stderr_lines.append(raw.decode("utf-8", errors="replace").rstrip())
@@ -170,14 +174,12 @@ async def run_paper_static_simulation(
     except asyncio.TimeoutError:
         timed_out = True
         returncode = -1
-        try:
-            process.kill()
-            await process.wait()
-        except Exception:
-            pass
         stderr_lines.append(f"timed out after {timeout:.1f}s")
     except OSError as exc:
         stderr_lines.append(str(exc))
+    finally:
+        if process is not None:
+            await terminate_process_tree(process)
 
     summary_path = _summary_path(output_root=output_root, done_path=done_path)
     summary = _read_json(summary_path) if summary_path is not None else {}

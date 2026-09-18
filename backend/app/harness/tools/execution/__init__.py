@@ -22,6 +22,7 @@ from typing import Any
 from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.tools.config import load_execution_config, tool_config
 from app.harness.tools.registry import ToolContext, ToolResult
+from app.harness.tools.process_runtime import communicate_process, start_process
 from app.settings import repo_root
 
 
@@ -84,13 +85,7 @@ class _ExecutionResult:
     fingerprint_hash: str
     is_mock: bool
     loss_curve: list[float]
-
-
-@dataclass(frozen=True)
-class _LocalCommandSpec:
-    id: str
-    label: str
-    argv: tuple[str, ...]
+    error: str = ""
 
 
 def _job_spec_from_args(
@@ -242,164 +237,22 @@ def _write_curve(
     return target
 
 
-def _local_commands() -> tuple[_LocalCommandSpec, ...]:
-    cfg = load_execution_config()["execution"]
-    raw_commands = cfg.get("local_commands", [])
-    if not isinstance(raw_commands, list):
-        return ()
-    out: list[_LocalCommandSpec] = []
-    for index, item in enumerate(raw_commands):
-        if not isinstance(item, dict):
-            continue
-        argv_raw = item.get("argv", [])
-        if not isinstance(argv_raw, list) or not all(isinstance(part, str) for part in argv_raw):
-            continue
-        if not argv_raw:
-            continue
-        out.append(
-            _LocalCommandSpec(
-                id=str(item.get("id") or f"local_{index + 1}"),
-                label=str(item.get("label") or item.get("id") or f"local command {index + 1}"),
-                argv=tuple(argv_raw),
-            )
-        )
-    return tuple(out)
-
-
-def _command_allowed(
-    argv: tuple[str, ...],
-    allowlist: tuple[tuple[str, ...], ...],
-) -> bool:
-    if not allowlist:
-        return False
-    return any(len(argv) >= len(prefix) and argv[: len(prefix)] == prefix for prefix in allowlist)
-
-
-def _select_local_command(args: dict[str, Any], *, tool_name: str) -> _LocalCommandSpec | ToolResult:
-    requested = str(args.get("command_id", "") or "")
-    commands = _local_commands()
-    if requested:
-        commands = tuple(command for command in commands if command.id == requested)
-    if not commands:
-        return ToolResult(ok=False, error="no local_command is configured for execution tools")
-    command = commands[0]
-    allowlist = tool_config(tool_name).command_allowlist
-    if not _command_allowed(command.argv, allowlist):
-        return ToolResult(
-            ok=False,
-            error=f"{command.id} is not allowlisted for {tool_name}",
-            output={"argv": list(command.argv)},
-        )
-    return command
-
-
 async def _run_local_command(
-    *,
-    args: dict[str, Any],
-    ctx: ToolContext,
-    spec: _ExecutionSpec,
-    tool_name: str,
+    *, args: dict[str, Any], ctx: ToolContext, spec: _ExecutionSpec, tool_name: str,
 ) -> tuple[_ExecutionResult, list[dict[str, Any]]]:
-    selected = _select_local_command(args, tool_name=tool_name)
-    if isinstance(selected, ToolResult):
-        raise RuntimeError(selected.error or "local command is not available")
-    run_root = _run_root(ctx, spec.run_id)
-    logs_dir = run_root / "execution" / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    timeout = _command_timeout_seconds()
-    env = {
-        **os.environ,
-        "MARS_RUN_ID": spec.run_id,
-        "MARS_EXPERIMENT_ID": spec.experiment_id,
-        "MARS_PROJECT": spec.project,
-        "MARS_RUN_ROOT": str(run_root),
-    }
-    started = time.monotonic()
-    process = await asyncio.create_subprocess_exec(
-        *selected.argv,
-        cwd=str(run_root),
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    timed_out = False
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        timed_out = True
-        process.kill()
-        await process.wait()
-        stdout, stderr = b"", f"timed out after {timeout}s".encode()
-    duration = time.monotonic() - started
-    stdout_text = stdout.decode("utf-8", errors="replace")
-    stderr_text = stderr.decode("utf-8", errors="replace")
-    returncode = -1 if timed_out else int(process.returncode or 0)
-    log_path = logs_dir / f"{spec.experiment_id}_{selected.id}.log"
-    log_path.write_text(
-        "\n".join(
-            [
-                f"command_id={selected.id}",
-                "argv=" + json.dumps(list(selected.argv), ensure_ascii=False),
-                f"returncode={returncode}",
-                "--- stdout ---",
-                stdout_text,
-                "--- stderr ---",
-                stderr_text,
-            ]
-        ),
-        encoding="utf-8",
-    )
-    metrics = _metrics_from_command_output(stdout_text)
-    has_measurements = bool(metrics)
-    metrics.setdefault("returncode", float(returncode))
-    result = _ExecutionResult(
-        run_id=spec.run_id,
-        experiment_id=spec.experiment_id,
-        duration_seconds=duration,
-        status="completed" if returncode == 0 and has_measurements else "failed",
-        metrics=metrics,
-        fingerprint_hash="sha256:" + hashlib.sha256(
-            f"{spec.project}:{spec.run_id}:{spec.experiment_id}:{selected.argv}:{returncode}".encode(
-                "utf-8"
-            )
-        ).hexdigest()[:24],
-        is_mock=False,
-        loss_curve=[],
-    )
-    return result, [{"kind": "local_command_log", "path": str(log_path)}]
+    from app.harness.tools.execution.local_command import LocalCommandJob, run_local_command
 
-
-def _metrics_from_command_output(stdout_text: str) -> dict[str, float]:
-    lines = [line.strip() for line in stdout_text.splitlines() if line.strip()]
-    for line in reversed(lines):
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        raw_metrics = parsed.get("metrics", parsed)
-        if not isinstance(raw_metrics, dict):
-            continue
-        metrics: dict[str, float] = {}
-        for key, value in raw_metrics.items():
-            try:
-                number = float(value)
-                if not isinstance(value, bool) and math.isfinite(number) and key not in {"returncode", "dry_run", "max_iters"}:
-                    metrics[str(key)] = number
-            except (TypeError, ValueError):
-                continue
-        if metrics:
-            return metrics
-    return {}
-
-
-def _command_timeout_seconds() -> float:
-    cfg = load_execution_config()["execution"]
-    try:
-        return float(cfg.get("command_timeout_seconds", 60) or 60)
-    except (TypeError, ValueError):
-        return 60.0
+    outcome = await run_local_command(LocalCommandJob(
+        run_id=spec.run_id, experiment_id=spec.experiment_id, project=spec.project,
+        run_root=_run_root(ctx, spec.run_id), config=dict(spec.config), seed=spec.seed,
+        steps=_steps_from_args(args), command_id=str(args.get("command_id") or spec.config.get("command_id") or ""),
+    ), tool_name=tool_name)
+    return _ExecutionResult(
+        run_id=spec.run_id, experiment_id=spec.experiment_id,
+        duration_seconds=outcome.duration_seconds, status=outcome.status,
+        metrics=outcome.metrics, fingerprint_hash=outcome.fingerprint_hash,
+        is_mock=False, loss_curve=outcome.loss_curve, error=outcome.error,
+    ), outcome.artifacts
 
 
 def _backend_unavailable_result(*, backend: str, run_id: str) -> ToolResult:
@@ -490,6 +343,7 @@ async def simulation_runner_tool(args: dict[str, Any], ctx: ToolContext) -> Tool
     ) + command_artifacts
     return ToolResult(
         ok=result.status == "completed",
+        error=result.error or None,
         output={
             "backend": backend,
             "run_id": spec.run_id,
@@ -554,7 +408,7 @@ async def batch_runner_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
             results.append(result)
             command_artifacts.extend(local_artifacts)
             if result.status != "completed":
-                failures.append((spec.experiment_id, "local_command failed"))
+                failures.append((spec.experiment_id, result.error or "local_command failed"))
     artifacts = _persist_results(
         run_root=_run_root(ctx, run_id),
         project=ctx.project,

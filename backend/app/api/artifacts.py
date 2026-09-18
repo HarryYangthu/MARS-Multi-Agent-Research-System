@@ -113,6 +113,8 @@ def _resolve(run_id: str, agent_dir: str, stem: str, version: str) -> Path:
     run = store.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    if version == "approved":
+        ArtifactStore(run).recover_approvals()
     p = run.subdir(agent_dir) / f"{stem}.{version}.md"
     if not p.exists():
         raise HTTPException(status_code=404, detail=f"artifact missing: {p.name}")

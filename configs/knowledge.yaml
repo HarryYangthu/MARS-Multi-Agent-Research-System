@@ -1,9 +1,15 @@
 embedding:
-  # V0 uses a deterministic local embedder so KB tests are network-free.
-  # Set `provider: chroma_default` to use Chroma's bundled all-MiniLM model
-  # once the host has it cached (Hardware E2E lane).
-  provider: hash_local
+  # Deterministic Unicode lexical retrieval; this is NOT a neural embedding.
+  # Old ASCII hash vectors are rescored from their stored source text.
+  # For a real embedding model choose openai_compatible and set all service
+  # fields below (or MARS_EMBEDDING_PROVIDER/MODEL/DIM/BASE_URL overrides).
+  # Service failures are explicit; no local substitute is returned.
+  provider: lexical_unicode
   dim: 256
+  model: ""
+  base_url: ""
+  api_key_env: MARS_EMBEDDING_API_KEY
+  timeout_seconds: 30
 
 zones:
   # literature: PIM / passive-intermodulation cancellation papers, memory

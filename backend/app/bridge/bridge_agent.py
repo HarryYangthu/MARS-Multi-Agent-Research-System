@@ -72,6 +72,10 @@ class BridgeAgent:
         analysis: DiagnosisAnalysis,
         attempt: int,
     ) -> BridgeDecision:
+        if not analysis.evaluated:
+            return BridgeDecision(passed=False, should_continue=False, recommended_target="writing",
+                recommended_action="Report measurements without claiming validation; project acceptance criteria are missing or disabled.",
+                budget_status="not_applicable", next_attempt=attempt)
         if analysis.passed:
             return BridgeDecision(
                 passed=True,
@@ -145,6 +149,7 @@ class BridgeAgent:
             "run_id": run.run_id,
             "attempt": attempt,
             "passed": decision.passed,
+            "metrics_evaluated": analysis.evaluated,
             "failed_metrics": [f.to_metadata() for f in analysis.failed_metrics],
             "suspected_causes": [c.to_metadata() for c in analysis.suspected_causes],
             "recommended_target": decision.recommended_target,
@@ -180,11 +185,12 @@ class BridgeAgent:
         ]
         if analysis.failed_metrics:
             for failure in analysis.failed_metrics:
+                observed = f"{failure.observed:.6g}" if failure.observed is not None else "missing or invalid"
                 lines.append(
-                    f"- `{failure.metric}` observed `{failure.observed:.6g}` vs target `{failure.target:.6g}` ({failure.direction})."
+                    f"- `{failure.metric}` observed `{observed}` vs target `{failure.target:.6g}` ({failure.direction})."
                 )
         else:
-            lines.append("- All configured metrics passed.")
+            lines.append("- All configured metrics passed." if analysis.evaluated else "- Metric acceptance was not evaluated.")
         lines.extend(["", "## Suspected Causes"])
         if analysis.suspected_causes:
             for cause in analysis.suspected_causes:

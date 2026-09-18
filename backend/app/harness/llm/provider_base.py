@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 Role = Literal["system", "user", "assistant", "tool"]
@@ -110,10 +111,16 @@ class LLMCompletionError(RuntimeError):
 class Delta:
     text: str
     finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 class LLMProvider(ABC):
     name: str = "base"
+
+    @property
+    def base_url(self) -> str | None:
+        """Effective endpoint identity; implementations must not expose credentials."""
+        return None
 
     async def close(self) -> None:
         """Release any resources owned by the provider."""
@@ -134,6 +141,16 @@ class LLMProvider(ABC):
         ``Coroutine[..., AsyncIterator[T]]``.
         """
         ...
+
+
+def public_endpoint_url(value: str) -> str:
+    """Keep endpoint routing information while removing URL credentials."""
+    parsed = urlsplit(value)
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    query = [(name, "REDACTED" if any(marker in name.casefold() for marker in (
+        "key", "token", "secret", "password", "credential", "authorization",
+    )) else item) for name, item in parse_qsl(parsed.query, keep_blank_values=True)]
+    return urlunsplit((parsed.scheme, authority, parsed.path.rstrip("/"), urlencode(query), ""))
 
 
 def llm_call_deadline_seconds(

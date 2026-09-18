@@ -16,6 +16,7 @@ from app.agents.idea.delivery import (
 )
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.protocol import protocol_schema
+from app.agents.idea.parameter_schema import parameter_budget_schema, parameter_components_schema
 from app.agents.idea.research_links import research_link_errors, research_links_schema
 from app.agents.idea.research_assessment import assessment_errors, assessment_schema
 from app.harness.agent_loop.executor import ProgressSink
@@ -106,40 +107,8 @@ class IdeaAgent(BaseAgent):
             schema["properties"]["evaluation_protocol"] = protocol_schema()
         if request.extra.get("idea_requirements", {}).get("require_parameter_budget"):
             schema["required"] += ["parameter_budget", "signal_contract", "alternatives", "ablation_plan"]
-            component = {"type": "object", "required": ["name", "formula", "dtype", "shape"],
-                         "properties": {"name": {"type": "string", "minLength": 1},
-                                        "formula": {"type": "string", "minLength": 1,
-                                                    "description": "Arithmetic expression for the real-scalar count, not tensor notation or prose. No equals sign; for example n*m."},
-                                        "dtype": {"enum": ["real", "complex"]},
-                                        "shape": {"type": "array", "maxItems": 8,
-                                                  "items": {"anyOf": [{"type": "integer", "minimum": 1},
-                                                                       {"type": "string", "minLength": 1}]}}}}
-            components = {"type": "array", "minItems": 1, "items": component}
-            budget_properties: dict[str, Any] = {
-                "unit": {"const": "real_scalar"},
-                "variables": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"},
-                              "description": "Numeric values only. Put variable explanations in a different field."},
-            }
-            for prefix in ("baseline", "candidate"):
-                budget_properties[prefix + "_formula"] = {"type": "string", "minLength": 1,
-                    "description": "Executable arithmetic expression only; no equals sign or appended result. Use variables declared in variables."}
-                budget_properties[prefix + "_parameters"] = {"type": "integer", "minimum": 1}
-                budget_properties[prefix + "_components"] = components
-            budget_properties["evaluation_cases"] = {
-                "type": "array", "minItems": 1, "maxItems": 32,
-                "description": "Include the primary configuration unchanged: inherit or exactly repeat its candidate_formula and candidate_components. Other sizes inherit its tensor ledger; different candidate architectures may explicitly override BOTH candidate_formula and candidate_components. All cases retain the baseline ledger and host budget limit.",
-                "items": {"type": "object", "additionalProperties": False,
-                          "required": ["name", "variables", "baseline_parameters", "candidate_parameters"],
-                          "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 120},
-                                         "variables": {"type": "object", "additionalProperties": {"type": "number"}},
-                                         "baseline_parameters": {"type": "integer", "minimum": 1},
-                                         "candidate_parameters": {"type": "integer", "minimum": 1},
-                                         "candidate_formula": budget_properties["candidate_formula"],
-                                         "candidate_components": components},
-                          "dependentRequired": {"candidate_formula": ["candidate_components"],
-                                                "candidate_components": ["candidate_formula"]}}}
-            schema["properties"]["parameter_budget"] = {"type": "object", "required": list(budget_properties),
-                                                          "properties": budget_properties}
+            components = parameter_components_schema()
+            schema["properties"]["parameter_budget"] = parameter_budget_schema(require_evaluation_cases=True)
             schema["properties"]["signal_contract"] = {"type": "object", "minProperties": 1}
             for field, minimum in (("alternatives", 2), ("ablation_plan", 3)):
                 schema["properties"][field] = {"type": "array", "minItems": minimum,

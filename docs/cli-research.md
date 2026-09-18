@@ -37,20 +37,27 @@ mars resume ./runs/pimc20
 
 上述步骤适用于包含本次 CLI 改动的主干版本。需要复现实验时，记录实际 `git rev-parse HEAD`，使用该提交重新创建运行；历史下载补丁只用于对应旧基点，不应重复应用到已包含这些改动的主干。
 
-`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Analysis 模型，调研仍使用现有 `configs/idea_focused.yaml` 的 Pro 作者与 Flash 审查者；各 Agent 保留独立模型配置。研究命令启用公共文献检索并保存工具收据，默认来源域名见 `configs/cli_research.yaml`。
+`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型，调研仍使用 Pro 作者与 Flash 审查者。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：生成阶段关闭 thinking、请求超时配置为 360 秒（重试与总调用截止时间另外计入），独立研究审查保持原有 thinking 配置。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。
 
 ## 一次运行发生什么
 
 1. 冻结外部源码、配置、数据 SHA-256、依赖版本、模型配置与预算，保存项目身份。先检查真实基线和数据结构，通过后才调用模型。
 2. FocusedIdea 实际读代码、查论文、读方法，提出可证伪假设，接受另一模型审查。
+   基线预检同时输出仅使用训练区间的功率、频谱与通道相关性诊断；真实原始形状、dtype、有限性、缩放和隔离区均有收据。诊断不是最终评分器。
+   独立 Experiment Agent 在训练前基于上述证据生成 `experiment/plan.md`，确认完整冻结协议并解释对照、失败判据与本轮预算。宿主在提交 schema 中固定 scheduled_trials 和 estimated_runs，后者只计基线加候选的训练次数；额外消融只能写入 future_ablations，终测复用已选 checkpoint。审查使用同一份提交契约，不能要求扩张计算预算。协议仍由宿主执行，模型不能改写。
 3. 相同评测协议训练原始 `StaticPIMC` 基线。
-4. Coding 根据假设和已有实验生成完整 `build_model(config)` 模块；可重写候选架构，不局限于预定义参数网格。
+4. Coding 根据假设和已有实验生成完整 `build_model(config)` 模块；可重写候选架构，不局限于预定义参数网格。作者和 worker 使用同一函数生成工厂输入，只有 `channels`、`baseline` 和 `context`；候选自己的秩等架构选择写入候选源码。独立审查收到实际任务、冻结上游与提交契约，不继承作者的提交工具指令。
 5. Gate 5 审查后，候选只添加在隔离副本的 `libs/research_candidate.py`。原仓、原基线、评分器和数据划分不改动。
 6. 真实检查参数量、两个输入长度、复数形状、有限值和反向梯度，再执行有预算的训练与验证。编译/参数/训练失败也进入反馈。
 7. Analysis 解读实际验证结果，给出下一轮具体改动；下一轮 Coding 收到历史测量与上一轮分析。
 8. 预算结束后，宿主按验证分数选择满足参数约束的候选，冻结选择，再分别对基线与该候选测试一次，生成报告。没有合格候选则明确失败。
+9. 独立最终 Writing 调用读取已经冻结选择后的测试结果，生成 `writing/final.md`。测试后不再返回编码；后续研究必须另立协议及独立测试集。宿主另外从原始记录导出逐通道表、训练曲线、模型和工具调用表、Token 及失败汇总，缺失值保持缺失，不推算没有价格依据的费用。
+
+`context/**/*.md` 中的领域背景可选加载，并与源码一起冻结；恢复会检查项目实际上下文的路径与内容。外部项目的原始 baseline 不改写。候选本地 Git commit 的父提交是冻结 baseline，`coding/*.patch` 和收据同时记录上游源码提交、冻结父提交、候选提交及差异哈希。
 
 ## 科学验收
+
+DeepSeek 显式关闭 thinking 时，底层同时省略继承或显式的 `reasoning_effort`，防止请求参数互相冲突。只有显式非思考且唯一工具为 `mars_submit_document` 的生成请求强制选择该函数；多工具调研与思考审查保持原行为。参数约束依据 [DeepSeek 官方接口文档](https://api-docs.deepseek.com/api/create-chat-completion/)，测试检查实际请求参数，不替代真实 API 验证。
 
 基线实参数为 19,264（复数算两个实标量），减少至少 20% 对应整数上限 15,411。RES 直接调用外部仓库 `tools.train_static_compression.metric`，定义为 `10log10(mean_channel(Perr/Pnf))`，越低越好。训练过程使用同一个 Adam 实现、固定 seed、同一学习率/损失/划分/保护间隔和最大更新预算；按验证集选择 checkpoint。该适配器版本为 `pimc_static.cli.v1`，不同于上游命令逐方法立即测试的调度方式。
 
@@ -59,6 +66,8 @@ mars resume ./runs/pimc20
 ## 证据与恢复
 
 `report.md` 汇总目标、预算、实际测量、判定和调研/代码/逐轮分析链接。`state.json` 可供其他 CLI 或未来编辑器插件查询。
+
+复用通过审查的研究时，`context/research_reuse.json` 记录原运行、提案哈希和阶段归档，完整历史 trace 位于 `reused_research/stage/`。报告分别列出本运行新发生的调用与继承的历史调用；复制旧 trace 不代表重新调用 API。`evidence/summary.json` 的 `resource_usage_by_origin.current_run` 和 `inherited_research` 分别保留调用/Token/失败计数，`resource_usage` 保留两者总和以供审计。模型调用、工具和阶段 CSV 的 `origin`、`source_run_root` 标明来源；旧 trace 的原始时间与路径保持不变，历史资源账本不能当成本运行新增费用。
 
 | 路径 | 内容 |
 |---|---|
@@ -76,7 +85,7 @@ mars resume ./runs/pimc20
 
 候选进程不接收 API Key/SSH 凭据等环境变量。源码 lint、只读快照和独立进程用于防止常见越权与实验污染；它们不是针对恶意 Python 的 OS 沙箱。当前接口适用于可信本地研究仓，生产隔离可使用已有 Docker/remote 执行后端另行接入。
 
-## 本次验证记录
+## 早期 Linux 验证记录（不代表当前本地真实数据运行）
 
 开发环境为 Linux/Python 3.12，PyTorch 2.14.0+cpu、NumPy 2.3.5、SciPy 1.18.1。已通过 271 项相关检查、521 个 Python 文件的完整严格类型检查和 4 项依赖方向检查。
 

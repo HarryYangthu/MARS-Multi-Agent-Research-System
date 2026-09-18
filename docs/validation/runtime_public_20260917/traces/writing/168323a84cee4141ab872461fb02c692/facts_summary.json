@@ -1,0 +1,29 @@
+{
+  "status": "passed",
+  "counts": {
+    "action_rounds": 3,
+    "model_requests": 5,
+    "model_responses": 5,
+    "observations": 3,
+    "protocol_repairs": 0,
+    "reflections": 1,
+    "sdk_attempts": 5,
+    "tool_dispatches": 3,
+    "validation_repairs": 0
+  },
+  "usage": {
+    "completion_tokens": 11118,
+    "prompt_tokens": 57042,
+    "total_tokens": 68160
+  },
+  "usage_complete": true,
+  "fingerprint": "6aeca01448a83631d61d3338a9113e7f237fd198c6a4f509502b6e6330c16822",
+  "correlation": {
+    "invocation_id": "168323a84cee4141ab872461fb02c692",
+    "node_id": "writing",
+    "parent_task_id": "2026-09-17T1932_real_cpu_polynomial_regression",
+    "task_id": "2026-09-17T1932_real_cpu_polynomial_regression:writing",
+    "trace_id": "2026-09-17T1932_real_cpu_polynomial_regression"
+  },
+  "event_seq": 35
+}

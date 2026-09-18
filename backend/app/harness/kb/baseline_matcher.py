@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.harness.kb.embedder import cosine, embed
+from app.harness.kb.embedder import retrieval_similarity
 from app.harness.kb.stores import KBRecord, KBStores, get_stores
 
 
@@ -52,11 +52,10 @@ def find_match(
         if record.text == sig:
             return BaselineMatch(matched_run_id=record.metadata.get("run_id"),
                                  match_score=1.0, record=record)
-    q_vec = embed(sig)
     best_score = -1.0
     best_rec: KBRecord | None = None
     for rec in records:
-        score = cosine(q_vec, rec.embedding)
+        score = retrieval_similarity(sig, rec.text, rec.embedding, rec.metadata)
         if score > best_score:
             best_score = score
             best_rec = rec

@@ -18,6 +18,7 @@ import yaml
 from app.harness.project_workspace import project_root
 from app.harness.tools.config import check_commands, command_timeout_seconds, tool_config
 from app.harness.tools.registry import ToolContext, ToolResult
+from app.harness.tools.process_runtime import communicate_process, start_process
 from app.settings import repo_root
 
 _MAX_READ_BYTES = 20_000
@@ -313,17 +314,17 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
                 error=f"{command.id} is not allowlisted for {tool_name}",
                 output={"argv": list(command.argv)},
             )
-        process = await asyncio.create_subprocess_exec(
-            *command.argv,
+        process = await start_process(
+            command.argv,
+            backend=tool_config(tool_name).process_backend,
+            require_isolation=tool_config(tool_name).require_isolation,
             cwd=str(root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            stdout, stderr = await communicate_process(process, timeout=timeout)
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
             return ToolResult(ok=False, error=f"{command.id} timed out after {timeout}s")
         results.append(
             {
@@ -355,14 +356,14 @@ async def _git_apply(root: Path, diff: str, *, check_only: bool) -> ToolResult:
     argv = ["git", "apply", "--whitespace=nowarn"]
     if check_only:
         argv.append("--check")
-    process = await asyncio.create_subprocess_exec(
-        *argv,
+    process = await start_process(
+        argv,
         cwd=str(root),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate(diff.encode("utf-8"))
+    stdout, stderr = await communicate_process(process, input_data=diff.encode("utf-8"), timeout=command_timeout_seconds())
     output = {
         "argv": argv,
         "returncode": process.returncode,

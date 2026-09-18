@@ -53,6 +53,31 @@ def test_open_existing_does_not_overwrite_background_or_code(tmp_path: Path, reg
     assert not (root / "AGENTS.md").exists()
 
 
+@pytest.mark.parametrize("include_rules", [False, True])
+@pytest.mark.asyncio
+async def test_disabled_project_references_are_not_read_or_snapshotted(
+    tmp_path: Path, registry: Path, include_rules: bool,
+) -> None:
+    from app.agents.idea.agent import IdeaAgent
+    project = open_folder(str(tmp_path / "private_project"), create=True)
+    (project.root / "AGENTS.md").write_text("EXPLICIT_PROJECT_RULE_MARKER")
+    (project.root / "README.md").write_text("PRIVATE_REFERENCE_MUST_NOT_BE_LOADED")
+    (project.root / "context/private.md").write_text("PRIVATE_REFERENCE_MUST_NOT_BE_LOADED")
+    run_root = tmp_path / "public_run"
+    request = RunRequest(project=project.name, user_request="Public literature only.",
+        extra={"run_root": str(run_root), "context_sources": {
+            "project_rules": include_rules, "code_repositories": False,
+            "project_references": False, "agent_resources": False, "memory": False}})
+    agent = IdeaAgent()
+    context = await agent.build_context(request)
+    messages = agent._messages_for_context(request, context, purpose="loop")
+    text = "\n".join(message.content for message in messages)
+    assert "PRIVATE_REFERENCE_MUST_NOT_BE_LOADED" not in text
+    assert ("EXPLICIT_PROJECT_RULE_MARKER" in text) is include_rules
+    assert "folder_context" not in context.metadata and "project_knowledge" not in context.metadata
+    assert not (run_root / "input/folder_context.v1.json").exists()
+
+
 def test_context_auto_discovers_nested_markdown_excludes_secrets_and_escapes(tmp_path: Path, registry: Path) -> None:
     project = open_folder(str(tmp_path / "project"), create=True)
     (project.root / "context/notes").mkdir()

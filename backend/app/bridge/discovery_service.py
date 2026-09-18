@@ -4,12 +4,15 @@ from __future__ import annotations
 import asyncio
 import math
 import statistics
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+from filelock import BaseFileLock, FileLock, Timeout as FileLockTimeout
 
 from app.bridge.discovery_core import DefaultDiscoveryCore, DiscoveryCore
 from app.bridge.discovery_events import DiscoveryEventSink
@@ -167,6 +170,9 @@ class _RunControl:
     gate: asyncio.Event = field(default_factory=asyncio.Event)
     stop_requested: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    lease: BaseFileLock | None = None
+    cleanup_task: asyncio.Task[None] | None = None
+    stop_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -279,26 +285,32 @@ class DiscoveryService:
                 raise self._invalid_state("discovery checkpoint is missing")
             if latest.status in {CheckpointStatus.COMPLETED, CheckpointStatus.FAILED}:
                 return self.status(run_id)
-            if latest.status == CheckpointStatus.PAUSED:
-                await self._require_adapter_ready(context)
-                context.stores.checkpoints.resume()
-                progress = DiscoveryProgress.model_validate(latest.state)
-                if progress.lifecycle == DiscoveryLifecycle.CREATED:
-                    progress = progress.model_copy(
-                        update={"lifecycle": DiscoveryLifecycle.RUNNING}
-                    )
-                    context.stores.checkpoints.checkpoint(
-                        phase="started",
-                        iteration=progress.next_iteration,
-                        state=model_payload(progress),
-                        idempotency_key="run-started",
-                    )
-                control.gate.set()
-                control.stop_requested.clear()
-                await context.events.emit(DiscoveryEventName.RUN_STARTED)
-            task = self._launch(context, control)
+
+            if latest.reason == "stop_requested":
+                raise self._invalid_state("stop_incomplete: reconcile the interrupted cleanup before resuming")
+            if latest.status == CheckpointStatus.RUNNING and (control.task is None or control.task.done()):
+                raise self._invalid_state("historical execution requires explicit resume")
+            with self._execution_claim(context, control):
+                if latest.status == CheckpointStatus.PAUSED:
+                    await self._require_adapter_ready(context)
+                    context.stores.checkpoints.resume()
+                    progress = DiscoveryProgress.model_validate(latest.state)
+                    if progress.lifecycle == DiscoveryLifecycle.CREATED:
+                        progress = progress.model_copy(
+                            update={"lifecycle": DiscoveryLifecycle.RUNNING}
+                        )
+                        context.stores.checkpoints.checkpoint(
+                            phase="started",
+                            iteration=progress.next_iteration,
+                            state=model_payload(progress),
+                            idempotency_key="run-started",
+                        )
+                    control.gate.set()
+                    control.stop_requested.clear()
+                    await context.events.emit(DiscoveryEventName.RUN_STARTED)
+                task = self._launch(context, control)
         if wait and task is not None:
-            await task
+            await asyncio.shield(task)
         return self.status(run_id)
 
     def status(self, run_id: str) -> DiscoveryRunView:
@@ -359,13 +371,14 @@ class DiscoveryService:
                 raise self._invalid_state("discovery checkpoint is missing")
             if latest.status in {CheckpointStatus.COMPLETED, CheckpointStatus.FAILED}:
                 return self.status(run_id)
-            if latest.status != CheckpointStatus.PAUSED:
-                control.gate.clear()
-                context.stores.checkpoints.pause(reason=reason)
-                await context.events.emit(
-                    DiscoveryEventName.RUN_PAUSED,
-                    payload={"reason": reason},
-                )
+            with self._execution_claim(context, control):
+                if latest.status != CheckpointStatus.PAUSED:
+                    control.gate.clear()
+                    context.stores.checkpoints.pause(reason=reason)
+                    await context.events.emit(
+                        DiscoveryEventName.RUN_PAUSED,
+                        payload={"reason": reason},
+                    )
         return self.status(run_id)
 
     async def resume(self, run_id: str, *, wait: bool = False) -> DiscoveryRunView:
@@ -379,66 +392,98 @@ class DiscoveryService:
             if latest.status in {CheckpointStatus.COMPLETED, CheckpointStatus.FAILED}:
                 return self.status(run_id)
 
-            live = control.task is not None and not control.task.done()
-            if latest.status == CheckpointStatus.RUNNING and not live:
-                latest = context.stores.checkpoints.recover()
-                context.stores.candidates.recover()
-                context.stores.promotions.recover()
-                context.stores.budget.recover()
-                context.stores.budget.recover_slots(active_lease_ids=set())
-            if latest is not None and latest.status == CheckpointStatus.PAUSED:
-                progress = DiscoveryProgress.model_validate(latest.state)
-                context.stores.checkpoints.resume()
-                if progress.hitl_pending and not progress.hitl_resolved:
-                    progress = progress.model_copy(
-                        update={"hitl_pending": False, "hitl_resolved": True}
-                    )
-                    context.stores.checkpoints.checkpoint(
-                        phase="hitl_resolved",
-                        iteration=progress.next_iteration,
-                        state=model_payload(progress),
-                        idempotency_key=f"hitl-resolved:{progress.next_iteration}",
-                    )
-                    await context.events.emit(DiscoveryEventName.HITL_RESOLVED)
-                control.gate.set()
-                control.stop_requested.clear()
-                await context.events.emit(DiscoveryEventName.RUN_RESUMED)
-            task = self._launch(context, control)
+            if latest.reason == "stop_requested":
+                raise self._invalid_state("stop_incomplete: reconcile the interrupted cleanup before resuming")
+            with self._execution_claim(context, control):
+
+                live = control.task is not None and not control.task.done()
+                if latest.status == CheckpointStatus.RUNNING and not live:
+                    latest = context.stores.checkpoints.recover()
+                    context.stores.candidates.recover()
+                    context.stores.promotions.recover()
+                    context.stores.budget.recover()
+                    context.stores.budget.recover_slots(active_lease_ids=set())
+                if latest is not None and latest.status == CheckpointStatus.PAUSED:
+                    progress = DiscoveryProgress.model_validate(latest.state)
+                    context.stores.checkpoints.resume()
+                    if progress.hitl_pending and not progress.hitl_resolved:
+                        progress = progress.model_copy(
+                            update={"hitl_pending": False, "hitl_resolved": True}
+                        )
+                        context.stores.checkpoints.checkpoint(
+                            phase="hitl_resolved",
+                            iteration=progress.next_iteration,
+                            state=model_payload(progress),
+                            idempotency_key=f"hitl-resolved:{progress.next_iteration}",
+                        )
+                        await context.events.emit(DiscoveryEventName.HITL_RESOLVED)
+                    control.gate.set()
+                    control.stop_requested.clear()
+                    await context.events.emit(DiscoveryEventName.RUN_RESUMED)
+                task = self._launch(context, control)
         if wait and task is not None:
-            await task
+            await asyncio.shield(task)
         return self.status(run_id)
 
-    async def stop(self, run_id: str, *, reason: str = "user_requested") -> DiscoveryRunView:
+    async def stop(self, run_id: str, *, reason: str = "user_requested", grace_seconds: float = 10.0) -> DiscoveryRunView:
+        """Cancel owned work and commit STOPPED only after its actual cleanup."""
+        if not 0 <= grace_seconds <= 60:
+            raise ValueError("stop grace must be in [0,60] seconds")
         context = self._context(run_id)
         control = self._control(run_id)
+        task: asyncio.Task[None] | None
         async with control.lock:
             latest = context.stores.checkpoints.latest()
             if latest is None:
                 raise self._invalid_state("discovery checkpoint is missing")
             if latest.status in {CheckpointStatus.COMPLETED, CheckpointStatus.FAILED}:
                 return self.status(run_id)
-            control.stop_requested.set()
-            control.gate.set()
-            context.stores.promotions.cancel_pending(reason=reason)
-            progress = DiscoveryProgress.model_validate(latest.state).model_copy(
-                update={
-                    "lifecycle": DiscoveryLifecycle.STOPPED,
-                    "stop_reason": reason,
-                    "stop_code": StopReason.MANUAL.value,
-                    "stop_details": (reason,),
-                }
-            )
-            context.stores.checkpoints.complete(state=model_payload(progress))
-            await context.events.emit(
-                DiscoveryEventName.RUN_STOPPED,
-                payload={"reason": reason},
-            )
+            self._acquire_execution_lease(context, control)
+            task = control.task
+            if latest.reason == "stop_requested" and task is None:
+                self._release_execution_lease(control)
+                raise self._invalid_state("stop_incomplete: previous worker cleanup outcome is unknown; inspect its execution receipts")
+            if task is None and latest.status == CheckpointStatus.RUNNING:
+                self._release_execution_lease(control)
+                raise self._invalid_state("historical execution is not owned; reconcile or explicitly resume before cancelling")
+            if not control.stop_requested.is_set():
+                control.stop_reason = reason
+                control.stop_requested.set()
+                control.gate.set()
+                context.stores.checkpoints.save(
+                    phase=latest.phase, iteration=latest.iteration, state=latest.state,
+                    status=CheckpointStatus.RUNNING,
+                    idempotency_key=f"stop-requested:{latest.checkpoint_hash}", reason="stop_requested",
+                )
+                if task is not None and not task.done():
+                    task.cancel()
+            if task is None or task.done():
+                if control.cleanup_task is None:
+                    control.cleanup_task = asyncio.create_task(self._finish_discovery_stop(context, control))
+        if task is not None and not task.done():
+            done, _ = await asyncio.wait({task}, timeout=grace_seconds)
+            if not done:
+                raise self._invalid_state("stop_incomplete: cancellation requested; execution cleanup is still running")
+        cleanup = control.cleanup_task
+        if cleanup is not None:
+            # Cancelling or disconnecting this HTTP waiter cannot abandon cleanup.
+            done, _ = await asyncio.wait({cleanup}, timeout=grace_seconds)
+            if not done:
+                raise self._invalid_state("stop_incomplete: execution stopped but durable cleanup is still pending")
+            cleanup.result()
         return self.status(run_id)
 
     async def wait(self, run_id: str) -> DiscoveryRunView:
         control = self._control(run_id)
         if control.task is not None:
-            await control.task
+            try:
+                await asyncio.shield(control.task)
+            except asyncio.CancelledError:
+                caller = asyncio.current_task()
+                if not control.stop_requested.is_set() or (caller is not None and caller.cancelling()):
+                    raise
+                if control.cleanup_task is not None:
+                    await asyncio.shield(control.cleanup_task)
         return self.status(run_id)
 
     def replay(self, run_id: str) -> DiscoveryReplayView:
@@ -970,10 +1015,73 @@ class DiscoveryService:
 
     def _launch(self, context: _Context, control: _RunControl) -> asyncio.Task[None]:
         if control.task is None or control.task.done():
+            self._acquire_execution_lease(context, control)
             control.task = asyncio.create_task(self._run_loop(context, control))
+            control.task.add_done_callback(lambda task: self._execution_finished(context, control, task))
         return control.task
 
+    def _acquire_execution_lease(self, context: _Context, control: _RunControl) -> None:
+        if control.lease is not None:
+            return
+        # A distinct instance is intentional: coroutine ownership must never
+        # inherit the reentrancy of the storage transaction lock.
+        lease = FileLock(context.run.root / "discovery" / ".execution.lock", timeout=0)
+        try:
+            lease.acquire()
+        except FileLockTimeout as exc:
+            raise self._invalid_state("execution_owned_elsewhere: another worker owns this discovery run") from exc
+        control.lease = lease
+
+    @staticmethod
+    def _release_execution_lease(control: _RunControl) -> None:
+        if control.lease is not None:
+            control.lease.release()
+            control.lease = None
+
+    @contextmanager
+    def _execution_claim(self, context: _Context, control: _RunControl) -> Iterator[None]:
+        self._acquire_execution_lease(context, control)
+        try:
+            if control.stop_requested.is_set():
+                raise self._invalid_state("stop_incomplete: execution cleanup must finish before another operation")
+            yield
+        finally:
+            if (control.task is None or control.task.done()) and not control.stop_requested.is_set():
+                self._release_execution_lease(control)
+
+    def _execution_finished(self, context: _Context, control: _RunControl, task: asyncio.Task[None]) -> None:
+        if control.task is not task:
+            return
+        if control.stop_requested.is_set():
+            control.cleanup_task = asyncio.create_task(self._finish_discovery_stop(context, control))
+        else:
+            self._release_execution_lease(control)
+
+    async def _finish_discovery_stop(self, context: _Context, control: _RunControl) -> None:
+        async with control.lock:
+            try:
+                latest = context.stores.checkpoints.latest()
+                if latest is None or latest.status in {CheckpointStatus.COMPLETED, CheckpointStatus.FAILED}:
+                    return
+                context.stores.promotions.recover()
+                context.stores.promotions.cancel_pending(reason=control.stop_reason)
+                context.stores.budget.recover_slots(active_lease_ids=set())
+                progress = DiscoveryProgress.model_validate(latest.state).model_copy(update={
+                    "lifecycle": DiscoveryLifecycle.STOPPED, "stop_reason": control.stop_reason,
+                    "stop_code": StopReason.MANUAL.value, "stop_details": (control.stop_reason, "cleanup_complete"),
+                })
+                context.stores.checkpoints.complete(state=model_payload(progress))
+                await context.events.emit(DiscoveryEventName.RUN_STOPPED,
+                                          payload={"reason": control.stop_reason, "cleanup_complete": True})
+            finally:
+                self._release_execution_lease(control)
+
     async def _run_loop(self, context: _Context, control: _RunControl) -> None:
+        from app.harness.llm.accounting import run_resource_scope
+        with run_resource_scope(context.run.root):
+            await self._run_loop_scoped(context, control)
+
+    async def _run_loop_scoped(self, context: _Context, control: _RunControl) -> None:
         try:
             while True:
                 await control.gate.wait()

@@ -50,7 +50,9 @@ def evaluation_request(scenario: dict[str, Any], root: Path) -> RunRequest:
     return RunRequest(project=scenario["project"], user_request=scenario["question"],
                       extra={"run_id": root.name, "run_root": str(root), "scope": scenario["scope"],
                              "idea_requirements": scenario["requirements"],
-                             "context_sources": {"project_rules": False, "code_repositories": False}})
+                             "context_sources": {"project_rules": False, "code_repositories": False,
+                                                 "agent_resources": False, "memory": False,
+                                                 "project_references": False}})
 
 
 def git_value(*args: str) -> str:
