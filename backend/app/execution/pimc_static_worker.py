@@ -8,7 +8,6 @@ This process isolation is not an OS security sandbox for hostile Python code.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import importlib
 import importlib.util
 import json
@@ -20,7 +19,7 @@ from typing import Any
 
 from app.execution.pimc_diagnostics import data_diagnostics, training_curve
 from app.harness.agent_loop.trace import atomic_json
-from app.harness.research_trial import file_sha256, read_record
+from app.harness.research_trial import candidate_factory_config, file_sha256, read_record
 
 
 def dependencies(repo: Path) -> tuple[Any, Any, Any, Any]:
@@ -46,7 +45,7 @@ def load_model(torch: Any, models: Any, cfg: dict[str, Any], candidate: Path | N
     # Dataclasses and postponed annotations resolve their defining module here.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    model = module.build_model({"channels": 16, "baseline": deepcopy(cfg["baseline"]), "context": cfg["context"]})
+    model = module.build_model(candidate_factory_config(cfg))
     if not isinstance(model, torch.nn.Module):
         raise TypeError("build_model(config) must return torch.nn.Module")
     return model

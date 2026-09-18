@@ -156,15 +156,23 @@ class _OpenAICompatProvider(LLMProvider):
                     raise ValueError("native tools require explicit non-thinking mode or DeepSeek observation-only history")
             kwargs["tools"] = list(config.tools)
             kwargs["parallel_tool_calls"] = False
+            if self.name == "deepseek" and config.thinking_enabled is False and len(config.tools) == 1:
+                tool = config.tools[0]
+                function = tool.get("function")
+                if (tool.get("type") == "function" and isinstance(function, dict)
+                        and function.get("name") == "mars_submit_document"):
+                    # The terminal submission has no competing action. DeepSeek
+                    # allows a named tool choice only outside thinking mode.
+                    kwargs["tool_choice"] = {"type": "function", "function": {"name": function["name"]}}
         if config.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if stream:
             kwargs["stream"] = True
 
         reasoning_effort = config.reasoning_effort or self._default_reasoning_effort
-        if self.name == "deepseek" and thinking_enabled is False and config.extra.get("review_format_repair") is True:
-            # Host-only format repair marker; never forward it or inherit the
-            # provider's reasoning default for this explicitly non-thinking call.
+        if self.name == "deepseek" and thinking_enabled is False:
+            # DeepSeek effort values enable thinking, so a disabled mode must
+            # take precedence over both call-specific and inherited effort.
             reasoning_effort = None
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort

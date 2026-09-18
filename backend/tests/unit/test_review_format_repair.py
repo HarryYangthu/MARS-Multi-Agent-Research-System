@@ -142,7 +142,7 @@ def test_normal_acceptance_contract_is_unchanged() -> None:
     assert state["counts"]["reflections"] == 1
 
 
-def test_actual_deepseek_request_kwargs_disable_thinking_and_inherited_effort_only_for_repair() -> None:
+def test_actual_deepseek_request_kwargs_keep_authorship_and_repair_non_thinking() -> None:
     # Only inspect real provider serialization; never initialize its client or call a model.
     provider = DeepSeekProvider(api_key="configuration-input-not-a-key", default_reasoning_effort="high")
     config = LLMConfig(provider="deepseek", model="configuration-contract", thinking_enabled=False,
@@ -164,7 +164,10 @@ def test_actual_deepseek_request_kwargs_disable_thinking_and_inherited_effort_on
         disabled = phase_llm_config(config, replace(policy, reflection_format_repair_enabled=False), phase=phase, **options)
         assert asdict(enabled) == asdict(disabled)
         normal_wire = provider._request_kwargs([], enabled)
-        assert normal_wire["reasoning_effort"] == ("high" if phase == "act" else "low")
+        if phase == "act":
+            assert "reasoning_effort" not in normal_wire
+        else:
+            assert normal_wire["reasoning_effort"] == "low"
     resumed = phase_llm_config(config, policy, phase="reflect", native=True, wire_tools=tools, effort_overrides={})
     assert provider._request_kwargs([], resumed)["extra_body"] == {"thinking": {"type": "enabled"}}
     assert provider._request_kwargs([], resumed)["reasoning_effort"] == "high"

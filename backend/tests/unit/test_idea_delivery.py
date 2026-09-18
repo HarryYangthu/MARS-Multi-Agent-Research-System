@@ -181,7 +181,8 @@ def test_submission_schema_requires_full_method_without_changing_legacy_parser()
     assert {"research_assessment", "research_links"} <= set(schema["required"])
     assert schema["properties"]["alternatives"]["minItems"] == 2
     budget = schema["properties"]["parameter_budget"]
-    assert budget["properties"]["variables"]["additionalProperties"] == {"type": "number"}
+    assert budget["properties"]["variables"]["additionalProperties"] == {
+        "type": "number", "minimum": -1e12, "maximum": 1e12}
     assert "baseline_parameters" in budget["required"]
     assert budget["properties"]["baseline_components"]["items"]["properties"]["shape"]["type"] == "array"
     legacy = {"schema": "proposal.v1", "project": "pimc", "agent": "idea", "research_question": "Authored input?",

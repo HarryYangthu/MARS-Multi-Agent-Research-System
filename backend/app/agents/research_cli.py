@@ -9,6 +9,7 @@ from typing import Any
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.llm.provider_base import Message
+from app.harness.research_trial import candidate_factory_config
 from app.harness.schema.frontmatter_parser import parse
 
 
@@ -22,6 +23,18 @@ def candidate_errors(source: str) -> list[str]:
     factories = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_model"]
     if len(factories) != 1 or len(factories[0].args.args) != 1 or factories[0].args.vararg or factories[0].args.kwarg:
         errors.append("Define exactly one synchronous build_model(config) factory")
+    if len(factories) == 1 and len(factories[0].args.args) == 1:
+        parameter = factories[0].args.args[0].arg
+        for node in ast.walk(factories[0]):
+            key: ast.expr | None = None
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == parameter:
+                key = node.slice
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == parameter
+                    and node.func.attr == "get" and node.args):
+                key = node.args[0]
+            if isinstance(key, ast.Constant) and key.value not in {"channels", "baseline", "context"}:
+                errors.append("Factory config has only channels, baseline and context; architecture choices belong in the candidate")
     allowed = ("__future__", "torch", "math", "copy", "typing", "collections", "dataclasses", "libs.model", "libs.model_static_compact")
     for node in ast.walk(tree):
         imports: list[str] = []
@@ -53,7 +66,14 @@ class ResearchCodingAgent(BaseAgent):
         "Count complex parameters as two real scalars. Never change training, metric, data splits or baseline source. "
         "No file/network I/O, dynamic imports, external weights or new dependencies. Include every code line in "
         "metadata.source_code, an explicit hypothesis and implementation rationale. Discuss measurements only "
-        "when present in host feedback; never predict fabricated achieved scores. Explain in Chinese."
+        "when present in host feedback; never predict fabricated achieved scores. Explain in Chinese. "
+        "The exact factory_config is supplied by the same helper used by the worker. No rank/model/seed "
+        "keys are added at runtime: encode architecture choices in the candidate module. Host hashes the "
+        "candidate separately from the common training protocol and counts actual parameters itself. "
+        "The supplied frozen source text is real source-reading evidence; tools are intentionally disabled "
+        "for this stage. Keep the body concise: implementation, interface assumptions and pending checks; "
+        "do not repeat the entire research essay. Input finite complex64 is a host precondition, not a "
+        "requirement to support arbitrary invalid inputs. Short-budget scores do not identify physical rank."
     )
 
     def __init__(self, model: str, loop: dict[str, Any], *, generation: dict[str, Any] | None = None) -> None:
@@ -63,6 +83,41 @@ class ResearchCodingAgent(BaseAgent):
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
         return await self._draft_via_llm(request, context)
+
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        if "frozen_protocol" in request.upstream_artifacts:
+            frozen = json.loads(request.upstream_artifacts["frozen_protocol"])
+            context.upstream["factory_config"] = json.dumps(candidate_factory_config(frozen), ensure_ascii=False)
+        return context
+
+    def reflection_rubric(self) -> str:
+        return (
+            "Review the exact runnable candidate under supplied factory_config and the frozen protocol. "
+            "Reject wrong tensor semantics, missing keys, invalid gradients, incorrect counts, changed "
+            "baseline/evaluator, unsupported measured claims or architecture inconsistent with the approved "
+            "plan. Cite a concrete execution failure or false assertion for each blocker. Do not require "
+            "unprovided config keys, unrelated optimizer paths, invalid-input support, unbudgeted studies "
+            "or a proof of the true system rank. Valid input preconditions need not be runtime assertions. "
+            "An omitted multiplicative 1, a documented unused fallback or a future limitation is not a "
+            "material blocker when the fixed experiment is executable. The source text in upstream is "
+            "actual frozen code evidence. Parameters/checkpoints are independently checked by the host "
+            "after this review; do not demand candidate measurements before allowing execution."
+        )
+
+    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
+        # Do not replay the author's 'submit a document' system instructions to
+        # a tool-free reviewer that must return only an accept/issues decision.
+        messages = [Message(role="system", content="You are an independent reviewer of an existing candidate. "
+                    "Do not author or submit a document and do not call tools. Use the review JSON instruction "
+                    "supplied by the host. Read the exact task, immutable inputs and submission contract."),
+                    Message(role="system", content=context.project),
+                    Message(role="user", content=context.task)]
+        messages.extend(Message(role="user", content=f"[untrusted upstream:{name}]\n{value}")
+                        for name, value in context.upstream.items())
+        messages.append(Message(role="system", content="Host-enforced submission contract for this exact run:\n"
+                        + json.dumps(self.submission_schema(request), ensure_ascii=False)))
+        return messages
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any]:
         schema = super().submission_schema(request)
@@ -106,6 +161,15 @@ class ResearchAnalysisAgent(ResearchCodingAgent):
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
         return await BaseAgent.validate_candidate(self, request, text, observations)
+
+    def reflection_rubric(self) -> str:
+        return (
+            "Check the report against actual host measurements, frozen budget and available evidence. "
+            "Reject invented results, incorrect numerical comparisons, test leakage, unsupported causal "
+            "claims and claims of convergence/generalization from a short single-seed run. Require explicit "
+            "limitations and separate completed work from future studies. Do not require new experiments "
+            "to accept a correct report of limited or negative results. Reused research must be labelled."
+        )
 
 
 class ResearchExperimentAgent(ResearchCodingAgent):
@@ -163,11 +227,6 @@ class ResearchExperimentAgent(ResearchCodingAgent):
             "Reject actual unsupported claims or infeasible scheduled work; do not reject an explicitly "
             "acknowledged single-seed/short-budget limitation merely because a larger study would be better."
         )
-
-    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
-        return [*self._messages_for_context(request, context, purpose="review"),
-                Message(role="system", content="Host-enforced submission contract for this exact run:\n"
-                        + json.dumps(self.submission_schema(request), ensure_ascii=False))]
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
