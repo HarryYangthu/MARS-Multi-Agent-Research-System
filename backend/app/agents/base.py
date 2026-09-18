@@ -387,6 +387,7 @@ class BaseAgent(ABC):
         if not self.native_structured_delivery:
             return None
         schema: dict[str, Any] = json.loads((repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")).read_text())
+        schema["properties"]["project"] = {**schema["properties"]["project"], "const": request.project}
         return schema
 
     def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
