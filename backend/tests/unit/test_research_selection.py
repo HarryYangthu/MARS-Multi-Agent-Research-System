@@ -119,13 +119,14 @@ def test_experiment_protocol_ack_requires_exact_frozen_values() -> None:
                 "fs": 245.76, "band": [-29.74, -24.74],
                 "metric": "10log10(mean_channel(Perr/Pnf)); lower is better",
                 "selection": "validation only; final test evaluated only after candidate selection",
-                "initialization": "from scratch with the fixed seed"}
-    frozen = {**expected, "private_path": "/not-part-of-the-ack"}
+                "initialization": "from scratch with the fixed seed", "data_sha256": "a" * 64,
+                "batch_samples": 8192, "context": 144}
+    frozen = dict(expected)
     assert ResearchExperimentAgent.protocol_ack(frozen) == expected
     # Construct the real agent solely to inspect its delivery schema; no API invocation.
     agent = ResearchExperimentAgent("deepseek-v4-flash", {})
     request = RunRequest(project="pimc", user_request="Design a bounded experiment",
-                         upstream_artifacts={"frozen_protocol": json.dumps(frozen)})
+                         upstream_artifacts={"frozen_protocol": json.dumps(frozen), "goal": '{"rounds":1}'})
     schema = agent.submission_schema(request)
     assert "protocol_ack" in schema["required"]
     ack_schema = schema["properties"]["protocol_ack"]

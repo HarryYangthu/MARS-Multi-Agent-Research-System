@@ -37,14 +37,14 @@ mars resume ./runs/pimc20
 
 上述步骤适用于包含本次 CLI 改动的主干版本。需要复现实验时，记录实际 `git rev-parse HEAD`，使用该提交重新创建运行；历史下载补丁只用于对应旧基点，不应重复应用到已包含这些改动的主干。
 
-`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型，调研仍使用 Pro 作者与 Flash 审查者。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：生成阶段关闭 thinking、单请求上限 360 秒，独立研究审查保持原有 thinking 配置。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。
+`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型，调研仍使用 Pro 作者与 Flash 审查者。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：生成阶段关闭 thinking、请求超时配置为 360 秒（重试与总调用截止时间另外计入），独立研究审查保持原有 thinking 配置。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。
 
 ## 一次运行发生什么
 
 1. 冻结外部源码、配置、数据 SHA-256、依赖版本、模型配置与预算，保存项目身份。先检查真实基线和数据结构，通过后才调用模型。
 2. FocusedIdea 实际读代码、查论文、读方法，提出可证伪假设，接受另一模型审查。
    基线预检同时输出仅使用训练区间的功率、频谱与通道相关性诊断；真实原始形状、dtype、有限性、缩放和隔离区均有收据。诊断不是最终评分器。
-   独立 Experiment Agent 在训练前基于上述证据生成 `experiment/plan.md`，确认冻结协议并解释对照、失败判据与本轮预算。协议仍由宿主执行，模型不能改写。
+   独立 Experiment Agent 在训练前基于上述证据生成 `experiment/plan.md`，确认完整冻结协议并解释对照、失败判据与本轮预算。宿主在提交 schema 中固定 scheduled_trials 和 estimated_runs，后者只计基线加候选的训练次数；额外消融只能写入 future_ablations，终测复用已选 checkpoint。审查使用同一份提交契约，不能要求扩张计算预算。协议仍由宿主执行，模型不能改写。
 3. 相同评测协议训练原始 `StaticPIMC` 基线。
 4. Coding 根据假设和已有实验生成完整 `build_model(config)` 模块；可重写候选架构，不局限于预定义参数网格。
 5. Gate 5 审查后，候选只添加在隔离副本的 `libs/research_candidate.py`。原仓、原基线、评分器和数据划分不改动。
@@ -64,6 +64,8 @@ mars resume ./runs/pimc20
 ## 证据与恢复
 
 `report.md` 汇总目标、预算、实际测量、判定和调研/代码/逐轮分析链接。`state.json` 可供其他 CLI 或未来编辑器插件查询。
+
+复用通过审查的研究时，`context/research_reuse.json` 记录原运行、提案哈希和阶段归档，完整历史 trace 位于 `reused_research/stage/`。报告分别列出本运行新发生的调用与继承的历史调用；复制旧 trace 不代表重新调用 API。`evidence/summary.json` 的 `resource_usage_by_origin.current_run` 和 `inherited_research` 分别保留调用/Token/失败计数，`resource_usage` 保留两者总和以供审计。模型调用、工具和阶段 CSV 的 `origin`、`source_run_root` 标明来源；旧 trace 的原始时间与路径保持不变，历史资源账本不能当成本运行新增费用。
 
 | 路径 | 内容 |
 |---|---|

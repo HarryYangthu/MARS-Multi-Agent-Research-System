@@ -8,6 +8,7 @@ from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.harness.llm.model_registry import get_agent_config
+from app.harness.llm.provider_base import Message
 from app.harness.schema.frontmatter_parser import parse
 
 
@@ -119,23 +120,54 @@ class ResearchExperimentAgent(ResearchCodingAgent):
         "and goal are immutable. All models start from scratch with the same seed and update budget. "
         "Separate experiments actually scheduled within remaining rounds from future ablations; never claim "
         "an unexecuted ablation is a result. Parameter reduction is an exploratory hypothesis, not a user "
-        "promise. Include a concise Chinese plan and exact protocol_ack metadata from frozen_protocol."
+        "promise. Include a concise Chinese plan and exact protocol_ack metadata from frozen_protocol. "
+        "estimated_runs counts training runs only: one baseline plus goal.rounds candidates. ablations lists "
+        "only those scheduled candidates; put all unscheduled designs under future_ablations. Final evaluation "
+        "uses selected checkpoints without extra optimization. Do not expand a one-candidate budget into a "
+        "rank sweep. build_model receives only config.channels, config.baseline and config.context; use the "
+        "provided baseline.model settings, with no external protocol file access or speculative fallback keys. "
+        "A short-budget comparison tests achieved quality for this implementation and budget, not the true "
+        "physical rank; failure causes can remain unresolved without inventing extra experiments."
     )
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any]:
         schema = BaseAgent.submission_schema(self, request)
         assert schema is not None
         frozen = json.loads(request.upstream_artifacts["frozen_protocol"])
-        schema["required"] += ["protocol_ack", "hypothesis"]
+        rounds = int(json.loads(request.upstream_artifacts["goal"])["rounds"])
+        schema["required"] += ["protocol_ack", "hypothesis", "scheduled_trials"]
         schema["properties"]["protocol_ack"] = {"const": self.protocol_ack(frozen)}
         schema["properties"]["hypothesis"] = {"type": "string", "minLength": 20}
+        schema["properties"]["estimated_runs"] = {"const": 1 + rounds}
+        schema["properties"]["scheduled_trials"] = {
+            "const": ["baseline", *[f"round_{i:02d}" for i in range(1, rounds + 1)]]}
+        schema["properties"]["ablations"].update(minItems=rounds, maxItems=rounds)
+        schema["properties"]["future_ablations"] = {"type": "array", "items": {"type": "string"}}
         return schema
 
     @staticmethod
     def protocol_ack(frozen: dict[str, Any]) -> dict[str, Any]:
-        keys = ("seed", "max_steps", "split_guard", "train_fraction", "validation_fraction",
-                "scale", "fs", "band", "metric", "selection", "initialization")
-        return {key: frozen[key] for key in keys}
+        # The complete host record avoids an author/reviewer disagreement over
+        # whether a deliberately selected acknowledgement subset is complete.
+        return dict(frozen)
+
+    def reflection_rubric(self) -> str:
+        return (
+            "Check that the plan can be executed within the immutable host goal and supplied native "
+            "submission schema. scheduled_trials and estimated_runs are exact host limits; never require "
+            "additional runs or fields that contradict the schema. Check data identity, matched training, "
+            "implementation interface, parameter arithmetic and honest limitations. Future ablations must "
+            "be labelled unscheduled. This is a bounded engineering/quality comparison: it need not identify "
+            "the true physical rank or distinguish optimization failure from model capacity. Require that "
+            "those mechanisms remain inconclusive, not invented thresholds or unavailable diagnostics. "
+            "Reject actual unsupported claims or infeasible scheduled work; do not reject an explicitly "
+            "acknowledged single-seed/short-budget limitation merely because a larger study would be better."
+        )
+
+    def review_messages(self, request: RunRequest, context: ContextPack) -> list[Message]:
+        return [*self._messages_for_context(request, context, purpose="review"),
+                Message(role="system", content="Host-enforced submission contract for this exact run:\n"
+                        + json.dumps(self.submission_schema(request), ensure_ascii=False))]
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
@@ -157,7 +189,9 @@ class ResearchFinalReportAgent(ResearchAnalysisAgent):
         "and time. Distinguish engineering completion, exploratory target attainment, convergence, novelty "
         "and generalization. Include actual failures, uncertainty, references and reproducibility limits. "
         "Do not fabricate prices, measurements or executed ablations. Any future redesign needs a new "
-        "protocol and untouched test data: this run cannot return to coding after final test."
+        "protocol and untouched test data: this run cannot return to coding after final test. "
+        "If research_provenance identifies a source_run_root, the approved research and its real API calls "
+        "were inherited from that prior run; distinguish them from newly executed stages."
     )
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any]:

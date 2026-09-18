@@ -34,7 +34,7 @@ def request(project: str = "folder_schema_contract") -> RunRequest:
               "validation_fraction": .1, "scale": 1, "fs": 1, "band": [-.5, .5],
               "metric": "fixture metric", "selection": "validation", "initialization": "from scratch"}
     return RunRequest(project=project, user_request="Human-authored schema contract input",
-        upstream_artifacts={"frozen_protocol": json.dumps(frozen)},
+        upstream_artifacts={"frozen_protocol": json.dumps(frozen), "goal": '{"rounds":1}'},
         extra={"scope": "project_proposal", "idea_requirements": {"require_parameter_budget": True}})
 
 

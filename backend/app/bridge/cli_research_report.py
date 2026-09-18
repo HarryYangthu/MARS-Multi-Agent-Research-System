@@ -89,16 +89,19 @@ def _usage(value: Any) -> dict[str, int | None]:
     return {key: data[key] if type(data.get(key)) is int and data[key] >= 0 else None for key in TOKEN_KEYS}
 
 
-def _collect_traces(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+def _collect_traces(root: Path, warnings: list[str], *, scan_root: Path | None = None,
+                    origin: str = "current_run", source_run_root: str | None = None
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     stages: list[dict[str, Any]] = []
     calls: list[dict[str, Any]] = []
     tools: list[dict[str, Any]] = []
-    directories = {p.parent for name in ("facts.json", "events.jsonl") for p in (root / "stages").rglob(name)
+    directories = {p.parent for name in ("facts.json", "events.jsonl") for p in (scan_root or root / "stages").rglob(name)
                    if "agent_traces" in p.parts}
     for directory in sorted(directories):
         facts = _record(directory / "facts.json", warnings)
         events = _rows(directory / "events.jsonl", warnings)
         ref = _relative(root, directory)
+        provenance = {"trace": ref, "origin": origin, "source_run_root": source_run_root or str(root.resolve())}
         counts = {key: sum(row.get("kind") == event for row in events) if events else facts.get("counts", {}).get(key)
                   for key, event in COUNT_EVENTS.items()}
         if events and any(facts.get("counts", {}).get(key, counts[key]) != counts[key] for key in COUNT_EVENTS):
@@ -108,7 +111,7 @@ def _collect_traces(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any
         for event in events:
             kind = event.get("kind")
             if kind == "model_request":
-                call = {"trace": ref, "request": event.get("request"), "provider": event.get("provider"),
+                call = {**provenance, "request": event.get("request"), "provider": event.get("provider"),
                         "model": event.get("model"), "phase": event.get("phase"), "started_at": event.get("time"),
                         "status": "unresolved", "sdk_failures": 0, **_usage(None)}
                 requests[event.get("request")] = call
@@ -125,7 +128,7 @@ def _collect_traces(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any
                     call.update(status="not_sent_budget" if kind == "resource_budget_exhausted" else "failed",
                                 finished_at=event.get("time"), elapsed_seconds=_duration(call["started_at"], event.get("time")))
             elif kind == "tool_dispatch":
-                tool = {"trace": ref, "step": event.get("step"), "tool": event.get("tool"),
+                tool = {**provenance, "step": event.get("step"), "tool": event.get("tool"),
                         "started_at": event.get("time"), "ok": None}
                 dispatches[event.get("step")] = tool
                 tools.append(tool)
@@ -137,7 +140,7 @@ def _collect_traces(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any
         complete = (facts.get("usage_complete") is True and all(row.get(key) is not None for row in requests.values() for key in TOKEN_KEYS)
                     and not any(row["sdk_failures"] or row["status"] in {"unresolved", "failed"} for row in requests.values()))
         times = [t for e in events if (t := _timestamp(e.get("time"))) is not None]
-        stages.append({"trace": ref, "receipt": ref + ("/facts.json" if facts else "/events.jsonl"),
+        stages.append({**provenance, "receipt": ref + ("/facts.json" if facts else "/events.jsonl"),
                        "status": facts.get("status", "unknown"), **counts, **token_usage,
                        "usage_complete": complete, "sdk_failures": sum(e.get("kind") == "sdk_attempt_failed" for e in events),
                        "model_errors": sum(e.get("kind") == "model_error" for e in events),
@@ -146,7 +149,8 @@ def _collect_traces(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any
     return stages, calls, tools
 
 
-def _collect_budgets(root: Path, warnings: list[str]) -> list[dict[str, Any]]:
+def _collect_budgets(root: Path, warnings: list[str], *, inherited_stage: Path | None = None,
+                     source_run_root: str | None = None) -> list[dict[str, Any]]:
     ledgers: list[dict[str, Any]] = []
     for path in sorted(root.rglob("model_budget.v1.json")):
         if path.parent.name != "resources":
@@ -157,15 +161,40 @@ def _collect_budgets(root: Path, warnings: list[str]) -> list[dict[str, Any]]:
                  ("provider", "model", "status", "started_at", "finished_at", "usage_complete", "charged_tokens",
                   "reserved_tokens", "charged_cost", "reserved_cost", "price", "usage", "correlation")}}
                 for identifier, row in requests.items() if isinstance(row, dict)] if isinstance(requests, dict) else []
-        ledgers.append({"path": _relative(root, path), "limits": raw.get("configuration", {}).get("limits", {}),
+        inherited = inherited_stage is not None and path.resolve().is_relative_to(inherited_stage)
+        origin = "inherited_research" if inherited else "current_run"
+        if not inherited and path.resolve().is_relative_to((root / "reused_research").resolve()):
+            origin = "unclassified_inherited"
+        ledgers.append({"path": _relative(root, path), "origin": origin,
+                        "source_run_root": source_run_root if inherited else str(root.resolve()) if origin == "current_run" else None,
+                        "limits": raw.get("configuration", {}).get("limits", {}),
                         "requests": rows, "accounting": "Reservations and charges are quota accounting, not invoices."})
     return ledgers
+
+
+def _trace_usage(stages: list[dict[str, Any]], calls: list[dict[str, Any]]) -> dict[str, Any]:
+    totals = {key: sum(row[key] or 0 for row in stages)
+              for key in (*COUNT_EVENTS, *TOKEN_KEYS, "sdk_failures", "model_errors", "tool_failures")}
+    totals["usage_complete"] = bool(stages) and all(row["usage_complete"] for row in stages)
+    totals["model_call_seconds"] = sum(row.get("elapsed_seconds") or 0 for row in calls)
+    return totals
 
 
 def collect_evidence(root: Path, manifest: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Read current evidence without calling models, loading tensors, or changing state."""
     warnings: list[str] = []
     protocol = _record(root / "experiment/protocol.json", warnings)
+    reuse = _record(root / "context/research_reuse.json", warnings)
+    inherited_stage: Path | None = None
+    if reuse:
+        relative = reuse.get("copied_stage_root")
+        if reuse.get("schema") == "research.reuse.v1" and isinstance(relative, str) and not Path(relative).is_absolute():
+            candidate = (root / relative).resolve()
+            if (candidate.is_relative_to(root.resolve()) and candidate.is_relative_to((root / "reused_research").resolve())
+                    and candidate.is_dir()):
+                inherited_stage = candidate
+        if inherited_stage is None:
+            warnings.append("Research reuse receipt has no valid archived stage inside reused_research; inherited calls are not classified as new calls")
     trials: list[dict[str, Any]] = []
     channels: list[dict[str, Any]] = []
     for name, trial in state.get("trials", {}).items():
@@ -197,13 +226,20 @@ def collect_evidence(root: Path, manifest: dict[str, Any], state: dict[str, Any]
             steps.append({**prefix, **{key: row.get(key) for key in
                           ("optimizer_step", "epoch", "training_loss", "gradient_norm", "learning_rate", "elapsed_seconds")}})
     stages, calls, tools = _collect_traces(root, warnings)
-    totals = {key: sum(row[key] or 0 for row in stages) for key in (*COUNT_EVENTS, *TOKEN_KEYS, "sdk_failures", "model_errors", "tool_failures")}
-    totals["usage_complete"] = bool(stages) and all(row["usage_complete"] for row in stages)
+    if inherited_stage is not None:
+        inherited_stages, inherited_calls, inherited_tools = _collect_traces(
+            root, warnings, scan_root=inherited_stage, origin="inherited_research", source_run_root=reuse.get("source_run_root"))
+        stages.extend(inherited_stages)
+        calls.extend(inherited_calls)
+        tools.extend(inherited_tools)
+    by_origin = {origin: _trace_usage([row for row in stages if row["origin"] == origin],
+                                     [row for row in calls if row["origin"] == origin])
+                 for origin in ("current_run", "inherited_research")}
+    totals = _trace_usage(stages, calls)
     totals["worker_training_seconds"] = sum(row["elapsed_seconds"] or 0 for row in attempts)
     totals["worker_timing_complete"] = bool(attempts) and all(row["elapsed_seconds"] is not None for row in attempts)
-    totals["model_call_seconds"] = sum(row.get("elapsed_seconds") or 0 for row in calls)
     totals["run_wall_seconds"] = _duration(manifest.get("created_at"), state.get("completed_at"))
-    budgets = _collect_budgets(root, warnings)
+    budgets = _collect_budgets(root, warnings, inherited_stage=inherited_stage, source_run_root=reuse.get("source_run_root"))
     commits = [{"receipt": _relative(root, p), **_record(p, warnings)} for p in sorted((root / "coding").glob("*.receipt.json"))]
     diagnostics = [{"trial": name, **trial["data_diagnostics"]} for name, trial in state.get("trials", {}).items()
                    if isinstance(trial.get("data_diagnostics"), dict)]
@@ -228,6 +264,7 @@ def collect_evidence(root: Path, manifest: dict[str, Any], state: dict[str, Any]
             "protocol": protocol, "budget": manifest.get("budget", {}), "trials": trials, "channels": channels,
             "execution_attempts": attempts, "training_history": history, "training_steps": steps, "stages": stages,
             "model_calls": calls, "tools": tools, "resource_usage": totals, "model_budgets": budgets,
+            "resource_usage_by_origin": by_origin, "research_reuse": reuse or None,
             "source_receipts": commits, "selected": state.get("selected"), "final_comparison": state.get("final_comparison"),
             "data_diagnostics": diagnostics,
             "stage_failures": state.get("stage_failures", {}), "evidence_links": refs, "warnings": warnings,
@@ -341,9 +378,9 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
         "channels": ["trial", "split", "channel", "RES_db"],
         "training_history": ["trial", "attempt", "epoch", "optimizer_steps", "validation_RES_db", "path"],
         "training_steps": ["trial", "attempt", "optimizer_step", "epoch", "training_loss", "gradient_norm", "learning_rate", "elapsed_seconds", "path"],
-        "model_calls": ["trace", "request", "provider", "model", "phase", "status", "prompt_tokens", "completion_tokens", "total_tokens", "sdk_failures", "elapsed_seconds"],
-        "tools": ["trace", "step", "tool", "ok", "elapsed_seconds"],
-        "stages": ["trace", "status", *COUNT_EVENTS, *TOKEN_KEYS, "usage_complete", "sdk_failures", "model_errors", "tool_failures", "elapsed_seconds"],
+        "model_calls": ["origin", "source_run_root", "trace", "request", "provider", "model", "phase", "status", "prompt_tokens", "completion_tokens", "total_tokens", "sdk_failures", "elapsed_seconds"],
+        "tools": ["origin", "source_run_root", "trace", "step", "tool", "ok", "elapsed_seconds"],
+        "stages": ["origin", "source_run_root", "trace", "status", *COUNT_EVENTS, *TOKEN_KEYS, "usage_complete", "sdk_failures", "model_errors", "tool_failures", "elapsed_seconds"],
     }
     for name, fields in exports.items():
         _csv(directory / f"{name}.csv", evidence[name], fields)
@@ -358,6 +395,14 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
         body.append("缺少阶段产物：" + "、".join(acceptance["missing_stage_artifacts"]) + "。")
     if evidence["error"]:
         body.append("当前错误或限制：" + _display(evidence["error"]))
+    if evidence["research_reuse"]:
+        reuse = evidence["research_reuse"]
+        body += ["## 复用的已审查研究",
+                 "本运行采用先前真实调用生成并通过审查的研究提案。继承 trace 保留原调用时间与原路径，复制证据不会重新发送这些 API 请求。实验设计、代码生成与仿真等新阶段按本运行记录单独计数。",
+                 f"原运行：`{reuse.get('source_run_root', '—')}`；原研究阶段：`{reuse.get('source_stage_root', '—')}`。",
+                 f"复用时间：{reuse.get('reused_at', '—')}；提案 SHA-256：`{reuse.get('source_artifact_sha256', '—')}`。",
+                 f"复用收据：{_link('context/research_reuse.json')}；继承阶段副本：{_link(str(reuse.get('copied_stage_root', 'reused_research/stage')))}。",
+                 "副本中的历史正文收据和上下文可能仍包含原运行绝对路径；应结合复用收据中的 stage_files 哈希核查。历史失败、拒绝和已知用量一并保留，不当作本运行新发生的调用。"]
     body += ["## 数据、协议与代码身份", f"数据：`{manifest.get('data', '—')}`\n\n冻结数据 SHA-256：`{protocol.get('data_sha256', '—')}`。",
              f"源仓库：`{manifest.get('repo', '—')}`；源 HEAD：`{manifest.get('source_commit', '—')}`；冻结源码提交：`{manifest.get('frozen_source_commit', '—')}`；源受跟踪文件有改动：{manifest.get('source_tracked_dirty', '—')}。",
              f"协议：{_link('experiment/protocol.json')}；输入：{_link('input/manifest.json')}。",
@@ -397,17 +442,22 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
         body.append(f"![{Path(chart).stem}]({chart})")
     body += ["## 资源预算、模型与工具调用", "冻结计算预算：\n```json\n" + json.dumps(budget, ensure_ascii=False, indent=2) + "\n```",
              "更新数表示 optimizer.step 次数，不表示 epoch 数。以下 Token 来自 trace 的实际响应 usage；失败请求未返回的用量不能视为零。",
-             f"已记录模型请求：{usage['model_requests']}；响应：{usage['model_responses']}；SDK 尝试：{usage['sdk_attempts']}；工具派发：{usage['tool_dispatches']}。",
-             f"已知输入 Token：{usage['prompt_tokens']}；已知输出 Token：{usage['completion_tokens']}；已知总 Token：{usage['total_tokens']}。完整用量：{'是' if usage['usage_complete'] else '否，属于已知下界或尚无调用证据'}。",
+             "| 调用来源 | 模型请求 | 响应 | SDK 尝试 | 工具派发 | 输入 Token | 输出 Token | 总 Token |\n|---|---:|---:|---:|---:|---:|---:|---:|"]
+    origin_labels = {"current_run": "本运行新发生", "inherited_research": "继承的历史研究", "unclassified_inherited": "未分类的历史副本"}
+    for origin, values in evidence["resource_usage_by_origin"].items():
+        body.append("| " + " | ".join([origin_labels[origin], *[_display(values[key]) for key in
+                    ("model_requests", "model_responses", "sdk_attempts", "tool_dispatches", *TOKEN_KEYS)]]) + " |")
+    body += [f"证据总计（本运行新调用与继承历史之和）：模型请求 {usage['model_requests']}；响应 {usage['model_responses']}；SDK 尝试 {usage['sdk_attempts']}；工具派发 {usage['tool_dispatches']}。总计不能称作本运行新发送的 API 次数。",
+             f"证据总计的已知输入 Token：{usage['prompt_tokens']}；已知输出 Token：{usage['completion_tokens']}；已知总 Token：{usage['total_tokens']}。完整用量：{'是' if usage['usage_complete'] else '否，属于已知下界或尚无调用证据'}。",
              f"SDK 失败：{usage['sdk_failures']}；模型错误事件：{usage['model_errors']}；工具失败：{usage['tool_failures']}。这些计数不可相加为独立失败请求数。",
              f"已观测模型调用耗时合计：{usage['model_call_seconds']:.3f} 秒；已记录 worker 训练耗时：{usage['worker_training_seconds']:.3f} 秒。二者不是端到端墙钟耗时；并发、未结算调用与无计时 worker 不据此补算。",
              f"从运行创建到完成的墙钟耗时：{_display(usage['run_wall_seconds'])} 秒（包含等待与恢复间隔；仅在完成时间已归档时计算）。",
              "费用：未进行价格推算。资源账本的 charged/reserved 数值仅作为配额记账证据，不能当作服务商账单。",
-             "| 阶段 trace | 状态 | 请求 | 输入 Token | 输出 Token | 工具 | 耗时/秒 |\n|---|---|---:|---:|---:|---:|---:|"]
+             "| 阶段 trace | 调用来源 | 状态 | 请求 | 输入 Token | 输出 Token | 工具 | 耗时/秒 |\n|---|---|---|---:|---:|---:|---:|---:|"]
     for stage in evidence["stages"]:
-        body.append("| " + " | ".join([_link(stage["receipt"]), *[_display(stage.get(key)) for key in ("status", "model_requests", "prompt_tokens", "completion_tokens", "tool_dispatches", "elapsed_seconds")]]) + " |")
+        body.append("| " + " | ".join([_link(stage["receipt"]), origin_labels[stage["origin"]], *[_display(stage.get(key)) for key in ("status", "model_requests", "prompt_tokens", "completion_tokens", "tool_dispatches", "elapsed_seconds")]]) + " |")
     for ledger in evidence["model_budgets"]:
-        body.append(f"模型配额与逐请求保留记录：{_link(ledger['path'])}；共 {len(ledger['requests'])} 条，不与 trace 用量重复累加。")
+        body.append(f"模型配额与逐请求保留记录：{_link(ledger['path'])}；来源：{origin_labels[ledger['origin']]}；共 {len(ledger['requests'])} 条，不与 trace 用量重复累加。历史账本不计为本运行新发生的配额消耗。")
         body.append("冻结模型配额：\n```json\n" + json.dumps(ledger["limits"], ensure_ascii=False, indent=2) + "\n```")
         charged = sum(row["charged_tokens"] for row in ledger["requests"] if type(row.get("charged_tokens")) is int)
         unresolved = sum(row.get("usage_complete") is not True for row in ledger["requests"])

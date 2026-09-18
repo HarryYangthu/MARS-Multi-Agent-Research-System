@@ -27,6 +27,7 @@ from app.harness.discovery.code_materialization import (
 from app.harness.discovery.snapshots import SnapshotPolicy, create_snapshot, verify_snapshot
 from app.harness.discovery.source_commit import archive_source_commit, source_commit_diff
 from app.harness.project_workspace import folder_project, open_folder
+from app.harness.research_reuse import reuse_research, verify_research_reuse
 from app.harness.research_selection import freeze_selection, load_selection, verify_trial_archive, worker_identity
 from app.harness.research_trial import ResearchBudget, compare, file_sha256, read_record, select_candidate
 from app.harness.schema.frontmatter_parser import parse
@@ -103,7 +104,8 @@ def prepare_protocol(repo: Path, data: Path, budget: ResearchBudget) -> dict[str
     return cfg
 
 
-def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budget: ResearchBudget) -> dict[str, Any]:
+def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budget: ResearchBudget,
+               *, reuse_research_from: Path | None = None) -> dict[str, Any]:
     if not repo.is_dir():
         raise ValueError(f"Research repository does not exist: {repo}")
     cfg = configuration()
@@ -155,9 +157,14 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
         "source_tracked_dirty": bool(source_status.stdout.strip()) if source_status.returncode == 0 else None,
         "protocol_sha256": file_sha256(output / "experiment/protocol.json"),
         "context_sha256": file_sha256(output / "context/source.json"), "configuration": cfg}
+    if reuse_research_from is not None:
+        manifest["research_reuse"] = {"receipt": "context/research_reuse.json",
+                                      "source_run_root": str(reuse_research_from.resolve())}
     atomic_json(output / "input/manifest.json", manifest)
     state: dict[str, Any] = {"status": "ready" if data.is_file() else "blocked_data", "artifacts": {}, "trials": {},
                              "attempts": {}, "manifest_sha256": file_sha256(output / "input/manifest.json")}
+    if reuse_research_from is not None:
+        reuse_research(output, manifest, state, reuse_research_from)
     atomic_json(output / "state.json", state)
     write_report(output, manifest, state)
     return state
@@ -193,6 +200,7 @@ def verify_run(root: Path, manifest: dict[str, Any], state: dict[str, Any]) -> N
             raise ValueError(f"Archived evidence changed: {relative}")
     for name, trial in state["trials"].items():
         verify_trial_archive(root, state, name, trial)
+    verify_research_reuse(root, manifest, state)
 
 
 async def materialize(root: Path, manifest: dict[str, Any], candidate_id: str, document: str) -> Path:
@@ -355,6 +363,7 @@ class CliResearchService:
             {"proposal": (root / "idea/proposal.md").read_text(encoding="utf-8"),
                  "experiment_plan": (root / "experiment/plan.md").read_text(encoding="utf-8"),
              "frozen_protocol": base_context["frozen_protocol"], "goal": base_context["goal"],
+             "research_provenance": json.dumps(manifest.get("research_reuse") or {"origin": "current_run"}, ensure_ascii=False),
              "actual_results": json.dumps(state["trials"], ensure_ascii=False),
              "selection": json.dumps({"selected": state.get("selected"),
                  "comparison": state.get("final_comparison"), "numerical_status": numerical_status}, ensure_ascii=False),

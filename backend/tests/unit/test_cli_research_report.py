@@ -145,3 +145,86 @@ def test_data_diagnostics_and_source_lineage_are_linked(tmp_path: Path) -> None:
     evidence = json.loads((tmp_path / "evidence/summary.json").read_text())
     assert evidence["resource_usage"]["run_wall_seconds"] == 5
     assert evidence["data_diagnostics"][0]["path"] == diagnostic_path.relative_to(tmp_path).as_posix()
+
+
+def _trace_contract(directory: Path, *, tokens: int, start: str, failed: bool = False) -> None:
+    rows: list[dict[str, Any]] = [
+        {"kind": "model_request", "request": 1, "model": "arithmetic-contract", "time": start},
+        {"kind": "sdk_attempt_started", "request": 1, "time": start},
+        {"kind": "model_response", "request": 1, "time": start,
+         "usage": {"prompt_tokens": tokens, "completion_tokens": 2, "total_tokens": tokens + 2}},
+    ]
+    if failed:
+        rows += [{"kind": "model_request", "request": 2, "time": start},
+                 {"kind": "sdk_attempt_started", "request": 2, "time": start},
+                 {"kind": "sdk_attempt_failed", "request": 2, "time": start},
+                 {"kind": "model_error", "time": start}]
+    _lines(directory / "events.jsonl", rows)
+    atomic_json(directory / "facts.json", {"status": "model_error" if failed else "passed", "usage_complete": not failed,
+                "counts": {"model_requests": 2 if failed else 1, "model_responses": 1,
+                           "sdk_attempts": 2 if failed else 1, "tool_dispatches": 0}})
+
+
+def test_reused_traces_keep_original_time_and_separate_new_usage(tmp_path: Path) -> None:
+    """Copy arithmetic trace inputs; never rerun or emulate a provider."""
+    import shutil
+    original = tmp_path / "original"
+    source_stage = original / "stages/idea/proposal"
+    _trace_contract(source_stage / "agent_traces/idea/previous", tokens=100, start="2026-01-01T00:00:00Z", failed=True)
+    atomic_json(source_stage / "resources/model_budget.v1.json", {"configuration": {"limits": {}},
+                "requests": {"previous": {"status": "failed", "charged_tokens": 900, "usage_complete": False}}})
+    current = tmp_path / "current"
+    copied_stage = current / "reused_research/stage"
+    shutil.copytree(source_stage, copied_stage)
+    _trace_contract(current / "stages/experiment/plan/agent_traces/experiment/current",
+                    tokens=10, start="2026-01-02T00:00:00Z")
+    atomic_json(current / "resources/model_budget.v1.json", {"configuration": {"limits": {}},
+                "requests": {"current": {"status": "completed", "charged_tokens": 12, "usage_complete": True}}})
+    receipt = {"schema": "research.reuse.v1", "source_run_root": str(original), "source_stage_root": str(source_stage),
+               "copied_stage_root": "reused_research/stage", "reused_at": "2026-01-02T00:00:00Z",
+               "source_artifact_sha256": "contract-artifact-hash"}
+    atomic_json(current / "context/research_reuse.json", receipt)
+    state = {"status": "designing_experiment", "trials": {}}
+    write_report(current, _manifest(), state)
+    evidence = json.loads((current / "evidence/summary.json").read_text())
+    new = evidence["resource_usage_by_origin"]["current_run"]
+    old = evidence["resource_usage_by_origin"]["inherited_research"]
+    assert new["model_requests"] == new["model_responses"] == 1
+    assert new["total_tokens"] == 12 and new["usage_complete"] is True
+    assert old["model_requests"] == 2 and old["total_tokens"] == 102
+    assert old["sdk_failures"] == 1 and old["usage_complete"] is False
+    assert evidence["resource_usage"]["model_requests"] == 3
+    assert evidence["resource_usage"]["total_tokens"] == 114
+    assert evidence["resource_usage"]["usage_complete"] is False
+    old_calls = [row for row in evidence["model_calls"] if row["origin"] == "inherited_research"]
+    assert all(row["started_at"] == "2026-01-01T00:00:00Z" for row in old_calls)
+    assert all(row["source_run_root"] == str(original) for row in old_calls)
+    assert {row["origin"] for row in evidence["model_budgets"]} == {"current_run", "inherited_research"}
+    report = (current / "report.md").read_text()
+    assert "复制证据不会重新发送这些 API 请求" in report
+    assert "本运行新发生" in report and "继承的历史研究" in report
+    with (current / "evidence/model_calls.csv").open(newline="") as stream:
+        exported = list(csv.DictReader(stream))
+    assert sum(row["origin"] == "current_run" for row in exported) == 1
+    assert sum(row["origin"] == "inherited_research" for row in exported) == 2
+    assert (source_stage / "agent_traces/idea/previous/events.jsonl").read_bytes() == (copied_stage / "agent_traces/idea/previous/events.jsonl").read_bytes()
+
+
+def test_invalid_reuse_path_never_imports_outside_trace(tmp_path: Path) -> None:
+    source = tmp_path / "outside"
+    _trace_contract(source / "agent_traces/idea/previous", tokens=100, start="2026-01-01T00:00:00Z")
+    root = tmp_path / "run"
+    atomic_json(root / "context/research_reuse.json", {"schema": "research.reuse.v1", "copied_stage_root": "../outside"})
+    evidence = collect_evidence(root, _manifest(), {})
+    assert evidence["resource_usage"]["model_requests"] == 0
+    assert evidence["resource_usage_by_origin"]["current_run"]["model_requests"] == 0
+    assert evidence["warnings"] and "no valid archived stage" in evidence["warnings"][0]
+
+
+def test_unattributed_archived_budget_is_not_new_run_spend(tmp_path: Path) -> None:
+    archive = tmp_path / "reused_research/stage/resources/model_budget.v1.json"
+    atomic_json(archive, {"configuration": {"limits": {}}, "requests": {"old": {"charged_tokens": 300}}})
+    evidence = collect_evidence(tmp_path, _manifest(), {})
+    assert evidence["model_budgets"][0]["origin"] == "unclassified_inherited"
+    assert evidence["model_budgets"][0]["source_run_root"] is None
+    assert evidence["resource_usage_by_origin"]["current_run"]["total_tokens"] == 0
