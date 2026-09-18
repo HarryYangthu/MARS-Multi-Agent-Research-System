@@ -139,6 +139,9 @@ async def test_actual_refused_connection_obeys_retry_cap_in_completion_and_strea
 
     # The OS owns this bound but non-listening port. There is no responding
     # HTTP server, and no provider object/client is substituted.
+    # On the actual macOS host this can reach the connection deadline instead
+    # of receiving an immediate refusal. Both are real connection failures;
+    # the exact retry count and absence of successful output remain mandatory.
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         base_url = f"http://127.0.0.1:{sock.getsockname()[1]}/v1"
@@ -156,7 +159,7 @@ async def test_actual_refused_connection_obeys_retry_cap_in_completion_and_strea
                 await provider.complete([Message("user", "actual connection failure check")], config)
 
         try:
-            with pytest.raises((APIConnectionError, httpx.ConnectError)):
+            with pytest.raises((APIConnectionError, httpx.ConnectError, httpx.ConnectTimeout)):
                 await asyncio.wait_for(invoke(), timeout=10)
         finally:
             await provider.close()
@@ -181,7 +184,9 @@ async def test_generic_stream_never_replays_real_local_output_after_transport_fa
             config = LLMConfig(provider="local-lifecycle-contract", model="none", max_retries=3,
                                retry_base_delay_seconds=0, attempt_observer=lambda kind, _: events.append(kind))
             received: list[str] = []
-            with pytest.raises(httpx.ConnectError):
+            # A bound non-listening macOS socket may time out rather than refuse.
+            # Neither failure may replay the local bytes already yielded.
+            with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
                 async for item in stream_with_retries(file_then_connect, config):
                     received.append(item)
     assert received == ["actual local file bytes"]
