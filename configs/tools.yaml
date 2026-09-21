@@ -130,7 +130,7 @@ tools:
 
   search.arxiv_search:
     enabled: true
-    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k.
+    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k. On API HTTP 406, recover metadata from official arXiv HTML pages; keyword recovery supports plain keywords with relevance ranking only, without API filters. Metadata and abstracts are not full-text reading evidence.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 65

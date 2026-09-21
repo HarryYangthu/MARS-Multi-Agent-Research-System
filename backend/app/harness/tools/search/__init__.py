@@ -19,6 +19,7 @@ import httpx as httpx
 from app.harness.kb.memory_writer import write_to_zone
 from app.harness.kb.provenance import record_retrieval
 from app.harness.tools.search.arxiv_query import exact_arxiv_ids, verify_arxiv_lookup
+from app.harness.tools.search.arxiv_html import fallback_urls, fetch_metadata, verify_cached
 from app.harness.tools.search.cvf import cvf_search_tool as cvf_search_tool
 from app.harness.tools.search.neurips import neurips_search_tool as neurips_search_tool
 from app.harness.tools.search.openalex import openalex_search_tool as openalex_search_tool
@@ -107,8 +108,9 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     )
     terms = query if re.search(r"\b(AND|OR|ANDNOT)\b|:", query) else " AND ".join(query.split())
     search_query = terms + category_query
-    cache_key = _cache_key({"lookup_contract": 1, "arxiv_ids": ids}) if ids else _cache_key(
+    cache_key = _cache_key({"lookup_contract": 2, "arxiv_ids": ids}) if ids else _cache_key(
         {
+            "lookup_contract": 2,
             "q": search_query,
             "top_k": top_k,
             "date_from": date_from,
@@ -118,7 +120,12 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     cache_path = _cache_dir() / f"{cache_key}.json"
     if cache_path.exists():
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        if ids:
+        if payload.get("metadata_format") == "arxiv_html":
+            try:
+                verify_cached(payload, ids, top_k, fallback_urls(args, ids, query))
+            except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+                return ToolResult(ok=False, error=f"invalid arXiv HTML cache: {exc}")
+        elif ids:
             try:
                 verify_arxiv_lookup(ids, payload["hits"])
                 raw = cache_path.with_suffix(".xml").read_bytes()
@@ -138,15 +145,23 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     if ids:
         params = {"id_list": ",".join(ids), "start": "0", "max_results": str(len(ids))}
     url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
+    fallback_responses: list[dict[str, str]] | None = None
     try:
-        await _respect_arxiv_rate_limit()
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        return ToolResult(ok=False, error=f"arXiv request failed: {type(exc).__name__}: {exc}")
+        # Bound the API plus fallback together, below the registry's 65s deadline.
+        async with asyncio.timeout(55):
+            await _respect_arxiv_rate_limit()
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=False,
+                    headers={"User-Agent": "MARS-Research/1.0", "Accept": "application/atom+xml, text/html;q=0.9"}) as client:
+                response = await client.get(url)
+                if response.status_code == 406:
+                    hits, fallback_responses = await fetch_metadata(args, ids, query, top_k, cache_path, client, _respect_arxiv_rate_limit)
+                else:
+                    response.raise_for_status()
+    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
+        return ToolResult(ok=False, error=f"arXiv request failed (including official HTML recovery when API returns 406): {type(exc).__name__}: {exc}")
     try:
-        hits = _parse_arxiv(response.text, date_from=date_from)
+        if fallback_responses is None:
+            hits = _parse_arxiv(response.text, date_from=date_from)
         missing = verify_arxiv_lookup(ids, hits) if ids else []
     except (ValueError, ET.ParseError) as exc:
         return ToolResult(ok=False, error=f"arXiv metadata rejected: {exc}")
@@ -174,7 +189,13 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
         "cached": False,
         "cached_at": datetime.now(tz=timezone.utc).isoformat(),
     }
-    if ids:
+    if fallback_responses is not None:
+        payload.update(metadata_format="arxiv_html", metadata_responses=fallback_responses,
+                       api_url=url, api_status=406, url=fallback_responses[0]["url"],
+                       metadata_only=True, pdf_downloaded=False,
+                       warnings=["arXiv Atom API returned HTTP 406; metadata recovered from official arxiv.org HTML. "
+                                 "Keyword results use the website's relevance ranking; abstracts are not full-text reading evidence."])
+    if ids and fallback_responses is None:
         payload.update(lookup_mode="arxiv_id", requested_arxiv_ids=ids, missing_arxiv_ids=missing)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if ids:
@@ -252,12 +273,16 @@ async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 def _parse_arxiv(xml_text: str, *, date_from: str) -> list[dict[str, Any]]:
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     root = ET.fromstring(xml_text)
+    if root.tag != "{http://www.w3.org/2005/Atom}feed":
+        raise ValueError("response is not an arXiv Atom feed")
     out: list[dict[str, Any]] = []
     for entry in root.findall("atom:entry", ns):
         published = _entry_text(entry, "published", ns)
+        arxiv_id = _entry_text(entry, "id", ns)
+        if "/api/errors" in arxiv_id:
+            raise ValueError(f"arXiv API error: {_entry_text(entry, 'summary', ns)}")
         if date_from and published[:10] < date_from:
             continue
-        arxiv_id = _entry_text(entry, "id", ns)
         out.append(
             {
                 "id": arxiv_id.split("/abs/", 1)[-1],
