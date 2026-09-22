@@ -1,0 +1,16 @@
+# Windows 10/11 x64 native setup. Flat scalar keys are read before Python exists.
+python_version: 3.11.14
+frontend_port: 3001
+backend_port: 8010
+startup_timeout_seconds: 180
+uv_url: https://github.com/astral-sh/uv/releases/download/0.11.1/uv-x86_64-pc-windows-msvc.zip
+uv_sha256: 6659250cebbd3bb6ee48bcb21a3f0c6656450d63fb97f0f069bcb532bdb688ed
+uv_executable: uv.exe
+node_url: https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip
+node_sha256: 1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97
+node_executable: node-v22.23.2-win-x64/node.exe
+git_url: https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/MinGit-2.55.0.5-64-bit.zip
+git_sha256: 56d7b226b7693196cfc71fef26568f536c4a021ab6c37ff2db4287bed908e96e
+git_executable: cmd/git.exe
+torch_index: https://download.pytorch.org/whl/cpu
+vc_runtime_url: https://aka.ms/vc14/vc_redist.x64.exe

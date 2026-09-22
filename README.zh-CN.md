@@ -1,5 +1,7 @@
 # MARS · 多 Agent 研究系统
 
+**Windows 原生 CPU 一键运行：** 双击根目录 `MARS-Windows.cmd`，首次自动安装依赖并引导配置本机 API，然后启动前后端。详见 [Windows 原生使用说明](deploy/windows-native/README.md)。
+
 > **研究型多 Agent 系统的工程底座** — 把研究问题经 5 个专门 Agent 一路推到论文初稿,
 > 全程 schema 强校验、每步 HITL 审核、完整审计可回放。
 
