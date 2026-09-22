@@ -8,16 +8,30 @@ from typing import Any
 from app.agents.idea.delivery import resolve_pointer
 
 
-def research_schema() -> dict[str, Any]:
+def validate_review_mode(author: tuple[str, str], reviewer: tuple[str, str], mode: object = "cross_model") -> str:
+    """Keep historical cross-model admission strict; same-model review is explicit."""
+    if mode not in ("cross_model", "independent_session"):
+        raise ValueError("review_mode must be cross_model or independent_session")
+    if mode == "cross_model" and author == reviewer:
+        raise ValueError("generation and review models must differ for cross_model review")
+    return str(mode)
+
+
+def research_schema(*, version: int = 1) -> dict[str, Any]:
     text = {"type": "string", "minLength": 1}
     strings = {"type": "array", "items": text}
-    source = {"type": "object", "required": ["source_id", "title", "url", "decision", "reason"],
+    source: dict[str, Any] = {"type": "object", "required": ["source_id", "title", "url", "decision", "reason"],
               "properties": {"source_id": {"type": "string"}, "title": text, "url": text,
                   "decision": {"enum": ["use", "reject", "defer"]}, "reason": text,
                   "method_sections": strings, "method_summary": text, "transfer": text,
                   "limitations": text, "method_spec_ref": text}}
+    if version == 2:
+        source["properties"]["method_pages"] = {"type": "array", "uniqueItems": True,
+                                                "items": {"type": "integer", "minimum": 1}}
+        source["allOf"] = [{"if": {"properties": {"decision": {"const": "use"}}},
+                            "then": {"required": ["method_pages"]}}]
     return {"type": "object", "required": ["schema", "question", "selection_principles", "sources", "stop_reason", "open_questions"],
-            "properties": {"schema": {"const": "idea.research_context.v1"}, "question": text,
+            "properties": {"schema": {"const": f"idea.research_context.v{version}"}, "question": text,
                 "selection_principles": {**strings, "minItems": 1},
                 "sources": {"type": "array", "minItems": 1, "items": source},
                 "stop_reason": text, "open_questions": strings}}
@@ -59,8 +73,9 @@ def focused_research_errors(metadata: dict[str, Any], observations: list[dict[st
     if not isinstance(context, dict):
         return ["/research_context: actual research and method reading are required"]
     from jsonschema import Draft202012Validator
+    version = 2 if context.get("schema") == "idea.research_context.v2" else 1
     errors = ["/research_context/" + "/".join(map(str, e.absolute_path)) + ": " + e.message
-              for e in Draft202012Validator(research_schema()).iter_errors(context)]
+              for e in Draft202012Validator(research_schema(version=version)).iter_errors(context)]
     if errors:
         return errors
     readings, urls = reading_sources(observations), observed_urls([o.get("output", {}) for o in observations])
@@ -86,6 +101,16 @@ def focused_research_errors(metadata: dict[str, Any], observations: list[dict[st
                 errors.append(prefix + "/" + field + ": explain the actual method and its transfer")
         if not source.get("method_sections"):
             errors.append(prefix + "/method_sections: identify the method sections and dependencies actually read")
+        if version == 2 and any(row.get("source_type") == "pdf" for row in rows):
+            from app.harness.agent_loop.context import reading_coverage_index
+            coverage = [page for document in reading_coverage_index(observations)
+                        if document["source_id"] == source_id
+                        and document["sha256"] == rows[0].get("sha256") for page in document["pages"]]
+            complete = {page["page"] for page in coverage if page["complete_extracted_text"]}
+            declared = set(source.get("method_pages", []))
+            if not declared or not declared.issubset(complete):
+                errors.append(prefix + "/method_pages: declare the operative method pages and finish their actual text windows; "
+                              f"fully covered pages={sorted(complete)}, incomplete/missing={sorted(declared - complete)}")
         try:
             ref = str(source.get("method_spec_ref", ""))
             if not ref.startswith("/method_spec/"):
@@ -126,7 +151,9 @@ def render_research_context(context: dict[str, Any]) -> str:
 def focused_requirement_errors(metadata: dict[str, Any], observations: list[dict[str, Any]], requirements: dict[str, Any]) -> list[str]:
     from app.agents.idea.research import parameter_errors
     from app.agents.idea.protocol import protocol_errors
+    from app.agents.idea.performance_contract import performance_errors
     errors: list[str] = []
+    errors += performance_errors(metadata, requirements)
     sources = metadata.get("research_context", {}).get("sources", [])
     used = {s.get("source_id") for s in sources if s.get("decision") == "use"}
     readings = reading_sources(observations)
@@ -164,7 +191,7 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
         checkpoints.append(str(path))
         if (state.get("candidate") == proposal_text and state.get("status") == "passed"
                 and state.get("reflection_accepted") and state.get("reviewed_candidate_sha") == digest(proposal_text)):
-            review_receipt = verify_cross_model_trace(path.parent, configuration)
+            review_receipt = verify_review_trace(path.parent, configuration)
             reviewed = True
     errors = focused_research_errors(metadata, observations, run_root)
     if errors:
@@ -178,17 +205,16 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
             "scientific_validated": False}
 
 
-def verify_cross_model_trace(trace_root: Path, configuration: dict[str, Any]) -> dict[str, Any]:
+def verify_review_trace(trace_root: Path, configuration: dict[str, Any]) -> dict[str, Any]:
     """Require real matching provider responses, not just configured model names."""
     import json
     from app.harness.agent_loop.trace import audit_trace
     if not audit_trace(trace_root)["consistent"]:
-        raise ValueError("cross-model review trace is inconsistent")
+        raise ValueError("model review trace is inconsistent")
     author = configuration["author"]["model"]
     reviewer = configuration["reviewer"]["model"]
     expected = {"act": (author["provider"], author["name"]), "reflect": (reviewer["provider"], reviewer["name"])}
-    if expected["act"] == expected["reflect"]:
-        raise ValueError("generation and review models must differ")
+    mode = validate_review_mode(expected["act"], expected["reflect"], configuration.get("review_mode", "cross_model"))
     requests: dict[int, tuple[str, str, str]] = {}
     responses: dict[str, list[int]] = {"act": [], "reflect": []}
     for line in (trace_root / "events.jsonl").read_text().splitlines():
@@ -203,6 +229,7 @@ def verify_cross_model_trace(trace_root: Path, configuration: dict[str, Any]) ->
             if request and (event.get("provider"), event.get("model")) == request[1:]:
                 responses[request[0]].append(event["request"])
     if not all(responses.values()):
-        raise ValueError("no completed cross-model generation and review responses")
+        raise ValueError("no completed generation and independent review responses")
     return {"author": author["name"], "reviewer": reviewer["name"], "completed_requests": responses,
-            "trace_root": str(trace_root)}
+            "trace_root": str(trace_root), "review_mode": mode,
+            "cross_model": expected["act"] != expected["reflect"]}

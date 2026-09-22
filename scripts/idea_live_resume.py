@@ -90,7 +90,7 @@ def load_resume(root: Path, *, review: ExternalReview | None = None,
         raise ValueError("resume requires a complete, consistent full trace")
     if initial["run_id"] != root.name or previous["run_id"] != root.name:
         raise ValueError("run identity does not match its directory")
-    if state["counts"]["model_requests"] >= initial["loop_policy"]["max_model_calls"]:
+    if not AgentLoopPolicy.from_mapping(initial["loop_policy"]).allows_model_calls(state["counts"]["model_requests"]):
         raise ValueError("model request budget already exhausted")
     if review:
         review_revision(state, review, AgentLoopPolicy.from_mapping(initial["loop_policy"]))

@@ -10,7 +10,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
 from app.agents.idea.focused_agent import FocusedIdeaAgent
-from app.agents.idea.focused_research import focused_research_errors, research_schema
+from app.agents.idea.focused_research import focused_research_errors, research_schema, validate_review_mode
 from app.harness.context.project_knowledge import load_project_knowledge
 from app.harness.tools.search.source_fetch import extract_pdf
 from app.harness.tools.registry import get_registry, ToolContext
@@ -58,14 +58,21 @@ def test_knowledge_rejects_missing_empty_escaping_or_changed_snapshot(tmp_path: 
         load_project_knowledge(project, tmp_path / "run2")
 
 
-def test_actual_focused_configuration_uses_different_models_and_no_delegation() -> None:
+def test_actual_focused_configuration_uses_explicit_flash_review_and_no_delegation() -> None:
     agent = FocusedIdeaAgent()
     snapshot = agent.service_profile_snapshot
-    assert snapshot["author"]["model"] != snapshot["reviewer"]["model"]
+    assert snapshot["review_mode"] == "independent_session"
+    assert snapshot["author"]["model"]["name"] == "deepseek-flash"
+    assert snapshot["reviewer"]["model"]["name"] == "deepseek-flash"
     assert "idea.research_delegate" not in agent.config.tools
     assert "search.fetch_sources" in agent.config.tools
     assert agent.config.raw["loop"]["max_reflections"] == 4
-    assert agent.config.thinking_enabled
+    assert agent.config.raw["loop"]["max_model_calls"] is None
+    assert agent.loop_policy.max_model_calls is None
+    assert not agent.config.thinking_enabled
+    assert agent.loop_policy.document_revisions_enabled
+    assert agent.loop_policy.deduplicate_evidence_enabled
+    assert "code.repo_reader" in agent.required_review_tools(RunRequest(project="pimc", user_request="check"))
     assert agent.config.raw["loop"]["protocol"] == "native_tools"
     assert agent.config.raw["loop"]["native_observation_history"]
     assert agent.config.raw["loop"]["author_empty_completion_repair_enabled"]
@@ -81,14 +88,25 @@ def test_cli_author_configuration_is_frozen_without_changing_independent_review(
     bounded = FocusedIdeaAgent(author_settings=settings["research_author"])
     assert not bounded.config.thinking_enabled
     assert bounded.config.request_timeout_seconds == 360
-    assert normal.config.thinking_enabled
+    assert not normal.config.thinking_enabled
     assert bounded.service_profile_snapshot["reviewer"] == normal.service_profile_snapshot["reviewer"]
     assert bounded.service_profile_snapshot["source_sha256"] != normal.service_profile_snapshot["source_sha256"]
-    assert bounded.service_profile_snapshot["author"]["model"] != bounded.service_profile_snapshot["reviewer"]["model"]
+    assert bounded.service_profile_snapshot["review_mode"] == normal.service_profile_snapshot["review_mode"]
     coding = ResearchCodingAgent("deepseek-v4-flash", settings["coding_loop"], generation=settings["generation"])
     assert not coding.config.thinking_enabled
     assert coding.config.request_timeout_seconds == 360
     assert coding.config.raw["loop"]["mode"] == "reflection"
+
+
+def test_same_model_requires_explicit_review_policy_and_historical_default_stays_strict() -> None:
+    author = ("deepseek", "deepseek-flash")
+    with pytest.raises(ValueError, match="must differ"):
+        validate_review_mode(author, author)
+    assert validate_review_mode(author, author, "independent_session") == "independent_session"
+    assert validate_review_mode(author, ("deepseek", "deepseek-v4-pro")) == "cross_model"
+    for invalid in (False, None, "disabled", "skip"):
+        with pytest.raises(ValueError, match="review_mode"):
+            validate_review_mode(author, author, invalid)
 
 
 @pytest.mark.asyncio

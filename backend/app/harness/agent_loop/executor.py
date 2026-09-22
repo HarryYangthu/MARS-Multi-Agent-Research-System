@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -27,7 +28,7 @@ from app.harness.tools.registry import ToolContext, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
 ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
-CONTEXT_FORMAT_VERSION = 9
+CONTEXT_FORMAT_VERSION = 10
 
 
 def generation_fingerprint(config: LLMConfig, provider: LLMProvider) -> str:
@@ -99,7 +100,7 @@ class AgentLoopExecutor(Protocol):
 
 def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     """Expose actual remaining local resources before choosing another action."""
-    remaining = {"model_calls": max(0, policy.max_model_calls - counts["model_requests"]),
+    remaining = {"model_calls": policy.remaining_model_calls(counts["model_requests"]),
                  "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
                  "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
     return remaining_budget_message(remaining)
@@ -188,7 +189,10 @@ def apply_review_decision(state: dict[str, Any], decision: dict[str, Any], *,
     state["reflection_accepted"] = False
     state["feedback"] = canonical({"required_revision": decision["issues"],
                                     "review_rationale": decision["rationale"],
-                                    "instruction": "Revise the complete candidate to resolve these issues. Do not merely remove warnings."})
+                                    "instruction": "Resolve each issue against the original task and actual evidence. "
+                                    "Reviewer claims are unverified: calculate alleged counterexamples before changing a correct method. "
+                                    "Update all affected fields or provide a precise evidence-backed rebuttal in the revised candidate. "
+                                    "Do not relax user constraints or merely remove warnings."})
     state["next_phase"] = "act"
     if state["counts"]["reflections"] >= max_reflections:
         state["status"] = "reflection_rejected"
@@ -247,7 +251,8 @@ class NativeAgentLoop:
                 and not (request.config.thinking_enabled is True and p.native_observation_history
                          and request.config.provider == "deepseek")):
             raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
-        wire_tools = native_specs(specs, request.final_schema) if native else ()
+        wire_tools = native_specs(specs, request.final_schema, allow_revisions=p.document_revisions_enabled,
+                                  body_field=p.submission_body_field) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
         instructions = action_instructions(specs, native=native, final_schema=request.final_schema)
         pinned = list(request.messages) + [Message(role="system", content=instructions)]
@@ -397,7 +402,7 @@ class NativeAgentLoop:
             if not empty_recovery:
                 counts["protocol_repairs"] += 1
                 state["phase_efforts"][phase] = plan["reasoning_effort"]
-            final_description = ("mars_submit_document call with complete metadata and body"
+            final_description = ("mars_submit_document call matching its exact argument schema"
                                  if request.final_schema is not None else "Markdown document beginning with YAML frontmatter, without preamble or code fences")
             if not empty_recovery:
                 state["feedback"] = (plan["feedback"].replace("JSON response", final_description)
@@ -408,7 +413,7 @@ class NativeAgentLoop:
             trace.emit("completion_recovery", {"phase": phase, "code": plan.get("code", "output_truncated"),
                                                "previous_effort": plan["previous_effort"],
                                                "reasoning_effort": plan["reasoning_effort"],
-                                               "remaining_model_calls": p.max_model_calls-counts["model_requests"],
+                                               "remaining_model_calls": p.remaining_model_calls(counts["model_requests"]),
                                                **({"recovery_kind": plan["recovery_kind"],
                                                    "response_event_seq": plan["response_event_seq"],
                                                    "response_metadata_sha256": plan["response_metadata_sha256"],
@@ -433,7 +438,7 @@ class NativeAgentLoop:
         try:
             if request.resume:
                 recover_completion(state.get("last_model_error"))
-            for _ in range(max(0, p.max_model_calls - counts["model_requests"])):
+            while p.allows_model_calls(counts["model_requests"]):
                 if stop_at_boundary("before_model"):
                     break
                 reviewing = state["next_phase"] == "reflect"
@@ -462,6 +467,12 @@ class NativeAgentLoop:
                 if counts["model_requests"] == 0:
                     await progress("started")
                 extra: list[Message] = [budget_message(p, counts)]
+                if p.document_revisions_enabled and state["candidate"] and not reviewing:
+                    extra.append(Message("user", "[host current candidate receipt]\n" + canonical({
+                        "base_sha256": digest(state["candidate"]),
+                        "revision_tool": "mars_revise_document",
+                        "instruction": "Prefer explicit field edits for corrections; preserve unaffected definitions. "
+                        "The host validates and reviews the complete resulting candidate, never just the patch."})))
                 if state["protocol_output"]:
                     extra.append(invalid_output_context(state["protocol_output"],
                                  native=native and not (reviewing and p.reflection_format_repair_enabled)))
@@ -491,6 +502,7 @@ class NativeAgentLoop:
                         validation_issues=state["validation_issues"],
                         required_review_tools=request.required_review_tools,
                         native_observation_history=p.native_observation_history,
+                        deduplicate_evidence=p.deduplicate_evidence_enabled,
                     )
                 manifest["tool_schema_upper_bound_tokens"] = phase_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + phase_schema_budget
@@ -545,7 +557,9 @@ class NativeAgentLoop:
                         state["pending"] = None
                     state["status"] = "model_error"
                     state["last_model_error"] = getattr(exc, "reason", None)
-                    trace.emit("model_error", {"error_type": type(exc).__name__, "reason": getattr(exc, "reason", None)})
+                    trace.emit("model_error", {"error_type": type(exc).__name__, "reason": getattr(exc, "reason", None),
+                        "frames": [{"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
+                                   for frame in traceback.extract_tb(exc.__traceback__)[-6:]]})
                     if recover_completion(state["last_model_error"], error=exc, response=rejected_response):
                         continue
                     break
@@ -571,7 +585,10 @@ class NativeAgentLoop:
                         decision = parse_review(canonical(unit_result.decision))
                     else:
                         decision = (parse_review(completion.text) if reviewing else
-                                    native_decision(completion, request.tools, structured_final=request.final_schema is not None) if native else parse_action(completion.text))
+                                    native_decision(completion, request.tools, structured_final=request.final_schema is not None,
+                                                    allow_revisions=p.document_revisions_enabled, candidate=state["candidate"],
+                                                    body_field=p.submission_body_field)
+                                    if native else parse_action(completion.text))
                 except ReviewConflictError as exc:
                     # Keep the original response in trace, but never fix this by
                     # asking the reviewer to erase its issue list without revision.
@@ -629,6 +646,15 @@ class NativeAgentLoop:
                                              "two keys: metadata and body. Close metadata before body; close the root "
                                              "once after body. Do not append another body or object after the root. "
                                              "Resolve the pinned candidate validation errors too. No rejected action was executed.")
+                        if p.document_revisions_enabled and state["candidate"]:
+                            state["feedback"] += " You may instead use mars_revise_document with the current base_sha256 and explicit operations."
+                        if p.submission_body_field:
+                            state["feedback"] = (f"Protocol error: {parse_error}. No rejected action was executed. "
+                                "Call mars_submit_document with one JSON object containing metadata fields DIRECTLY. "
+                                "Do not use metadata/body wrapper keys or append a second object. "
+                                f"The host copies your {p.submission_body_field} as body. "
+                                "Use existing observations and resolve pinned errors. "
+                                + ("For local edits use mars_revise_document with the current base_sha256." if state["candidate"] else ""))
                     trace.emit("protocol_error", {"error": str(parse_error),
                                "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
@@ -682,6 +708,12 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    if "revision" in decision:
+                        trace.emit("document_revision", {"call_id": decision["submission_id"],
+                            "base_sha256": decision["revision"]["base_sha256"],
+                            "candidate_sha256": digest(state["candidate"]),
+                            "operation_count": len(decision["revision"]["operations"]), "atomic": True},
+                            visible=decision["revision"])
                     if "submission_id" in decision:
                         trace.emit("document_submission", {"call_id": decision["submission_id"],
                                                            "candidate_sha256": digest(state["candidate"]),

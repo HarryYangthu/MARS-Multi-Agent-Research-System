@@ -38,7 +38,7 @@ def author_empty_completion_recovery(error: Exception | None, *, response: dict[
             or response.get("usage") != usage or type(response.get("event_seq")) is not int
             or response["event_seq"] < 1 or "visible" in response
             or counts["protocol_repairs"] >= policy.max_protocol_repairs
-            or counts["model_requests"] >= policy.max_model_calls):
+            or not policy.allows_model_calls(counts["model_requests"])):
         return None
     return {
         "code": "empty_final_content", "recovery_kind": "author_empty_completed_response",

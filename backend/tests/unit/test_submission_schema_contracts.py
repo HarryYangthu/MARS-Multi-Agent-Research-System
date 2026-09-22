@@ -69,7 +69,7 @@ def focused_document(project: str) -> dict[str, Any]:
             "changes": [{"target": "fixture", "operation": "add", "spec_ref": "/method_spec/operation", "preserve": []}],
             "verification_requirements": [{"id": "fixture", "question": "structure", "comparison": "fixture",
                 "metric": "fixture", "decision_rule_ref": "/decision_rule"}], "required_context": []},
-        "research_context": {"schema": "idea.research_context.v1", "question": "Structure only",
+        "research_context": {"schema": "idea.research_context.v2", "question": "Structure only",
             "selection_principles": ["Schema fixture"], "sources": [{"source_id": "", "title": "Authored fixture",
                 "url": "https://example.org/fixture", "decision": "defer", "reason": "No source was retrieved"}],
             "stop_reason": "This is not research", "open_questions": []},
@@ -104,6 +104,19 @@ def test_wrong_project_is_rejected_by_complete_native_submission_definition() ->
     assert len(errors) == 1
     assert list(errors[0].absolute_path) == ["metadata", "project"]
     assert errors[0].validator == "const"
+
+
+def test_focused_direct_submission_uses_the_real_runtime_body_policy() -> None:
+    subject, req = FocusedIdeaAgent(), request()
+    definitions = native_specs([], subject.submission_schema(req),
+                               body_field=subject.loop_policy.submission_body_field,
+                               allow_revisions=subject.loop_policy.document_revisions_enabled)
+    submission = next(item["function"] for item in definitions if item["function"]["name"] == SUBMIT_DOCUMENT)
+    validator = Draft202012Validator(submission["parameters"])
+    document = focused_document(req.project)
+    assert not list(validator.iter_errors(document["metadata"]))
+    assert list(validator.iter_errors(document))
+    assert subject.loop_policy.submission_body_field == "human_summary"
 
 
 @pytest.mark.parametrize("shape", ["N*R", "[N,R]", [1] * 9, [0], [-1], [True], [1.5]])

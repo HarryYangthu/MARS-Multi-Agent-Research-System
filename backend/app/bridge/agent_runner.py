@@ -399,6 +399,16 @@ def load_agent_handoff_context(
                 source_ref=latest_diagnosis.relative_to(run.root).as_posix(),
             )
     if revision_reason:
+        if stage == "idea":
+            versions = [ref for ref in ArtifactStore(run).list_versions(agent_dir="idea", stem="idea_proposal")
+                        if ref.version.startswith("v")]
+            if versions:
+                current = versions[-1]
+                upstream["revision_candidate"] = (
+                    "Current model-generated draft for targeted revision; not an approved conclusion. "
+                    "Preserve unaffected content, verify the specific feedback against actual evidence, "
+                    "and avoid restarting broad research without an identified gap.\n"
+                    + _handoff_summary(text=current.path.read_text(), source_ref=current.path.relative_to(run.root).as_posix()))
         upstream["human_revision_request"] = (
             "Human reviewer rejected the current draft and requested a revised "
             f"version. Feedback: {revision_reason}"

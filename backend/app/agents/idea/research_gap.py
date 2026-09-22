@@ -141,7 +141,7 @@ def actual_attempts(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def failure_record(*, delegation_id: str, trace_ref: str, checkpoint: dict[str, Any],
-                   min_sources: int, max_tool_steps: int, max_model_calls: int,
+                   min_sources: int, max_tool_steps: int, max_model_calls: int | None,
                    gap: str, project: str) -> dict[str, Any]:
     observations = checkpoint["history"]
     material = material_state(observations)
@@ -172,7 +172,7 @@ def failure_record(*, delegation_id: str, trace_ref: str, checkpoint: dict[str, 
             "publication_count_conflicts": material["publication_count_conflicts"],
             "attempts": attempts, "remaining_gaps": remaining,
             "remaining_budget": {"tool_calls": max(0, max_tool_steps-counts["tool_dispatches"]),
-                                 "model_calls": max(0, max_model_calls-counts["model_requests"])},
+                                 "model_calls": None if max_model_calls is None else max(0, max_model_calls-counts["model_requests"])},
             "suggested_next_actions": declaration["next_actions"] if declaration else [],
             "recovery_guidance": [
                 "Choose the next action from the specific missing evidence and actual source errors, not a repeated broad assignment.",

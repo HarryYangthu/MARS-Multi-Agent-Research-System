@@ -205,20 +205,22 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
                 material_failures.extend(assessment_errors(parse(text).metadata, research_reports, required=True))
                 if not state.get("reflection_accepted") or counts.get("reflections", 0) < 1:
                     material_failures.append("Research assessment requires an accepted model review of this candidate.")
-            if record.get("research_contract") == "idea.research_context.v1":
-                from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, verify_cross_model_trace
+            if record.get("research_contract") in {"idea.research_context.v1", "idea.research_context.v2"}:
+                from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, verify_review_trace
                 snapshot_path = run.root / "input/idea_focused.v1.json"
                 if not snapshot_path.is_file() or digest(_json(snapshot_path)) != record.get("runtime_profile_sha256"):
                     material_failures.append("Focused validation is not bound to its runtime profile")
                 else:
                     try:
-                        verify_cross_model_trace(path.parent, _json(snapshot_path))
+                        verify_review_trace(path.parent, _json(snapshot_path))
                     except (OSError, ValueError, KeyError) as exc:
-                        material_failures.append("Cross-model review evidence failed: " + str(exc))
+                        material_failures.append("Independent model review evidence failed: " + str(exc))
                 material_failures.extend(focused_research_errors(parse(text).metadata, material_observations, run.root))
+                if parse(text).metadata.get("research_context", {}).get("schema") != record["research_contract"]:
+                    material_failures.append("Focused research contract differs from its validation receipt")
                 material_failures.extend(focused_requirement_errors(parse(text).metadata, material_observations, req))
                 if not state.get("reflection_accepted") or counts.get("reflections", 0) < 1:
-                    material_failures.append("Focused research requires accepted cross-model review")
+                    material_failures.append("Focused research requires accepted independent model review")
             else:
                 material_failures.extend(material_errors(
                     parse(text).metadata, material_observations,

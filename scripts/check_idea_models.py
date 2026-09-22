@@ -30,7 +30,7 @@ async def check(name: str) -> dict[str, object]:
     return result
 
 
-async def main() -> None:
+async def main() -> int:
     profile = yaml.safe_load((repo_root() / "configs/idea_focused.yaml").read_text())
     results = await asyncio.gather(check(profile.get("author_agent", "idea")), check(profile["review_agent"]))
     path = Path("runs/verification/idea_model_preflight.json")
@@ -38,7 +38,8 @@ async def main() -> None:
     path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
     from loguru import logger
     logger.info("{}", results)
+    return 0 if all(result["ok"] for result in results) else 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

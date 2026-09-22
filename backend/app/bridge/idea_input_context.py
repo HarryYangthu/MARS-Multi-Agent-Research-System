@@ -1,7 +1,7 @@
 """Validate caller-provided Idea context without rewriting its source text."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,6 +21,18 @@ def validate_idea_context(value: object) -> dict[str, str]:
     return result
 
 
+class PerformanceRequirement(BaseModel):
+    """An explicit comparison gate, not a claim that an experiment has passed."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    metric: str = Field(min_length=1, max_length=120)
+    direction: Literal["minimize", "maximize"]
+    max_degradation: float = Field(ge=0)
+    unit: str = Field(min_length=1, max_length=40)
+    baseline: Literal["matched_run"]
+    acceptance_split: Literal["held_out_test"] | None = None
+
+
 class IdeaRequirements(BaseModel):
     """Optional overrides; omitted fields retain the Idea Agent's defaults."""
 
@@ -31,6 +43,7 @@ class IdeaRequirements(BaseModel):
     max_parameter_ratio: float | None = Field(default=None, gt=0, le=100)
     require_evaluation_protocol: bool | None = None
     require_research_dossier: bool | None = None
+    performance_requirement: PerformanceRequirement | None = None
 
 
 def validate_idea_extra(extra: dict[str, Any]) -> dict[str, str]:

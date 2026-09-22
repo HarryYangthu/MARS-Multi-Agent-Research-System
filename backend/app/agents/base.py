@@ -308,6 +308,14 @@ class BaseAgent(ABC):
                 "Do not return a proposal in assistant text. Submission is followed by host validation and, "
                 "when configured, review; it does not claim approval or experimental success."
             )
+            if self.loop_policy.submission_body_field:
+                schema_instruction = (
+                    "Submit the complete candidate with mars_submit_document. Its arguments ARE the metadata object "
+                    "matching " + self.output_schema + ", whose full JSON Schema is supplied in that function. "
+                    "No metadata/body wrapper; never write YAML in arguments or return a proposal in assistant text. "
+                    "The host serializes your exact fields and copies " + self.loop_policy.submission_body_field
+                    + " verbatim as the body. All validation and independent review still apply."
+                )
         elif self.native_structured_delivery:
             schema_instruction = (
                 "Return final.metadata as a complete native JSON object and final.body as Markdown. "

@@ -238,6 +238,15 @@ def render_readable_proposal(metadata: dict[str, Any], research_brief: str) -> s
             return [line for item in value for line in lines(item, depth)]
         return ["  " * depth + "- " + str(value).replace("\n", "\n" + "  " * (depth + 1))]
 
-    return "\n".join(["# 研究方案", "", str(metadata["human_summary"]), "", "## 方法", "",
-        *lines(metadata["method_spec"]), "", "## 验证办法", "", *lines(metadata["decision_rule"]),
-        "", research_brief, "", "方案收益仍需实验验证。", ""])
+    document = ["# 研究方案", "", str(metadata["human_summary"]), ""]
+    sections = {"research_question": "研究问题", "hypothesis": "待验证假设", "novelty": "与已有方法的区别",
+                "method_spec": "方法", "parameter_budget": "参数预算", "decision_rule": "验证办法",
+                "handoff": "交接与执行前置条件"}
+    for field, label in sections.items():
+        if field in metadata:
+            document += ["## " + label, "", *lines(metadata[field]), ""]
+    remaining = {key: value for key, value in metadata.items()
+                 if key not in {*sections, "schema", "project", "agent", "created", "human_summary", "research_context"}}
+    if remaining:
+        document += ["## 其他提案字段", "", *lines(remaining), ""]
+    return "\n".join([*document, research_brief, "", "方案收益仍需实验验证。", ""])

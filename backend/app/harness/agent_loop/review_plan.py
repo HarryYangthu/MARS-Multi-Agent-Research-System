@@ -27,8 +27,10 @@ _BUDGET_SUFFIX = (". The next model call is included. Each dispatched tool, incl
                   "Do not invent evidence when resources are insufficient.")
 
 
-def remaining_budget_message(remaining: dict[str, int]) -> Message:
-    return Message("system", _BUDGET_PREFIX + canonical(remaining) + _BUDGET_SUFFIX)
+def remaining_budget_message(remaining: dict[str, int | None]) -> Message:
+    explanation = ". A null model_calls value means no model-request count limit" if remaining.get("model_calls") is None else ""
+    # Preserve the historical template exactly for finite-budget trace audits.
+    return Message("system", _BUDGET_PREFIX + canonical(remaining) + explanation + _BUDGET_SUFFIX)
 
 
 def review_unit_config(config: LLMConfig) -> LLMConfig:
@@ -151,7 +153,7 @@ def completed_plan_decision(plan: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def prepare_review_plan(state: dict[str, Any], plan: ReviewPlan, *, contract_id: str,
-                        max_model_calls: int) -> bool:
+                        max_model_calls: int | None) -> bool:
     """Freeze inputs, or verify an unfinished plan; reserve all remaining calls."""
     if plan.contract_id != contract_id or plan.candidate_sha256 != digest(state["candidate"]):
         raise ValueError("review plan does not match this contract and exact candidate")
@@ -173,7 +175,7 @@ def prepare_review_plan(state: dict[str, Any], plan: ReviewPlan, *, contract_id:
         state["review_plan"] = current
         state["reflection_accepted"] = False
     remaining = len(plan.units) + 1 - current["next_unit"]
-    if max_model_calls - state["counts"]["model_requests"] < remaining:
+    if max_model_calls is not None and max_model_calls - state["counts"]["model_requests"] < remaining:
         state["status"] = "budget_exhausted"
         state["reflection_accepted"] = False
         state["feedback"] = f"Insufficient remaining model calls for {remaining} required review units, including whole review."
@@ -211,9 +213,10 @@ def isolated_unit_input_errors(unit: dict[str, Any], actual: Any) -> list[str]:
         content = budget["content"]
         if not isinstance(content, str) or not content.startswith(_BUDGET_PREFIX) or not content.endswith(_BUDGET_SUFFIX):
             return ["isolated review budget message is not the host template"]
-        values = json.loads(content[len(_BUDGET_PREFIX):-len(_BUDGET_SUFFIX)])
+        values, _ = json.JSONDecoder().raw_decode(content[len(_BUDGET_PREFIX):])
         if (not isinstance(values, dict) or set(values) != {"model_calls", "tool_calls", "validation_repairs"}
-                or any(type(value) is not int or value < 0 for value in values.values())
+                or any(not (key == "model_calls" and value is None) and (type(value) is not int or value < 0)
+                       for key, value in values.items())
                 or budget != remaining_budget_message(values).to_wire()):
             return ["isolated review budget message contains more than the bounded host counters"]
     except (ValueError, KeyError, TypeError):

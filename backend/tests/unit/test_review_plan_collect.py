@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+import json
 from typing import Any
 from pathlib import Path
 
@@ -90,8 +91,11 @@ def test_all_unit_opinions_are_collected_once_even_when_last_unit_accepts(last_a
     assert state["review_issues"] == aggregate["issues"]
     assert len(aggregate["issues"]) == (1 if last_accept else 2)
     assert aggregate["issues"][0] == "[unit_a] " + first["decision"]["issues"][0]
-    assert state["feedback"] == canonical({"required_revision": aggregate["issues"], "review_rationale": aggregate["rationale"],
-        "instruction": "Revise the complete candidate to resolve these issues. Do not merely remove warnings."})
+    feedback = json.loads(state["feedback"])
+    assert feedback["required_revision"] == aggregate["issues"]
+    assert feedback["review_rationale"] == aggregate["rationale"]
+    assert "Do not relax user constraints" in feedback["instruction"]
+    assert "Reviewer claims are unverified" in feedback["instruction"]
     assert _plan_structure_errors(state["review_plan"]) == []
     with pytest.raises(ValueError, match="finished"):
         start_review_unit(state, [])
@@ -111,6 +115,27 @@ def test_fail_fast_default_still_returns_first_rejection() -> None:
     assert state["review_issues"] == record["decision"]["issues"]
     assert state["review_plan"]["next_unit"] == 1 and state["review_plan"]["status"] == "rejected"
     assert _plan_structure_errors(state["review_plan"]) == []
+
+
+def test_unlimited_review_plan_budget_remains_auditable_and_isolated() -> None:
+    plan = _plan()
+    state = _state(plan)
+    state["counts"]["model_requests"] = 1000
+    assert prepare_review_plan(state, plan, contract_id=plan.contract_id, max_model_calls=None)
+    policy = AgentLoopPolicy(max_model_calls=None)
+    messages, _ = pack_review_unit(plan.units[0], budget=10000,
+                                  budget_context=budget_message(policy, state["counts"]))
+    wire = [message.to_wire() for message in messages]
+    unit = plan_payload(plan)["units"][0]
+    assert isolated_unit_input_errors(unit, wire) == []
+    assert state["counts"]["model_requests"] == 1000
+    for replacement in ('"tool_calls":null', '"tool_calls":true'):
+        changed = deepcopy(wire)
+        changed[-2]["content"] = changed[-2]["content"].replace('"tool_calls":18', replacement)
+        assert isolated_unit_input_errors(unit, changed)
+    changed = deepcopy(wire)
+    changed[-2]["content"] += " Extra reviewer input"
+    assert isolated_unit_input_errors(unit, changed)
 
 
 def test_all_positive_units_still_require_whole_review_and_one_reflection() -> None:

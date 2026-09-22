@@ -42,6 +42,8 @@ def test_policy_is_opt_in_and_keeps_default_fingerprint_byte_equivalent() -> Non
     before.pop("author_empty_completion_repair_enabled")
     before.pop("reflection_format_repair_enabled")
     before.pop("native_observation_history")
+    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"):
+        before.pop(name)
     assert policy.fingerprint_data() == before
     enabled = replace(policy, author_empty_completion_repair_enabled=True)
     assert enabled.fingerprint_data()["author_empty_completion_repair_contract_version"] == 1
@@ -119,6 +121,20 @@ def test_recovery_keeps_model_policy_observations_candidate_prior_feedback_and_u
     assert phase_llm_config(config, policy, phase="act", native=False, wire_tools=(), effort_overrides=state["phase_efforts"]) == before
     assert apply_author_empty_completion_recovery(error, response=response, state=state, policy=policy, effort="high") is None
     validate_author_empty_recovery_resume(state, policy)
+
+
+def test_unlimited_model_count_keeps_empty_completion_repair_budget() -> None:
+    error, response, state, policy = _contract()
+    policy = replace(policy, max_model_calls=None)
+    state["counts"].update(model_requests=1000, model_responses=1000)
+    response["request"] = 1000
+    state["counts"]["protocol_repairs"] = policy.max_protocol_repairs
+    assert author_empty_completion_recovery(error, response=response, state=state, policy=policy, effort="high") is None
+    state["counts"]["protocol_repairs"] -= 1
+    plan = apply_author_empty_completion_recovery(error, response=response, state=state, policy=policy, effort="high")
+    assert plan is not None
+    assert state["counts"] == {"model_requests": 1000, "model_responses": 1000,
+                               "protocol_repairs": policy.max_protocol_repairs}
 
 
 def test_existing_truncation_route_is_separate_and_unchanged() -> None:

@@ -181,6 +181,9 @@ def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
         required.discard("author_empty_completion_repair_enabled")
     if not policy.native_observation_history and "native_observation_history" not in declared:
         required.discard("native_observation_history")
+    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"):
+        if not getattr(policy, name) and name not in declared:
+            required.discard(name)
     if declared != required:
         raise ValueError("experimental profile must explicitly declare every loop setting")
     if policy.protocol != "json_actions" or policy.mode != "reflection" or policy.trace != "full":

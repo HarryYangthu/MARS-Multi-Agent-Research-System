@@ -276,13 +276,14 @@ writing:
   - knowledge.methodology
   - knowledge.run_archive
 
-# A separate model and session for focused Idea review; no same-model fallback.
+# Separate author/reviewer configurations; focused review_mode explicitly permits
+# independent sessions on the same model, with truthful same-model audit receipts.
 idea_author:
   enabled: true
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek-flash
     temperature: 0.2
     max_tokens: 16384
     api_key_env: DEEPSEEK_API_KEY
@@ -302,7 +303,7 @@ idea_reviewer:
   output_schema: proposal.v1
   model:
     provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek-flash
     temperature: 0.1
     max_tokens: 32768
     api_key_env: DEEPSEEK_API_KEY

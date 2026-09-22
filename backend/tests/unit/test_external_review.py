@@ -31,3 +31,15 @@ def test_external_review_preserves_candidate_counts_and_requires_revision() -> N
 def test_empty_or_unbounded_review_is_rejected(issues: list[str]) -> None:
     with pytest.raises(ValueError):
         ExternalReview.from_mapping({"candidate_digest": digest("document"), "reviewer": "human", "issues": issues})
+
+
+def test_unlimited_requests_allow_review_without_resetting_reflections() -> None:
+    state = {"candidate": "human-authored document", "pending": None,
+             "counts": {"reflections": 1, "model_requests": 1000}, "review_issues": []}
+    review = ExternalReview(digest(state["candidate"]), "human reviewer", ("correct this definition",))
+    policy = AgentLoopPolicy(mode="reflection", max_model_calls=None, max_reflections=2)
+    updates = review_revision(state, review, policy)
+    assert updates["next_phase"] == "act" and "counts" not in updates
+    assert state["counts"] == {"reflections": 1, "model_requests": 1000}
+    with pytest.raises(ValueError, match="reflection budget"):
+        review_revision(state, review, replace(policy, max_reflections=1))

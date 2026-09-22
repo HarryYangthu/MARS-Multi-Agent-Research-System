@@ -1,21 +1,30 @@
 schema: idea.focused.config.v1
 author_agent: idea_author
 review_agent: idea_reviewer
+# Same Flash model in separate author/reviewer sessions, explicitly selected.
+# Set cross_model to require different provider/model pairs again.
+review_mode: independent_session
 author:
-  thinking_enabled: true
-  reasoning_effort: low
+  # Tool navigation and concise drafting do not need a long reasoning pass.
+  # The isolated reviewer retains thinking for mathematical checks.
+  thinking_enabled: false
+  reasoning_effort: null
   temperature: 0.2
-  max_tokens: 32768
+  max_tokens: 16384
   request_timeout_seconds: 180
   max_retries: 1
 loop:
   protocol: native_tools
   native_observation_history: true
+  document_revisions_enabled: true
+  submission_body_field: human_summary
+  deduplicate_evidence_enabled: true
   mode: reflection
   trace: full
   input_token_budget: 256000
   observation_chars: 24000
-  max_model_calls: 36
+  # Explicitly unlimited request count; every actual call is still recorded.
+  max_model_calls: null
   max_tool_steps: 24
   max_protocol_repairs: 4
   max_validation_repairs: 4

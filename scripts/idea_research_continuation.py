@@ -45,7 +45,8 @@ def check_terminal_state(state: dict[str, Any], policy: dict[str, Any]) -> None:
         raise ValueError("continuation requires full trace mode")
     used = state.get("counts", {}).get("model_requests")
     maximum = policy.get("max_model_calls")
-    if type(used) is not int or type(maximum) is not int or not 0 <= used < maximum:
+    if (type(used) is not int or used < 0 or "max_model_calls" not in policy
+            or maximum is not None and (type(maximum) is not int or not used < maximum)):
         raise ValueError("original model request budget is invalid or exhausted")
 
 

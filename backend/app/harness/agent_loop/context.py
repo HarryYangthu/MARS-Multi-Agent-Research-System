@@ -60,11 +60,15 @@ def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     continue
                 text, total, truncated = page.get("text"), page.get("full_page_text_chars"), page.get("truncated")
                 shown = len(text) if isinstance(text, str) else None
-                coherent = (shown is not None and type(total) is int and 0 < shown <= total
-                            and type(truncated) is bool and truncated == (shown < total))
+                start = page.get("char_start", 0)
+                end = page.get("char_end", start + shown if type(start) is int and shown is not None else None)
+                coherent = (shown is not None and type(total) is int and type(start) is int and type(end) is int
+                            and 0 <= start < end <= total and end - start == shown
+                            and type(truncated) is bool and truncated == (end < total))
                 visibility.append({"page": page["page"], "shown_text_chars": shown,
+                    "char_start": start, "char_end": end,
                     "extracted_page_text_chars": total if type(total) is int and total >= 0 else None,
-                    "text_window": ("partial" if truncated else "complete_extracted_text") if coherent else "unknown"})
+                    "text_window": ("complete_extracted_text" if start == 0 and end == total else "partial") if coherent else "unknown"})
             visible_numbers = [page["page"] for page in visibility]
             extracted = row.get("extracted_pages")
             unshown = ([number for number in extracted if number not in visible_numbers]
@@ -86,6 +90,72 @@ def source_receipt_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return selected
 
 
+def reading_coverage_index(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Union actual character windows, keeping offsets and gaps rather than inferred reading."""
+    documents: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
+    for item in history:
+        if not item.get("ok") or not isinstance(item.get("output"), dict):
+            continue
+        for row in item["output"].get("sources", []):
+            if not isinstance(row, dict) or not row.get("ok") or not row.get("archive_complete"):
+                continue
+            key = (str(row.get("source_id", "")), str(row.get("sha256", "")))
+            if not all(key):
+                continue
+            pages = documents.setdefault(key, {})
+            for page in row.get("visible_pages", []):
+                number, total, start = page.get("page"), page.get("full_page_text_chars"), page.get("char_start", 0)
+                text = page.get("text")
+                if (type(number) is not int or type(total) is not int or type(start) is not int
+                        or not isinstance(text, str) or not text or not 0 <= start < start + len(text) <= total):
+                    continue
+                record = pages.setdefault(number, {"total": total, "intervals": [], "consistent": True})
+                record["consistent"] = record["consistent"] and record["total"] == total
+                record["intervals"].append((start, start + len(text)))
+    result = []
+    for (source_id, sha), pages in documents.items():
+        coverage = []
+        for number, record in sorted(pages.items()):
+            merged: list[list[int]] = []
+            for start, end in sorted(record["intervals"]):
+                if merged and start <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], end)
+                else:
+                    merged.append([start, end])
+            cursor, gaps = 0, []
+            for start, end in merged:
+                if start > cursor:
+                    gaps.append([cursor, start])
+                cursor = end
+            if cursor < record["total"]:
+                gaps.append([cursor, record["total"]])
+            coverage.append({"page": number, "shown_intervals": merged, "missing_intervals": gaps,
+                             "complete_extracted_text": record["consistent"] and not gaps})
+        result.append({"source_id": source_id, "sha256": sha, "pages": coverage,
+                       "note": "Only extracted text windows; absent pages, equations and figures remain unverified."})
+    return result
+
+
+def deduplicate_observation(value: Any, available: list[str]) -> Any:
+    """Remove exact duplicate evidence strings only; originals stay in this same context."""
+    if isinstance(value, list):
+        return [deduplicate_observation(child, available) for child in value]
+    if not isinstance(value, dict):
+        return value
+    result: dict[str, Any] = {}
+    for key, child in value.items():
+        if key in {"content", "text", "excerpt"} and isinstance(child, str) and len(child) >= 512:
+            if any(child in original for original in available):
+                result[key] = {"duplicate_of_included_text_sha256": digest(child), "chars": len(child),
+                               "note": "Exact text is already included in this context; this is not a shortened excerpt."}
+            else:
+                result[key] = child
+                available.append(child)
+        else:
+            result[key] = deduplicate_observation(child, available)
+    return result
+
+
 def pack_context(
     pinned: list[Message], history: list[dict[str, Any]], feedback: str,
     candidate: str, *, budget: int, observation_chars: int, native: bool = False,
@@ -93,6 +163,7 @@ def pack_context(
     validation_issues: Sequence[str] = (),
     required_review_tools: tuple[str, ...] = (),
     native_observation_history: bool = False,
+    deduplicate_evidence: bool = False,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if validation_issues and not reviewing:
@@ -118,15 +189,25 @@ def pack_context(
                 "partial/unknown and unshown pages cannot support claims about complete page ranges or the whole paper. "
                 "Complete extracted text does not verify figures, formulas, supplements, or full-document reading. "
                 "If actual text is absent or shortened in this context, reread its window before quoting]\n" + canonical(source_receipts))))
+        coverage = reading_coverage_index(history)
+        if coverage:
+            required.append(Message("user", "[host union of actual reading windows; finish relevant gaps with start_page/char_offset]\n"
+                                    + canonical(coverage)))
     groups = history_groups(history)
     preserved: list[int] = []
+    available_texts = [message.content for message in pinned]
+    deduplicated: list[int] = []
     if reviewing:
         for index, items in enumerate(groups):
             if any(item.get("ok") and item.get("tool") in required_review_tools for item in items):
                 # These are the actual observations, including long reasons and
                 # page text. A reference or prefix cannot replace review evidence.
-                required.extend(Message(role="user", content="[untrusted complete review Observation]\n"
-                                        + canonical(item)) for item in items)
+                for item in items:
+                    rendered = deduplicate_observation(item, available_texts) if deduplicate_evidence else item
+                    if rendered != item:
+                        deduplicated.append(index)
+                    required.append(Message(role="user", content="[untrusted complete review Observation; exact duplicates may reference included text]\n"
+                                            + canonical(rendered)))
                 preserved.append(index)
     if candidate:
         required.append(Message(role="user", content="[untrusted current candidate; review or revise this document]\n"
@@ -183,6 +264,7 @@ def pack_context(
                       "estimator": "utf8_byte_upper_bound", "budget": budget,
                       "compressed_history": compressed, "omitted_history": omitted,
                       "preserved_review_history": preserved,
+                      "deduplicated_review_history": sorted(set(deduplicated)),
                       "reviewing": reviewing,
                       "prior_review_issues_visible": bool(review_issues) and not reviewing,
                       "validation_issues_visible": bool(validation_issues) and not reviewing,

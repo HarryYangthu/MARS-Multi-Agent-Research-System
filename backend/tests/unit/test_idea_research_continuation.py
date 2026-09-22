@@ -40,6 +40,19 @@ def test_guards_preserve_candidate_history_and_unknown_usage() -> None:
         check_terminal_state(state, {"trace": "full", "max_model_calls": 13})
 
 
+def test_unlimited_continuation_requires_explicit_null_without_resetting_usage() -> None:
+    state = {"status": "model_error", "pending": "model", "counts": {"model_requests": 1000},
+             "candidate": "caller-owned bytes", "history": [], "usage_complete": False}
+    before = json.dumps(state)
+    check_terminal_state(state, {"trace": "full", "max_model_calls": None})
+    assert json.dumps(state) == before
+    with pytest.raises(ValueError, match="invalid or exhausted"):
+        check_terminal_state(state, {"trace": "full"})
+    for invalid in (True, "null", 0):
+        with pytest.raises(ValueError, match="invalid or exhausted"):
+            check_terminal_state(state, {"trace": "full", "max_model_calls": invalid})
+
+
 @pytest.mark.parametrize("maximum,elapsed", [(None, 12), (1200, None), (1200, 1200),
                                              (1200, -1), (float("inf"), 10), (True, 0),
                                              (1800, 1800), (3601, 0)])

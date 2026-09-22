@@ -36,7 +36,7 @@ def review_revision(state: dict[str, Any], review: ExternalReview, policy: Agent
     if policy.mode == "reflection" and state["counts"]["reflections"] >= policy.max_reflections:
         raise ValueError("reflection budget exhausted; external review cannot reset it")
     required_calls = 2 if policy.mode == "reflection" else 1
-    if policy.max_model_calls - state["counts"]["model_requests"] < required_calls:
+    if not policy.allows_model_calls(state["counts"]["model_requests"], required_calls):
         raise ValueError("insufficient model budget for a reviewed revision")
     return {"status": "running", "next_phase": "act", "reflection_accepted": False,
             "reviewed_candidate_sha": review.candidate_digest,

@@ -51,8 +51,9 @@ def _competing_process(root: str, policy: dict[str, Any]) -> str:
     return "unexpectedly_reserved"
 
 
-def test_concurrent_reservations_enforce_shared_slot_limit_and_unknown_cost(tmp_path: Path) -> None:
-    policy = _policy()
+@pytest.mark.parametrize("max_requests", [32, None])
+def test_concurrent_reservations_enforce_shared_slot_limit_and_unknown_cost(tmp_path: Path, max_requests: int | None) -> None:
+    policy = _policy(max_model_requests=max_requests)
     owners = [RunModelBudget(tmp_path, configuration=policy) for _ in range(12)]
 
     def reserve(index: int) -> tuple[int, Any]:
@@ -118,6 +119,49 @@ def test_configuration_is_an_immutable_snapshot(tmp_path: Path) -> None:
     budget.settle(reservation, usage=None, complete=False, outcome="cancelled")
     with pytest.raises(ResourceBudgetError, match="model-request budget"):
         budget.reserve(_messages(), _config(), {})
+
+
+def test_unlimited_requests_cross_old_ceiling_without_losing_ledger_rows(tmp_path: Path) -> None:
+    # Real reservation/settlement operations only; no model calls or responses.
+    policy = _policy(max_model_requests=None)
+    budget = RunModelBudget(tmp_path, configuration=policy)
+    for index in range(257):
+        reservation = budget.reserve(_messages(), _config(), {"task_id": str(index)})
+        budget.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    state = json.loads(budget.path.read_text())
+    assert state["configuration"]["limits"]["max_model_requests"] is None
+    assert len(state["requests"]) == 257
+    assert all(row["status"] == "cancelled" and row["usage"] is None and not row["usage_complete"]
+               and row["charged_tokens"] == row["reserved_tokens"] for row in state["requests"].values())
+    fresh = RunModelBudget(tmp_path, configuration=policy)
+    assert fresh.recover_abandoned() == ()
+    assert json.loads(fresh.path.read_text()) == state
+    finite = RunModelBudget(tmp_path, configuration=_policy())
+    with pytest.raises(ResourceBudgetError, match="policy changed"):
+        finite.reserve(_messages(), _config(), {})
+
+
+def test_unlimited_count_does_not_remove_token_reservations(tmp_path: Path) -> None:
+    budget = RunModelBudget(tmp_path, configuration=_policy(max_model_requests=None, max_total_tokens=1))
+    with pytest.raises(ResourceBudgetError, match="total-token"):
+        budget.reserve(_messages(), _config(), {})
+    assert not budget.path.exists()
+
+
+@pytest.mark.parametrize("key,value", [("max_model_requests", True), ("max_model_requests", "null"),
+    ("max_model_requests", 0), ("max_total_tokens", None), ("max_parallel_model_calls", None)])
+def test_only_explicit_request_null_is_unlimited(tmp_path: Path, key: str, value: Any) -> None:
+    with pytest.raises(ValueError, match=key):
+        RunModelBudget(tmp_path, configuration=_policy(**{key: value}))
+    missing = _policy()
+    del missing["limits"]["max_model_requests"]
+    with pytest.raises(ValueError, match="max_model_requests"):
+        RunModelBudget(tmp_path, configuration=missing)
+
+
+def test_actual_resource_configuration_has_no_request_count_ceiling(tmp_path: Path) -> None:
+    budget = RunModelBudget(tmp_path)
+    assert budget.configuration["limits"]["max_model_requests"] is None
 
 
 def test_crashed_request_requires_explicit_reconciliation_without_refunding_unknown_usage(tmp_path: Path) -> None:

@@ -91,6 +91,8 @@ class RunModelBudget:
         if not isinstance(limits, dict):
             raise ValueError("resource limits must be an object")
         for key in ("max_model_requests", "max_total_tokens", "max_parallel_model_calls"):
+            if key == "max_model_requests" and key in limits and limits[key] is None:
+                continue
             if type(limits.get(key)) is not int or limits[key] < 1:
                 raise ValueError(f"{key} must be a positive integer")
         _number(limits.get("max_elapsed_seconds"), "max_elapsed_seconds", positive=True)
@@ -210,7 +212,7 @@ class RunModelBudget:
             if time.time() - state["started_at"] >= limits["max_elapsed_seconds"]:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
             rows = list(state["requests"].values())
-            if len(rows) >= limits["max_model_requests"]:
+            if limits["max_model_requests"] is not None and len(rows) >= limits["max_model_requests"]:
                 raise ResourceBudgetError("run model-request budget exhausted")
             if sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
