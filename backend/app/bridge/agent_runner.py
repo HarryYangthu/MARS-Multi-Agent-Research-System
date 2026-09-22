@@ -27,6 +27,7 @@ from app.harness.execution_intent import (
     wants_execution_sweep,
 )
 from app.harness.llm.provider_base import LLMCompletionError
+from app.harness.llm.accounting import RunModelBudget
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
 from app.storage.data_source_store import selection_summary
@@ -152,6 +153,10 @@ async def run_agent_node(
     failure_phase = "build_context"
     try:
         context = await agent.build_context(request)
+
+        if revision_reason and resume_invocation is None:
+            failure_phase = "resource_revision"
+            RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
 
         failure_phase = "draft"
         run_loop = getattr(agent, "run_loop", None)

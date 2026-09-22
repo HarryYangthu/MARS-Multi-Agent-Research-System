@@ -16,6 +16,7 @@ from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.delivery import delivery_errors
 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, research_schema, validate_review_mode
 from app.agents.idea.parameter_schema import parameter_budget_schema
+from app.agents.idea.focused_runtime import bind_focused_snapshot
 from app.agents.idea.runtime_profile import public_agent_configuration
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import get_agent_config, select_provider
@@ -114,14 +115,10 @@ class FocusedIdeaAgent(IdeaAgent):
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         root = Path(str(request.extra["run_root"]))
-        path = root / "input/idea_focused.v1.json"
-        if path.exists():
-            if json.loads(path.read_text()) != self._snapshot:
-                raise ValueError("focused Idea configuration changed; start a new run")
-        else:
-            if request.extra.get("resume_invocation") or any((root / "agent_traces").glob("*/*/checkpoint.json")):
-                raise ValueError("cannot change a historical run to focused Idea")
-            atomic_json(path, self._snapshot)
+        bind_focused_snapshot(root, self._snapshot,
+            invocation=request.extra.get("invocation_id") or request.runtime.get("invocation_id"),
+            resume=request.extra.get("resume_invocation"),
+            revision_reason=str(request.extra.get("revision_reason", "")))
         requirements = request.extra.get("idea_requirements", {})
         if requirements.get("require_research_dossier"):
             raise ValueError("full delegated research dossier requires the explicit legacy research profile")

@@ -118,6 +118,8 @@ class RunModelBudget:
         if state.get("configuration_sha256") != self.configuration_hash:
             raise ResourceBudgetError("resource policy changed; reconcile the existing run before continuing")
         _number(state.get("started_at"), "resource ledger start time")
+        if "revision_started_at" in state:
+            _number(state["revision_started_at"], "resource revision start time")
         for identifier, row in state["requests"].items():
             if (not isinstance(identifier, str) or not identifier.isalnum() or not isinstance(row, dict)
                     or row.get("status") not in {"in_flight", "completed", "failed", "cancelled",
@@ -127,6 +129,52 @@ class RunModelBudget:
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
+
+    def begin_revision(self, *, invocation_id: str, reason: str) -> None:
+        """Record an explicit fresh execution without refunding previous usage.
+
+        Only the elapsed-time window is renewed. Request/token/cost totals still
+        include every old reservation, including cancelled or unknown usage.
+        Policy changes are archived and are never admitted during a live call.
+        """
+        if not invocation_id.replace("-", "").isalnum() or not reason.strip():
+            raise ValueError("resource revision requires an invocation ID and reason")
+        with path_lock(self.lock_path):
+            if self.path.exists():
+                raw = json.loads(self.path.read_text())
+                if not isinstance(raw, dict) or not isinstance(raw.get("configuration"), dict):
+                    raise ResourceBudgetError("invalid resource ledger; reconcile its persisted records")
+                previous = RunModelBudget(self.root, configuration=raw["configuration"])
+                state = previous._read()
+            else:
+                state = self._read()
+            revisions = state.setdefault("revisions", [])
+            for receipt in revisions:
+                if receipt["invocation_id"] == invocation_id:
+                    if (receipt["reason"] != reason or receipt["configuration_sha256"] != self.configuration_hash
+                            or state["configuration_sha256"] != self.configuration_hash):
+                        raise ResourceBudgetError("resource revision receipt is immutable")
+                    return
+            if self._mark_abandoned(state):
+                atomic_write_json(self.path, state)
+            rows = state["requests"].values()
+            if any(row["status"] == "reconciliation_required" for row in rows):
+                raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation before retry")
+            if any(row["status"] == "in_flight" for row in rows):
+                raise ResourceBudgetError("cannot start a resource revision while model calls are active")
+            if any(row.get("correlation", {}).get("invocation_id") == invocation_id for row in rows):
+                raise ResourceBudgetError("resource revision requires a fresh invocation")
+            if state["configuration"].get("currency") != self.configuration.get("currency"):
+                raise ResourceBudgetError("cannot change currency in an existing resource ledger")
+            started_at = time.time()
+            revisions.append({"invocation_id": invocation_id, "reason": reason, "started_at": started_at,
+                "previous_configuration": state["configuration"],
+                "previous_configuration_sha256": state["configuration_sha256"],
+                "previous_started_at": state.get("revision_started_at", state["started_at"]),
+                "configuration_sha256": self.configuration_hash})
+            state.update(configuration=self.configuration, configuration_sha256=self.configuration_hash,
+                         revision_started_at=started_at)
+            atomic_write_json(self.path, state)
 
     def _lease_path(self, request_id: str) -> Path:
         return self.path.parent / "requests" / f"{request_id}.lock"
@@ -209,7 +257,7 @@ class RunModelBudget:
             if unresolved:
                 raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation: " + ", ".join(unresolved))
             limits = state["configuration"]["limits"]
-            if time.time() - state["started_at"] >= limits["max_elapsed_seconds"]:
+            if time.time() - state.get("revision_started_at", state["started_at"]) >= limits["max_elapsed_seconds"]:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
             rows = list(state["requests"].values())
             if limits["max_model_requests"] is not None and len(rows) >= limits["max_model_requests"]:

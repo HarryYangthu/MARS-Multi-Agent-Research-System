@@ -177,10 +177,9 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
     metadata = parse(proposal_text).metadata
     if not validate_document(proposal_text, expected_schema="proposal.v1").valid or metadata.get("project") != project:
         raise ValueError("focused handoff requires a valid project proposal")
-    profile = run_root / "input/idea_focused.v1.json"
-    if not profile.is_file():
+    from app.agents.idea.focused_runtime import load_focused_snapshot
+    if not (run_root / "input/idea_focused.v1.json").is_file():
         raise ValueError("focused handoff has no original runtime profile")
-    configuration = json.loads(profile.read_text())
     observations: list[dict[str, Any]] = []
     checkpoints: list[str] = []
     reviewed = False
@@ -191,6 +190,7 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
         checkpoints.append(str(path))
         if (state.get("candidate") == proposal_text and state.get("status") == "passed"
                 and state.get("reflection_accepted") and state.get("reviewed_candidate_sha") == digest(proposal_text)):
+            configuration = load_focused_snapshot(run_root, path.parent.name)
             review_receipt = verify_review_trace(path.parent, configuration)
             reviewed = True
     errors = focused_research_errors(metadata, observations, run_root)
