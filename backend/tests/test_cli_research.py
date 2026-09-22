@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -143,6 +144,14 @@ async def test_real_training_and_sealed_finalization_on_tensor_fixture(tmp_path:
     assert curve["contains_test_data"] is False
     assert Path(curve["path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert len((tmp_path / "train/steps.jsonl").read_text().splitlines()) == 2
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    events = EventAccumulator(str(tmp_path / "train/tensorboard")).Reload()
+    loss_events = events.Scalars("train/loss")
+    step_rows = [json.loads(line) for line in (tmp_path / "train/steps.jsonl").read_text().splitlines()]
+    assert [event.step for event in loss_events] == [1, 2]
+    assert [event.value for event in loss_events] == pytest.approx([row["training_loss"] for row in step_rows])
+    assert "validation/RES_db" in events.Tags()["scalars"]
+    assert not any(tag.startswith("test/") for tag in events.Tags()["scalars"])
     assert trained["selected_optimizer_steps"] <= 2
     assert "test" not in trained
     final = await run_worker({"repo": str(repo), "protocol": str(protocol), "operation": "finalize",

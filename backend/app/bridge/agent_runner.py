@@ -665,7 +665,11 @@ async def _run_execution_batch(
 
     import json
 
+    from app.bridge.tensorboard_service import get_tensorboard_manager
+    from app.execution.tensorboard_writer import ExecutionScalars
+
     attempt = parse_node_key(node_key).attempt
+    scalars = ExecutionScalars(run.subdir("execution") / "tensorboard" / f"attempt_{attempt}")
     approved_execution_path = run.subdir("execution") / "run_log.approved.md"
     plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
     intent_text = _execution_intent_text(run)
@@ -739,6 +743,10 @@ async def _run_execution_batch(
     backend = str(execution_cfg.get("backend", "local_command") or "local_command")
     runtime_backend = get_settings().mars_execution_backend
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
+        try:
+            scalars.record(payload)
+        except Exception as exc:
+            logger.warning("TensorBoard metric write failed: {}", exc)
         if bus is not None:
             await bus.publish(channel, payload)
             # Mirror per-experiment events onto a single consolidated run channel
@@ -779,11 +787,24 @@ async def _run_execution_batch(
         for i, (name, cfg) in enumerate(abl_specs)
     ]
 
-    outcome = await run_batch(
-        specs,
-        config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
-        bus_publish=_publish,
-    )
+    display = get_tensorboard_manager()
+    try:
+        activation = await display.activate(run, attempt)
+        await _publish(f"run.{run.run_id}.execution", {"event": "execution.tensorboard_ready", **activation})
+    except Exception as exc:
+        logger.warning("TensorBoard display unavailable: {}", exc)
+        await _publish(f"run.{run.run_id}.execution", {"event": "execution.tensorboard_failed", "error": str(exc)})
+    phase = "failed"
+    try:
+        outcome = await run_batch(
+            specs,
+            config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
+            bus_publish=_publish,
+        )
+        phase = "failed" if outcome.failures else "completed"
+    finally:
+        scalars.close()
+        display.finish(run, phase)
 
     for r in outcome.results:
         write_run_log(run_root=run.root, result=r, project=run.project)

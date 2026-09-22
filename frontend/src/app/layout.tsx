@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 import { I18nProvider } from "@/lib/i18n";
+import { ExecutionAutoOpen } from "@/components/ExecutionAutoOpen";
 import { ProjectProvider } from "@/lib/project";
 
 export const metadata: Metadata = {
@@ -18,7 +19,7 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className="bg-mars-bg text-slate-100 antialiased min-h-screen">
         <I18nProvider>
-          <ProjectProvider>{children}</ProjectProvider>
+          <ProjectProvider><ExecutionAutoOpen />{children}</ProjectProvider>
         </I18nProvider>
       </body>
     </html>

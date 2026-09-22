@@ -28,6 +28,8 @@ from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
 from app.api import execution as execution_api
+from app.api import tensorboard as tensorboard_api
+from app.bridge.tensorboard_service import shutdown_tensorboard
 from app.api import knowledge as knowledge_api
 from app.api import projects as projects_api
 from app.api import readiness as readiness_api
@@ -83,6 +85,7 @@ async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await shutdown_owned_runs()
+        await shutdown_tensorboard()
 
 
 def create_app() -> FastAPI:
@@ -153,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_api.router)
     app.include_router(traces_api.router)
     app.include_router(execution_api.router)
+    app.include_router(tensorboard_api.router)
     app.include_router(knowledge_api.router)
     app.include_router(templates_api.router)
     app.include_router(tools_api.router)

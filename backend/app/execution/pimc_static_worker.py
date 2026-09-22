@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 from app.execution.pimc_diagnostics import data_diagnostics, training_curve
+from app.execution.tensorboard_writer import ScalarWriter
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.research_trial import candidate_factory_config, file_sha256, read_record
 
@@ -108,6 +109,12 @@ def score(evaluator: Any, model: Any, split: dict[str, Any], cfg: dict[str, Any]
 
 def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any],
           cfg: dict[str, Any], out: Path) -> dict[str, Any]:
+    with ScalarWriter(out / "tensorboard") as observer:
+        return _train_observed(torch, np, evaluator, model, splits, cfg, out, observer)
+
+
+def _train_observed(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any],
+                    cfg: dict[str, Any], out: Path, observer: ScalarWriter) -> dict[str, Any]:
     length, context, batch = cfg["fft_length"], cfg["context"], cfg["batch_samples"]
     window = torch.kaiser_window(length, periodic=False, beta=10)
     frequency = torch.fft.fftfreq(length, d=1/cfg["fs"])
@@ -155,6 +162,10 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
                           "training_loss": float(loss.detach()), "gradient_norm": float(gradient_norm),
                           "learning_rate": optimizer.param_groups[0]["lr"], "elapsed_seconds": time.monotonic()-started}
                 training_steps.append(update)
+                observer.scalar("train/loss", update["training_loss"], completed)
+                observer.scalar("train/gradient_norm", update["gradient_norm"], completed)
+                observer.scalar("train/learning_rate", update["learning_rate"], completed)
+                observer.flush()
                 with (out / "steps.jsonl").open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(update, allow_nan=False) + "\n")
                 if completed == 1:
@@ -164,6 +175,9 @@ def train(torch: Any, np: Any, evaluator: Any, model: Any, splits: dict[str, Any
         validation = score(evaluator, model, splits["validation"], cfg)
         row = {"epoch": epoch, "optimizer_steps": completed, "validation": validation}
         validation_history.append(row)
+        for metric_name, metric_value in validation.items():
+            observer.scalar("validation/" + metric_name, metric_value, completed)
+        observer.flush()
         with history.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, allow_nan=False) + "\n")
         if validation["RES_db"] < best:

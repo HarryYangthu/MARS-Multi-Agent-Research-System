@@ -7,6 +7,8 @@ const backendUrl =
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  // TensorBoard serves a directory URL; preserve its trailing slash for assets.
+  skipTrailingSlashRedirect: true,
   typedRoutes: false,
   async rewrites() {
     return [

@@ -1,0 +1,11 @@
+# TensorBoard is served through the MARS API, bound only to loopback internally.
+tensorboard:
+  reload_interval: 3
+  startup_timeout_seconds: 30
+  max_sessions: 8
+  # Paths are relative to the project's configured research repository.
+  # Native PIMC events are read in place; no changes to models or existing runs.
+  project_logdirs:
+    pimc:
+      - runs/static/new_runs
+      - exports/static_pimc_minimal_20260908/runs/static/new_runs
