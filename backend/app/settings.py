@@ -5,10 +5,25 @@ import os
 from pathlib import Path
 from typing import Literal, Mapping
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+def resolve_runtime_root(configured: str, source_root: Path) -> Path:
+    """Select an explicitly seeded desktop workspace without reading source secrets."""
+    if not configured:
+        return source_root
+    root = Path(configured).expanduser()
+    if not root.is_absolute():
+        raise ValueError("MARS_RUNTIME_ROOT must be an absolute application workspace")
+    required = ("configs/agents.yaml", "templates/artifacts", "backend/app/harness/schema/schemas")
+    if not root.is_dir() or any(not (root / path).exists() for path in required):
+        raise ValueError("MARS_RUNTIME_ROOT is missing required application resources")
+    return root.resolve()
+
+
+REPO_ROOT = resolve_runtime_root(
+    os.environ.get("MARS_RUNTIME_ROOT", ""), Path(__file__).resolve().parents[2]
+)
 LOCAL_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")
 
 
@@ -44,6 +59,7 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_port: int = 3000
     mars_cors_origins: str = "*"
+    mars_desktop_session_token: SecretStr = Field(default=SecretStr(""), repr=False)
 
     # === Mode flags ===
     mars_runtime_mode: Literal["development", "staging", "production"] = "development"

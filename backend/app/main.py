@@ -45,6 +45,7 @@ from app.api import traces as traces_api
 from app.api import websocket as ws_api
 from app.api.dependencies import get_event_bus, get_run_store, shutdown_owned_runs
 from app.api.llm_errors import llm_error_response
+from app.api.desktop_session import DesktopSessionMiddleware
 from app.bridge.agent_registry import get_registry
 from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
@@ -131,6 +132,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    desktop_token = settings.mars_desktop_session_token.get_secret_value()
+    if desktop_token:
+        app.add_middleware(
+            DesktopSessionMiddleware, token=desktop_token, origins=tuple(cors_origins)
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
