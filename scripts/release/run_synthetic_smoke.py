@@ -8,15 +8,20 @@ from pathlib import Path
 
 from app.bridge.extension_runtime import build_extension_runtime
 from app.execution.adapters.base import AdapterAction, AdapterRequest
+from app.harness.persistence import atomic_write_json
+from app.storage.run_store import RunStore
 from synthetic_regression_adapter import candidate_configs
 
 
-async def run() -> dict[str, object]:
+async def run(*, runs_root: Path | None = None) -> dict[str, object]:
     root = Path(__file__).resolve().parents[2]
     pack_root = root / "projects" / "synthetic_regression"
+    store = RunStore(runs_root)
+    run_handle = store.create(task="synthetic-release-smoke", project="synthetic_regression", entrypoint="execution")
     runtime = build_extension_runtime(
         distribution="v30-core",
         pack_roots=(pack_root,),
+        workspace_runs_root=store.runs_root,
     )
     # Retain the Pack's actual source-layout environment and workspace resolver.
     adapter = runtime.adapters.get(runtime.adapter_name("synthetic_regression", "evaluator"))
@@ -28,7 +33,7 @@ async def run() -> dict[str, object]:
                 action=AdapterAction.EVALUATE,
                 request_id=f"release-smoke-{index:02d}",
                 project="synthetic_regression",
-                run_id="release-smoke",
+                run_id=run_handle.run_id,
                 candidate_id=f"core-release-{index:02d}",
                 seed=index,
                 config={
@@ -50,6 +55,7 @@ async def run() -> dict[str, object]:
                 },
             )
         )
+        atomic_write_json(run_handle.root / "execution" / f"candidate-{index:02d}.json", response.model_dump(mode="json"))
         if response.status != "ok":
             raise RuntimeError(
                 f"candidate {candidate.candidate_id} failed: {response.error_code} {response.error}"
@@ -58,8 +64,9 @@ async def run() -> dict[str, object]:
         if envelope.get("schema_id") != "metric_envelope.v1":
             raise RuntimeError("adapter did not return metric_envelope.v1")
         envelopes.append(envelope)
-    return {
+    result: dict[str, object] = {
         "schema_id": "synthetic_release_smoke.v1",
+        "run_id": run_handle.run_id,
         "distribution": runtime.profile.name,
         "pack_version": runtime.project_packs.get(
             "synthetic_regression"
@@ -71,6 +78,8 @@ async def run() -> dict[str, object]:
         ),
         "status": "passed",
     }
+    atomic_write_json(run_handle.root / "execution" / "summary.json", result)
+    return result
 
 
 def main() -> int:

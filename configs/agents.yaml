@@ -2,20 +2,20 @@ commander:
   enabled: true
   output_schema: ''
   model:
-    provider: deepseek
-    model: deepseek-v4-pro
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.2
     # Thinking tokens and visible final text share this upper bound.
-    max_tokens: 16384
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 120
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
@@ -36,36 +36,35 @@ idea:
   enabled: true
   output_schema: proposal.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-flash
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.7
-    # Actual dossier reviews exhausted 16K entirely on reasoning. The complete
-    # proposal and review share this larger, still bounded output allowance.
-    max_tokens: 32768
+    # Product default: billed output includes provider reasoning usage.
+    max_tokens: 8192
     top_p: 1.0
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
-      enabled: false
-    reasoning_effort: high
+      enabled: true
+    reasoning_effort: low
     request_timeout_seconds: 360
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
     rounds: 1
     participants:
     - role: proposer
-      provider: deepseek
-      model: deepseek-v4-flash
+      provider: zhipu
+      model: glm-5.3
     - role: critic
-      provider: deepseek
-      model: deepseek-v4-flash
+      provider: zhipu
+      model: glm-5.3
     - role: judge
-      provider: deepseek
-      model: deepseek-v4-flash
+      provider: zhipu
+      model: glm-5.3
   research:
     max_delegations: 2
     required_tools: true
@@ -75,14 +74,15 @@ idea:
     web_search: true
   loop:
     protocol: native_tools
+    native_observation_history: true
     mode: reflection
     trace: full
     # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
-    reflection_reasoning_effort: high
-    reflection_format_repair_enabled: true
+    reflection_reasoning_effort: low
+    reflection_format_repair_enabled: false
     # Includes the submission schema, supplied context and visible paper excerpts.
-    input_token_budget: 256000
+    input_token_budget: 48000
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
@@ -99,16 +99,16 @@ idea_research:
   enabled: true
   output_schema: research_report.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-flash
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.2
-    max_tokens: 24576
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
-      enabled: false
-    reasoning_effort: null
+      enabled: true
+    reasoning_effort: low
     request_timeout_seconds: 360
     retry:
       max_retries: 1
@@ -120,13 +120,14 @@ idea_research:
     enabled: false
   loop:
     protocol: native_tools
+    native_observation_history: true
     mode: reflection
     reflection_thinking_enabled: true
-    reflection_reasoning_effort: high
-    reflection_format_repair_enabled: true
+    reflection_reasoning_effort: low
+    reflection_format_repair_enabled: false
     max_reflections: 2
     trace: full
-    input_token_budget: 256000
+    input_token_budget: 48000
     observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12
@@ -143,24 +144,24 @@ experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-pro
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.3
-    max_tokens: 16384
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 120
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
   loop:
-    input_token_budget: 128000
+    input_token_budget: 48000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -171,19 +172,19 @@ coding:
   enabled: true
   output_schema: code_spec.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-pro
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.1
-    max_tokens: 32768
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 120
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   post_training:
     enabled: false
@@ -199,7 +200,7 @@ coding:
   - python_research
   - c_production
   loop:
-    input_token_budget: 128000
+    input_token_budget: 48000
     max_validation_repairs: 2
     max_tool_steps: 20
   tools:
@@ -216,24 +217,24 @@ execution:
   enabled: true
   output_schema: run_log.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-pro
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.1
-    max_tokens: 16384
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 120
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
   loop:
-    input_token_budget: 128000
+    input_token_budget: 48000
     max_validation_repairs: 1
     max_tool_steps: 6
   tools:
@@ -243,33 +244,33 @@ writing:
   enabled: true
   output_schema: report.v1
   model:
-    provider: deepseek
-    model: deepseek-v4-pro
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.4
-    max_tokens: 32768
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 120
     retry:
-      max_retries: 3
+      max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
     rounds: 1
     participants:
     - role: critic
-      provider: deepseek
-      model: deepseek-v4-pro
+      provider: zhipu
+      model: glm-5.3
     - role: positive_reviewer
-      provider: deepseek
-      model: deepseek-v4-pro
+      provider: zhipu
+      model: glm-5.3
   loop:
     mode: reflection
-    input_token_budget: 128000
+    input_token_budget: 48000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -282,15 +283,16 @@ idea_author:
   enabled: true
   output_schema: proposal.v1
   model:
-    provider: deepseek
-    model: deepseek-flash
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.2
-    max_tokens: 16384
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
-      enabled: false
+      enabled: true
+    reasoning_effort: low
     request_timeout_seconds: 180
     retry:
       max_retries: 1
@@ -302,16 +304,16 @@ idea_reviewer:
   enabled: true
   output_schema: proposal.v1
   model:
-    provider: deepseek
-    model: deepseek-flash
+    provider: zhipu
+    model: glm-5.3
     temperature: 0.1
-    max_tokens: 32768
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com/v1
-    base_url_env: DEEPSEEK_BASE_URL
+    max_tokens: 8192
+    api_key_env: ZHIPU_API_KEY
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
-    reasoning_effort: high
+    reasoning_effort: low
     request_timeout_seconds: 240
     retry:
       max_retries: 0

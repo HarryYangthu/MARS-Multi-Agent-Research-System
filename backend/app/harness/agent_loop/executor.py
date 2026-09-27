@@ -22,6 +22,7 @@ from app.harness.agent_loop.review_plan import (
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.tools.registry import ToolContext, ToolRegistry
@@ -234,6 +235,20 @@ def missing_review_evidence(history: list[dict[str, Any]], manifest: dict[str, A
     return missing
 
 
+def validate_native_thinking(config: LLMConfig, policy: AgentLoopPolicy) -> None:
+    """Permit thinking tools only with a supported, public-observation history."""
+    if policy.protocol != "native_tools":
+        return
+    glm_thinking = requires_glm_thinking(config.provider, config.model)
+    if config.thinking_enabled is False:
+        if glm_thinking:
+            raise ModelCompatibilityError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
+        return
+    if (not policy.native_observation_history
+            or not (glm_thinking or config.provider == "deepseek" and config.thinking_enabled is True)):
+        raise ModelCompatibilityError("native thinking tools require supported observation-only history")
+
+
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
         p = request.policy
@@ -247,10 +262,7 @@ class NativeAgentLoop:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
         native = p.protocol == "native_tools"
-        if (native and request.config.thinking_enabled is not False
-                and not (request.config.thinking_enabled is True and p.native_observation_history
-                         and request.config.provider == "deepseek")):
-            raise ValueError("native tool loop requires explicitly disabled thinking until continuation support is available")
+        validate_native_thinking(request.config, p)
         wire_tools = native_specs(specs, request.final_schema, allow_revisions=p.document_revisions_enabled,
                                   body_field=p.submission_body_field) if native else ()
         tool_schema_budget = len(canonical(wire_tools).encode("utf-8")) if native else 0
@@ -551,7 +563,9 @@ class NativeAgentLoop:
                     if isinstance(exc, LLMCompletionError):
                         counts["model_responses"] += 1
                         response_payload = {"request": counts["model_requests"], "rejected": True,
-                                            "reason": exc.reason, "usage": exc.usage}
+                                            "reason": exc.reason, "usage": exc.usage,
+                                            "requested_model": call_config.model,
+                                            **exc.model_identity}
                         trace.emit("model_response", response_payload)
                         rejected_response = {"event_seq": trace.seq, "kind": "model_response", **response_payload}
                         state["pending"] = None
@@ -572,7 +586,12 @@ class NativeAgentLoop:
                 response_visible = ({"text": completion.text, "tool_calls": [c.to_wire() for c in completion.tool_calls]}
                                     if native else completion.text)
                 trace.emit("model_response", {"request": counts["model_requests"], "provider": completion.provider,
-                                              "model": completion.model, "usage": completion.raw.get("usage")},
+                                              "model": completion.model, "requested_model": call_config.model,
+                                              "response_models": completion.raw.get("response_models", []),
+                                              "response_model_status": completion.raw.get("response_model_status", "unreported"),
+                                              "response_model_missing_fields": completion.raw.get("response_model_missing_fields"),
+                                              "response_model_invalid_fields": completion.raw.get("response_model_invalid_fields"),
+                                              "usage": completion.raw.get("usage")},
                            visible=response_visible)
                 review_conflict = False
                 unit_result: UnitReviewResult | None = None

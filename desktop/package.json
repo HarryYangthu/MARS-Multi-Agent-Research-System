@@ -1,0 +1,21 @@
+{
+  "name": "mars-desktop",
+  "version": "0.1.0",
+  "description": "MARS isolated desktop lifecycle development spike",
+  "private": true,
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "smoke": "electron . --smoke"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "electron": "44.4.5"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

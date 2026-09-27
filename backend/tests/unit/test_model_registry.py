@@ -24,33 +24,29 @@ def test_idea_config_has_debate_participants() -> None:
     assert cfg.debate_enabled is False
     assert len(cfg.debate_participants) >= 2
     assert cfg.output_schema == "proposal.v1"
-    assert cfg.model_name == ("deepseek-v4-flash" if cfg.name == "idea" else "deepseek-v4-pro")
-    assert cfg.thinking_enabled is (cfg.name != "idea")
-    assert cfg.reasoning_effort == "high"
-    assert cfg.max_tokens == 32_768
+    assert cfg.model_name == "glm-5.3"
+    assert cfg.thinking_enabled
+    assert cfg.reasoning_effort == "low"
+    assert cfg.max_tokens == 8_192
     assert cfg.top_p == 1.0
     assert cfg.request_timeout_seconds == 360.0
-    assert cfg.max_retries == 3
+    assert cfg.max_retries == 2
 
 
-def test_all_enabled_agents_use_the_deepseek_research_profile() -> None:
-    profiles = {
-        "idea": ("deepseek-v4-flash", False, "high", 32_768),
-        "idea_research": ("deepseek-v4-flash", False, None, 8_192),
-        "idea_author": ("deepseek-v4-pro", False, None, 16_384),
-        "idea_reviewer": ("deepseek-v4-flash", True, "high", 16_384),
-    }
+def test_all_enabled_agents_use_the_bounded_glm_research_profile() -> None:
     for cfg in list_agent_configs():
         if not cfg.enabled:
             continue
-        assert cfg.model_provider == "deepseek"
-        model, thinking, effort, minimum_tokens = profiles.get(cfg.name, ("deepseek-v4-pro", True, "high", 16_384))
-        assert cfg.model_name == model
-        assert cfg.thinking_enabled is thinking
-        assert cfg.reasoning_effort == effort
-        assert cfg.max_tokens >= minimum_tokens
-        if cfg.name in {"coding", "writing"}:
-            assert cfg.max_tokens >= 32_768
+        assert cfg.model_provider == "zhipu"
+        assert cfg.model_name == "glm-5.3"
+        assert cfg.api_key_env == "ZHIPU_API_KEY"
+        assert cfg.thinking_enabled
+        assert cfg.reasoning_effort == "low"
+        assert cfg.max_tokens == 8_192
+        assert cfg.max_retries <= 2
+        for participant in cfg.debate_participants:
+            assert participant["provider"] == "zhipu"
+            assert participant["model"] == "glm-5.3"
 
 
 def test_local_provider_selection_preserves_agent_configuration() -> None:
@@ -62,11 +58,11 @@ def test_local_provider_selection_preserves_agent_configuration() -> None:
     assert provider.name == "local_vllm"
     assert llm_cfg.response_schema == "proposal.v1"
     assert llm_cfg.thinking_enabled == cfg.thinking_enabled
-    assert llm_cfg.reasoning_effort == "high"
+    assert llm_cfg.reasoning_effort == "low"
     assert llm_cfg.max_tokens == cfg.max_tokens
     assert llm_cfg.top_p == 1.0
     assert llm_cfg.request_timeout_seconds == cfg.request_timeout_seconds
-    assert llm_cfg.max_retries == 3
+    assert llm_cfg.max_retries == 2
 
 
 def test_available_providers_excludes_removed_simulated_provider() -> None:

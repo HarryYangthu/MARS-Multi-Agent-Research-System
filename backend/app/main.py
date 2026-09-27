@@ -36,6 +36,7 @@ from app.api import readiness as readiness_api
 from app.api import reports as reports_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
+from app.api import research_contracts as research_contracts_api
 from app.api import stats as stats_api
 from app.api import system as system_api
 from app.api import templates as templates_api
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
         return {"message": "MARS V0 backend. See /docs for API spec."}
 
     app.include_router(runs_api.router)
+    app.include_router(research_contracts_api.router)
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(diagnoses_api.router)

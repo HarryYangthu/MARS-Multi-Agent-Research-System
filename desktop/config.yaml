@@ -1,0 +1,10 @@
+# Runtime behavior is explicit; no remote renderer or arbitrary IPC is enabled.
+window:
+  width: 1440
+  height: 900
+  min_width: 1024
+  min_height: 680
+startup_timeout_ms: 60000
+shutdown_timeout_ms: 5000
+smoke_timeout_ms: 3000
+proxy_timeout_ms: 120000

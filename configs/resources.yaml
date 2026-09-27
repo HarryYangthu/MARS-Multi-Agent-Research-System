@@ -1,12 +1,14 @@
 schema: runtime.resources.v1
 limits:
-  # No aggregate request-count ceiling; reservations and usage remain audited.
-  max_model_requests: null
-  max_total_tokens: 4000000
-  max_parallel_model_calls: 6
-  max_elapsed_seconds: 14400
+  # Finite aggregate model limit, shared by inherited child tasks.
+  max_model_requests: 60
+  max_total_tokens: 1128000
+  max_parallel_model_calls: 2
+  max_elapsed_seconds: 5400
+  # No verified price table yet: monetary cost is unknown, never a fake zero.
+  # The requested CNY budget is frozen separately in research_task.v1.
   max_cost: null
 # Optional explicit prices per million tokens, in one declared currency.
 # A monetary hard limit requires a matching provider/model price entry.
-currency: USD
+currency: CNY
 prices: {}

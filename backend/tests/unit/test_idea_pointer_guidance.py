@@ -57,7 +57,8 @@ def test_other_invalid_or_empty_references_still_fail(pointer: str) -> None:
 async def test_author_prompt_and_complete_schema_include_structure_only_guidance(protocol: str) -> None:
     config = get_agent_config("idea")
     agent = IdeaAgent(agent_config=replace(config, raw={
-        **config.raw, "loop": {**config.raw["loop"], "protocol": protocol}}))
+        **config.raw, "loop": {**config.raw["loop"], "protocol": protocol,
+            "native_observation_history": protocol == "native_tools"}}))
     request = RunRequest("pimc", "Human-authored structure contract input", extra={
         "context_sources": {"project_rules": False, "code_repositories": False},
         "idea_requirements": {"require_parameter_budget": True}})

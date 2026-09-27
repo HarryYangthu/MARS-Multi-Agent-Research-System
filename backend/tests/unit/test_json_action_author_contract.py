@@ -40,7 +40,8 @@ def scenario(path: str = VARIANT) -> dict[str, Any]:
 def idea(protocol: str) -> IdeaAgent:
     original = get_agent_config("idea")
     return IdeaAgent(agent_config=replace(original, raw={
-        **original.raw, "loop": {**original.raw["loop"], "protocol": protocol}}))
+        **original.raw, "loop": {**original.raw["loop"], "protocol": protocol,
+            "native_observation_history": protocol == "native_tools"}}))
 
 
 def test_both_protocols_retain_the_complete_submission_contract() -> None:

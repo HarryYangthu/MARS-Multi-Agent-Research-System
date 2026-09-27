@@ -210,9 +210,15 @@ def test_only_explicit_request_null_is_unlimited(tmp_path: Path, key: str, value
         RunModelBudget(tmp_path, configuration=missing)
 
 
-def test_actual_resource_configuration_has_no_request_count_ceiling(tmp_path: Path) -> None:
+def test_actual_resource_configuration_has_finite_product_limits(tmp_path: Path) -> None:
     budget = RunModelBudget(tmp_path)
-    assert budget.configuration["limits"]["max_model_requests"] is None
+    limits = budget.configuration["limits"]
+    assert limits["max_model_requests"] == 60
+    assert limits["max_total_tokens"] == 1_128_000
+    assert limits["max_parallel_model_calls"] == 2
+    assert limits["max_elapsed_seconds"] == 5_400
+    assert budget.configuration["currency"] == "CNY"
+    assert limits["max_cost"] is None  # Prices are unknown, not zero.
 
 
 def test_crashed_request_requires_explicit_reconciliation_without_refunding_unknown_usage(tmp_path: Path) -> None:

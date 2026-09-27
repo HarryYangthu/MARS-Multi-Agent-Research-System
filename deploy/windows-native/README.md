@@ -52,17 +52,21 @@ PyPI、npm、download.pytorch.org；不是离线安装包。重装会重建这�
 向导会同时配置 Idea 作者、Idea 独立评审者和其他 Agent，避免只改界面的 `idea`
 一行而漏掉正式执行所用的 `idea_author`、`idea_reviewer`。
 
-**DeepSeek 官方**：选择 1，地址默认 `https://api.deepseek.com/v1`，输入自己的 Key。
-模型留空会保留代码中各 Agent 的原模型；填写模型名称则统一使用该名称。
+**智谱 GLM-5.3（默认）**：选择 1，地址默认 `https://open.bigmodel.cn/api/paas/v4`，
+模型默认为 `glm-5.3`，输入自己的 `ZHIPU_API_KEY`。向导同时启用所需 thinking 并使用低推理强度。
 
-**公司网关或其他 OpenAI 兼容 API**：选择 2，填写实际 Base URL（通常以 `/v1`
+**DeepSeek 官方（显式选择）**：选择 2，地址默认 `https://api.deepseek.com/v1`。
+模型留空使用独立的 `deepseek-v4-pro` 默认值，不继承此前的 GLM 模型名。
+
+**公司网关或其他 OpenAI 兼容 API**：选择 3，填写实际 Base URL（通常以 `/v1`
 结尾）、网关支持的模型名称和 Key。
 
-**本机模型服务**：选择 3。例如 LM Studio 已加载模型并开启兼容服务后，可填
+**本机模型服务**：选择 4。例如 LM Studio 已加载模型并开启兼容服务后，可填
 `http://127.0.0.1:1234/v1`；Ollama 兼容服务常用 `http://127.0.0.1:11434/v1`。
 模型名称必须与服务实际加载的名称一致。无鉴权本机服务可以留空 Key。
 本脚本负责 MARS 对接；模型服务需要先由你安装、加载模型并启动。
 Idea 所选模型还需支持当前原生工具调用与结构化输出协议。
+切换 provider 时，作者、评审及 CLI 的 thinking 覆盖项也会同步更新并备份，避免旧 GLM 配置覆盖新选择。
 
 Key 只写入 Git 忽略的根目录 `.env.local`，脚本会限制该文件的 Windows 用户权限，
 不会写进 YAML、下载包、命令行参数或检查报告。系统环境中已有的同名 Key 优先于
@@ -71,6 +75,8 @@ Key 只写入 Git 忽略的根目录 `.env.local`，脚本会限制该文件的 
 配置后可用 `MARS-Windows.cmd` 的 **6 Test API** 发出作者/评审者各一次小型真实请求。
 这会使用所配置账号的少量额度。HTTP 402 通常是余额/计费问题，401 是 Key 问题；
 脚本会显示脱敏错误码，不会把服务启动或模型列表查询当成完成了研究任务。
+检查保留 GLM 所需 thinking，每次最多 2048 输出 token、45 秒、无自动重试；上限在
+`configs/windows_native.yaml` 配置。该向导仍是源码安装辅助入口，`.env.local` 不是正式桌面产品的平台凭据存储。
 
 前端 API 配置页：**http://127.0.0.1:3001/config/agents**。
 在界面保存模型配置后，请停止并重新启动服务，让各 Agent 重新加载配置。
@@ -82,9 +88,11 @@ MARS 源码包不包含真实 PIMC 数据、模型权重或外部研究源码。
 API 向导允许填写 PIMC 源码目录（必须含 `train_static.py`）和数据文件路径，会更新
 `projects/pimc/repo_link.yaml` 与 `configs/execution.yaml` 的本机路径，保留基线保护规则。
 修改前的 YAML 在 `local/windows/config-backups/`。
+只有显式提供有效的代码目录、数据文件和现有可执行 Python 时才启用该本地执行适配器。
+仅填写代码而跳过数据时保持禁用，并清除旧数据路径，避免新项目误用旧采集文件；这项路径检查不代表训练依赖或数据内容已通过验证。
 
 如果先只调试前端和 API，可以留空，之后在项目页接入源码、在新任务里选择数据。
-不要使用旧 Mac 上的 `/Users/...` 或 `/opt/anaconda3/...` 路径发起 Windows 实验。
+请在当前电脑重新选择代码、数据和 Python 环境，不要复用其他电脑的绝对路径。
 代码包不迁移旧任务的绝对路径与执行环境；Windows 验证建议新建任务。
 Execution 开始后，已有 TensorBoard 集成会展示该次实际实验过程。
 

@@ -1,0 +1,26 @@
+schema_id: research_defaults.v1
+# Admission defaults, frozen per task. Global runtime enforcement is work package D.
+budget:
+  search_candidates: 20
+  deep_read_papers: 5
+  concurrent_readers: 2
+  proposal_candidates: 2
+  implemented_candidates: 1
+  debate_rounds: 1
+  automatic_iterations: 2
+  model_requests: 60
+  tool_executions: 120
+  research_activity_seconds: 5400
+  input_tokens: 1000000
+  billed_output_tokens: 128000
+  model_cost_cny: 20.0
+  request_input_tokens: 48000
+  request_output_tokens: 8192
+  coding_output_tokens: 16384
+  training_job_seconds: 600
+  concurrent_training_jobs: 1
+  max_gpus: 1
+  training_process_seconds: 3600
+  gpu_seconds: 3600
+  operation_retries: 2
+  repeated_error_limit: 2

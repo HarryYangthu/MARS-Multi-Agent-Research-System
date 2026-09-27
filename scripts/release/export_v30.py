@@ -76,6 +76,15 @@ _DOCKER_REQUIRED_IGNORES = (
     "knowledge",
 )
 _MAX_HISTORY_FINDINGS = 500
+_PRIVATE_OR_GENERATED_COMPONENTS = frozenset({
+    ".git", ".claude", ".codex", ".agents", ".venv", "venv",
+    "node_modules", "__pycache__", ".next", ".pytest_cache", ".mypy_cache",
+    "credentials", "secrets",
+})
+_USER_STATE_ROOTS = frozenset({
+    "runs", "conversations", "knowledge", "workspace", "evaluation_runs", "local",
+})
+_ENV_TEMPLATES = frozenset({".env.example", ".env.production.example"})
 
 
 class ReleaseGateError(RuntimeError):
@@ -167,6 +176,8 @@ def audit_release(
         decision: Literal["pass", "blocked"] = "blocked" if findings else "pass"
         materialized = ""
         if materialize is not None:
+            if gitleaks.status != "passed":
+                raise ReleaseGateError("materialization requires a successful gitleaks scan")
             if decision != "pass":
                 raise ReleaseGateError("materialization is blocked by release findings")
             _materialize_archive(export_root, selection.files, materialize)
@@ -200,21 +211,17 @@ def select_git_tree(repo: Path, *, treeish: str, allowlist_path: str) -> GitSele
     all_files = tuple(
         item.decode("utf-8") for item in tree_output.split(b"\0") if item
     )
-    selected = tuple(
-        path
-        for path in all_files
-        if any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
-    )
+    # Every entry is a reviewed literal file. In particular, Next.js [id]
+    # directories are not fnmatch character classes, and new files cannot
+    # silently enter an export through a directory wildcard.
+    requested = set(patterns)
+    selected = tuple(path for path in all_files if path in requested)
     if not selected:
         raise ReleaseGateError("allowlist selected no committed files")
-    unmatched = [
-        pattern
-        for pattern in patterns
-        if not any(fnmatch.fnmatchcase(path, pattern) for path in all_files)
-    ]
+    unmatched = sorted(requested - set(all_files))
     if unmatched:
         raise ReleaseGateError(
-            "allowlist contains unmatched patterns: " + ", ".join(unmatched)
+            "allowlist contains missing files: " + ", ".join(unmatched)
         )
     return GitSelection(
         commit=commit,
@@ -228,6 +235,8 @@ def scan_export_tree(root: Path, selected_files: Sequence[str]) -> tuple[Finding
     findings: list[Finding] = []
     for relative in selected_files:
         path = root / relative
+        if _private_or_generated_path(relative):
+            findings.append(_finding("private_or_generated_path", "tree", relative, 0, relative))
         if any(fnmatch.fnmatchcase(relative, pattern) for pattern in _INTERNAL_PATH_PATTERNS):
             findings.append(_finding("internal_path", "tree", relative, 0, relative))
         if path.suffix.casefold() in _BINARY_SUFFIXES:
@@ -369,18 +378,39 @@ def _parse_allowlist(value: str) -> tuple[str, ...]:
             raise ReleaseGateError(
                 f"negative allowlist pattern is forbidden at line {line_number}"
             )
+        if any(token in pattern for token in "*?"):
+            raise ReleaseGateError(
+                f"allowlist line {line_number} must name an exact file; wildcards are forbidden"
+            )
         _safe_relative(pattern, label=f"allowlist line {line_number}", allow_glob=True)
+        if pattern in patterns:
+            raise ReleaseGateError(f"duplicate allowlist file at line {line_number}: {pattern}")
+        if _private_or_generated_path(pattern):
+            raise ReleaseGateError(f"private or generated allowlist path: {pattern}")
         patterns.append(pattern)
     if not patterns:
-        raise ReleaseGateError("allowlist must contain at least one path pattern")
+        raise ReleaseGateError("allowlist must contain at least one exact file")
     return tuple(patterns)
+
+
+def _private_or_generated_path(value: str) -> bool:
+    path = PurePosixPath(value)
+    parts = {part.casefold() for part in path.parts}
+    name = path.name.casefold()
+    return (
+        bool(parts & _PRIVATE_OR_GENERATED_COMPONENTS)
+        or path.parts[0].casefold() in _USER_STATE_ROOTS
+        or (name.startswith(".env") and name not in _ENV_TEMPLATES)
+        or name.endswith((".tsbuildinfo", ".pyc", ".pyo", ".log", ".pem", ".key"))
+        or name in {".ds_store", "id_rsa", "id_ed25519"}
+    )
 
 
 def _safe_relative(value: str, *, label: str, allow_glob: bool = False) -> str:
     if not value or "\\" in value or "\x00" in value or ":" in value:
         raise ReleaseGateError(f"invalid {label}: {value!r}")
     path = PurePosixPath(value)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+    if path.is_absolute() or path.as_posix() != value or any(part in {"", ".", ".."} for part in path.parts):
         raise ReleaseGateError(f"{label} must be a normalized relative path")
     if not allow_glob and any(token in value for token in "*?["):
         raise ReleaseGateError(f"globs are forbidden in {label}")
@@ -392,6 +422,7 @@ def _extract_selection(repo: Path, selection: GitSelection, output: Path) -> Non
     archive_path = output.parent / "tree.tar"
     command = [
         "git",
+        "--literal-pathspecs",
         "archive",
         "--format=tar",
         selection.commit,
@@ -580,6 +611,7 @@ def _detail_for_rule(rule: str) -> str:
         "gitleaks": "secret-history scan did not pass",
         "history_scan_truncated": "history evidence reached the configured cap",
         "internal_path": "internal-only document path is not public-release material",
+        "private_or_generated_path": "credentials, user state and generated files are forbidden in release content",
         "non_utf8_content": "non-UTF-8 file requires explicit public review",
         "secret_pattern": "secret-shaped content requires removal and rotation review",
     }.get(rule, "release policy violation")

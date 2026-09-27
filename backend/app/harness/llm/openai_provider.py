@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 
 from loguru import logger
 
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import (
     Completion,
     Delta,
@@ -31,6 +32,36 @@ _T = TypeVar("_T")
 
 
 @dataclass
+class ResponseModelIdentity:
+    """Only bounded public model identifiers from actual SDK envelope fields."""
+
+    models: set[str] = field(default_factory=set)
+    missing_fields: int = 0
+    invalid_fields: int = 0
+
+    def add(self, value: Any) -> None:
+        if value is None or value == "":
+            self.missing_fields += 1
+        elif (not isinstance(value, str)
+              or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,255}", value) is None):
+            self.invalid_fields += 1
+        else:
+            self.models.add(value)
+
+    @property
+    def model(self) -> str:
+        # Never turn the requested name into claimed response identity.
+        return next(iter(self.models)) if len(self.models) == 1 and not self.invalid_fields else ""
+
+    def metadata(self, requested: str) -> dict[str, Any]:
+        status = ("inconsistent" if len(self.models) > 1 else "invalid" if self.invalid_fields
+                  else "missing" if not self.models else "partial" if self.missing_fields else "consistent")
+        return {"requested_model": requested, "response_models": sorted(self.models),
+                "response_model_status": status, "response_model_missing_fields": self.missing_fields,
+                "response_model_invalid_fields": self.invalid_fields}
+
+
+@dataclass
 class VisibleStreamAccumulator:
     """Pure public-output parser; reasoning fields are never copied or retained."""
 
@@ -40,9 +71,11 @@ class VisibleStreamAccumulator:
     fingerprint: str | None = None
     chunks: int = 0
     visible_chars: int = 0
+    identity: ResponseModelIdentity = field(default_factory=ResponseModelIdentity)
 
     def add(self, chunk: Any) -> None:
         self.chunks += 1
+        self.identity.add(getattr(chunk, "model", None))
         usage = _usage_payload(getattr(chunk, "usage", None))
         if usage is not None:
             self.usage = usage
@@ -67,10 +100,12 @@ class VisibleStreamAccumulator:
                 "empty_final_content" if not text.strip() else "")
         if code:
             raise LLMCompletionError(code=code, provider=provider, model=model,
-                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip()), usage=self.usage)
-        return Completion(text=text, provider=provider, model=model,
+                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip()), usage=self.usage,
+                                     model_identity=self.identity.metadata(model))
+        return Completion(text=text, provider=provider, model=self.identity.model,
                           raw={"usage": self.usage, "finish_reason": self.finish_reason,
-                               "system_fingerprint": self.fingerprint, "streamed": True, "stream_chunks": self.chunks})
+                               "system_fingerprint": self.fingerprint, "streamed": True, "stream_chunks": self.chunks,
+                               **self.identity.metadata(model)})
 
 
 class _OpenAICompatProvider(LLMProvider):
@@ -132,6 +167,11 @@ class _OpenAICompatProvider(LLMProvider):
         thinking_enabled = config.thinking_enabled
         if thinking_enabled is None:
             thinking_enabled = self._default_thinking_enabled
+        glm_thinking = requires_glm_thinking(self.name, config.model)
+        if glm_thinking:
+            if config.thinking_enabled is False:
+                raise ModelCompatibilityError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
+            thinking_enabled = True
         kwargs: dict[str, Any] = {
             "model": config.model,
             "max_tokens": config.max_tokens,
@@ -145,15 +185,17 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["temperature"] = config.temperature
             kwargs["top_p"] = config.top_p
         if config.tools:
-            if self.name == "zhipu":
+            if self.name == "zhipu" and stream:
                 raise ValueError("native tool streaming is not implemented for zhipu")
             if thinking_enabled:
                 # Each request is a new reasoning turn over public observations.
                 # Never replay incomplete assistant/tool turns without the private
-                # reasoning history required by DeepSeek's conversational API.
-                if (self.name != "deepseek" or config.extra.get("native_observation_history") is not True
+                # reasoning history. GLM and DeepSeek use the same explicit
+                # observation-only contract; no hidden reasoning is replayed.
+                if ((self.name != "deepseek" and not glm_thinking)
+                        or config.extra.get("native_observation_history") is not True
                         or any(m.role in {"assistant", "tool"} or m.tool_calls for m in messages)):
-                    raise ValueError("native tools require explicit non-thinking mode or DeepSeek observation-only history")
+                    raise ModelCompatibilityError("native thinking tools require supported observation-only history")
             kwargs["tools"] = list(config.tools)
             kwargs["parallel_tool_calls"] = False
             if self.name == "deepseek" and config.thinking_enabled is False and len(config.tools) == 1:
@@ -170,6 +212,10 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["stream"] = True
 
         reasoning_effort = config.reasoning_effort or self._default_reasoning_effort
+        if glm_thinking:
+            reasoning_effort = reasoning_effort or "low"
+            if reasoning_effort not in {"low", "high", "max"}:
+                raise ModelCompatibilityError("GLM-5.3 reasoning_effort must be low, high or max")
         if self.name == "deepseek" and thinking_enabled is False:
             # DeepSeek effort values enable thinking, so a disabled mode must
             # take precedence over both call-specific and inherited effort.
@@ -178,13 +224,8 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["reasoning_effort"] = reasoning_effort
 
         if self.name == "zhipu":
-            forced = config.model.lower().startswith("glm-5.3")
-            if forced and config.thinking_enabled is False:
-                raise ValueError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
-            if forced and reasoning_effort not in {None, "low", "high", "max"}:
-                raise ValueError("GLM-5.3 reasoning_effort must be low, high or max")
-            if forced or config.thinking_enabled is not None:
-                kwargs["extra_body"] = {"thinking": {"type": "enabled" if forced or thinking_enabled else "disabled"}}
+            if glm_thinking or config.thinking_enabled is not None:
+                kwargs["extra_body"] = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
         elif self.name == "deepseek" and thinking_enabled is False:
             kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         elif thinking_enabled:
@@ -260,8 +301,13 @@ class _OpenAICompatProvider(LLMProvider):
 
     def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
         """Pure SDK-envelope parsing; it performs no model/service execution."""
+        identity = ResponseModelIdentity()
+        identity.add(getattr(resp, "model", None))
         if not resp.choices:
-            raise RuntimeError(f"{self.name} returned no completion choices")
+            raise LLMCompletionError(code="empty_final_content", provider=self.name, model=config.model,
+                                     finish_reason=None, empty_final=True,
+                                     usage=_usage_payload(getattr(resp, "usage", None)),
+                                     model_identity=identity.metadata(config.model))
         response_choice = resp.choices[0]
         message = response_choice.message
         # Never surface or persist reasoning_content. It may contain hidden
@@ -276,12 +322,13 @@ class _OpenAICompatProvider(LLMProvider):
         if calls and not config.tools:
             raise ValueError("unsolicited tool calls without configured tools")
         self._check_final(config, finish_reason, bool(text.strip()) or bool(calls),
-                          usage=_usage_payload(getattr(resp, "usage", None)))
+                          usage=_usage_payload(getattr(resp, "usage", None)),
+                          model_identity=identity.metadata(config.model))
         return Completion(
             text=text,
             tool_calls=calls,
             provider=self.name,
-            model=config.model,
+            model=identity.model,
             is_mock=False,
             raw={
                 "usage": _usage_payload(getattr(resp, "usage", None)),
@@ -289,16 +336,17 @@ class _OpenAICompatProvider(LLMProvider):
                     getattr(resp, "system_fingerprint", None)
                 ),
                 "finish_reason": finish_reason,
+                **identity.metadata(config.model),
             },
         )
 
     def _check_final(self, config: LLMConfig, finish_reason: str | None, visible_content_seen: bool,
-                     *, usage: dict[str, Any] | None = None) -> None:
+                     *, usage: dict[str, Any] | None = None, model_identity: dict[str, Any] | None = None) -> None:
         if finish_reason == "length" or not visible_content_seen:
             raise LLMCompletionError(
                 code="output_truncated" if finish_reason == "length" else "empty_final_content",
                 provider=self.name, model=config.model, finish_reason=finish_reason,
-                empty_final=not visible_content_seen, usage=usage,
+                empty_final=not visible_content_seen, usage=usage, model_identity=model_identity,
             )
 
     @staticmethod
@@ -340,6 +388,11 @@ class ZhipuProvider(_OpenAICompatProvider):
         Each retry owns a fresh accumulator. Partial content from an unsuccessful
         attempt can never be concatenated with a subsequent attempt's answer.
         """
+        if config.tools:
+            # The visible-text SSE parser deliberately ignores private fields
+            # and cannot reconstruct streamed tool argument fragments. Native
+            # tools use the real non-streaming envelope parser instead.
+            return await super().complete(messages, config)
         client = self._get_client()
         kwargs = self._request_kwargs(messages, config, stream=True)
 

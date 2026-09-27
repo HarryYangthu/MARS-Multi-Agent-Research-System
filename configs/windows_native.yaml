@@ -3,6 +3,12 @@ python_version: 3.11.14
 frontend_port: 3001
 backend_port: 8010
 startup_timeout_seconds: 180
+# Provider-specific defaults; explicit legacy selection never inherits a GLM name.
+api_glm_model: glm-5.3
+api_deepseek_model: deepseek-v4-pro
+api_local_endpoint: http://127.0.0.1:1234/v1
+api_probe_max_tokens: 2048
+api_probe_timeout_seconds: 45
 uv_url: https://github.com/astral-sh/uv/releases/download/0.11.1/uv-x86_64-pc-windows-msvc.zip
 uv_sha256: 6659250cebbd3bb6ee48bcb21a3f0c6656450d63fb97f0f069bcb532bdb688ed
 uv_executable: uv.exe

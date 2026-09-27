@@ -13,8 +13,13 @@ import tempfile
 from typing import Any
 
 from loguru import logger
+import yaml
 
 from app.bridge.cli_research_service import CliResearchService, configuration, initialize, prepare_protocol
+from app.bridge.research_contract_service import (
+    default_research_budget, freeze_research_task, load_project_contract, preflight_project,
+)
+from app.harness.runtime.research_contract import ResearchBudget as ProjectResearchBudget
 from app.cli_composition import CliAgents
 from app.execution.research_process import run_worker
 from app.harness.agent_loop.trace import atomic_json
@@ -25,14 +30,25 @@ from app.settings import env_or_local, set_runtime_env
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="mars", description="Run a bounded, evidence-backed research loop on a local static PIMC checkout")
+    result = argparse.ArgumentParser(prog="mars", description="MARS project preflight and research tools")
     commands = result.add_subparsers(dest="command", required=True)
+    project = commands.add_parser("project", help="Inspect and freeze a generic project contract without starting research")
+    project_commands = project.add_subparsers(dest="project_command", required=True)
+    project_commands.add_parser("defaults", help="Show the finite standard research budgets")
+    for action in ("preflight", "freeze"):
+        contract_command = project_commands.add_parser(action)
+        contract_command.add_argument("--config", type=Path, required=True, help="research_project.v1 YAML")
+        if action == "freeze":
+            contract_command.add_argument("--goal", required=True)
+            contract_command.add_argument("--mode", choices=("bounded_auto", "manual"), default="bounded_auto")
+            contract_command.add_argument("--budget", type=Path, help="Complete budget YAML; defaults are used when omitted")
+            contract_command.add_argument("--output", type=Path, required=True, help="New frozen task JSON file")
     cfg = configuration()
     for name in ("doctor", "research"):
         command = commands.add_parser(name)
         command.add_argument("--repo", type=Path, required=True)
         command.add_argument("--data", type=Path, required=True, help="Real static .pth capture with x/y/nf")
-        command.add_argument("--model", choices=("deepseek-v4-flash", "deepseek-v4-pro"), default="deepseek-v4-flash")
+        command.add_argument("--model", default=get_agent_config("coding").model_name)
         if name == "doctor":
             command.add_argument("--check-model", action="store_true", help="Make one real small API request")
         else:
@@ -53,8 +69,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 async def doctor(repo: Path, data: Path, model: str, check_model: bool) -> dict[str, Any]:
+    coding_config = get_agent_config("coding")
     result: dict[str, Any] = {"repo": str(repo), "data": str(data), "dataset_present": data.is_file(),
-        "key_configured": bool(env_or_local("DEEPSEEK_API_KEY")), "python": sys.version.split()[0],
+        "key_configured": bool(env_or_local(coding_config.api_key_env)), "python": sys.version.split()[0],
         "missing_dependencies": [name for name in ("torch", "scipy", "matplotlib", "tensorboard") if importlib.util.find_spec(name) is None]}
     if not result["missing_dependencies"]:
         try:
@@ -69,8 +86,8 @@ async def doctor(repo: Path, data: Path, model: str, check_model: bool) -> dict[
             result["baseline_preflight"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
     if check_model:
         try:
-            provider, cfg = select_provider(replace(get_agent_config("coding"), model_name=model,
-                max_tokens=32, thinking_enabled=False, max_retries=0, request_timeout_seconds=45))
+            provider, cfg = select_provider(replace(coding_config, model_name=model,
+                max_tokens=1024, max_retries=0, request_timeout_seconds=45))
             try:
                 completion = await provider.complete([Message(role="user", content="Reply with READY only.")], cfg)
                 result["model_check"] = {"provider": completion.provider, "model": completion.model, "responded": bool(completion.text.strip())}
@@ -86,6 +103,23 @@ async def doctor(repo: Path, data: Path, model: str, check_model: bool) -> dict[
 
 
 async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
+    if options.command == "project":
+        if options.project_command == "defaults":
+            return default_research_budget().model_dump(mode="json")
+        project = load_project_contract(options.config.expanduser().resolve())
+        if options.project_command == "preflight":
+            return preflight_project(project).model_dump(mode="json")
+        project_budget = (ProjectResearchBudget.model_validate(yaml.safe_load(options.budget.read_text(encoding="utf-8")))
+                  if options.budget else default_research_budget())
+        frozen = freeze_research_task(project, goal=options.goal, mode=options.mode, budget=project_budget)
+        output = options.output.expanduser().resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        # Export is explicit and exclusive; never replace a user's existing file.
+        with output.open("x", encoding="utf-8") as stream:
+            json.dump(frozen.model_dump(mode="json"), stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+        return {"status": "prepared", "task_sha256": frozen.task_sha256, "output": str(output),
+                "research_started": False}
     if options.command == "status":
         root = options.run.expanduser().resolve()
         state = read_record(root / "state.json")
@@ -131,6 +165,8 @@ def main() -> int:
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     if options.command == "doctor":
         return 0 if result["ready"] else 2
+    if options.command == "project" and result.get("ready") is False:
+        return 2
     return 2 if result.get("status") in {"blocked_data", "failed", "interrupted"} else 0
 
 

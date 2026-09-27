@@ -74,6 +74,25 @@ class Reservation:
     request_id: str
     tokens: int
     cost: float | None
+    attempts: int
+
+
+def reserved_model_attempts(row: Mapping[str, Any]) -> int:
+    """Read the original conservative attempt reservation, including legacy v1."""
+    maximum = row.get("max_sdk_attempts", MAX_LLM_RETRIES + 1)
+    if type(maximum) is not int or not 1 <= maximum <= MAX_LLM_RETRIES + 1:
+        raise ResourceBudgetError("invalid model-attempt reservation record")
+    return int(maximum)
+
+
+def charged_model_attempts(row: Mapping[str, Any]) -> int:
+    """Read attempt quota charges; absent legacy charges retain the full ceiling."""
+    maximum = reserved_model_attempts(row)
+    charged = row.get("charged_attempts", maximum)
+    if (type(charged) is not int or not 1 <= charged <= maximum
+            or charged < maximum and row.get("attempts_complete") is not True):
+        raise ResourceBudgetError("invalid model-attempt reservation record")
+    return int(charged)
 
 
 class RunModelBudget:
@@ -126,6 +145,7 @@ class RunModelBudget:
                                                 "reconciliation_required", "abandoned"}
                     or type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0):
                 raise ResourceBudgetError("invalid resource reservation record")
+            charged_model_attempts(row)
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
@@ -236,6 +256,8 @@ class RunModelBudget:
                 correlation: Mapping[str, Any]) -> Reservation:
         if type(config.max_tokens) is not int or config.max_tokens < 1:
             raise ValueError("max_tokens must bound a positive output length")
+        if type(config.max_retries) is not int:
+            raise ValueError("max_retries must be an integer")
         attempts = min(max(config.max_retries, 0), MAX_LLM_RETRIES) + 1
         prompt_bound = len(_canonical({"messages": [m.to_wire() for m in messages],
                                       "tools": config.tools}).encode()) + 32 * (len(messages) + 1)
@@ -260,8 +282,9 @@ class RunModelBudget:
             if time.time() - state.get("revision_started_at", state["started_at"]) >= limits["max_elapsed_seconds"]:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
             rows = list(state["requests"].values())
-            if limits["max_model_requests"] is not None and len(rows) >= limits["max_model_requests"]:
-                raise ResourceBudgetError("run model-request budget exhausted")
+            if (limits["max_model_requests"] is not None
+                    and sum(charged_model_attempts(row) for row in rows) + attempts > limits["max_model_requests"]):
+                raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts")
             if sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
             if limits.get("max_cost") is not None:
@@ -275,7 +298,8 @@ class RunModelBudget:
                 "provider": config.provider, "model": config.model, "correlation": dict(correlation),
                 "reserved_tokens": reserved_tokens, "charged_tokens": reserved_tokens,
                 "reserved_cost": cost, "charged_cost": cost, "usage": None, "usage_complete": False,
-                "price": price, "max_sdk_attempts": attempts}
+                "price": price, "max_sdk_attempts": attempts, "charged_attempts": attempts,
+                "observed_attempts": None, "attempts_complete": False}
             lease_path = self._lease_path(identifier)
             lease_path.parent.mkdir(parents=True, exist_ok=True)
             lease = FileLock(lease_path, timeout=0, thread_local=False)
@@ -286,10 +310,11 @@ class RunModelBudget:
                 lease.release()
                 raise
             self._leases[identifier] = lease
-        return Reservation(identifier, reserved_tokens, cost)
+        return Reservation(identifier, reserved_tokens, cost, attempts)
 
     def settle(self, reservation: Reservation, *, usage: Any, complete: bool,
-               outcome: str) -> None:
+               outcome: str, sdk_attempts: int | None = None,
+               attempts_complete: bool = False) -> None:
         if outcome not in {"completed", "failed", "cancelled"}:
             raise ValueError("invalid model settlement outcome")
         with path_lock(self.lock_path):
@@ -299,6 +324,14 @@ class RunModelBudget:
                 raise ResourceBudgetError("model reservation already settled")
             if reservation.request_id not in self._leases:
                 raise ResourceBudgetError("model reservation belongs to another owner; use explicit reconciliation after owner loss")
+            maximum_attempts = row.get("max_sdk_attempts", MAX_LLM_RETRIES + 1)
+            if sdk_attempts is not None and (type(sdk_attempts) is not int
+                    or not 0 <= sdk_attempts <= maximum_attempts):
+                raise ValueError("observed SDK attempts exceed the reservation or are invalid")
+            attempt_count_known = bool(outcome != "cancelled" and attempts_complete
+                                       and sdk_attempts is not None and sdk_attempts > 0)
+            row.update(observed_attempts=sdk_attempts, attempts_complete=attempt_count_known,
+                       charged_attempts=sdk_attempts if attempt_count_known else maximum_attempts)
             valid = (isinstance(usage, dict)
                      and all(type(usage.get(k)) is int and usage[k] >= 0
                              for k in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -334,13 +367,33 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
             await asyncio.sleep(0.05)
     observer = config.attempt_observer
     unknown_attempt = False
+    started_attempts = 0
+    finished_attempts = 0
+    attempt_sequence_valid = True
 
     def observe(kind: str, data: dict[str, Any]) -> None:
-        nonlocal unknown_attempt
-        if kind == "sdk_attempt_failed":
-            unknown_attempt = True
+        nonlocal unknown_attempt, started_attempts, finished_attempts, attempt_sequence_valid
+        if kind == "sdk_attempt_started":
+            number = data.get("attempt")
+            if (type(number) is not int or number != started_attempts + 1
+                    or started_attempts != finished_attempts or number > reservation.attempts):
+                attempt_sequence_valid = False
+                raise ResourceBudgetError("SDK attempt cannot exceed its reserved request budget")
+            started_attempts += 1
+        elif kind in {"sdk_attempt_succeeded", "sdk_attempt_failed"}:
+            number = data.get("attempt")
+            if (type(number) is not int or number != started_attempts
+                    or finished_attempts + 1 != started_attempts):
+                attempt_sequence_valid = False
+            else:
+                finished_attempts += 1
+            if kind == "sdk_attempt_failed":
+                unknown_attempt = True
         if observer is not None:
             observer(kind, data)
+
+    def attempts_are_known() -> bool:
+        return attempt_sequence_valid and started_attempts > 0 and started_attempts == finished_attempts
 
     # Config objects may be shared across concurrent roles; never mutate their observers.
     from dataclasses import replace
@@ -349,8 +402,10 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
         result = await provider.complete(messages, actual)
     except BaseException as exc:
         budget.settle(reservation, usage=getattr(exc, "usage", None), complete=False,
-                      outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed")
+                      outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                      sdk_attempts=started_attempts, attempts_complete=attempts_are_known())
         raise
     budget.settle(reservation, usage=result.raw.get("usage"), complete=not unknown_attempt,
-                  outcome="completed")
+                  outcome="completed", sdk_attempts=started_attempts,
+                  attempts_complete=attempts_are_known())
     return result

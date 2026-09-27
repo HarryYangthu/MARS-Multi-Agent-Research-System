@@ -92,8 +92,10 @@ class LLMCompletionError(RuntimeError):
         finish_reason: str | None,
         empty_final: bool,
         usage: dict[str, Any] | None = None,
+        model_identity: dict[str, Any] | None = None,
     ) -> None:
         self.usage = usage
+        self.model_identity = dict(model_identity or {})
         self.reason: dict[str, str | bool | None] = {
             "code": code,
             "provider": provider,

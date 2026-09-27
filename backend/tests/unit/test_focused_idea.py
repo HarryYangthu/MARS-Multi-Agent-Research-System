@@ -58,18 +58,18 @@ def test_knowledge_rejects_missing_empty_escaping_or_changed_snapshot(tmp_path: 
         load_project_knowledge(project, tmp_path / "run2")
 
 
-def test_actual_focused_configuration_uses_explicit_flash_review_and_no_delegation() -> None:
+def test_actual_focused_configuration_uses_bounded_glm_review_and_no_delegation() -> None:
     agent = FocusedIdeaAgent()
     snapshot = agent.service_profile_snapshot
     assert snapshot["review_mode"] == "independent_session"
-    assert snapshot["author"]["model"]["name"] == "deepseek-flash"
-    assert snapshot["reviewer"]["model"]["name"] == "deepseek-flash"
+    assert snapshot["author"]["model"]["name"] == "glm-5.3"
+    assert snapshot["reviewer"]["model"]["name"] == "glm-5.3"
     assert "idea.research_delegate" not in agent.config.tools
     assert "search.fetch_sources" in agent.config.tools
-    assert agent.config.raw["loop"]["max_reflections"] == 4
-    assert agent.config.raw["loop"]["max_model_calls"] is None
-    assert agent.loop_policy.max_model_calls is None
-    assert not agent.config.thinking_enabled
+    assert agent.config.raw["loop"]["max_reflections"] == 1
+    assert agent.config.raw["loop"]["max_model_calls"] == 60
+    assert agent.loop_policy.max_model_calls == 60
+    assert agent.config.thinking_enabled
     assert agent.loop_policy.document_revisions_enabled
     assert agent.loop_policy.deduplicate_evidence_enabled
     assert "code.repo_reader" in agent.required_review_tools(RunRequest(project="pimc", user_request="check"))
@@ -86,14 +86,14 @@ def test_cli_author_configuration_is_frozen_without_changing_independent_review(
     settings = configuration()
     normal = FocusedIdeaAgent()
     bounded = FocusedIdeaAgent(author_settings=settings["research_author"])
-    assert not bounded.config.thinking_enabled
+    assert bounded.config.thinking_enabled
     assert bounded.config.request_timeout_seconds == 360
-    assert not normal.config.thinking_enabled
+    assert normal.config.thinking_enabled
     assert bounded.service_profile_snapshot["reviewer"] == normal.service_profile_snapshot["reviewer"]
     assert bounded.service_profile_snapshot["source_sha256"] != normal.service_profile_snapshot["source_sha256"]
     assert bounded.service_profile_snapshot["review_mode"] == normal.service_profile_snapshot["review_mode"]
-    coding = ResearchCodingAgent("deepseek-v4-flash", settings["coding_loop"], generation=settings["generation"])
-    assert not coding.config.thinking_enabled
+    coding = ResearchCodingAgent("glm-5.3", settings["coding_loop"], generation=settings["generation"])
+    assert coding.config.thinking_enabled
     assert coding.config.request_timeout_seconds == 360
     assert coding.config.raw["loop"]["mode"] == "reflection"
 

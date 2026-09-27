@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import getpass
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -13,7 +14,19 @@ from urllib.parse import urlsplit
 from loguru import logger
 import yaml
 
+from app.harness.llm.model_capabilities import setup_reasoning
+
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def setup_model(provider: str, model_name: str, *, root: Path = ROOT) -> str:
+    if model_name.strip():
+        return model_name.strip()
+    setting = {"zhipu": "api_glm_model", "deepseek": "api_deepseek_model"}.get(provider)
+    if setting is None:
+        raise ValueError("兼容服务需要填写其实际加载的模型名称。")
+    defaults = yaml.safe_load((root / "configs/windows_native.yaml").read_text(encoding="utf-8"))
+    return str(defaults[setting])
 
 
 def validate_endpoint(value: str) -> str:
@@ -28,6 +41,9 @@ def validate_endpoint(value: str) -> str:
 def route_agents(source: dict[str, Any], *, provider: str, model_name: str,
                  endpoint: str, key_env: str) -> dict[str, Any]:
     """Apply explicit routing to every role, including focused author/reviewer."""
+    model_name = setup_model(provider, model_name)
+    endpoint = validate_endpoint(endpoint)
+    thinking, effort = setup_reasoning(provider, model_name)
     result = deepcopy(source)
     for body in result.values():
         if not isinstance(body, dict) or not isinstance(body.get("model"), dict):
@@ -35,16 +51,35 @@ def route_agents(source: dict[str, Any], *, provider: str, model_name: str,
         model = body["model"]
         model.update(provider=provider, api_key_env=key_env, base_url=endpoint,
                      base_url_env="MARS_WINDOWS_API_BASE_URL")
-        if model_name:
-            model["model"] = model_name
-        if provider != "deepseek":
-            model["thinking"] = {"enabled": False}
+        model["model"] = model_name
+        model["thinking"] = {"enabled": thinking}
+        if effort is None:
             model.pop("reasoning_effort", None)
+        else:
+            model["reasoning_effort"] = effort
+        loop = body.get("loop", {})
+        if isinstance(loop, dict):
+            loop["reflection_thinking_enabled"] = thinking
+            loop["reflection_reasoning_effort"] = effort
+            loop["reflection_format_repair_enabled"] = False
         for participant in body.get("debate", {}).get("participants", []):
             if isinstance(participant, dict):
                 participant["provider"] = provider
-                if model_name:
-                    participant["model"] = model_name
+                participant["model"] = model_name
+    return result
+
+
+def route_generation_settings(source: dict[str, Any], *, provider: str, model_name: str) -> dict[str, Any]:
+    """Focused and CLI overrides must not undo the selected model capability."""
+    thinking, effort = setup_reasoning(provider, setup_model(provider, model_name))
+    result = deepcopy(source)
+    for key in ("author", "research_author", "generation"):
+        if isinstance(result.get(key), dict):
+            result[key].update(thinking_enabled=thinking, reasoning_effort=effort)
+    for key in ("loop", "coding_loop"):
+        if isinstance(result.get(key), dict):
+            result[key].update(reflection_thinking_enabled=thinking, reflection_reasoning_effort=effort,
+                               reflection_format_repair_enabled=False)
     return result
 
 
@@ -77,7 +112,7 @@ def save_yaml(root: Path, relative: str, value: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
-def configure_pimc(root: Path, code: Path, data: Path | None = None) -> None:
+def configure_pimc(root: Path, code: Path, data: Path | None = None, *, python_executable: Path | None = None) -> None:
     code = code.expanduser().resolve()
     if not code.is_dir() or not (code / "train_static.py").is_file():
         raise ValueError("PIMC 源码目录必须存在且包含 train_static.py。")
@@ -85,45 +120,51 @@ def configure_pimc(root: Path, code: Path, data: Path | None = None) -> None:
         data = data.expanduser().resolve()
         if not data.is_file():
             raise ValueError("指定的数据文件不存在。")
+    interpreter = (python_executable or Path(sys.executable)).expanduser().resolve()
+    if not interpreter.is_file() or not os.access(interpreter, os.X_OK):
+        raise ValueError("指定的 Python 解释器不存在或不可执行。")
     link = yaml.safe_load((root / "projects/pimc/repo_link.yaml").read_text(encoding="utf-8"))
     link["repo_path"] = code.as_posix()
     save_yaml(root, "projects/pimc/repo_link.yaml", link)
     execution = yaml.safe_load((root / "configs/execution.yaml").read_text(encoding="utf-8"))
     settings = execution["execution"]["paper_static"]
-    settings.update(repo_path=code.as_posix(), python=Path(sys.executable).as_posix())
-    if data is not None:
-        settings["data_path"] = data.as_posix()
+    # A new code selection must never silently inherit an old data capture.
+    settings.update(repo_path=code.as_posix(), python=interpreter.as_posix(),
+                    data_path=data.as_posix() if data is not None else "", enabled=data is not None)
     save_yaml(root, "configs/execution.yaml", execution)
 
 
 def main(root: Path = ROOT) -> None:
-    logger.info("API 配置：1 DeepSeek 官方；2 OpenAI 兼容云端/网关；3 本机兼容服务；0 稍后在前端配置。")
+    logger.info("API 配置：1 智谱 GLM-5.3；2 DeepSeek 官方；3 OpenAI 兼容云端/网关；4 本机兼容服务；0 稍后配置。")
     choice = input("选择 [1]：").strip() or "1"
     if choice == "0":
         logger.info("跳过 API 配置。界面可以启动；真实 Agent 需要随后配置有效模型。")
         return
-    if choice not in {"1", "2", "3"}:
-        raise ValueError("请选择 0、1、2 或 3。")
-    provider, key_env, default_url = {
-        "1": ("deepseek", "DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"),
-        "2": ("custom", "CUSTOM_ENDPOINT_API_KEY", ""),
-        "3": ("local_vllm", "LOCAL_VLLM_API_KEY", "http://127.0.0.1:1234/v1"),
-    }[choice]
+    if choice not in {"1", "2", "3", "4"}:
+        raise ValueError("请选择 0、1、2、3 或 4。")
+    provider = {"1": "zhipu", "2": "deepseek", "3": "custom", "4": "local_vllm"}[choice]
+    providers = yaml.safe_load((root / "configs/models.yaml").read_text(encoding="utf-8"))["providers"]
+    defaults = yaml.safe_load((root / "configs/windows_native.yaml").read_text(encoding="utf-8"))
+    key_env = str(providers[provider]["api_key_env"])
+    default_url = (str(defaults["api_local_endpoint"]) if provider == "local_vllm"
+                   else str(providers[provider].get("base_url", "")))
     endpoint = validate_endpoint(input(f"API Base URL [{default_url}]：").strip() or default_url)
-    model_name = input("模型名称（DeepSeek 可留空保留各 Agent 原模型）：").strip()
-    if choice != "1" and not model_name:
-        raise ValueError("兼容服务需要填写其实际加载的模型名称。")
+    default_model = setup_model(provider, "", root=root) if provider in {"zhipu", "deepseek"} else ""
+    model_name = setup_model(provider, input(f"模型名称 [{default_model}]：").strip(), root=root)
     from app.settings import env_or_local
     key = getpass.getpass("API Key（隐藏输入；留空保留现有 Key，本机无鉴权服务可留空）：").strip()
-    key = key or env_or_local(key_env) or ("EMPTY" if choice == "3" else "")
+    key = key or env_or_local(key_env) or ("EMPTY" if choice == "4" else "")
     if not key:
         raise ValueError("云端 API Key 未配置。")
     agents = yaml.safe_load((root / "configs/agents.yaml").read_text(encoding="utf-8"))
     updated = route_agents(agents, provider=provider, model_name=model_name, endpoint=endpoint, key_env=key_env)
-    endpoint_env = {"deepseek": "DEEPSEEK_BASE_URL", "custom": "CUSTOM_ENDPOINT_URL",
+    endpoint_env = {"zhipu": "ZHIPU_BASE_URL", "deepseek": "DEEPSEEK_BASE_URL", "custom": "CUSTOM_ENDPOINT_URL",
                     "local_vllm": "LOCAL_VLLM_BASE_URL"}[provider]
     update_env(root / ".env.local", {key_env: key, "MARS_WINDOWS_API_BASE_URL": endpoint, endpoint_env: endpoint})
     save_yaml(root, "configs/agents.yaml", updated)
+    for relative in ("configs/idea_focused.yaml", "configs/cli_research.yaml"):
+        profile = yaml.safe_load((root / relative).read_text(encoding="utf-8"))
+        save_yaml(root, relative, route_generation_settings(profile, provider=provider, model_name=model_name))
     # Enable only the project's real, allowlisted literature acquisition tools.
     if input("允许真实论文检索与下载？[Y/n]：").strip().lower() != "n":
         update_env(root / ".env.local", {

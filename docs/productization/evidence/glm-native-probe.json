@@ -1,0 +1,72 @@
+{
+  "actual_response_models": [
+    "glm-5.3"
+  ],
+  "artifact_sha256": "def6c71fb9f57edf1c8745bf067e927220e9560e1e62a33c358e23af7fd6c842",
+  "cost_status": "unknown_no_verified_price_table",
+  "counts": {
+    "action_rounds": 1,
+    "model_requests": 2,
+    "model_responses": 2,
+    "observations": 1,
+    "protocol_repairs": 0,
+    "reflections": 0,
+    "sdk_attempts": 2,
+    "tool_dispatches": 1,
+    "validation_repairs": 0
+  },
+  "finished_at": "2026-09-27T18:40:28.141619+00:00",
+  "full_research_accepted": false,
+  "input_sha256": "f214a173f240d1a203803c6a0dba016f3d53d0d6ca8d6b1bf9688274bed9cc69",
+  "model": "glm-5.3",
+  "model_cost_cny": null,
+  "model_request_limit": 4,
+  "output_token_limit": 2048,
+  "provider": "zhipu",
+  "reflection_accepted": false,
+  "requested_models": [
+    "glm-5.3"
+  ],
+  "response_model_identity_complete": true,
+  "response_model_matches_requested": true,
+  "response_model_statuses": [
+    "consistent"
+  ],
+  "schema_id": "glm_native_probe_receipt.v1",
+  "scope": "code.repo_reader/native_observation_loop",
+  "source_fingerprints": {
+    "backend/app/harness/agent_loop/executor.py": "36b905a15974a6af69810f194b75fa13b406dcc3835f56fb0f98daec5aabe0d0",
+    "backend/app/harness/llm/accounting.py": "c5e30d5405dbf1722763a987f59c969a5bb5312306cad49dc1d450917822f9df",
+    "backend/app/harness/llm/model_capabilities.py": "16b12757dd19def2cbde1893da91c50a2e254290e503ef2581b9185a9b1e6349",
+    "backend/app/harness/llm/openai_provider.py": "63f080943cf55b11abeb40efd456796e4d7c3c08ff9bf084b6791ecd09305551",
+    "backend/app/harness/llm/provider_base.py": "d3c034878132498c420571923fd9afd6738abb4f9060548ab736b4a3c1d419f0",
+    "configs/agents.yaml": "0c6ee65123bd97e55ac6dc70540ecee59611e9bc227526784439caca8df231d2",
+    "configs/resources.yaml": "c86052ee528fb5bf76c552fc3d89d1a85d6de911264e543a501584ff2517cc9b",
+    "scripts/verify_glm_native.py": "a4feb2b21efb8548df9126e680e996699999d5c00111a10bec273bb7dc2f1362"
+  },
+  "started_at": "2026-09-27T18:40:21.918797+00:00",
+  "status": "passed",
+  "transport_status": "passed",
+  "usage": {
+    "completion_tokens": 220,
+    "prompt_tokens": 1676,
+    "total_tokens": 1896
+  },
+  "usage_complete": true,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.13.9"
+  },
+  "evidence_location": "runs/glm-native-productization-20260928-b (local ignored runtime directory)",
+  "model_identity_boundary": "Provider-reported SDK model field; not independent weight attestation",
+  "raw_evidence_sha256": {
+    "result.md": "def6c71fb9f57edf1c8745bf067e927220e9560e1e62a33c358e23af7fd6c842",
+    "receipt.json": "1be42a87ded8692f241d9080bf9347615d4f22a3981b1d36c1cad8488487a967",
+    "trace/checkpoint.json": "108c9ef994047109eb8b0dba666081054e75577ad4a9341a260d3f5f86b21e1d",
+    "trace/events.jsonl": "77fc927a06887bbd9d67bc8e03578abf266abe6c12a971b1f3c36037829e7864",
+    "trace/facts.json": "b374f1e1f04ac1a89a6a0c5542dee9d2e5bde5b6fd5514b7dea5c74b6b1e9470",
+    "trace/tools/0001.json": "ca3c0d9ca802d2019cbc6d1408d56d2a3527ed5f4e48a8b90a47dbc297b815c2",
+    "input/baseline.py": "f214a173f240d1a203803c6a0dba016f3d53d0d6ca8d6b1bf9688274bed9cc69"
+  }
+}

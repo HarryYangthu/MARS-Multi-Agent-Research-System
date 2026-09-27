@@ -12,10 +12,19 @@ from loguru import logger
 import yaml
 
 from app.harness.llm.accounting import guarded_complete
+from app.harness.llm.model_capabilities import setup_reasoning
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.openai_provider import public_error_details
-from app.harness.llm.provider_base import Message
+from app.harness.llm.provider_base import LLMConfig, Message
 from app.settings import repo_root
+
+
+def probe_config(config: LLMConfig) -> LLMConfig:
+    defaults = yaml.safe_load((repo_root() / "configs/windows_native.yaml").read_text(encoding="utf-8"))
+    thinking, effort = setup_reasoning(config.provider, config.model)
+    return replace(config, max_tokens=int(defaults["api_probe_max_tokens"]), max_retries=0,
+                   thinking_enabled=thinking, reasoning_effort=effort,
+                   request_timeout_seconds=float(defaults["api_probe_timeout_seconds"]))
 
 
 async def check(name: str, root: Path) -> dict[str, Any]:
@@ -24,8 +33,7 @@ async def check(name: str, root: Path) -> dict[str, Any]:
     try:
         provider, config = select_provider(get_agent_config(name))
         result.update(provider=config.provider, model=config.model)
-        config = replace(config, max_tokens=32, max_retries=0, thinking_enabled=False,
-                         reasoning_effort=None, request_timeout_seconds=30)
+        config = probe_config(config)
         response = await guarded_complete(provider, [Message("user", "Reply READY only.")], config,
                                           run_root=root, correlation={"purpose": "windows_api_check", "agent": name})
         result.update(ok=bool(response.text.strip()), visible_response=bool(response.text.strip()))

@@ -165,7 +165,7 @@ def test_actual_pdf_offsets_merge_without_claiming_a_tail_is_a_whole_page(tmp_pa
 
 def test_performance_gate_rejects_relaxation_historical_baseline_and_test_selection() -> None:
     gate = {"metric": "RES", "direction": "minimize", "max_degradation": 0.0, "unit": "dB", "baseline": "matched_run"}
-    requirements = IdeaRequirements(performance_requirement=gate).model_dump(exclude_none=True)
+    requirements = IdeaRequirements.model_validate({"performance_requirement": gate}).model_dump(exclude_none=True)
     rule = {**gate, "selection_split": "validation", "report_split": "held_out_test",
             "status": "pending_experiment", "acceptance_expression": "candidate_RES <= baseline_RES"}
     assert not performance_errors({"decision_rule": {"performance": rule}}, requirements)
@@ -173,7 +173,7 @@ def test_performance_gate_rejects_relaxation_historical_baseline_and_test_select
                        ("selection_split", "held_out_test"), ("status", "passed")]:
         assert performance_errors({"decision_rule": {"performance": {**rule, key: value}}}, requirements)
     with pytest.raises(ValidationError):
-        IdeaRequirements(performance_requirement={**gate, "max_degradation": float("inf")})
-    final_gate = IdeaRequirements(performance_requirement={**gate, "acceptance_split": "held_out_test"}).model_dump(exclude_none=True)
+        IdeaRequirements.model_validate({"performance_requirement": {**gate, "max_degradation": float("inf")}})
+    final_gate = IdeaRequirements.model_validate({"performance_requirement": {**gate, "acceptance_split": "held_out_test"}}).model_dump(exclude_none=True)
     assert performance_errors({"decision_rule": {"performance": rule}}, final_gate)
     assert not performance_errors({"decision_rule": {"performance": {**rule, "acceptance_split": "held_out_test"}}}, final_gate)

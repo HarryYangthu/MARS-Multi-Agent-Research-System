@@ -29,7 +29,9 @@ def test_registry_fork_preserves_real_tools_and_gates_without_sharing_maps() -> 
 def test_research_config_and_explicit_tool_permissions() -> None:
     config = get_agent_config("idea_research")
     assert config.output_schema == "research_report.v1"
-    assert not config.thinking_enabled
+    assert config.thinking_enabled is True
+    assert config.model_provider == "zhipu" and config.model_name == "glm-5.3"
+    assert config.reasoning_effort == "low"
     assert TOOL not in config.tools
     for name in config.tools:
         assert "idea_research" in tool_config(name).allowed_agents
