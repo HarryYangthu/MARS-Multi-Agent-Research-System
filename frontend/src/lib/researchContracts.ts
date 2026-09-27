@@ -28,9 +28,15 @@ export type FrozenResearch = {
 };
 export type ResearchCreated = {
   run_id: string; project: string; task: string; task_sha256: string;
-  status: "created"; research_started: false;
+  status: "created"; research_started: false; request_id: string | null; idempotent: boolean;
   execution_admission: { ready: boolean; enforced_budget_fields: string[]; blockers: { code: string; message: string; fields: string[] }[] };
 };
+
+export type ResearchLookup = {
+  request_id: string; task_sha256: string; status: "pending" | "created" | "unknown" | "rejected"; admitted: boolean | null; run_id: string | null;
+  research_started: false; run: ResearchCreated | null; reason: string | null;
+};
+export function researchBackendOrigin(): string { return new URL(BASE || window.location.origin, window.location.origin).origin; }
 
 function localizeIssue(issue: ResearchIssue): ResearchIssue {
   const labels: Record<string, string> = {
@@ -51,7 +57,7 @@ function localizeIssue(issue: ResearchIssue): ResearchIssue {
 }
 
 export class ResearchApiError extends Error {
-  constructor(readonly status: number, readonly issues: ResearchIssue[]) {
+  constructor(readonly status: number, readonly issues: ResearchIssue[], readonly code: string | null = null) {
     super(issues.map((issue) => issue.message).join("；") || `请求失败（HTTP ${status}）`);
   }
 }
@@ -70,7 +76,7 @@ function issuesFrom(value: unknown): ResearchIssue[] {
     return [localizeIssue({ field, code: typeof item.code === "string" ? item.code : "invalid_field", message })];
   });
 }
-async function request(path: string, body: unknown | undefined, signal?: AbortSignal): Promise<unknown> {
+async function request(path: string, body: unknown | undefined, signal?: AbortSignal, acceptUnknown = false): Promise<unknown> {
   const response = await boundedFetch(`${BASE}/api/research-contracts${path}`, {
     method: body === undefined ? "GET" : "POST", signal,
     ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
@@ -79,9 +85,12 @@ async function request(path: string, body: unknown | undefined, signal?: AbortSi
   try { value = await response.json(); } catch (cause: unknown) { if (response.ok) throw cause; value = null; }
   signal?.throwIfAborted();
   if (!response.ok) {
+    const detail = record(value) && record(value.detail) ? value.detail : null;
+    if (acceptUnknown && ((response.status === 409 && detail?.status === "unknown") || (response.status === 422 && detail?.status === "rejected"))) return detail;
+    const code = typeof detail?.code === "string" ? detail.code : null;
     const issues = issuesFrom(value);
     throw new ResearchApiError(response.status, issues.length ? issues : [{ field: "", code: "request_failed",
-      message: response.status === 409 ? "声明文件已变化或计划已失效，请重新预检。" : response.status === 401 || response.status === 403 ? "当前连接未获授权，请检查本地服务会话。" : `后端未完成请求（HTTP ${response.status}）。` }]);
+      message: response.status === 409 ? "声明文件已变化或计划已失效，请重新预检。" : response.status === 401 || response.status === 403 ? "当前连接未获授权，请检查本地服务会话。" : `后端未完成请求（HTTP ${response.status}）。` }], code);
   }
   if (!record(value)) throw new Error("服务回执不完整，请核对后端记录。");
   return value;
@@ -102,16 +111,46 @@ export async function prepareResearch(body: { project: ResearchProject; goal: st
   if (!record(value) || typeof value.task_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.task_sha256) || !record(value.task) || !Array.isArray(value.task.input_fingerprints)) throw new Error("冻结回执不完整，尚未创建任务。");
   return value as FrozenResearch;
 }
-export async function saveResearch(name: string, contract: unknown, signal?: AbortSignal): Promise<ResearchCreated> {
-  const value = await request("/runs", { name, contract }, signal);
-  if (!record(value) || typeof value.run_id !== "string" || !value.run_id || typeof value.task !== "string" || typeof value.task_sha256 !== "string"
+export function parseResearchCreated(value: unknown, requestId: string, fingerprint: string): ResearchCreated {
+  if (!record(value) || typeof value.run_id !== "string" || !value.run_id || typeof value.project !== "string" || typeof value.task !== "string"
+      || value.task_sha256 !== fingerprint || value.request_id !== requestId || value.idempotent !== true
       || value.research_started !== false || value.status !== "created" || !record(value.execution_admission)
-      || typeof value.execution_admission.ready !== "boolean" || !Array.isArray(value.execution_admission.blockers)
-      || !value.execution_admission.blockers.every((item: unknown) => record(item) && typeof item.code === "string" && typeof item.message === "string" && Array.isArray(item.fields))) throw new Error("保存回执不完整，请到任务列表核对是否已保存。");
+      || typeof value.execution_admission.ready !== "boolean" || !Array.isArray(value.execution_admission.enforced_budget_fields)
+      || !value.execution_admission.enforced_budget_fields.every((item: unknown) => typeof item === "string")
+      || !Array.isArray(value.execution_admission.blockers)
+      || !value.execution_admission.blockers.every((item: unknown) => record(item) && typeof item.code === "string" && typeof item.message === "string" && Array.isArray(item.fields) && item.fields.every((field: unknown) => typeof field === "string"))) throw new Error("保存回执与原请求不匹配，请保留请求编号并核对。");
   return value as ResearchCreated;
 }
-export function knownResearchRejection(error: unknown): boolean {
-  return error instanceof ResearchApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
+export function parseResearchLookup(value: unknown, requestId: string, fingerprint: string): ResearchLookup {
+  if (!record(value) || value.request_id !== requestId || value.task_sha256 !== fingerprint || value.research_started !== false
+      || !["pending", "created", "unknown", "rejected"].includes(String(value.status))
+      || !(value.run_id === null || typeof value.run_id === "string") || !(value.reason === null || typeof value.reason === "string")) throw new Error("保存核对回执不完整，保留原请求供再次核对。");
+  if (value.admitted !== (value.status === "unknown" ? null : value.status !== "rejected")
+      || (value.status === "rejected" && (value.run_id !== null || value.run !== null))) throw new Error("保存核对回执缺少确定的准入状态，保留原请求。");
+  const run = value.status === "created" ? parseResearchCreated(value.run, requestId, fingerprint) : null;
+  if ((run && value.run_id !== run.run_id) || (!run && value.run !== null)) throw new Error("保存核对回执的任务标识不一致，保留原请求。");
+  return { request_id: requestId, task_sha256: fingerprint, status: value.status as ResearchLookup["status"], admitted: value.admitted as boolean | null, run_id: value.run_id as string | null,
+    research_started: false, run, reason: value.reason as string | null };
+}
+export async function saveResearch(name: string, contract: unknown, requestId: string, fingerprint: string, signal?: AbortSignal): Promise<ResearchLookup> {
+  const value = await request("/runs", { name, contract, request_id: requestId }, signal, true);
+  if (record(value) && value.status === "created" && "execution_admission" in value) {
+    const run = parseResearchCreated(value, requestId, fingerprint);
+    return { request_id: requestId, task_sha256: fingerprint, status: "created", admitted: true, run_id: run.run_id, research_started: false, run, reason: null };
+  }
+  return parseResearchLookup(value, requestId, fingerprint);
+}
+export async function lookupResearchSave(requestId: string, fingerprint: string, signal?: AbortSignal): Promise<ResearchLookup> {
+  const value = await request(`/requests/${encodeURIComponent(requestId)}`, undefined, signal);
+  return parseResearchLookup(value, requestId, fingerprint);
+}
+export function researchSaveError(error: unknown): string {
+  if (error instanceof ResearchApiError) {
+    if (error.code === "creation_request_conflict") return "此请求编号已绑定另一份保存内容。已保留原请求，请核对其任务；不会换编号重发。";
+    if (error.code === "creation_request_not_found") return "此后端尚未找到该请求。可能未受理或服务记录不可用；继续保留原编号，不会自动重发。";
+    if (error.status === 404) return "当前后端未找到请求或不支持核对接口。保留原请求，不会自动重发。";
+  }
+  return `${researchRequestError(error)} 原请求编号已保留；只会核对，不会重发保存。`;
 }
 export function researchRequestError(error: unknown): string {
   if (error instanceof DOMException && error.name === "TimeoutError") return "等待后端超时，请检查连接；没有自动重试。";

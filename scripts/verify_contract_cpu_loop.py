@@ -45,8 +45,24 @@ from app.storage.run_store import RunStore
 from scripts.diagnostics.contract_cpu_fixture import validate_features
 
 
+def source_fingerprints() -> dict[str, str]:
+    paths = (
+        "scripts/verify_contract_cpu_loop.py", "scripts/diagnostics/contract_cpu_fixture.py",
+        "backend/app/harness/tools/research_accounting.py", "backend/app/harness/tools/registry.py",
+        "backend/app/bridge/research_job_service.py", "backend/app/execution/local/runner.py",
+        "backend/app/execution/local/worker.py", "backend/app/harness/runtime/research_budget_ledger.py",
+        "backend/app/harness/llm/research_accounting.py", "backend/app/harness/agent_loop/executor.py",
+        "backend/app/bridge/results_service.py", "backend/app/bridge/results_export.py",
+        "backend/app/bridge/research_results_usage.py", "backend/app/bridge/research_run_service.py",
+        "backend/app/bridge/orchestrator.py", "configs/agents.yaml", "configs/research_jobs.yaml",
+        "configs/research_defaults.yaml")
+    return {name: hashlib.sha256((repo_root() / name).read_bytes()).hexdigest() for name in paths}
+
+
 async def verify(output: Path) -> dict[str, Any]:
+    sources = source_fingerprints()
     output.mkdir(parents=True, exist_ok=False)
+    atomic_write_json(output / "started_source_fingerprints.json", sources)
     source = output / "source"
     source.mkdir()
     baseline = "def features(x):\n    return (1.0, x)\n"
@@ -164,31 +180,35 @@ async def verify(output: Path) -> dict[str, Any]:
     results = collect_run_results(run)
     if len(results["experiments"]) != 6 or any(item["verification"] != "verified_local_receipt" for item in results["experiments"]):
         raise ValueError("Results did not verify all six actual jobs")
+    resources = results["resources"]
+    if (resources.get("authority") != "sqlite" or resources.get("status") != "recorded"
+            or resources.get("usage_complete") is not True or resources.get("cost") is not None):
+        raise ValueError("Results did not verify the actual contract model usage")
     exported = create_results_export(run)
     encoded = read_results_export(run, exported["export_id"])
     (output / "results.zip").write_bytes(encoded)
     snapshot = ledger.snapshot()
     if snapshot.unknown_reservations or snapshot.active_jobs or snapshot.used["implemented_candidates"] != 1:
         raise ValueError("Shared budget did not settle all admitted operations")
+    if resources["observed_sdk_attempts"] != snapshot.used["model_requests"]:
+        raise ValueError("Results and shared SDK accounting disagree")
     if (source / "candidate.py").read_text() != baseline or (source / "baseline.py").read_text() != baseline:
         raise ValueError("Original source changed")
     admission = research_execution_admission(run)
     assert admission is not None
+    if source_fingerprints() != sources:
+        raise ValueError("Diagnostic implementation changed while the real run was active")
     receipt = {"schema": "verification.contract_cpu_loop.v1", "status": "passed", "run_id": run.run_id,
         "task_sha256": frozen.task_sha256, "loop_counts": loop.counts,
         "actual_model": explanation.model, "response_model_status": explanation.raw.get("response_model_status"),
         "measurements": measured, "budget": snapshot.model_dump(mode="json"),
         "export_sha256": hashlib.sha256(encoded).hexdigest(), "export_bytes": len(encoded),
         "candidate_sha256": hashlib.sha256((project_scope.candidate_root / "candidate.py").read_bytes()).hexdigest(),
+        "results_resources": resources,
+        "legacy_model_ledger_created": (run.root / "resources/model_budget.v1.json").exists(),
         "original_source_unchanged": True, "research_execution_ready": admission.ready,
         "full_research_accepted": False, "os_execution_sandbox_certified": False,
-        "source_fingerprints": {name: hashlib.sha256((repo_root() / name).read_bytes()).hexdigest() for name in (
-            "scripts/verify_contract_cpu_loop.py", "scripts/diagnostics/contract_cpu_fixture.py",
-            "backend/app/harness/tools/research_accounting.py", "backend/app/harness/tools/registry.py",
-            "backend/app/bridge/research_job_service.py", "backend/app/execution/local/runner.py",
-            "backend/app/execution/local/worker.py", "backend/app/harness/runtime/research_budget_ledger.py",
-            "backend/app/harness/llm/research_accounting.py", "backend/app/harness/agent_loop/executor.py",
-            "backend/app/bridge/results_service.py", "backend/app/bridge/results_export.py")}}
+        "source_fingerprints": sources, "selected_source_files_unchanged_during_run": True}
     atomic_write_json(output / "receipt.json", receipt)
     return receipt
 

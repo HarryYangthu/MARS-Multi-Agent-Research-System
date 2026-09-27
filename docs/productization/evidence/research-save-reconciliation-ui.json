@@ -1,0 +1,115 @@
+{
+  "schema_id": "research_save_reconciliation_ui.v1",
+  "observed_at_utc": "2026-09-27T21:00:57.932514+00:00",
+  "claim": "Real browser POST timeout, durable creation, backend restart, and GET reconciliation to the same pending run; no research execution",
+  "source_sha256": {
+    "frontend/src/components/NewResearchWizard.tsx": "7d6d9258a21650db9d4b44de6a5b91c21779bbc1084b2d24ac4396c4e055118f",
+    "frontend/src/components/FrozenResearchImport.tsx": "1e9352723e77920195fb9d26f7baad7b5f05b490ebd008f515f7e86be42204c7",
+    "frontend/src/components/ResearchSaveRecovery.tsx": "bf461a326ad43c0eb8e26de4d2aee44fbbfac0720d8b7327ecef7b7128dfb960",
+    "frontend/src/lib/researchContracts.ts": "bc8b0f7f62057cb0808c38e819acf26bf093b305c14fe8e80a273e00dc72f673",
+    "frontend/src/lib/researchSubmission.ts": "52804d7f9ea2bcc274e80abd4d270a163f14adc8c4c349ab43741094c5353c25",
+    "frontend/src/lib/useResearchSubmission.ts": "5f053c20b9f7f3fa543efe95d0fa2cece7c42d5b4bfa86dc27b15a543b31b0a7",
+    "frontend/scripts/research-submission-smoke.ts": "0b93f62f35ed8b3bd15d093811c44a8228e917db101f6b70a4c0e39dbb07e57e"
+  },
+  "backend_source_sha256_at_restart_test": {
+    "backend/app/api/research_contracts.py": "b795127bf747e71e016bda7f02e6b62569dfc77cb1602bf278636a93ec1e559e",
+    "backend/app/bridge/research_run_service.py": "790d8d246beff94ce3342382cdc4a8c1423e5117f73d31f8a6b011db25653d01",
+    "backend/app/storage/research_creation_store.py": "47b99b2ef16123f7b41eeac7b3118df3143046af672ce2e51bc3d4c2dde96839"
+  },
+  "backend_source_boundary": "Captured before follow-up creation initialization lock guard hardening; API semantics unchanged but this is the exact restart test snapshot",
+  "build_id": "PbeDgd66I0IkpDFeGZhzf",
+  "request_identity": {
+    "schema_id": "research_save_request.v1",
+    "origin": "http://127.0.0.1:3012",
+    "request_id": "c1c544b2-ec22-48db-99cd-f64a9511bfda",
+    "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13"
+  },
+  "same_run_id": "2026-09-27T2057_ui",
+  "request_post_count_in_browser_trace": 1,
+  "lookup_get_count_after_reload": 1,
+  "start_request_count": 0,
+  "matching_named_runs_observed_after_restart": 1,
+  "backend_pids_before_after_restart": [
+    38499,
+    40030
+  ],
+  "storage_fields_observed": [
+    "origin",
+    "request_id",
+    "schema_id",
+    "task_sha256"
+  ],
+  "created_after_restart": {
+    "status": "created",
+    "admitted": true,
+    "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13",
+    "idempotent": true,
+    "research_started": false
+  },
+  "pending_storage_removed_only_after_verified_created": true,
+  "real_stale_source_rejection": {
+    "request_id": "59307c1d-da17-47aa-a07b-22a2424a5513",
+    "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13",
+    "status": "rejected",
+    "admitted": false,
+    "run_id": null,
+    "research_started": false,
+    "run": null,
+    "reason": "creation_preflight_rejected"
+  },
+  "rejected_named_run_count": 0,
+  "rejected_reset_ui": {
+    "pending": [],
+    "fileValue": "",
+    "canSave": false
+  },
+  "additional_metadata_cases": {
+    "unsubmitted_local_identity_real_server_404": {
+      "method": "Initialized only browser session identity for an ID never posted; actual backend returned 404; no service response substitution",
+      "lookup_get_count": 1,
+      "post_count": 0,
+      "lock_retained": true,
+      "reset_button_present": false
+    },
+    "legacy_fingerprint": {
+      "method": "Initialized the historical fingerprint-only browser key; no service response substitution",
+      "lookup_get_count": 0,
+      "post_count": 0,
+      "lock_retained": true
+    }
+  },
+  "command_execution_sentinel_exists": false,
+  "screenshots": {
+    "01-real-save-timeout.png": "afa96667d7a208a387317b1ede77e893f40fbf9820f9a6d551a0870d7aa93033",
+    "02-after-backend-restart-reconciled-1280.png": "5db942555279c0e01490504f6836dd710889baf92c53279fa88020a35b89e536",
+    "03-real-stale-rejected.png": "e005505fb147b2f4b95275c3d449f6ee5039c49d2a04a692b68c8dc25326a304",
+    "04-real-lookup-404.png": "4f535d5e872d9eaf19f44d270620934ec3755148566b5f43181ab9dd341dc42b",
+    "05-legacy-marker-unknown.png": "2da2b3e3a31631e74d8c30eee3981965e3799e1c70f92286e000138c84c32bb9"
+  },
+  "network_evidence": {
+    "requests-after-restart.txt": "3cc83af04fb79d4a5d9783efd8af6861ece29801e6091dd6165a5470c60314eb",
+    "requests-before-restart.txt": "0bfeaa3ee755343ea1fdad283d1f7f5ccbf3bd7f0ecdd58b47c0c182f9d63334",
+    "requests-legacy.txt": "542b6e00f10626c162d11f87b411fbc11d9bf218b2684a8774abe330cfe94f9a",
+    "requests-notfound.txt": "5014054b2fc2c22923fb70681cc26fdf427208e15f59576590ae8260cfe74603",
+    "requests-rejected.txt": "d984941111759ecc7bb554da954c6af57067d8bd04f22f939ed66f6367735e2d"
+  },
+  "validation": [
+    "tsc --noEmit --incremental false passed",
+    "Targeted ESLint passed",
+    "Pure request identity and response parser checks passed",
+    "Next production build passed with preexisting warnings in other files",
+    "Actual timeout + backend restart + same run recovery passed",
+    "Real stale source pre-allocation rejection and explicit reset passed"
+  ],
+  "limitations": [
+    "Same request_id is the backend idempotency boundary; different request IDs may create different tasks",
+    "Browser request identity is per sessionStorage tab, not cross-client request discovery",
+    "202 pending and null-fingerprint unknown are parser-tested; no fabricated UI success response",
+    "No research start, model call, experiment or full G acceptance is claimed"
+  ],
+  "attempts": [
+    "Intermediate builds were superseded after parent review required true idempotent plus lookup fingerprint validation",
+    "Independent mounted recovery hooks were replaced by one shared page hook before final runtime test",
+    "No backend response or model/tool success was substituted"
+  ]
+}

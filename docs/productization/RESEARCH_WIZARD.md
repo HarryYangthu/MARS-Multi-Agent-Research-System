@@ -26,9 +26,25 @@
 
 所有请求使用 `configs/frontend.yaml` 的等待上限，无自动 mutation 重试。活动请求由 AbortController 取消等待，组件卸载或字段版本变化后不回写旧响应。按钮使用同步 ref 防止同一组件的重复点击。
 
-保存请求发出前，在 sessionStorage 中记录不含路径或用户正文的计划指纹。只有有效成功回执或明确的 4xx 拒绝（不含 408）才清除此标记；超时、断线、5xx 或坏回执保留“结果未知”，页面禁用再次保存并链接同一后端的任务列表。没有“清锁后重试”的入口。
+保存请求发出前，按浏览器实际 API origin 在 sessionStorage 中保存 `{schema_id, origin, request_id, task_sha256}`，不含路径、正文、名称或凭据。走本地代理时 origin 指代理入口，不表示已识别其背后的物理进程。存储不可用时在首次 POST 前阻断。
 
-**该标记不是后端幂等保证**：它只在同一浏览器标签页生命周期内生效；关闭标签页、禁用存储、另一标签页或另一个客户端不受它保护。持久请求身份、按请求核对和安全恢复还需后端实现，当前不得声称完成了保存恢复。客户端 abort 不能撤销服务端已受理的保存。
+首次显式保存带上随机请求编号。POST 超时、202、unknown、冲突、其他错误均保留原请求，UI 不重发 POST、不自动换编号。页面重开时最多自动只读核对一次，后续由“核对原请求”按钮发送 `GET /api/research-contracts/requests/{request_id}`，没有循环轮询。回执必须匹配请求编号和合同指纹；created 还校验原 run ID、`research_started:false` 与幂等标记，然后展示同一原任务。只有 `rejected + admitted:false + run/run_id:null` 的匹配回执，才允许用户显式修改并重新预检；这一回执表示后端在分配 run 前已明确拒绝。404、409 冲突、指纹不符或无证据均不能清锁。
+
+旧版仅指纹标记缺少请求编号，仍显示未知并禁止自动恢复/重发。已确认创建或明确拒绝的标记按原身份检查后才能移除。
+
+**客户端存储边界**：请求编号只随同一标签页会话保留；关闭标签页、存储被清理、另一客户端使用新编号不构成同一请求。后端仅对相同 request_id 实施持久幂等，不保证不同编号下内容相同的请求只创建一次。客户端 abort 不能撤销服务端已受理的保存；不确定时应核对原编号，不能通过新开标签页重复提交。
+
+幂等核对 UI 的真实重启验收独立记录在 [research-save-reconciliation-ui.json](evidence/research-save-reconciliation-ui.json)，不会把下面首版缺少 request_id 的故障测试误当成恢复通过。
+
+### 幂等核对增量的真实验收
+
+- 真实浏览器首次显式 POST 在本次持有的 Next 进程暂停期间超时；保留原请求编号。恢复 Next 后，后端真实创建 `2026-09-27T2057_ui`。随后真实重启同一 runtime 的后端，刷新页面只发送一次 GET，恢复到同一任务；整条浏览器记录为 **1 POST、1 核对 GET、0 start**，按测试名称查询仍恰好一条记录。
+- 实际改变临时项目基线文件使冻结指纹失效：后端返回匹配请求/指纹的 rejected，未分配任何 run；只有显式点击“修改后重新预检”才清除本地标记和原文件选择。临时基线已恢复，未执行研究命令。
+- 本地预置一个从未发送的请求标记后，真实后端 GET 返回 404，界面保留锁定且无新 POST。旧版仅指纹标记没有自动 GET/POST、没有清锁入口。这两项是浏览器元数据边界检查，没有替换服务响应。
+- 向导和高级导入共享同一保存状态，避免展开高级区域时重复发起自动核对。自动核对每页面挂载最多一次；手动核对按钮复用相同只读接口，没有轮询或 POST 重试。
+- 类型检查、定向 ESLint、`scripts/research-submission-smoke.ts` 纯身份/回执解析检查、生产构建通过。纯检查覆盖不同 origin、坏/多余存储字段、错/缺合同指纹、非幂等 created、错误 run ID，以及不符合 admitted 边界的回执。202 pending 与首次预检尚无指纹的 unknown 只做纯解析边界检查，未用假成功服务制造 UI 验收。
+
+本次截图已查看；只证明计划保存/核对，不证明研究执行、预算完成、跨客户端请求发现或 G 外部用户验收。
 
 ## 实际验收
 
@@ -56,6 +72,8 @@
 ./node_modules/.bin/eslint src/components/NewResearchWizard.tsx src/components/FrozenResearchImport.tsx src/components/LegacyResearchForm.tsx src/components/FolderProjectDialog.tsx src/app/runs/new/page.tsx src/lib/researchWizard.ts src/lib/researchContracts.ts src/lib/researchSubmission.ts
 ./node_modules/.bin/tsc --outDir .tmp/research-wizard --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/research-wizard-smoke.ts src/lib/researchWizard.ts src/lib/researchContracts.ts src/lib/clientPolicy.ts
 node .tmp/research-wizard/scripts/research-wizard-smoke.js
+./node_modules/.bin/tsc --outDir .tmp/research-submission --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/research-submission-smoke.ts src/lib/researchSubmission.ts src/lib/researchContracts.ts src/lib/clientPolicy.ts
+node .tmp/research-submission/scripts/research-submission-smoke.js
 BACKEND_URL=http://127.0.0.1:8012 npm run build
 ```
 
@@ -63,4 +81,4 @@ BACKEND_URL=http://127.0.0.1:8012 npm run build
 
 初次构建未指定 API rewrite，已在实际 UI 验收前重构建；初次缺失文件文案为英文，已本地化并在最终构建复验。审查发现的重复错误阈值缺口及结果未知手动清锁已修复，不用较早截图替代最终源码验收。
 
-仍待独立验收：五名非开发目标用户的接入测试、高分屏矩阵、磁盘不足与 SSH 断连体验、完整项目配置复用、持久保存核对/幂等恢复，以及准入解除后的真实研究/停止/恢复闭环。
+仍待独立验收：五名非开发目标用户的接入测试、高分屏矩阵、磁盘不足与 SSH 断连体验、完整项目配置复用、跨标签页的待核对请求发现，以及准入解除后的真实研究/停止/恢复闭环。

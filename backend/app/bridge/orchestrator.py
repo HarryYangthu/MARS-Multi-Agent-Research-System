@@ -112,7 +112,8 @@ class Orchestrator:
 
     # --------------------------------------------------------------- create
 
-    def create_session(self, request: RunRequest, *, research_contract: FrozenResearchTask | None = None) -> RunSession:
+    def create_session(self, request: RunRequest, *, research_contract: FrozenResearchTask | None = None,
+                       on_run_allocated: Callable[[RunHandle], None] | None = None) -> RunSession:
         from app.bridge.research_context import archive_research_context
         from app.bridge.idea_input_context import validate_idea_extra
 
@@ -154,6 +155,8 @@ class Orchestrator:
             user_request=request.user_request,
             data_source=request.data_source,
         )
+        if on_run_allocated is not None:
+            on_run_allocated(run)
         run.meta["evaluation_policy"] = evaluation_policy
         run.meta["selected_skills_by_agent"] = skills
         atomic_json(run.root / "run_meta.json", run.meta)

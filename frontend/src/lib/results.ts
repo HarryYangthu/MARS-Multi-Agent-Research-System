@@ -13,7 +13,14 @@ export type RunResults = {
   experiments: { experiment_id: string; job_id: string | null; role: Role; status: string; verification: Verification; duration_seconds: number | null; seed: number | null; source_id: string | null }[];
   metrics: { experiment_id: string; job_id: string | null; name: string; value: number | null; unit: string | null; direction: "minimize" | "maximize" | null; role: Role; verification: Verification; source_id: string | null }[];
   curves: { experiment_id: string; job_id: string; metric: string; points: number[]; source_id: string }[];
-  resources: { status: "missing" | "recorded" | "invalid"; model_requests: number | null; logical_records: number | null; observed_sdk_attempts: number | null; charged_sdk_attempts: number | null; reserved_sdk_attempts: number | null; calls_with_unknown_attempt_count: number | null; observed_attempts_complete: boolean | null; input_tokens: number | null; billed_output_tokens: number | null; cost: number | null; currency: string | null; usage_complete: boolean | null };
+  resources: { authority?: "sqlite"; request_count_scope?: "logical_records";
+    charged_input_tokens?: number | null; charged_billed_output_tokens?: number | null;
+    charged_quantities?: Record<string, number | null>; limits?: Record<string, number>;
+    verified_input_tokens_subtotal?: number; verified_billed_output_tokens_subtotal?: number;
+    verified_usage_records?: number; unverified_usage_records?: number; verified_sdk_attempts_subtotal?: number;
+    research_activity_seconds?: number | null; research_activity_remaining_seconds?: number | null;
+    clock_uncertain?: boolean | null; unknown_reservations?: number; open_activity_reservations?: number;
+    status: "missing" | "recorded" | "invalid"; model_requests: number | null; logical_records: number | null; observed_sdk_attempts: number | null; charged_sdk_attempts: number | null; reserved_sdk_attempts: number | null; calls_with_unknown_attempt_count: number | null; observed_attempts_complete: boolean | null; input_tokens: number | null; billed_output_tokens: number | null; cost: number | null; currency: string | null; usage_complete: boolean | null };
   conclusions: { facts: string[]; hypotheses: string[]; interpretations: string[] };
   limitations: string[];
   sources: { id: string; kind: string; sha256: string; bytes: number }[];

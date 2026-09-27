@@ -20,8 +20,8 @@
 | D | 进行中 | StateJournal 原子状态/outbox与冻结预算扩展共用SQLite；模型、五个文件工具、候选实现额度与可信本地 CPU 作业已绑定同一账本。独立截止、并发准入、崩溃后未知保留和损坏输入下停止已验证；Reader、提案/辩论/迭代及完整 owner 暂停恢复仍待完成 |
 | E | 进行中 | 下游默认提示和模板已去领域假设及伪成功示例，复用项目知识快照；真实研究到实验的统一闭环仍未完成 |
 | F | 进行中 | AsyncSSH 密码/密钥连接层、严格主机校验与 SFTP 路径约束；真实本机 sshd 密钥/加密密钥/拒绝路径已测。密码成功、Linux GPU 和两种远端代码模式待验收 |
-| G | 进行中 | 四项主导航、项目页、任务/结果目录及四步通用新建向导已实现；真实文件预检、冻结、保存、字段错误、断网、超时和离页已在生产构建验证。完整项目配置复用、持久保存核对、暂停恢复和外部用户测试待完成 |
-| H | 进行中 | 真实回执核验、通用指标/曲线/描述统计/未知费用；HTML/MD/JSON/CSV/SVG 离线 ZIP 已校验哈希。仅可审阅，独立复跑、patch/论文集成和产品 PDF 导出待完成 |
+| G | 进行中 | 四项主导航、四步通用向导及持久请求核对已实现；真实保存超时、后端重启、一次查询找回同一任务，以及拒绝/404/旧标记已在生产构建验证。完整项目配置复用、执行暂停恢复和外部用户测试待完成 |
+| H | 进行中 | 真实回执核验、SQL 合同实际用量与保守预留分开展示；真实 GLM/工具/六个 CPU 作业的结果与离线 ZIP 已独立复核。仅可审阅，独立复跑、patch/论文集成和产品 PDF 导出待完成 |
 | I | 进行中 | macOS arm64 自包含 ad-hoc 测试应用已通过搬迁 GUI/真实服务、119 个原生文件逐库签名与开发目录拒读检查；正式安装、升级回滚、平台凭据存储、正式签名和最终清理未完成 |
 | J | 未开始 | 未冻结发布候选，也未执行同一构建的 20 次发布矩阵 |
 
@@ -39,6 +39,9 @@
 - [TOKEN_BUDGET.md](TOKEN_BUDGET.md)：输入/计费输出上限及未知量保留。
 - [AGENT_RESOURCE_MIGRATION.md](AGENT_RESOURCE_MIGRATION.md)：默认资源通用化与项目知识边界。
 - [PROJECT_CONTRACT.md](PROJECT_CONTRACT.md)：API/CLI 预检、冻结与保护范围。返回 prepared 明确不代表研究已经启动。
+- [RESEARCH_CREATION_IDEMPOTENCY.md](RESEARCH_CREATION_IDEMPOTENCY.md)：持久创建身份、实际分配边界与只读核对；未知请求不自动重建。
+- [RESEARCH_RESULTS_USAGE.md](RESEARCH_RESULTS_USAGE.md)：同一 SQLite 权威的只读用量展示，缺失证据不回退旧账本。
+- [CONTRACT_CPU_DIAGNOSTIC.md](CONTRACT_CPU_DIAGNOSTIC.md)：真实模型、文件修改、六个 CPU 作业和结果导出组合诊断；原模型总结的标准差/方差错误单独更正。
 
 桌面源码模式仍使用开发环境；新 macOS arm64 本地测试应用内置 CPython 3.11.15、Electron 44.4.5/Node 24.21.0 与 Next 生产服务。它通过搬迁启动与开发目录拒读下的真实服务检查，但没有 Developer ID、公证、正式安装/升级及完整研究验收。构建源快照和实际失败/重验见 [MACOS_TEST_BUNDLE.md](MACOS_TEST_BUNDLE.md) 与 [回执](evidence/macos-self-contained-local-test.json)。真实 GLM 检查只证明指定工具与协议链路，费用因缺少核验价格表显示未知；不证明正式 Idea Reflection、论文审查、PIMC 仿真或科学目标达成。
 
@@ -51,5 +54,9 @@
 UI/CLI 已可保存同一冻结合同的真实待执行任务，并重新核对声明源文件指纹。23 项合同预算及项目能力尚未全部接入执行器，合同任务仍明确只读/阻塞，不能启动。独立本地 CPU runner 与 macOS 测试包已有各自独立检查；这些证据不能合并称为完整研究已验收。`981ac04` 的 GitHub Core compatibility CI 全部五项作业及 Windows native CPU launcher 已通过，包含 Linux SSH 测试修复后复验。
 
 后续 `d781101` 与 `30818f4` 的 Core compatibility CI 和 Windows native CPU launcher 亦均通过。工具/作业接线的最新组合回归与恢复边界见 [检查回执](evidence/contract-tools-jobs-checks.json)、[文件工具](RESEARCH_TOOL_ACCOUNTING.md) 和 [合同 CPU 作业](RESEARCH_JOB_SERVICE.md)。这些主机开发接口没有解除产品总 start 阻断。
+
+`37783cc` 文件工具/作业接线与 `9f2c2dd` 四步向导随后均通过上述两项 GitHub 工作流。Windows launcher CI 仍不是 Windows 11 安装包实机验收。
+
+结果与保存恢复集成回归为 3273 通过、181 跳过，628 个 Python 文件 strict mypy、4 条依赖合同通过。随后补初始化锁硬链接拒绝及错误类型归一，新创建模块 28 项通过；源码/日志范围见 `evidence/contract-results-recovery-checks.json`。这些检查没有证明研究 start 或阶段恢复完成。
 
 Windows 11 x64 干净实机、Linux GPU/SSH 两种认证环境、发布签名/公证资源、五名目标用户及授权研究输入尚未完成此次核验。对应门槛不豁免，其余开发继续。

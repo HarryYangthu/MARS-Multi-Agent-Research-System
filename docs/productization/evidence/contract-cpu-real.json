@@ -1,0 +1,280 @@
+{
+  "actual_model": "glm-5.3",
+  "budget": {
+    "active_gpus": 0,
+    "active_jobs": 0,
+    "active_readers": 0,
+    "activity_remaining_us": 578750919,
+    "activity_us": 21249081,
+    "clock_uncertain": false,
+    "cost_ceiling_enforced": false,
+    "cost_usage_exact": false,
+    "known_cost_subtotal_micro_cny": 0,
+    "limits": {
+      "automatic_iterations": 2,
+      "billed_output_tokens": 128000,
+      "debate_rounds": 1,
+      "deep_read_papers": 5,
+      "gpu_us": 3600000000,
+      "implemented_candidates": 1,
+      "input_tokens": 1000000,
+      "model_cost_micro_cny": 20000000,
+      "model_requests": 8,
+      "proposal_candidates": 2,
+      "search_candidates": 20,
+      "tool_executions": 5,
+      "training_process_us": 60000000
+    },
+    "reservation_overrun": false,
+    "task_sha256": "9d1a2b145068e6a12ddbb8d2a8d0a92bb385b06bda23541183029c556c377b23",
+    "unknown_reservations": [],
+    "used": {
+      "automatic_iterations": 0,
+      "billed_output_tokens": 1117,
+      "debate_rounds": 0,
+      "deep_read_papers": 0,
+      "gpu_us": 0,
+      "implemented_candidates": 1,
+      "input_tokens": 5395,
+      "model_cost_micro_cny": null,
+      "model_requests": 4,
+      "proposal_candidates": 0,
+      "search_candidates": 0,
+      "tool_executions": 3,
+      "training_process_us": 140697
+    }
+  },
+  "candidate_sha256": "b98034abb7dcbf6f47280ae93d33239dc496d42d8edab55ae836f53e06e0ecc7",
+  "export_bytes": 14741,
+  "export_sha256": "3e59e7b03f76478f3eb7586641a65e228eb667a39fd66d79d7cbd813bd494b29",
+  "full_research_accepted": false,
+  "independent_audit": {
+    "assertions": 623,
+    "billed_output_tokens": 1117,
+    "candidate_files_changed": [
+      "candidate.py"
+    ],
+    "evidence_files_unchanged": 152,
+    "input_tokens": 5395,
+    "limitations": [
+      "Persisted consistency audit; not provider invoice attestation or independent rerun",
+      "Three authored synthetic seeds; no external scientific acceptance",
+      "Raw model summary incorrectly calls noise stddev 0.04 a variance; true variance is 0.0016",
+      "Contract run remains created; diagnostic directly invoked bounded host adapters; full product start blocked"
+    ],
+    "measurements": [
+      {
+        "job_id": "baseline-41",
+        "mse": 0.13273282216959395,
+        "rows": 64,
+        "seed": 41
+      },
+      {
+        "job_id": "baseline-42",
+        "mse": 0.14277976875359277,
+        "rows": 64,
+        "seed": 42
+      },
+      {
+        "job_id": "baseline-43",
+        "mse": 0.12481641952328916,
+        "rows": 64,
+        "seed": 43
+      },
+      {
+        "job_id": "candidate-41",
+        "mse": 0.0019598812556186067,
+        "rows": 64,
+        "seed": 41
+      },
+      {
+        "job_id": "candidate-42",
+        "mse": 0.0023337288448077647,
+        "rows": 64,
+        "seed": 42
+      },
+      {
+        "job_id": "candidate-43",
+        "mse": 0.0013235782019118147,
+        "rows": 64,
+        "seed": 43
+      }
+    ],
+    "model_cost": null,
+    "model_requests": 4,
+    "new_model_calls": 0,
+    "new_training_calls": 0,
+    "read_only": true,
+    "reservations": {
+      "implementation": 1,
+      "job": 6,
+      "model": 4,
+      "tool": 3
+    },
+    "status": "passed",
+    "tools": 3,
+    "zip_payload_files": 8
+  },
+  "independent_audit_sha256": "9440ff07ca4431606ca85c4641d358c29de464c0fb7f737afe61e2f537ff25a5",
+  "legacy_model_ledger_created": false,
+  "limitations": [
+    "Authored synthetic quadratic data with three paired seeds, not novel research or PIMC acceptance.",
+    "Native loop directly invoked scoped host adapters; managed research start remains blocked.",
+    "Consistency and numeric recomputation are not provider billing attestation or independent-environment rerun.",
+    "No price table verified; cost remains unknown.",
+    "This probe does not certify an OS execution sandbox."
+  ],
+  "loop_counts": {
+    "action_rounds": 3,
+    "model_requests": 3,
+    "model_responses": 3,
+    "observations": 3,
+    "protocol_repairs": 0,
+    "reflections": 0,
+    "sdk_attempts": 3,
+    "tool_dispatches": 3,
+    "validation_repairs": 0
+  },
+  "measurements": [
+    {
+      "arm": "baseline",
+      "duration_seconds": 0.02417083299951628,
+      "job_id": "baseline-41",
+      "mse": 0.13273282216959395,
+      "seed": 41
+    },
+    {
+      "arm": "baseline",
+      "duration_seconds": 0.023180083000625018,
+      "job_id": "baseline-42",
+      "mse": 0.14277976875359277,
+      "seed": 42
+    },
+    {
+      "arm": "baseline",
+      "duration_seconds": 0.02299120800307719,
+      "job_id": "baseline-43",
+      "mse": 0.12481641952328916,
+      "seed": 43
+    },
+    {
+      "arm": "candidate",
+      "duration_seconds": 0.023396374999720138,
+      "job_id": "candidate-41",
+      "mse": 0.0019598812556186067,
+      "seed": 41
+    },
+    {
+      "arm": "candidate",
+      "duration_seconds": 0.023438042000634596,
+      "job_id": "candidate-42",
+      "mse": 0.0023337288448077647,
+      "seed": 42
+    },
+    {
+      "arm": "candidate",
+      "duration_seconds": 0.02351687500049593,
+      "job_id": "candidate-43",
+      "mse": 0.0013235782019118147,
+      "seed": 43
+    }
+  ],
+  "original_source_unchanged": true,
+  "os_execution_sandbox_certified": false,
+  "raw_model_summary_correction": {
+    "finding": "The model called 0.04 the noise variance. The authored generator uses random.gauss(0, 0.04), so 0.04 is the standard deviation and the variance is 0.0016.",
+    "raw_output_preserved": true
+  },
+  "research_execution_ready": false,
+  "response_model_status": "consistent",
+  "results_resources": {
+    "active_gpus": 0,
+    "active_jobs": 0,
+    "active_readers": 0,
+    "authority": "sqlite",
+    "billed_output_tokens": 1117,
+    "calls_with_unknown_attempt_count": 0,
+    "charged_billed_output_tokens": 1117,
+    "charged_input_tokens": 5395,
+    "charged_quantities": {
+      "automatic_iterations": 0,
+      "billed_output_tokens": 1117,
+      "debate_rounds": 0,
+      "deep_read_papers": 0,
+      "gpu_us": 0,
+      "implemented_candidates": 1,
+      "input_tokens": 5395,
+      "model_requests": 4,
+      "proposal_candidates": 0,
+      "search_candidates": 0,
+      "tool_executions": 3,
+      "training_process_us": 140697
+    },
+    "charged_sdk_attempts": 4,
+    "clock_uncertain": false,
+    "cost": null,
+    "cost_scope": "unverified_price_not_invoice",
+    "currency": null,
+    "input_tokens": 5395,
+    "invalid_model_receipts": 0,
+    "limits": {
+      "automatic_iterations": 2,
+      "billed_output_tokens": 128000,
+      "debate_rounds": 1,
+      "deep_read_papers": 5,
+      "gpu_us": 3600000000,
+      "implemented_candidates": 1,
+      "input_tokens": 1000000,
+      "model_requests": 8,
+      "proposal_candidates": 2,
+      "search_candidates": 20,
+      "tool_executions": 5,
+      "training_process_us": 60000000
+    },
+    "logical_records": 4,
+    "model_requests": 4,
+    "observed_attempts_complete": true,
+    "observed_sdk_attempts": 4,
+    "open_activity_reservations": 0,
+    "request_count_scope": "logical_records",
+    "research_activity_remaining_seconds": 578.750919,
+    "research_activity_seconds": 21.249081,
+    "reservation_overrun": false,
+    "reserved_sdk_attempts": 4,
+    "source_id": "source_0039",
+    "status": "recorded",
+    "unknown_reservations": 0,
+    "unverified_usage_records": 0,
+    "usage_complete": true,
+    "verified_billed_output_tokens_subtotal": 1117,
+    "verified_input_tokens_subtotal": 5395,
+    "verified_sdk_attempts_subtotal": 4,
+    "verified_usage_records": 4
+  },
+  "run_id": "2026-09-27T2049_contract_cpu_loop_diagnostic",
+  "schema": "verification.contract_cpu_loop.v1",
+  "selected_source_files_unchanged_during_run": true,
+  "source_fingerprints": {
+    "backend/app/bridge/orchestrator.py": "4c2cf7ecb2ade84399ed1c398e85d0ce08e01e7274b6f658339f93bc7a07a636",
+    "backend/app/bridge/research_job_service.py": "5100cce674a9cda5204b307788c5043c4f0eb6a6e5e18b316102fae1fc1c832e",
+    "backend/app/bridge/research_results_usage.py": "e35aace8b506a5213365a3dd05218329189814c4ef58af336624779bc723ba1f",
+    "backend/app/bridge/research_run_service.py": "b418adc3b43def550b3fdb37c61674a0415d3b82b6c67411ddf785c08680ceb7",
+    "backend/app/bridge/results_export.py": "62261e8e32f0ff598100a0a6509f633eae1b8b8b7bf6fae1444d2f0b30bcaea2",
+    "backend/app/bridge/results_service.py": "f4cf4e4a6038aceadbb0ba99cd346afaf8a11ac396ce2fc2f2d924897566a59a",
+    "backend/app/execution/local/runner.py": "c3f21491f9e80f37a35240cb71e05f04f23caa3be927401165c0baa202086bb1",
+    "backend/app/execution/local/worker.py": "da42201cbba970f938c434567fdf8eed4fdc351cb4a44344b0fa33cf9a62beae",
+    "backend/app/harness/agent_loop/executor.py": "36b905a15974a6af69810f194b75fa13b406dcc3835f56fb0f98daec5aabe0d0",
+    "backend/app/harness/llm/research_accounting.py": "db846e4ebfa2b453b490177b1f4b966c92a231047bdbdcefb011cb52dee505d8",
+    "backend/app/harness/runtime/research_budget_ledger.py": "e13914afeeb5963a43bb32dd00f9b18071a3afa1fe73947f4ef6cf064e34af15",
+    "backend/app/harness/tools/registry.py": "55a2dd7da6ba2a2b4aeda6f3f87d66c6287381701149f81dbe4eeec695d8b5a9",
+    "backend/app/harness/tools/research_accounting.py": "d8167fbbb1f0020dd037fba0bde961d3598c2973eb942cefdab3b5593b009566",
+    "configs/agents.yaml": "0c6ee65123bd97e55ac6dc70540ecee59611e9bc227526784439caca8df231d2",
+    "configs/research_defaults.yaml": "9f76ca3a91f56634b4b978ddf40f1bee7fc3a7829f81a74a89b4ecb4a59b3327",
+    "configs/research_jobs.yaml": "2f2016a7911718009cadeb793dacebdd18c95d99f90468675beee344701dfaf2",
+    "scripts/diagnostics/contract_cpu_fixture.py": "d18618fd368a414e24bf05c02b8ebe0376dff8cce5bc044359c991ea505af75a",
+    "scripts/verify_contract_cpu_loop.py": "f07c7925371d43245f2f373f3645ebe3077a88b965547673ba565c25160db9fd"
+  },
+  "source_scope": "18 selected source files were unchanged between probe start/end and copied byte-for-byte to ignored local evidence; this was a working-tree snapshot with uncommitted H/idempotence glue, not a claim that a later commit was executed.",
+  "status": "passed",
+  "task_sha256": "9d1a2b145068e6a12ddbb8d2a8d0a92bb385b06bda23541183029c556c377b23"
+}

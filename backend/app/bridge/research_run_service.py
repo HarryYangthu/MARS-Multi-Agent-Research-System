@@ -6,16 +6,24 @@ are inspectable, persisted pending tasks whose execution is explicitly blocked.
 from __future__ import annotations
 
 import json
+import sqlite3
+from collections.abc import Callable
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.bridge.research_contract_service import (
-    FrozenResearchTask, ResearchContractIntegrityError, validate_frozen_research_task,
+    FrozenResearchTask, ProjectPreflightError, StaleResearchContractError,
+    ResearchContractIntegrityError, validate_frozen_research_task,
 )
 from app.harness.persistence import atomic_write_json
 from app.harness.runtime.research_contract import ContractModel, ResearchBudget
-from app.storage.run_store import RunHandle
+from app.storage.run_store import RunHandle, RunStore
+from app.storage.run_state_store import RunStateStore
+from app.harness.runtime.state_journal import StateJournal
+from app.storage.research_creation_store import (
+    CreationCatalogIntegrityError, CreationIntent, CreationRequestConflict, ResearchCreationStore, binding_sha256,
+)
 
 if TYPE_CHECKING:
     from app.bridge.orchestrator import Orchestrator, RunSession
@@ -136,11 +144,171 @@ def research_execution_admission(run: RunHandle, request_extra: dict[str, Any] |
     ))
 
 
-def create_research_run(orchestrator: Orchestrator, *, name: str, contract: FrozenResearchTask) -> RunSession:
+def create_research_run(orchestrator: Orchestrator, *, name: str, contract: FrozenResearchTask,
+                        on_run_allocated: Callable[[RunHandle], None] | None = None) -> RunSession:
     """Create one real session under the same API/CLI owner; never start it."""
     from app.bridge.orchestrator import RunRequest
     frozen = validate_frozen_research_task(contract, check_live_files=True)
     if not name.strip() or len(name) > 120:
         raise ValueError("Research run name must contain between 1 and 120 characters")
     return orchestrator.create_session(RunRequest(task=name.strip(), project=frozen.task.project.project_id,
-        entrypoint="pipeline", user_request=frozen.task.goal, auto_approve=False), research_contract=frozen)
+        entrypoint="pipeline", user_request=frozen.task.goal, auto_approve=False), research_contract=frozen, on_run_allocated=on_run_allocated)
+
+
+class ResearchRunCreated(ContractModel):
+    run_id: str
+    project: str
+    task: str
+    entrypoint: Literal["pipeline"] = "pipeline"
+    created_at: str
+    task_sha256: str
+    status: Literal["created"] = "created"
+    research_started: Literal[False] = False
+    execution_admission: ResearchExecutionAdmission
+    request_id: str | None = None
+    idempotent: bool = False
+
+
+class ResearchCreationStatus(ContractModel):
+    request_id: str
+    task_sha256: str | None = None
+    status: Literal["pending", "created", "unknown", "rejected"]
+    admitted: bool | None = None
+    run_id: str | None = None
+    research_started: Literal[False] = False
+    run: ResearchRunCreated | None = None
+    reason: str | None = None
+
+
+def _created_receipt(run: RunHandle, extra: dict[str, Any], task_sha256: str,
+                     request_id: str | None) -> ResearchRunCreated:
+    admission = research_execution_admission(run, extra)
+    if admission is None or any(item.code == "research_contract_integrity_error" for item in admission.blockers):
+        raise ResearchContractIntegrityError("Saved creation evidence is unavailable")
+    return ResearchRunCreated(run_id=run.run_id, project=run.project, task=run.task,
+        created_at=run.created_at, task_sha256=task_sha256, execution_admission=admission,
+        request_id=request_id, idempotent=request_id is not None)
+
+
+def _verify_created_run(store: RunStore, intent: CreationIntent) -> ResearchRunCreated:
+    """Read the actual authority without recovery, projection repair or live preflight."""
+    if intent.run_id is None:
+        raise ResearchContractIntegrityError("Creation allocation was not recorded")
+    root = store.runs_root / intent.run_id
+    if root.is_symlink() or (root / "run_meta.json").is_symlink():
+        raise ResearchContractIntegrityError("Creation run metadata cannot be a symbolic link")
+    run = store.get(intent.run_id)
+    if run is None:
+        raise ResearchContractIntegrityError("Allocated run is unavailable")
+    check_research_run_storage_paths(run)
+    for name in ("run_state.authority.json", "run_state.sqlite3"):
+        path = run.root / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+            raise ResearchContractIntegrityError("Creation authority must be an owned ordinary file")
+    journal = StateJournal.from_authority(run.root, run_id=run.run_id)
+    if journal is None:
+        raise ResearchContractIntegrityError("Creation authority is unavailable")
+    # StateJournal.read() currently opens mode=rw; this request deliberately
+    # uses a readonly connection and the same pure snapshot validators instead.
+    connection = sqlite3.connect(journal.path.as_uri() + "?mode=ro", uri=True, timeout=10)
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("BEGIN")
+        if connection.execute("SELECT run_id,journal_id,schema_version FROM identity WHERE id=1").fetchone() != (journal.run_id, journal.journal_id, 1):
+            raise ResearchContractIntegrityError("Creation authority identity differs")
+        snapshot = RunStateStore(run)._snapshot(StateJournal._read(connection))
+    finally:
+        connection.close()
+    extra = snapshot.request.get("extra")
+    if (not isinstance(extra, dict) or run.task != intent.name
+            or snapshot.request.get("task") != intent.name
+            or snapshot.request.get("project") != run.project
+            or snapshot.request.get("entrypoint") != "pipeline"):
+        raise ResearchContractIntegrityError("Creation request binding differs")
+    frozen = load_run_research_contract(run, extra)
+    if frozen is None or frozen.task_sha256 != intent.task_sha256 or snapshot.request.get("user_request") != frozen.task.goal:
+        raise ResearchContractIntegrityError("Creation contract binding differs")
+    return _created_receipt(run, extra, frozen.task_sha256, intent.request_id)
+
+
+def _creation_status(store: RunStore, catalog: ResearchCreationStore, intent: CreationIntent,
+                     *, owner_active: bool | None = None) -> ResearchCreationStatus:
+    if intent.phase == "rejected":
+        return ResearchCreationStatus(request_id=intent.request_id, task_sha256=intent.task_sha256, status="rejected", admitted=False,
+                                      reason="creation_preflight_rejected")
+    active = catalog.owner_active(intent.request_id) if owner_active is None else owner_active
+    if active:
+        return ResearchCreationStatus(request_id=intent.request_id, task_sha256=intent.task_sha256, status="pending", admitted=True, run_id=intent.run_id,
+                                      reason="creation_in_progress")
+    if intent.run_id is None:
+        return ResearchCreationStatus(request_id=intent.request_id, task_sha256=intent.task_sha256, status="unknown",
+                                      reason="creation_allocation_unconfirmed")
+    try:
+        run = _verify_created_run(store, intent)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return ResearchCreationStatus(request_id=intent.request_id, task_sha256=intent.task_sha256, status="unknown", run_id=intent.run_id,
+                                      reason="creation_evidence_unavailable")
+    return ResearchCreationStatus(request_id=intent.request_id, task_sha256=intent.task_sha256, status="created", admitted=True, run_id=run.run_id, run=run)
+
+
+def lookup_research_creation(store: RunStore, request_id: str) -> ResearchCreationStatus | None:
+    catalog = ResearchCreationStore(store.runs_root)
+    intent = catalog.get(request_id)
+    return None if intent is None else _creation_status(store, catalog, intent)
+
+
+def save_research_run(orchestrator: Orchestrator, *, name: str, contract: FrozenResearchTask,
+                      request_id: str | None = None) -> ResearchRunCreated | ResearchCreationStatus:
+    """At most one allocation attempt per durable request; never starts research.
+
+    A crash before allocation is bound can leave an orphan directory. Its ID
+    cannot be safely inferred, so this request remains unknown and is not retried.
+    """
+    if request_id is None:
+        session = create_research_run(orchestrator, name=name, contract=contract)
+        return _created_receipt(session.run, session.request.extra, contract.task_sha256, None)
+    frozen = validate_frozen_research_task(contract)  # Replay does not depend on mutable source files.
+    if not name.strip() or len(name) > 120:
+        raise ValueError("Research run name must contain between 1 and 120 characters")
+    normalized_name = name.strip()
+    catalog = ResearchCreationStore(orchestrator.run_store.runs_root)
+    from app.storage.research_creation_store import validate_request_id
+    validate_request_id(request_id)
+    catalog.initialize()
+    with catalog.lease(request_id) as acquired:
+        if not acquired:
+            existing = catalog.get(request_id)
+            if existing is not None and existing.binding_sha256 != binding_sha256(normalized_name, frozen.task_sha256):
+                raise CreationRequestConflict("Creation request identity already bound")
+            if existing is None:
+                # The other owner may still be preflighting. No accepted intent
+                # is visible yet, so do not claim admission or invite a resend.
+                return ResearchCreationStatus(request_id=request_id, status="unknown",
+                    reason="creation_preflight_in_progress")
+            return _creation_status(orchestrator.run_store, catalog, existing, owner_active=True)
+        existing = catalog.get(request_id)
+        if existing is not None:
+            if existing.binding_sha256 != binding_sha256(normalized_name, frozen.task_sha256):
+                raise CreationRequestConflict("Creation request identity already bound")
+            result = _creation_status(orchestrator.run_store, catalog, existing, owner_active=False)
+            return result.run if result.run is not None else result
+        try:
+            validate_frozen_research_task(frozen, check_live_files=True)
+        except (ProjectPreflightError, StaleResearchContractError):
+            rejected, _ = catalog.reserve(request_id, name=normalized_name, task_sha256=frozen.task_sha256, rejected=True)
+            return _creation_status(orchestrator.run_store, catalog, rejected, owner_active=False)
+        _, fresh = catalog.reserve(request_id, name=normalized_name, task_sha256=frozen.task_sha256)
+        if not fresh:
+            raise CreationCatalogIntegrityError("Creation intent changed while its lease was held")
+        try:
+            create_research_run(orchestrator, name=normalized_name, contract=frozen,
+                on_run_allocated=lambda run: catalog.bind_run(request_id, run.run_id))
+            bound = catalog.get(request_id)
+            if bound is None:
+                raise CreationCatalogIntegrityError("Creation intent disappeared")
+            receipt = _verify_created_run(orchestrator.run_store, bound)
+        except Exception:
+            catalog.finish(request_id, created=False)
+            raise
+        catalog.finish(request_id, created=True)
+        return receipt

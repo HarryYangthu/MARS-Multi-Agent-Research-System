@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path, Response
 from pydantic import Field
+from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import get_orchestrator
 from app.bridge.research_contract_service import (
@@ -12,7 +13,10 @@ from app.bridge.research_contract_service import (
     freeze_research_task, preflight_project, StaleResearchContractError,
 )
 from app.bridge.research_run_service import (
-    ResearchExecutionAdmission, create_research_run, research_execution_admission,
+    ResearchCreationStatus, ResearchRunCreated, lookup_research_creation, save_research_run,
+)
+from app.storage.research_creation_store import (
+    REQUEST_ID_PATTERN, CreationCatalogIntegrityError, CreationRequestConflict,
 )
 from app.harness.runtime.research_contract import ContractModel, ProjectContract, ResearchBudget
 
@@ -29,18 +33,7 @@ class PrepareResearchPayload(ContractModel):
 class CreateResearchRunPayload(ContractModel):
     name: str = Field(min_length=1, max_length=120)
     contract: FrozenResearchTask
-
-
-class ResearchRunCreated(ContractModel):
-    run_id: str
-    project: str
-    task: str
-    entrypoint: Literal["pipeline"] = "pipeline"
-    created_at: str
-    task_sha256: str
-    status: Literal["created"] = "created"
-    research_started: Literal[False] = False
-    execution_admission: ResearchExecutionAdmission
+    request_id: str | None = Field(default=None, pattern=REQUEST_ID_PATTERN)
 
 
 @router.get("/defaults", response_model=ResearchBudget)
@@ -61,10 +54,18 @@ def prepare(payload: PrepareResearchPayload) -> FrozenResearchTask:
         raise HTTPException(status_code=422, detail=exc.report.model_dump(mode="json")) from exc
 
 
-@router.post("/runs", response_model=ResearchRunCreated, status_code=201)
-async def create_contract_run(payload: CreateResearchRunPayload) -> ResearchRunCreated:
+@router.post("/runs", response_model=ResearchRunCreated | ResearchCreationStatus, status_code=201)
+async def create_contract_run(payload: CreateResearchRunPayload, response: Response) -> ResearchRunCreated | ResearchCreationStatus:
     try:
-        session = create_research_run(get_orchestrator(), name=payload.name, contract=payload.contract)
+        owner = get_orchestrator()  # Resolve the shared owner on the event-loop thread.
+        result = await run_in_threadpool(save_research_run, owner, name=payload.name, contract=payload.contract,
+                                   request_id=payload.request_id)
+    except CreationRequestConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "creation_request_conflict",
+            "request_id": payload.request_id, "message": "Request ID already belongs to a different declaration"}) from exc
+    except CreationCatalogIntegrityError as exc:
+        raise HTTPException(status_code=503, detail={"code": "creation_catalog_unavailable",
+            "request_id": payload.request_id, "message": "Creation evidence is unavailable; do not submit a replacement"}) from exc
     except ProjectPreflightError as exc:
         raise HTTPException(status_code=422, detail=exc.report.model_dump(mode="json")) from exc
     except StaleResearchContractError as exc:
@@ -73,7 +74,25 @@ async def create_contract_run(payload: CreateResearchRunPayload) -> ResearchRunC
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "invalid_research_contract",
             "message": "Research contract or run declaration is invalid"}) from exc
-    admission = research_execution_admission(session.run, session.request.extra)
-    assert admission is not None
-    return ResearchRunCreated(run_id=session.run.run_id, project=session.run.project, task=session.run.task,
-        created_at=session.run.created_at, task_sha256=payload.contract.task_sha256, execution_admission=admission)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail={"code": "creation_storage_unavailable",
+            "request_id": payload.request_id, "message": "Creation outcome could not be confirmed; query the request ID"}) from exc
+    if isinstance(result, ResearchCreationStatus):
+        if result.status in {"unknown", "rejected"}:
+            raise HTTPException(status_code=422 if result.status == "rejected" else 409,
+                                detail=result.model_dump(mode="json"))
+        response.status_code = 202
+    return result
+
+
+@router.get("/requests/{request_id}", response_model=ResearchCreationStatus)
+async def creation_status(request_id: str = Path(pattern=REQUEST_ID_PATTERN)) -> ResearchCreationStatus:
+    try:
+        store = get_orchestrator().run_store
+        result = await run_in_threadpool(lookup_research_creation, store, request_id)
+    except (CreationCatalogIntegrityError, OSError) as exc:
+        raise HTTPException(status_code=503, detail={"code": "creation_catalog_unavailable",
+            "request_id": request_id, "message": "Creation evidence is unavailable; do not submit a replacement"}) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail={"code": "creation_request_not_found", "request_id": request_id})
+    return result

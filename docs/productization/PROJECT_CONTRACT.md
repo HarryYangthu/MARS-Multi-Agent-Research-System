@@ -29,6 +29,8 @@ freeze 可通过 `--budget /absolute/budget.yaml` 提供完整预算；省略时
 
 `POST /api/research-contracts/runs` 接受 `{name, contract: {task, task_sha256}}`。桥接入口 `research_run_service.create_research_run()` 重新校验项目指纹、任务指纹、完整声明文件集合和当前文件内容，然后调用现有 `Orchestrator.create_session()`。任务名非空且不超过 120 字符。声明文件已变化返回 409，缺文件/不安全路径/无效合同返回 422；这些拒绝均发生在创建 run 之前。
 
+保存接口支持可选稳定 `request_id`，通过独立创建身份 catalog 核对超时后的真实结果；`GET /api/research-contracts/requests/{request_id}` 可跨后端重启只读查询。分配前明确预检拒绝为 `rejected`，创建中断/证据缺失为 `unknown`，后者不能自动重建；无 ID 的旧客户端仍明确非幂等。详细协议及崩溃窗口见 [保存幂等与核对恢复](RESEARCH_CREATION_IDEMPOTENCY.md)。
+
 成功返回 HTTP 201，状态 `created`、`research_started: false`、`task_sha256` 和 `execution_admission`。这是已保存任务的创建回执；不返回 `started`，不表示任何模型、工具或实验运行成功。`execution_admission.ready` 当前恒为 false，`enforced_budget_fields` 为空，具体阻断包括：
 
 - `project_execution_adapter_pending`：合同的命令、指标、输入范围及允许/保护范围尚未接入执行器。合同 `project_id` 不会自动注册或覆盖同名全局项目；创建过程不借用该全局项目的 folder context。旧工具的项目解析不能被视为合同项目已接入。

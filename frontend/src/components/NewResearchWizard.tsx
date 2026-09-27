@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { FrozenResearchImport } from "./FrozenResearchImport";
 import {
-  admissionMessage, getResearchDefaults, knownResearchRejection, preflightResearch, prepareResearch,
-  ResearchApiError, researchRequestError, saveResearch, type FrozenResearch, type ResearchCreated, type ResearchIssue, type ResearchPreflight,
+  admissionMessage, getResearchDefaults, preflightResearch, prepareResearch,
+  ResearchApiError, researchRequestError, type FrozenResearch, type ResearchIssue, type ResearchPreflight,
 } from "@/lib/researchContracts";
 import {
   BUDGET_FIELDS, COMMAND_LABELS, budgetDraft, buildResearchProject, emptyResearchDraft, validateBudget, validateResearchGoal,
   type BudgetDraft, type CommandDraft, type MetricDraft, type ResearchDraft,
 } from "@/lib/researchWizard";
-import { clearPendingResearchSave, hasPendingResearchSave, markPendingResearchSave } from "@/lib/researchSubmission";
+import { useResearchSubmission } from "@/lib/useResearchSubmission";
+import { ResearchSaveRecovery } from "./ResearchSaveRecovery";
 import { useProject } from "@/lib/project";
 
 const STEPS = ["研究目标", "项目路径", "命令与指标", "预算与预检"];
@@ -33,8 +34,8 @@ export function NewResearchWizard(): JSX.Element {
   const [notice, setNotice] = useState("");
   const [preflight, setPreflight] = useState<ResearchPreflight | null>(null);
   const [frozen, setFrozen] = useState<FrozenResearch | null>(null);
-  const [created, setCreated] = useState<ResearchCreated | null>(null);
-  const [uncertain, setUncertain] = useState(false);
+  const submission = useResearchSubmission();
+  const { created } = submission;
   const [advanced, setAdvanced] = useState(false);
   const mounted = useRef(false);
   const pending = useRef<AbortController | null>(null);
@@ -44,7 +45,6 @@ export function NewResearchWizard(): JSX.Element {
 
   useEffect(() => {
     mounted.current = true;
-    setUncertain(hasPendingResearchSave());
     void loadDefaults();
     return () => { mounted.current = false; pending.current?.abort(); defaultsRequest.current?.abort(); };
   }, []);
@@ -108,17 +108,19 @@ export function NewResearchWizard(): JSX.Element {
     return { project: built.project, budget: limits.budget, goal: draft.goal.trim(), mode: draft.mode };
   }
   async function perform(action: "preflight" | "freeze" | "save"): Promise<void> {
-    if (pending.current || created || uncertain) return;
-    if (action === "save" && hasPendingResearchSave()) { setUncertain(true); return; }
+    if (pending.current || created || submission.pending || submission.busy) return;
     const body = checked();
     if (!body || (action !== "preflight" && !preflight?.ready) || (action === "save" && !frozen)) return;
+    if (action === "save") {
+      await submission.save(draft.name.trim(), frozen, frozen!.task_sha256);
+      return;
+    }
     const controller = new AbortController();
     const ownRevision = revision.current;
     pending.current = controller;
     const active = (): boolean => mounted.current && !controller.signal.aborted && revision.current === ownRevision && pending.current === controller;
     setBusy(action); setIssues([]); setNotice("");
     if (action === "preflight") { setPreflight(null); setFrozen(null); }
-    if (action === "save") markPendingResearchSave(frozen!.task_sha256);
     try {
       if (action === "preflight") {
         const result = await preflightResearch(body.project, controller.signal);
@@ -130,21 +132,11 @@ export function NewResearchWizard(): JSX.Element {
         const result = await prepareResearch(body, controller.signal);
         if (!active()) return;
         setFrozen(result); setNotice("研究计划已冻结，任务尚未创建。请确认摘要后保存待执行计划。");
-      } else {
-        const result = await saveResearch(draft.name.trim(), frozen, controller.signal);
-        if (!active()) return;
-        clearPendingResearchSave(); setCreated(result); setNotice("待执行计划已保存，研究尚未启动。");
       }
     } catch (cause: unknown) {
       if (!active()) return;
-      if (action === "save" && !knownResearchRejection(cause)) {
-        setUncertain(true);
-        setNotice("保存结果尚不能确认。请先到同一后端的研究任务列表核对；离页或超时不会撤销已受理的保存。本页不会自动重发。");
-      } else {
-        if (action === "save") clearPendingResearchSave();
-        if (action === "freeze" || action === "save") { setPreflight(null); setFrozen(null); }
-        showIssues(cause instanceof ResearchApiError ? cause.issues : [], researchRequestError(cause));
-      }
+      if (action === "freeze") { setPreflight(null); setFrozen(null); }
+      showIssues(cause instanceof ResearchApiError ? cause.issues : [], researchRequestError(cause));
     } finally {
       if (active()) { setBusy(null); pending.current = null; }
     }
@@ -154,7 +146,7 @@ export function NewResearchWizard(): JSX.Element {
     <TextField field={errorField} label={label} hint={hint} value={String(draft[key])} rows={rows}
       onChange={(value) => update(key, value)} issues={issues} />
   );
-  const disabled = busy !== null || uncertain || created !== null || advanced;
+  const disabled = busy !== null || submission.busy !== null || submission.pending !== null || created !== null || advanced;
   const validBudget = validateBudget(budget).budget;
 
   if (created) return <section className={`${PANEL} space-y-5`} aria-labelledby="saved-research-title">
@@ -173,11 +165,7 @@ export function NewResearchWizard(): JSX.Element {
     <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-sm leading-6 text-amber-100">
       当前可预检项目、冻结计划并保存待执行任务。执行适配与预算接线尚未全部完成，保存后不会自动开始研究。
     </div>
-    {uncertain ? <section role="alert" className={`${PANEL} space-y-3 border-amber-500/40`}>
-      <h2 className="font-semibold text-amber-200">请先核对上次保存</h2><p className="text-sm leading-6 text-slate-300">一次保存请求可能已由后端受理，但客户端没有确认结果。当前不会重复提交，也不会因离页撤销已保存的任务。</p>
-      <Link className={`${BUTTON} inline-block`} href="/runs">到研究任务列表核对</Link>
-      <p className="text-xs leading-6 text-slate-400">当前尚未提供可靠的保存核对与恢复接口，本会话保持禁止再次保存；请保留任务列表中的已保存记录，不通过重新打开页面重复提交。</p>
-    </section> : null}
+    {!advanced ? <ResearchSaveRecovery submission={submission} onRejectedReset={invalidate} /> : null}
     <nav aria-label="研究配置步骤" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       {STEPS.map((label, index) => <button key={label} type="button" disabled={disabled} aria-current={step === index ? "step" : undefined}
         onClick={() => setStep(index)} className={`${BUTTON} text-left ${step === index ? "border-indigo-400/60 bg-indigo-400/10 text-indigo-100" : "text-slate-400"}`}>
@@ -251,7 +239,7 @@ export function NewResearchWizard(): JSX.Element {
       </> : null}
     </fieldset>
     <div ref={feedback} tabIndex={-1} className="scroll-mt-4 outline-none" aria-live="polite">
-      {notice ? <p role={issues.length ? "alert" : "status"} className={`rounded-md border px-4 py-3 text-sm leading-6 ${issues.length || uncertain ? "border-amber-500/30 text-amber-200" : "border-mars-border text-slate-300"}`}>{notice}</p> : null}
+      {notice ? <p role={issues.length ? "alert" : "status"} className={`rounded-md border px-4 py-3 text-sm leading-6 ${issues.length || submission.pending ? "border-amber-500/30 text-amber-200" : "border-mars-border text-slate-300"}`}>{notice}</p> : null}
       {issues.length ? <section className="mt-3 rounded-md border border-amber-500/30 p-4" aria-labelledby="research-issues-title"><h2 id="research-issues-title" className="font-medium text-amber-100">需要处理 {issues.length} 项</h2>
         <ul className="mt-3 space-y-2 text-sm">{issues.map((item, index) => <li key={`${item.field}-${index}`}><button type="button" onClick={() => focusIssue(item.field)} className="text-left text-amber-100 underline decoration-amber-500/30 underline-offset-4">{item.message}</button>{item.field ? <span className="ml-2 break-all text-xs text-slate-500">{item.field}</span> : null}</li>)}</ul></section> : null}
     </div>
@@ -261,12 +249,12 @@ export function NewResearchWizard(): JSX.Element {
       {step < 3 ? <button type="button" className={PRIMARY} disabled={disabled} onClick={() => setStep(step + 1)}>下一步：{STEPS[step + 1]}</button> : <div className="flex flex-wrap gap-2">
         <button type="button" className={BUTTON} disabled={disabled || defaultState !== "ready"} onClick={() => void perform("preflight")}>{busy === "preflight" ? "正在检查真实文件…" : "检查项目与缺项"}</button>
         {!frozen ? <button type="button" className={PRIMARY} disabled={disabled || !preflight?.ready || Boolean(preflight.issues.length)} onClick={() => void perform("freeze")}>{busy === "freeze" ? "正在冻结计划…" : "冻结研究计划"}</button>
-          : <button type="button" className={PRIMARY} disabled={disabled} onClick={() => void perform("save")}>{busy === "save" ? "正在保存…" : "保存待执行计划"}</button>}
+          : <button type="button" className={PRIMARY} disabled={disabled} onClick={() => void perform("save")}>{submission.busy === "saving" ? "正在保存…" : "保存待执行计划"}</button>}
       </div>}
     </footer>
     <p className="text-xs text-slate-500">离开本页会取消等待和后续请求；服务器已经受理的保存可能继续完成。不会自动重试保存。</p>
     <details className="border-t border-mars-border pt-4" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}><summary className="cursor-pointer text-sm text-slate-400">高级接入与旧流程</summary>
-      {advanced ? <div className="mt-4 space-y-4"><FrozenResearchImport /><Link href="/runs/new?mode=legacy" className="text-sm text-slate-400 underline">使用旧项目／PIMC 阶段表单（未使用本通用合同）</Link></div> : null}
+      {advanced ? <div className="mt-4 space-y-4"><FrozenResearchImport submission={submission} onRejectedReset={invalidate} /><Link href="/runs/new?mode=legacy" className="text-sm text-slate-400 underline">使用旧项目／PIMC 阶段表单（未使用本通用合同）</Link></div> : null}
     </details>
   </div>;
 }
