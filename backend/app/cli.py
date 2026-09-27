@@ -1,4 +1,4 @@
-"""Terminal entry point: doctor, research, resume and status; no web server needed."""
+"""Shared backend controls, project contracts, and legacy PIMC CLI entrypoints."""
 from __future__ import annotations
 
 import argparse
@@ -10,15 +10,19 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Literal, NoReturn
 
 from loguru import logger
+from pydantic import Field
 import yaml
 
 from app.bridge.cli_research_service import CliResearchService, configuration, initialize, prepare_protocol
 from app.bridge.research_contract_service import (
-    default_research_budget, freeze_research_task, load_project_contract, preflight_project,
+    FrozenResearchTask, ProjectPreflight, contract_sha256, default_research_budget,
+    freeze_research_task, load_project_contract, preflight_project,
 )
+from app.cli_runtime_client import RuntimeClient, RuntimeClientError, RuntimeResponse
+from app.harness.runtime.research_contract import ContractModel
 from app.harness.runtime.research_contract import ResearchBudget as ProjectResearchBudget
 from app.cli_composition import CliAgents
 from app.execution.research_process import run_worker
@@ -26,13 +30,102 @@ from app.harness.agent_loop.trace import atomic_json
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
 from app.harness.research_trial import ResearchBudget, read_record
-from app.settings import env_or_local, set_runtime_env
+from app.settings import env_or_local, repo_root, set_runtime_env
+
+
+class RuntimeClientLimits(ContractModel):
+    schema_id: Literal["cli_runtime.v1"]
+    timeout_seconds: float = Field(strict=True, gt=0, allow_inf_nan=False)
+    max_response_bytes: int = Field(strict=True, gt=0)
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        # argparse's default diagnostic can echo credentials pasted into an
+        # unsupported option or choice. Usage contains only declared options.
+        self.print_usage(sys.stderr)
+        self.exit(2, "Invalid command arguments; use --help for supported options.\n")
+
+
+def _runtime_client(server: str) -> RuntimeClient:
+    limits = RuntimeClientLimits.model_validate(yaml.safe_load(
+        (repo_root() / "configs/cli_runtime.yaml").read_text(encoding="utf-8")))
+    return RuntimeClient(server, timeout_seconds=limits.timeout_seconds,
+                         max_response_bytes=limits.max_response_bytes)
+
+
+def _runtime_response(response: RuntimeResponse) -> dict[str, Any]:
+    # Do not collapse HTTP acceptance, run status and scientific outcome.
+    return {"http_status": response.status_code, "http_ok": response.ok, "response": response.payload}
+
+
+def _export_frozen(frozen: FrozenResearchTask, output_path: Path) -> dict[str, Any]:
+    if contract_sha256(frozen.task) != frozen.task_sha256:
+        raise ValueError("Frozen task fingerprint does not match its content")
+    output = output_path.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("x", encoding="utf-8") as stream:
+        json.dump(frozen.model_dump(mode="json"), stream, ensure_ascii=False, indent=2, allow_nan=False)
+        stream.write("\n")
+    return {"status": "prepared", "task_sha256": frozen.task_sha256, "output": str(output),
+            "research_started": False}
+
+
+async def _remote_project(options: argparse.Namespace) -> dict[str, Any]:
+    async with _runtime_client(options.server) as client:
+        if options.project_command == "defaults":
+            response = await client.defaults()
+            return (ProjectResearchBudget.model_validate(response.payload).model_dump(mode="json")
+                    if response.ok else _runtime_response(response))
+        project = load_project_contract(options.config.expanduser().resolve())
+        if options.project_command == "preflight":
+            response = await client.preflight(project.model_dump(mode="json"))
+            return (ProjectPreflight.model_validate(response.payload).model_dump(mode="json")
+                    if response.ok else _runtime_response(response))
+        if options.budget:
+            budget = ProjectResearchBudget.model_validate(yaml.safe_load(options.budget.read_text(encoding="utf-8")))
+        else:
+            response = await client.defaults()
+            if not response.ok:
+                return _runtime_response(response)
+            budget = ProjectResearchBudget.model_validate(response.payload)
+        response = await client.prepare(project=project.model_dump(mode="json"), goal=options.goal,
+                                        mode=options.mode, budget=budget.model_dump(mode="json"))
+        if not response.ok:
+            return _runtime_response(response)
+        return _export_frozen(FrozenResearchTask.model_validate(response.payload), options.output)
+
+
+async def _remote_run(options: argparse.Namespace) -> dict[str, Any]:
+    async with _runtime_client(options.server) as client:
+        if options.run_command == "list":
+            response = await client.list_runs(project=options.project)
+        elif options.run_command == "show":
+            response = await client.detail(options.run_id)
+        elif options.run_command == "start":
+            response = await client.start(options.run_id)
+        elif options.run_command == "stop":
+            response = await client.stop(options.run_id)
+        elif options.run_command == "resume":
+            response = await client.resume(options.run_id)
+        else:
+            raise ValueError("Unknown runtime action")
+        return _runtime_response(response)
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="mars", description="MARS project preflight and research tools")
+    result = SafeArgumentParser(prog="mars", description="MARS project preflight and research tools")
     commands = result.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run", help="Control the same backend-owned runs used by the web UI")
+    run.add_argument("--server", required=True, help="Explicit loopback backend origin; no service is started")
+    run_commands = run.add_subparsers(dest="run_command", required=True)
+    listing = run_commands.add_parser("list")
+    listing.add_argument("--project", default="")
+    for action in ("show", "start", "stop", "resume"):
+        control = run_commands.add_parser(action)
+        control.add_argument("run_id")
     project = commands.add_parser("project", help="Inspect and freeze a generic project contract without starting research")
+    project.add_argument("--server", help="Use the selected backend for the same preflight and freeze service")
     project_commands = project.add_subparsers(dest="project_command", required=True)
     project_commands.add_parser("defaults", help="Show the finite standard research budgets")
     for action in ("preflight", "freeze"):
@@ -45,7 +138,7 @@ def parser() -> argparse.ArgumentParser:
             contract_command.add_argument("--output", type=Path, required=True, help="New frozen task JSON file")
     cfg = configuration()
     for name in ("doctor", "research"):
-        command = commands.add_parser(name)
+        command = commands.add_parser(name, help="Legacy StaticPIMC workflow; not the shared UI runtime")
         command.add_argument("--repo", type=Path, required=True)
         command.add_argument("--data", type=Path, required=True, help="Real static .pth capture with x/y/nf")
         command.add_argument("--model", default=get_agent_config("coding").model_name)
@@ -63,7 +156,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--timeout-seconds", type=int, default=cfg["timeout_seconds"])
             command.add_argument("--prepare-only", action="store_true", help="Research, code and model preflight; performs no training or test metrics")
     for name in ("resume", "status"):
-        command = commands.add_parser(name)
+        command = commands.add_parser(name, help="Legacy StaticPIMC run directory operation")
         command.add_argument("run", type=Path)
     return result
 
@@ -103,7 +196,11 @@ async def doctor(repo: Path, data: Path, model: str, check_model: bool) -> dict[
 
 
 async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
+    if options.command == "run":
+        return await _remote_run(options)
     if options.command == "project":
+        if options.server:
+            return await _remote_project(options)
         if options.project_command == "defaults":
             return default_research_budget().model_dump(mode="json")
         project = load_project_contract(options.config.expanduser().resolve())
@@ -112,14 +209,8 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
         project_budget = (ProjectResearchBudget.model_validate(yaml.safe_load(options.budget.read_text(encoding="utf-8")))
                   if options.budget else default_research_budget())
         frozen = freeze_research_task(project, goal=options.goal, mode=options.mode, budget=project_budget)
-        output = options.output.expanduser().resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        # Export is explicit and exclusive; never replace a user's existing file.
-        with output.open("x", encoding="utf-8") as stream:
-            json.dump(frozen.model_dump(mode="json"), stream, ensure_ascii=False, indent=2, allow_nan=False)
-            stream.write("\n")
-        return {"status": "prepared", "task_sha256": frozen.task_sha256, "output": str(output),
-                "research_started": False}
+        return _export_frozen(frozen, options.output)
+    logger.warning("Legacy StaticPIMC CLI selected; shared web tasks use mars run --server <origin>")
     if options.command == "status":
         root = options.run.expanduser().resolve()
         state = read_record(root / "state.json")
@@ -151,18 +242,37 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> int:
-    options = parser().parse_args()
+    options = argparse.Namespace(command=None)
     logger.remove()
     logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {message}")
     try:
+        options = parser().parse_args()
         result = asyncio.run(dispatch(options))
     except KeyboardInterrupt:
-        logger.warning("Interrupted; inspect mars status and use mars resume to continue")
+        if options.command == "run":
+            logger.warning("Client interrupted; inspect the same backend with mars run --server <origin> show <run_id> before retrying")
+        else:
+            logger.warning("Interrupted; inspect the selected workflow's saved status before continuing")
         return 130
+    except RuntimeClientError as exc:
+        sys.stdout.write(json.dumps({"http_ok": False, "error_code": exc.code,
+            "http_status": exc.status_code, "message": str(exc)}, ensure_ascii=False) + "\n")
+        return 2
     except Exception as exc:
-        logger.error("{}: {}", type(exc).__name__, exc)
+        # Pydantic/YAML/OS diagnostics may embed input values or partial values
+        # which cannot be reliably redacted by replacing the full credential.
+        explanations = {
+            "ValidationError": "Input does not match the project or configuration schema.",
+            "FileExistsError": "The output already exists; choose a new output file.",
+            "FileNotFoundError": "A required input or configuration file is unavailable.",
+            "ValueError": "Invalid input or state; verify the selected command's requirements.",
+        }
+        logger.error("{}: {}", type(exc).__name__, explanations.get(type(exc).__name__,
+            "Command failed; inspect the configured inputs and saved task state."))
         return 1
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+    if result.get("http_ok") is False:
+        return 2
     if options.command == "doctor":
         return 0 if result["ready"] else 2
     if options.command == "project" and result.get("ready") is False:

@@ -39,3 +39,17 @@
 [真实 probe c](evidence/glm-native-split-budget-probe.json) 使用实际 GLM 与注册文件工具：2 个请求、2 次 SDK 尝试、1 次工具调用，完整 usage 为输入 1653、计费输出 253、合计 1906 token。schema 与随机 nonce 校验通过。该回执按实际源码哈希固定，后续损坏记录校验未追溯伪装成已重跑的模型调用；费用仍未知，也不计为正式研究或实验验收。
 
 已推送的 `1ddbbf2` 与 `a0fd864` 均通过 GitHub Core compatibility CI 及 Windows native CPU launcher 工作流。Windows CPU launcher 检查不等于 Windows 11 干净安装或 GPU 研究验收。完整日志与此前失败尝试在本机 `release-evidence/productization/20260928/` 保留，公开证据只含来源指纹和汇总。
+
+状态增量提交 `e0114c32ef140a868bd90c7fd360f9e303b01aa9` 随后也通过上述两条 GitHub 工作流。完整源树 dry-run 的秘密扫描通过，领域内容/历史规则仍阻断，没有生成发行包。
+
+## 共享 CLI 控制增量
+
+`mars run --server <origin>` 经真实 HTTP 控制现有后端的任务，CLI 退出后后端仍持有 driver；没有另建调度循环。`mars project --server` 使用同一预检/冻结接口，默认与显式预算的整个合同及哈希都与直接 API 结果一致。旧 StaticPIMC 命令保留历史兼容并明确标记 legacy，完整通用研究接入尚未合并。
+
+相关回归最终 **292 通过、7 跳过，约 14 秒**；7 个跳过均需要未提供的外部 StaticPIMC checkout。**599 个 Python 源文件 strict mypy 通过，4 条依赖合同通过，14 项桌面资源/生命周期测试通过**。来源、日志哈希和边界见 [CLI 增量回执](evidence/cli-increment-checks.json)。前端源码未变化，沿用前一批生产构建与实际桌面烟测证据。
+
+其中 62 项真实 HTTP/子进程测试使用独立 uvicorn 运行未替换的 MARS 应用，验证同一任务 list/show/start/HITL/stop、重复启动、真实 401/404/409、只读历史、合同准备和已有文件不覆盖。人手编写的 schema 合法提案进入真实审核，没有替身模型或伪造研究完成。成功恢复中断模型需要实际 checkpoint，本次只测真实拒绝路径。独立审查先重跑 54 项客户端测试，再重跑新增 8 项 CLI 子进程测试，均通过。
+
+保留的失败与修复包括：IPv4-mapped IPv6 的跨 Python 判断差异、macOS 未监听端口可能真实超时、`1e309` 被解析为非有限数，以及 CLI 本地 Pydantic 诊断回显误贴的 session token。最后一项先真实失败，再改为不打印原始异常/输入；argparse 的坏参数也不再回显。回归同时检查完整凭据和前 12 字符不进入 stdout/stderr。网络响应受总读取时限和字节上限约束，不宣称可抢占同步 JSON 解析。
+
+该增量不证明通用合同预算已经接入所有执行工具、不证明自动研究或成功模型恢复，也未实现桌面到独立 CLI 的自动凭据交接。

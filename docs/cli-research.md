@@ -1,6 +1,33 @@
-# 本地 CLI 研究闭环
+# CLI 项目合同、共享任务控制与历史兼容
 
-这条路径不启动前端、Redis 或 API 服务。CLI → Bridge → 现有 NativeAgentLoop，复用 FocusedIdea 的真实论文阅读与跨模型审查；候选代码通过 Gate 5 和内容寻址工作区，交给独立 CPU 进程训练。
+`mars run` 连接网页使用的同一个后端，由该后端持有运行、审核和恢复状态；CLI 不新建调度器。当前先提供已有任务的控制与通用合同准备，通用合同到完整研究执行的接入仍在开发。
+
+## 共享后端任务
+
+明确填写当前后端的本机 origin，端口以实际启动结果为准。不会自动启动服务或猜测端口。需要会话身份时，从进程环境读取 `MARS_DESKTOP_SESSION_TOKEN`；没有命令行 token 参数，也不会读取 `.env` 来取得该会话凭据。桌面应用向独立 CLI 自动交接身份尚未实现。
+
+```sh
+mars run --server http://127.0.0.1:8010 list
+mars run --server http://127.0.0.1:8010 show RUN_ID
+mars run --server http://127.0.0.1:8010 start RUN_ID
+mars run --server http://127.0.0.1:8010 stop RUN_ID
+mars run --server http://127.0.0.1:8010 resume RUN_ID
+
+mars project --server http://127.0.0.1:8010 defaults
+mars project --server http://127.0.0.1:8010 preflight --config /absolute/project.yaml
+mars project --server http://127.0.0.1:8010 freeze --config /absolute/project.yaml \
+  --goal "比较声明的候选与基线" --mode manual --output /absolute/new-task.json
+```
+
+`run` 输出分别保留 `http_status`、`http_ok` 和后端 `response`；HTTP 202 只表示受理，研究状态及结果看实际响应。缺服务、认证失败、只读历史、无可恢复 checkpoint 等明确返回非零；超时的 mutation 结果可能未知，先 `show` 核对，客户端不自动重试。停止的持久化失败与实际任务清理完成是不同状态，原样保留。
+
+地址仅允许本机 loopback，`localhost` 固定为 `127.0.0.1`；拒绝 URL 内凭据、路径、查询串、重定向和代理环境。网络读取的总时限、响应字节上限来自 `configs/cli_runtime.yaml`，不承诺同步 JSON 解析的可抢占 CPU 时限。此 CLI 没有添加研究启动权限，仍由相同 API/bridge 的准入规则决定。
+
+`project --server` 从所选后端读取默认预算，并调用同一个预检/冻结服务；输出哈希在写文件前复核，已存在的输出不覆盖。`prepared` 始终附 `research_started:false`，不会执行声明的命令或模型。省略 `--server` 时仍支持本地只读预检/冻结，详见 [项目合同](productization/PROJECT_CONTRACT.md)。
+
+## 旧 StaticPIMC 专用流程
+
+以下 `doctor/research/status/resume` 保留给已有 StaticPIMC manifest/state，帮助文本及运行日志明确标为 legacy。它们仍是专用历史流程，不与 `mars run` 混用，也不表示 UI/CLI 完整研究循环已经合并。此路径不启动前端、Redis 或 API 服务。CLI → Bridge → NativeAgentLoop，候选代码通过 Gate 5 和内容寻址工作区，交给独立 CPU 进程训练。
 
 ## 启动
 
@@ -21,12 +48,12 @@ git clone https://github.com/HarryYangthu/pimc-simulation-framework.git ../pimc-
 git -C ../pimc-static checkout 7b114051264f1b3780467576b434a15251c3af0a
 
 # 在当前终端安全输入；也可配置 MARS 的 .env.local，不能提交 Key。
-read -rsp 'DeepSeek API Key: ' DEEPSEEK_API_KEY
-export DEEPSEEK_API_KEY
+read -rsp 'Zhipu API Key: ' ZHIPU_API_KEY
+export ZHIPU_API_KEY
 
 mars doctor --repo ../pimc-static --data /你的路径/pim_16t_221110_38dBm_fr4_rnd32_1.pth --check-model
 mars research --repo ../pimc-static --data /你的路径/pim_16t_221110_38dBm_fr4_rnd32_1.pth \
-  --model deepseek-v4-flash --reduction 0.20 --max-degradation-db 0 \
+  --model glm-5.3 --reduction 0.20 --max-degradation-db 0 \
   --max-steps 50 --rounds 3 --output ./runs/pimc20
 
 mars status ./runs/pimc20
@@ -37,7 +64,7 @@ mars resume ./runs/pimc20
 
 上述步骤适用于包含本次 CLI 改动的主干版本。需要复现实验时，记录实际 `git rev-parse HEAD`，使用该提交重新创建运行；历史下载补丁只用于对应旧基点，不应重复应用到已包含这些改动的主干。
 
-`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型，调研仍使用 Pro 作者与 Flash 审查者。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：生成阶段关闭 thinking、请求超时配置为 360 秒（重试与总调用截止时间另外计入），独立研究审查保持原有 thinking 配置。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。
+`--task` 接收自然语言背景；参数约束与计算预算以显式 CLI 参数和冻结协议为准。`--model` 选择 Coding/Experiment/Analysis/Writing 模型；当前默认角色与独立研究审查统一为 GLM-5.3。CLI 的 `research_author` 和 `generation` 请求设置来自 `configs/cli_research.yaml`：开启 thinking、使用 low effort，请求超时为 360 秒（重试与总调用截止时间另外计入）。有效设置写入冻结配置和 Idea 配置收据；普通 FocusedIdea 不受 CLI 覆盖影响。研究命令启用公共文献检索并保存工具收据，默认来源域名见该配置。文末的旧 Pro/Flash 记录仅对应历史实验，不是当前 GLM 或产品化验收。
 
 ## 一次运行发生什么
 

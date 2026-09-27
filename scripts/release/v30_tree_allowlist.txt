@@ -152,6 +152,7 @@ backend/app/bridge/tensorboard_service.py
 backend/app/bridge/workflow_service.py
 backend/app/cli.py
 backend/app/cli_composition.py
+backend/app/cli_runtime_client.py
 backend/app/execution/__init__.py
 backend/app/execution/adapters/__init__.py
 backend/app/execution/adapters/base.py
@@ -382,6 +383,7 @@ configs/agent_contexts/idea.yaml
 configs/agent_contexts/writing.yaml
 configs/agents.yaml
 configs/cli_research.yaml
+configs/cli_runtime.yaml
 configs/context.yaml
 configs/evaluation.yaml
 configs/evaluation_rubrics/code_spec.v1.yaml

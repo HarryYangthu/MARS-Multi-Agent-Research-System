@@ -20,6 +20,7 @@
 | `backend/app/harness/schema/schemas/*.json` | `schema/validator.py` 与 `agents/base.py` 依 schema ID 动态读取 | 保留全部已存在 schema | 原路径，进入运行资源清单 | 资源闭包测试核对存在及发行覆盖 |
 | `backend/app/agents/*/{prompts,docs,examples,evals}/*`、`backend/app/bridge/{prompts,docs}/*` | `storage/agent_context_store.py` 遍历 prompts/examples/evals；docs 仍作为工作台资料保留 | 保留；Experiment/Coding/Execution/Writing 默认 prompt 与工作原则已通用化 | PIMC 领域知识保留项目内，经现有 knowledge_file 快照加载 | 四阶段真实消息隔离与快照测试通过；其他领域资源仍待审查，见 `AGENT_RESOURCE_MIGRATION.md` |
 | `configs/*.yaml`、`configs/agent_contexts/*` | 配置加载器、模型注册、调度、预算、执行、Windows 启动 | 保留必要运行默认配置；迁移个人路径及领域假设 | 应用用户配置目录与通用项目合同 | `execution.yaml` 的开发者绝对路径已由主工作包清理；预算/模型仍需独立验证 |
+| `backend/app/cli_runtime_client.py`、`configs/cli_runtime.yaml` | `mars run` 与 `mars project --server` 调用现有后端；YAML 定义 HTTP 读取时限与大小上限 | 保留并加入精确源清单；YAML 同时加入桌面初始资源清单 | 同一 API/bridge owner；旧 StaticPIMC 路径显式 legacy | 真实 HTTP 与 CLI 子进程验证；桌面自动身份交接与完整合同执行仍待完成 |
 | `configs/skills.yaml`、`configs/skills/*.md` | `harness/skills/registry.py` 按 `instructions` 动态加载 | 保留配置及指令文件 | 原 registry 与相对路径 | 测试读取真实 YAML 并核对每个指令均在资源清单 |
 | `configs/evaluation_rubrics/*`、`configs/evaluation_suites/*` | artifact evaluator、默认 replay suite 与 mutation contract 调用 | 保留调用依赖；领域 suite 待迁移 | 通用 suite；不以删评测消除失败 | 已保留，当前部分领域标记阻塞公开发行 |
 | `configs/evaluation/*`、`configs/evaluation_datasets/*` | 历次开发运行输入与示例，不是默认服务依赖 | 从发行排除；主仓归档候选 | 开发证据索引；先核对脚本与测试消费者 | 未删除，避免破坏回归资料 |
@@ -59,8 +60,10 @@ PYTHONPATH=backend:. python -m mypy --strict scripts/release/export_v30.py backe
 
 ## 退出条件与未完成事项
 
-本项只完成精确选择与依赖清单基础。R26 仍未验收：需要通用化领域默认值，保持发行内容无个人路径，收敛旧产品入口，分类历史秘密扫描候选，补空项目模板和第三方许可清单，完成真实 GLM 工具闭环、旧任务读取与恢复、Windows/macOS 实机安装升级、最终签名安装包审计。任何资源移除必须同时更新调用方、两份清单和相关回归。
+本项只完成精确选择与依赖清单基础。R26 仍未验收：需要通用化领域默认值，保持发行内容无个人路径，收敛旧产品入口，继续阻断新增秘密扫描命中，补空项目模板和第三方许可清单，完成完整工具认证、旧任务恢复矩阵、Windows/macOS 实机安装升级、最终签名安装包审计。任何资源移除必须同时更新调用方、两份清单和相关回归。
 
 ### 历史秘密扫描复核
 
 随后按 Git 对象核查全部七条命中：原四条分别是可重算且与父提交一致的 README SHA256、两处同一幂等标识和空 API 环境变量；本轮三条是公开 WebSocket 握手 nonce 及两个与同提交源码字节匹配的 SHA256。详见 `evidence/secret-scan-review.json`。`.gitleaksignore` 只列精确 `commit:path:rule:line` 指纹，无路径/规则/值通配，无历史改写。真实 gitleaks 8.30.1 重扫 `HEAD` 返回 0；新命中仍阻断。先前原始扫描失败保留，不把误报当实际凭据泄漏。领域内容、资源收敛和正式包验收仍未完成。
+
+状态增量提交 `e0114c32ef140a868bd90c7fd360f9e303b01aa9` 已重新按实际 Git 对象执行完整 dry-run：精确选择 549 个文件，gitleaks 通过；内容/历史领域规则共 630 条命中，另有历史扫描达到 500 条上限的阻断记录。判定为 blocked，没有生成归档。该结果与早先仅扫描临时源码快照的 146 条不是同一扫描范围；本轮没有通过删规则、改写历史或跳过 history 制造发行通过。

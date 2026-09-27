@@ -37,6 +37,7 @@ configs/agent_contexts/idea.yaml
 configs/agent_contexts/writing.yaml
 configs/agents.yaml
 configs/cli_research.yaml
+configs/cli_runtime.yaml
 configs/context.yaml
 configs/evaluation.yaml
 configs/evaluation_rubrics/code_spec.v1.yaml

@@ -13,6 +13,8 @@
 
 API 适配器为 `backend/app/api/research_contracts.py`，已由 `app.main.create_app()` 注册。路由提供 `GET /api/research-contracts/defaults`、`POST /api/research-contracts/preflight` 和 `POST /api/research-contracts/prepare`。prepare 请求为 `{project, goal, mode, budget}`；响应为 `{task, task_sha256}`。
 
+CLI 可使用 `mars project --server <loopback-origin> defaults|preflight|freeze` 调用这三个实际后端接口，未显式指定预算时先读取该后端默认值。响应合同与哈希核对后才保存新文件；预检不满足退出 2，HTTP/认证失败保留错误而不回退本地成功。`mars run --server <origin>` 只控制同一后端已存在的任务。两者没有把合同绑定为可执行 run，完整任务准入、工具权限和命令适配仍未完成；详见 [CLI 使用说明](../cli-research.md)。
+
 CLI 使用相同 bridge 服务：
 
 ```sh
