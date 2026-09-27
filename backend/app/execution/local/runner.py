@@ -39,6 +39,7 @@ class LocalJobSpec(BaseModel):
     argv: tuple[str, ...] = Field(min_length=1)
     cwd: str
     timeout_seconds: float = Field(gt=0, strict=True)
+    not_after_epoch_seconds: float | None = Field(default=None, gt=0, strict=True)
     max_output_bytes: int = Field(gt=0, strict=True)
     required_metrics: tuple[str, ...] = Field(min_length=1)
     config: dict[str, Any] = Field(default_factory=dict)
@@ -85,6 +86,16 @@ def _digest(value: object) -> str:
                                                ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
+def _spec_payload(spec: LocalJobSpec) -> dict[str, Any]:
+    # Preserve the exact v1 hash shape for existing callers without an absolute cutoff.
+    return spec.model_dump(mode="json", exclude={"not_after_epoch_seconds"} if spec.not_after_epoch_seconds is None else set())
+
+
+def _deadline(spec: LocalJobSpec, submitted_at: float) -> float:
+    relative = submitted_at + spec.timeout_seconds
+    return min(relative, spec.not_after_epoch_seconds) if spec.not_after_epoch_seconds is not None else relative
+
+
 def _plain_directory(path: Path) -> Path:
     """Allow OS ancestor aliases (e.g. /tmp), never a linked selected root."""
     if path.is_symlink() or not path.is_dir():
@@ -124,12 +135,12 @@ def _submission(directory: Path) -> tuple[LocalJobSpec, dict[str, Any]]:
     _check_files(directory)
     record = _read_json(directory / "submission.json")
     spec = LocalJobSpec.model_validate(record.get("spec"))
-    if (record.get("schema") != "local_job_submission.v1" or record.get("spec_sha256") != _digest(spec.model_dump(mode="json"))
+    if (record.get("schema") != "local_job_submission.v1" or record.get("spec_sha256") != _digest(_spec_payload(spec))
             or record.get("run_root") != str(directory.parents[2]) or spec.job_id != directory.name
             or spec.run_id != directory.parents[2].name or type(record.get("deadline_at")) not in (int, float)
             or not math.isfinite(record["deadline_at"]) or type(record.get("submitted_at")) not in (int, float)
             or not math.isfinite(record["submitted_at"])
-            or record["deadline_at"] != record["submitted_at"] + spec.timeout_seconds):
+            or record["deadline_at"] != _deadline(spec, record["submitted_at"])):
         raise ValueError("local runner submission identity or fingerprint mismatch")
     return spec, record
 
@@ -175,7 +186,7 @@ class LocalRunner:
                     raise ValueError("job identity is already bound to a different submission")
             else:
                 submitted_at = time.time()
-                payload = spec.model_dump(mode="json")
+                payload = _spec_payload(spec)
                 request: dict[str, Any] = {
                     "schema": "local_command_request.v1", "invocation_id": spec.job_id,
                     "run_id": spec.run_id, "experiment_id": spec.experiment_id, "project": spec.project,
@@ -185,7 +196,7 @@ class LocalRunner:
                 atomic_write_json(directory / "submission.json", {
                     "schema": "local_job_submission.v1", "spec": payload, "spec_sha256": _digest(payload),
                     "run_root": str(self.root), "submitted_at": submitted_at,
-                    "deadline_at": submitted_at + spec.timeout_seconds, "request_sha256": _digest(request),
+                    "deadline_at": _deadline(spec, submitted_at), "request_sha256": _digest(request),
                 })
                 atomic_write_json(directory / "state.json", {"status": "queued"})
                 # Persisting submission precedes spawn. A crash here is an unknown

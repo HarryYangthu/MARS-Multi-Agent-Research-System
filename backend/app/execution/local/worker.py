@@ -100,6 +100,7 @@ def _supervise_owned(directory: Path) -> None:
                     "MARS_JOB_REQUEST": str(directory / "job.json"), "MARS_RESULT_PATH": str(directory / "result.json"),
                     # CPU is the sole capability of this runner, not an OS sandbox.
                     "CUDA_VISIBLE_DEVICES": "", "HIP_VISIBLE_DEVICES": "", "ROCR_VISIBLE_DEVICES": "",
+                    "PYTHONDONTWRITEBYTECODE": "1",
                 })
                 process = subprocess.Popen(spec.argv, cwd=spec.cwd, env=environment,
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

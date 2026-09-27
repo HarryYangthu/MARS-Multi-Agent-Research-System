@@ -1,6 +1,6 @@
 # 冻结研究预算的 SQLite 持久核心
 
-此增量提供 `harness/runtime/research_budget_ledger.py`，只处理可信宿主提交的预算记录与原子准入。模型边界适配器另行验证；ToolRegistry、Reader、Orchestrator 和本地 runner 仍需接入，合同研究依然阻断，不能把本模块测试当成全部预算已约束真实研究。
+此增量提供 `harness/runtime/research_budget_ledger.py`，只处理可信宿主提交的预算记录与原子准入。模型、工具和本地 CPU 作业适配器分别验证；Reader、Orchestrator 的完整调度仍需接入，合同研究依然阻断，不能把本模块测试当成全部预算已约束真实研究。
 
 ## 权威与显式升级
 
@@ -33,6 +33,8 @@ research_activity_seconds 单独按活动区间并集核算：并行操作只计
 并发 reader/job 槽位与 GPU 张数在预留事务内检查并持久占用。单请求输入/普通输出/coding 输出上限、单作业时长也在预留前验证。coding 类别须由将来的可信 stage 绑定器提供，不能让模型自行选择。SDK 最大尝试数按模型请求预留量计入该 operation 的额外重试预算；连续相同错误和相同证据达到 repeated_error_limit 拒绝下一尝试。网络层每次错误仍需将来接入，本模块不会自动中断供应商 SDK 内部循环。
 
 每次写入观察时钟，持久 high watermark 单调增加。遇到时间回退，持久 clock_uncertain 并保守占满活动预算，后续新增动作拒绝；不会用负时长退款。只读 snapshot 可报告观测回退但不写状态。没有自动时钟核对/清除接口；不能仅等待时间恢复就悄悄清空不确定性。测试的 now_us 是确定性时间输入，不是实际研究执行证据。
+
+后续 CPU 作业适配新增可信 `activity_ended_us`：真实回执可在较晚 observation 时关闭过去已经结束的对应区间，要求 start <= end <= observation，不回退时钟高水位，不能改写其他区间或已关闭终点。`BudgetTransaction.observe_clock()` 支持额度 SAVEPOINT 回滚后保存时钟证据。新增 reserve 同事务读取 StateJournal lifecycle，仅 created/running 可新增；created 是冻结开发诊断准备态，不是完整研究 start 授权。其他生命周期仍可结算、停止和恢复，不能借已绑定 scope 在取消/暂停后继续新增动作。
 
 有价格依据摘要时，模型最大费用必须用整微元提供；已知价格预留而实际费用未知时保留该上界，cost_usage_exact=False。没有价格依据时模型费用必须为未知，used.model_cost_micro_cny=None、cost_ceiling_enforced=False，known_cost_subtotal 仅为已知部分，不得显示成完整零费用。价格依据摘要由后续可信价格加载器核验；本模块不检索报价、不证明其来源真实性。
 

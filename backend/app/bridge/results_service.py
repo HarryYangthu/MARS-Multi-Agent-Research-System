@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from app.execution.local.runner import LocalJobSpec
+from app.execution.local.runner import LocalJobSpec, _deadline, _spec_payload
 from app.harness.llm.accounting import (
     ResourceBudgetError, charged_model_attempts, charged_token_component,
     reserved_model_attempts, validate_token_components,
@@ -178,7 +178,7 @@ class ResultReader:
         """Validate saved identity only; never acquire a worker lease or recover jobs."""
         record, data = self.record(parent + "/submission.json")
         spec = LocalJobSpec.model_validate(record.get("spec"))
-        fingerprint = "sha256:" + sha256(canonical(spec.model_dump(mode="json")))
+        fingerprint = "sha256:" + sha256(canonical(_spec_payload(spec)))
         submitted, deadline = finite_number(record.get("submitted_at")), finite_number(record.get("deadline_at"))
         if (record.get("schema") != "local_job_submission.v1" or record.get("spec_sha256") != fingerprint
                 or receipt.get("submission_sha256") != fingerprint
@@ -187,7 +187,7 @@ class ResultReader:
                 or spec.job_id != Path(parent).name or receipt.get("job_id") != spec.job_id
                 or receipt.get("invocation_id") != spec.job_id or request.get("invocation_id") != spec.job_id
                 or receipt.get("attempt_id") != spec.attempt_id or receipt.get("experiment_id") != spec.experiment_id
-                or submitted is None or deadline is None or deadline != submitted + spec.timeout_seconds
+                or submitted is None or deadline is None or deadline != _deadline(spec, submitted)
                 or receipt.get("deadline_at") != deadline
                 or record.get("request_sha256") != "sha256:" + sha256(canonical(request))
                 or request.get("config") != spec.config or request.get("seed") != spec.seed

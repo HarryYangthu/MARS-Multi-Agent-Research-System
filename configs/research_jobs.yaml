@@ -1,0 +1,5 @@
+research_jobs:
+  max_output_bytes: 1048576
+  snapshot_max_file_bytes: 16777216
+  snapshot_max_total_bytes: 536870912
+  snapshot_max_files: 20000

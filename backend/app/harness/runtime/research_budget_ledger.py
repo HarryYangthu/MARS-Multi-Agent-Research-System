@@ -313,9 +313,10 @@ class ResearchBudgetLedger:
         with self.transaction() as transaction:
             return transaction.reserve(specification, now_us=now_us)
 
-    def settle(self, reservation_id: str, settlement: BudgetSettlement, *, now_us: int | None = None) -> None:
+    def settle(self, reservation_id: str, settlement: BudgetSettlement, *, now_us: int | None = None,
+               activity_ended_us: int | None = None) -> None:
         with self.transaction() as transaction:
-            transaction.settle(reservation_id, settlement, now_us=now_us)
+            transaction.settle(reservation_id, settlement, now_us=now_us, activity_ended_us=activity_ended_us)
 
     def mark_unknown(self, reservation_id: str, *, reason: str,
                      observed_lower_bound: BudgetAmounts | None = None, now_us: int | None = None) -> None:
@@ -324,9 +325,10 @@ class ResearchBudgetLedger:
                 observed_lower_bound=observed_lower_bound, now_us=now_us)
 
     def reconcile_stopped(self, reservation_id: str, *, actor: str, evidence_refs: tuple[str, ...],
-                          now_us: int | None = None) -> None:
+                          now_us: int | None = None, activity_ended_us: int | None = None) -> None:
         with self.transaction() as transaction:
-            transaction.reconcile_stopped(reservation_id, actor=actor, evidence_refs=evidence_refs, now_us=now_us)
+            transaction.reconcile_stopped(reservation_id, actor=actor, evidence_refs=evidence_refs,
+                now_us=now_us, activity_ended_us=activity_ended_us)
 
 
 class BudgetTransaction:
@@ -388,6 +390,10 @@ class BudgetTransaction:
         effective = max(previous, observed)
         self.connection.execute("UPDATE research_budget SET high_watermark_us=?,clock_uncertain=? WHERE id=1", (effective, int(uncertain)))
         return effective, uncertain
+
+    def observe_clock(self, *, now_us: int | None = None) -> None:
+        """Preserve monotone clock evidence after a quota-only savepoint rollback."""
+        self._clock(now_us)
 
     def snapshot(self, *, now_us: int | None = None) -> BudgetSnapshot:
         previous, uncertain = self.ledger._metadata(self.connection)
@@ -494,6 +500,8 @@ class BudgetTransaction:
                           rows: list[tuple[BudgetReservation, str, BudgetSettlement | None, BudgetAmounts | None]],
                           snapshot: BudgetSnapshot, uncertain: bool) -> str | None:
         budget = self.ledger.budget
+        if StateJournal._read(self.connection).get("status") not in {"created", "running"}:
+            return "run_not_executable"
         if uncertain:
             return "clock_reconciliation_required"
         if snapshot.reservation_overrun:
@@ -550,8 +558,17 @@ class BudgetTransaction:
             raise BudgetConflictError("unknown budget reservation")
         return row
 
-    def _close(self, reservation_id: str, observed: int) -> None:
-        self.connection.execute("UPDATE research_activity SET ended_us=? WHERE reservation_id=?", (observed, reservation_id))
+    def _activity_end(self, reservation_id: str, observed: int, activity_ended_us: int | None) -> int:
+        ended = observed if activity_ended_us is None else _now(activity_ended_us)
+        row = self.connection.execute("SELECT started_us,ended_us FROM research_activity WHERE reservation_id=?", (reservation_id,)).fetchone()
+        if row is None or not row[0] <= ended <= observed:
+            raise BudgetConflictError("activity end must be between reservation start and observed time")
+        if activity_ended_us is not None and row[1] is not None and row[1] != ended:
+            raise BudgetConflictError("closed activity end is immutable")
+        return ended
+
+    def _close(self, reservation_id: str, ended: int) -> None:
+        self.connection.execute("UPDATE research_activity SET ended_us=? WHERE reservation_id=?", (ended, reservation_id))
         self.connection.execute("UPDATE research_leases SET released=1 WHERE reservation_id=?", (reservation_id,))
 
     def _validate_usage(self, spec: BudgetReservation, amounts: BudgetAmounts, *, require_attempt: bool) -> None:
@@ -560,11 +577,14 @@ class BudgetTransaction:
                 and amounts.model_cost_micro_cny is not None):
             raise BudgetConflictError("unpriced model usage cannot claim a verified cost")
 
-    def settle(self, reservation_id: str, settlement: BudgetSettlement, *, now_us: int | None = None) -> None:
+    def settle(self, reservation_id: str, settlement: BudgetSettlement, *, now_us: int | None = None,
+               activity_ended_us: int | None = None) -> None:
         settlement = BudgetSettlement.model_validate(settlement.model_dump(mode="json"))
-        observed, _ = self._clock(now_us)
+        observed = _now(now_us)
+        self._clock(observed)
         spec, state, previous, _ = self._get(reservation_id)
         self._validate_usage(spec, settlement.actual, require_attempt=True)
+        ended = self._activity_end(reservation_id, observed, activity_ended_us)
         if previous is not None:
             if previous != settlement:
                 raise BudgetConflictError("settlement is immutable")
@@ -574,7 +594,7 @@ class BudgetTransaction:
         payload = settlement.model_dump(mode="json")
         self.connection.execute("UPDATE research_reservations SET state='settled',settlement=?,settlement_sha256=? WHERE reservation_id=?",
             (_json(payload), _sha(payload), reservation_id))
-        self._close(reservation_id, observed)
+        self._close(reservation_id, ended)
 
     def mark_unknown(self, reservation_id: str, *, reason: str,
                      observed_lower_bound: BudgetAmounts | None = None, now_us: int | None = None) -> None:
@@ -594,11 +614,13 @@ class BudgetTransaction:
             (reason, _json(payload) if payload is not None else None, _sha(payload) if payload is not None else None, reservation_id))
 
     def reconcile_stopped(self, reservation_id: str, *, actor: str, evidence_refs: tuple[str, ...],
-                          now_us: int | None = None) -> None:
-        observed, _ = self._clock(now_us)
+                          now_us: int | None = None, activity_ended_us: int | None = None) -> None:
+        observed = _now(now_us)
+        self._clock(observed)
         if not actor.strip() or not evidence_refs or any(not value.strip() for value in evidence_refs):
             raise ValueError("stopped reconciliation requires actor and evidence")
         _, state, _, _ = self._get(reservation_id)
+        ended = self._activity_end(reservation_id, observed, activity_ended_us)
         receipt = _json({"actor": actor, "evidence_refs": evidence_refs})
         old = self.connection.execute("SELECT reconciliation FROM research_reservations WHERE reservation_id=?", (reservation_id,)).fetchone()
         if state == "retained" and old is not None and old[0] == receipt:
@@ -606,4 +628,4 @@ class BudgetTransaction:
         if state != "unknown":
             raise BudgetConflictError("only an unknown operation can be explicitly reconciled")
         self.connection.execute("UPDATE research_reservations SET state='retained',reconciliation=? WHERE reservation_id=?", (receipt, reservation_id))
-        self._close(reservation_id, observed)
+        self._close(reservation_id, ended)

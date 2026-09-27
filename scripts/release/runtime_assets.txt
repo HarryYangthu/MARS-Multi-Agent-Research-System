@@ -89,3 +89,4 @@ templates/artifacts/research_report.v1.md
 templates/artifacts/run_log.v1.md
 configs/research_defaults.yaml
 configs/results.yaml
+configs/research_jobs.yaml

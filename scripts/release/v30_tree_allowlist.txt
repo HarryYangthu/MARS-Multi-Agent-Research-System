@@ -602,3 +602,6 @@ backend/app/harness/runtime/research_execution_scope.py
 backend/app/harness/llm/research_accounting.py
 backend/app/harness/runtime/project_scope.py
 backend/app/bridge/research_project_scope.py
+backend/app/harness/tools/research_accounting.py
+backend/app/bridge/research_job_service.py
+configs/research_jobs.yaml

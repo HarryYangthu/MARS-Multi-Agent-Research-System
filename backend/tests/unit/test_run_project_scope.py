@@ -300,10 +300,28 @@ def test_diff_parser_counts_content_and_accepts_actual_unified_variants() -> Non
 
 def test_gate5_dispatch_blocks_protection_but_does_not_impose_pimc_interface(tmp_path: Path) -> None:
     run, _ = create_bound_run(tmp_path)
+    from app.bridge.research_run_service import load_run_research_contract
+    from app.harness.runtime.research_budget_ledger import ResearchBudgetLedger
+    from app.harness.runtime.research_execution_scope import ResearchExecutionScope, bind_research_execution
+    from app.harness.runtime.run_graph import RunGraph
+    from app.harness.runtime.state_journal import StateJournal
+    from app.storage.run_state_store import RunStateStore
+    frozen = load_run_research_contract(run)
+    assert frozen is not None
+    graph = RunGraph()
+    graph.add_node("coding")
+    RunStateStore(run).write(graph=graph, request={"extra": {"research_task_sha256": frozen.task_sha256}},
+                            status="created", expected_revision=0)
+    journal = StateJournal.from_authority(run.root, run_id=run.run_id)
+    assert journal is not None
+    ledger = ResearchBudgetLedger(journal, task_sha256=frozen.task_sha256, budget=frozen.task.budget)
+    ledger.initialize()
+    execution = ResearchExecutionScope(ledger, stage="coding", invocation_id="actual-gate-check")
     scope = prepare(run)
-    with bind_project_scope(scope):
+    with bind_research_execution(execution), bind_project_scope(scope):
         result = asyncio.run(get_registry().dispatch("code.write_file", {"path": "baseline.py", "content": "changed"}, context(scope)))
-        assert not result.ok
+        assert not result.ok and result.blocked_by_gate == "baseline_compatibility"
+        assert ledger.snapshot().used["tool_executions"] == 0
         assert static_check(project="pimc", tool_name="code.write_file", args={
             "path": "src/second_domain.py", "content": "def forward(self, x, other_parameter):\n    return x\n"}).blocking is False
 

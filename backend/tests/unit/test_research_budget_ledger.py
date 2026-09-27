@@ -720,3 +720,66 @@ def test_extension_v1_is_preserved_and_requires_explicit_future_migration(tmp_pa
         with pytest.raises(RunStateIntegrityError, match="extension version"):
             action(now_us=0)
         assert ledger.journal.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("status", ["queued", "waiting_review", "waiting_feedback", "pausing", "paused", "cancelling", "cancelled", "failed", "completed", "blocked"])
+def test_inactive_run_cannot_add_reservations_but_can_finish_existing_work(tmp_path: Path, status: str) -> None:
+    ledger, _ = _setup(tmp_path)
+    spec = _reserve("already-owned")
+    ledger.reserve(spec, now_us=0)
+    payload = ledger.journal.read()
+    payload["status"] = status
+    ledger.journal.commit(payload, expected_revision=payload["revision"])
+    assert ledger.reserve(_reserve("new"), now_us=1).reason == "run_not_executable"
+    # Replay is existing accounting identity, never permission to execute again.
+    assert ledger.reserve(spec, now_us=1).replay
+    ledger.settle(spec.reservation_id, _settlement(BudgetAmounts(tool_executions=1)), now_us=2)
+    assert ledger.snapshot(now_us=2).used["tool_executions"] == 1
+
+
+def test_verified_late_activity_end_does_not_rewind_clock_or_other_intervals(tmp_path: Path) -> None:
+    ledger, _ = _setup(tmp_path)
+    ledger.reserve(_reserve("finished"), now_us=10)
+    ledger.reserve(_reserve("ongoing"), now_us=50)
+    ledger.settle("finished", _settlement(BudgetAmounts(tool_executions=1)), now_us=100, activity_ended_us=20)
+    snapshot = ledger.snapshot(now_us=110)
+    assert snapshot.activity_us == 70 and not snapshot.clock_uncertain
+    with ledger.journal.connection() as connection:
+        assert connection.execute("SELECT high_watermark_us FROM research_budget").fetchone() == (100,)
+    with pytest.raises(BudgetConflictError, match="immutable"):
+        ledger.settle("finished", _settlement(BudgetAmounts(tool_executions=1)), now_us=110, activity_ended_us=21)
+
+
+@pytest.mark.parametrize("ended", [9, 101])
+def test_activity_end_outside_verified_observation_window_rolls_back(tmp_path: Path, ended: int) -> None:
+    ledger, _ = _setup(tmp_path)
+    ledger.reserve(_reserve("operation"), now_us=10)
+    before = ledger.journal.path.read_bytes()
+    with pytest.raises(BudgetConflictError, match="between"):
+        ledger.settle("operation", _settlement(BudgetAmounts(tool_executions=1)), now_us=100, activity_ended_us=ended)
+    assert ledger.journal.path.read_bytes() == before
+
+
+def test_late_unknown_stop_retains_usage_with_verified_activity_end(tmp_path: Path) -> None:
+    ledger, _ = _setup(tmp_path)
+    ledger.reserve(_reserve("operation", amounts=BudgetAmounts(tool_executions=2)), now_us=10)
+    ledger.mark_unknown("operation", reason="receipt unavailable", now_us=100)
+    ledger.reconcile_stopped("operation", actor="verified-host", evidence_refs=("receipt.json",), now_us=200, activity_ended_us=20)
+    snapshot = ledger.snapshot(now_us=300)
+    assert snapshot.activity_us == 10 and snapshot.used["tool_executions"] == 2
+    assert not snapshot.clock_uncertain and snapshot.unknown_reservations == ("operation",)
+
+
+def test_clock_observation_after_group_rollback_retains_uncertainty(tmp_path: Path) -> None:
+    ledger, _ = _setup(tmp_path, budget=_budget(tool_executions=1))
+    with ledger.transaction() as transaction:
+        transaction.observe_clock(now_us=100)
+        transaction.connection.execute("SAVEPOINT quota_group")
+        assert transaction.reserve(_reserve("first"), now_us=100).admitted
+        assert not transaction.reserve(_reserve("second"), now_us=100).admitted
+        transaction.connection.execute("ROLLBACK TO quota_group")
+        transaction.connection.execute("RELEASE quota_group")
+        transaction.observe_clock(now_us=90)
+    snapshot = ledger.snapshot(now_us=200)
+    assert snapshot.clock_uncertain and snapshot.used["tool_executions"] == 0
+    assert ledger.reserve(_reserve("third"), now_us=200).reason == "clock_reconciliation_required"
