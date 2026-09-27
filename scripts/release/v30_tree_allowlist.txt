@@ -617,3 +617,5 @@ backend/app/storage/research_creation_store.py
 frontend/src/components/ResearchSaveRecovery.tsx
 
 frontend/src/lib/useResearchSubmission.ts
+
+backend/app/bridge/research_scope_recovery.py

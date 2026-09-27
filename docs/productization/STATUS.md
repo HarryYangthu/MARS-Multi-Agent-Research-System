@@ -42,6 +42,7 @@
 - [RESEARCH_CREATION_IDEMPOTENCY.md](RESEARCH_CREATION_IDEMPOTENCY.md)：持久创建身份、实际分配边界与只读核对；未知请求不自动重建。
 - [RESEARCH_RESULTS_USAGE.md](RESEARCH_RESULTS_USAGE.md)：同一 SQLite 权威的只读用量展示，缺失证据不回退旧账本。
 - [CONTRACT_CPU_DIAGNOSTIC.md](CONTRACT_CPU_DIAGNOSTIC.md)：真实模型、文件修改、六个 CPU 作业和结果导出组合诊断；原模型总结的标准差/方差错误单独更正。
+- [RESEARCH_SCOPE_RECOVERY.md](RESEARCH_SCOPE_RECOVERY.md)：原 SQL 权威中的不可变项目权限封存；源码移走后的只读恢复及预算保留。阶段/作业 owner 接线仍待完成。
 
 桌面源码模式仍使用开发环境；新 macOS arm64 本地测试应用内置 CPython 3.11.15、Electron 44.4.5/Node 24.21.0 与 Next 生产服务。它通过搬迁启动与开发目录拒读下的真实服务检查，但没有 Developer ID、公证、正式安装/升级及完整研究验收。构建源快照和实际失败/重验见 [MACOS_TEST_BUNDLE.md](MACOS_TEST_BUNDLE.md) 与 [回执](evidence/macos-self-contained-local-test.json)。真实 GLM 检查只证明指定工具与协议链路，费用因缺少核验价格表显示未知；不证明正式 Idea Reflection、论文审查、PIMC 仿真或科学目标达成。
 
