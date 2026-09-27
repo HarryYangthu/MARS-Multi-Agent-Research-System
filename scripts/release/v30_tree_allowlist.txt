@@ -591,3 +591,9 @@ backend/app/execution/local/__init__.py
 backend/app/execution/local/runner.py
 backend/app/execution/local/worker.py
 backend/app/api/desktop_session.py
+desktop/bundle.yaml
+desktop/src/packaged-runtime.cjs
+scripts/desktop/build_macos.py
+scripts/desktop/verify_bundle.py
+scripts/desktop/smoke_macos.py
+scripts/desktop/runtime_probe.cjs

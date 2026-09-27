@@ -29,4 +29,6 @@ npm run smoke --prefix desktop
 
 macOS/Linux 退出只对本次启动的进程组发信号，超时升级为 SIGKILL；Windows 实现使用本次仍存活子进程的 `taskkill /T`，必须实机验证进程树和异常退出。独立长训练生命周期、远端任务重联不属于本验证入口的已验收范围。
 
-后续发行必须补齐：离线 Python 与前端运行依赖、精确包内容审计、平台凭据存储、安装升级/回滚/卸载、Windows 实机、签名、公证、许可证与研究全流程。当前程序在 `app.isPackaged` 为真时明确拒绝启动，防止把不完整壳误称为正式应用。
+工作包 I 另提供 macOS arm64 自包含本地测试 `.app` 构建路径，内置 standalone CPython 3.11、锁定依赖和生产前端，详见 [MACOS_TEST_BUNDLE.md](../../docs/productization/MACOS_TEST_BUNDLE.md)。打包模式必须具有有效本地测试声明与包内运行时，忽略开发 Python override、禁止回退到开发环境。源码模式的上述命令继续保留。
+
+后续发行仍须完成平台凭据存储、安装升级/回滚/卸载、Windows 实机、Developer ID 签名、公证、许可审查与研究全流程。当前 `.app` 仅有本地 ad-hoc 签名，不是公开发行版。

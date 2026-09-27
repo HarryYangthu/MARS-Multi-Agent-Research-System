@@ -8,8 +8,9 @@ const { createGateway } = require('./gateway.cjs');
 const { OwnedProcess, waitForPort, waitForBackend, getJSON, getStatus } = require('./lifecycle.cjs');
 const { TOKEN_HEADER, isAppURL, minimalEnvironment } = require('./security.cjs');
 const { seedRuntime } = require('./runtime-assets.cjs');
+const { runtimeLayout } = require('./packaged-runtime.cjs');
 
-const sourceRoot = path.resolve(__dirname, '../..');
+let sourceRoot = path.resolve(__dirname, '../..');
 const smoke = process.argv.includes('--smoke');
 const services = [];
 let gateway;
@@ -21,7 +22,7 @@ let dataRoot;
 let exitCode = 0;
 const receipt = { mode: 'source-production-spike', platform: process.platform, arch: process.arch, electron: process.versions.electron, startedAt: new Date().toISOString(), services: {}, checks: {} };
 
-app.setName('MARS Desktop Spike');
+app.setName(app.isPackaged ? 'MARS Local Test' : 'MARS Desktop Spike');
 if (process.env.MARS_DESKTOP_DATA_DIR) {
   if (!path.isAbsolute(process.env.MARS_DESKTOP_DATA_DIR)) throw new Error('MARS_DESKTOP_DATA_DIR must be absolute.');
   app.setPath('userData', process.env.MARS_DESKTOP_DATA_DIR);
@@ -59,10 +60,13 @@ async function stop() {
   await writeReceipt();
 }
 async function start() {
-  if (app.isPackaged) throw new Error('A self-contained desktop distribution has not been configured.');
+  const layout = await runtimeLayout({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, sourceRoot });
+  sourceRoot = layout.sourceRoot;
+  receipt.mode = layout.mode;
+  receipt.packaged = app.isPackaged;
   dataRoot = app.getPath('userData');
   await fs.mkdir(dataRoot, { recursive: true, mode: 0o700 });
-  config = YAML.parse(await fs.readFile(path.join(sourceRoot, 'desktop/config.yaml'), 'utf8'));
+  config = YAML.parse(await fs.readFile(path.resolve(__dirname, '../config.yaml'), 'utf8'));
   for (const field of ['startup_timeout_ms', 'shutdown_timeout_ms', 'smoke_timeout_ms', 'proxy_timeout_ms']) {
     if (!Number.isInteger(config[field]) || config[field] <= 0) throw new Error('Invalid desktop runtime configuration.');
   }
@@ -73,13 +77,13 @@ async function start() {
   const runtimeRoot = await seedRuntime(sourceRoot, dataRoot);
   gateway = await createGateway({ token, timeoutMs: config.proxy_timeout_ms });
   const environment = minimalEnvironment(process.env);
-  const python = process.env.MARS_DESKTOP_PYTHON || path.join(sourceRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  const python = layout.python;
   await fs.access(python);
   if (cleanup) throw new Error('Desktop is stopping.');
   receipt.stage = 'backend';
   const backend = new OwnedProcess(python, [path.join(__dirname, 'backend-runner.py')], {
     cwd: runtimeRoot,
-    env: { ...environment, PYTHONPATH: path.join(sourceRoot, 'backend'), PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', MARS_RUNTIME_ROOT: runtimeRoot, MARS_DESKTOP_SESSION_TOKEN: token, MARS_CORS_ORIGINS: gateway.origin },
+    env: { ...environment, ...(layout.pythonRoot ? { PYTHONHOME: layout.pythonRoot } : {}), PYTHONPATH: [path.join(sourceRoot, 'backend'), path.join(sourceRoot, 'projects/synthetic_regression/src')].join(path.delimiter), PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', MARS_RUNTIME_ROOT: runtimeRoot, MARS_DESKTOP_SESSION_TOKEN: token, MARS_CORS_ORIGINS: gateway.origin },
   });
   services.push(backend);
   const backendPort = await waitForPort(backend, config.startup_timeout_ms);

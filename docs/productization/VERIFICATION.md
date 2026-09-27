@@ -77,3 +77,11 @@ G/F/H 仍为进行中，未用这些局部证据替代两领域研究、五名�
 提交 `42849d9` 的 Windows native CPU、前端生产构建与桌面边界 CI 通过，Linux 后端 CI 的 14 项 SSH 正例因认证失败而失败。真实本机用 `/private/tmp` 父目录复现，sshd 明确记录 `bad ownership or modes`；将临时密钥移到用户目录下自动清理的私有目录，保留 StrictModes、主机密钥与认证校验后，35 项 SSH 测试全部通过。Linux CI 的下一次结果另行核验，不能用本机修复提前声称通过。
 
 该提交源树 dry-run 精确选择 567 文件，秘密扫描通过，634 条内容/历史门禁记录仍阻止归档。实际 macOS 测试包首次启动另外暴露 `desktop_session.py` 未纳精确源码清单，现已补入；测试包启动验收由后续构建独立记录。
+
+## 自包含 macOS arm64 本地测试应用增量（2026-09-28）
+
+内置独立 CPython 3.11.15、Electron 44.4.5/Node 24.21.0、锁定依赖和生产前端。实际 `.app` 搬到带空格的新路径后通过 GUI/API/WS、鉴权拒绝、退出清理与无关进程存活检查；独立服务进程在五个开发根目录拒读条件下仍能启动并返回真实页面。父任务独立重验 35,682 项文件清单、119 个 Mach-O 静态加载闭包及逐库/根应用 ad-hoc 签名通过。17 项 Node 测试、34 项真实文件/clang 与发行清单测试、4 个文件 strict mypy 通过。一次父任务测试命令写错不存在的文件名（exit 4），修正后才取得上述 34 项结果，原日志保留。
+
+所有构建/启动失败及修复详见 `MACOS_TEST_BUNDLE.md` 与 `evidence/macos-self-contained-local-test.json`。测试应用使用其冻结的源快照，未混入随后开发的预算/项目 scope；不能宣称它等于后续源码 HEAD。整个 GUI 外套 sandbox-exec 未通过 macOS 嵌套 sandbox 限制，保持 Electron 自身 sandbox，不以关闭隔离换通过。尚无 Developer ID、公证、正式安装升级、Windows 自包含包或完整研究验收。
+
+此前 `981ac04` 的 Core compatibility CI 五个作业与 Windows native CPU launcher 均已通过；Linux SSH StrictModes 临时目录问题已在真实 Linux CI 复验通过。

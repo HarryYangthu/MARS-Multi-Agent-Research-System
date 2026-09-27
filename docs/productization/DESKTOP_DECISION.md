@@ -1,6 +1,6 @@
 # 桌面运行架构决定
 
-日期：2026-09-28。工作包：A。结论：保留 Electron 评估路线，当前达到 macOS Apple Silicon 源码环境生产页面启动/退出验证；**未达到安装包或产品发布验收**。
+日期：2026-09-28。工作包：A。结论：保留 Electron 路线，A 的已验收记录仍是 macOS Apple Silicon 源码环境生产页面启动/退出验证。I 的自包含本地测试 `.app` 增量与独立证据见 [MACOS_TEST_BUNDLE.md](MACOS_TEST_BUNDLE.md)；**未达到正式安装与产品发布验收**。
 
 ## 已实施边界
 
@@ -27,4 +27,4 @@ Next.js 使用官方 custom-server API 加载既有生产构建，当前需要 `
 
 硬化时新增的真实 HTTP 头测试曾发现 Node `headersDistinct` 的延迟缓存与删除 raw header 对不兼容，第一次测试未通过并停止了该测试进程；修复为先清除 distinct 缓存再缩短 raw headers 后，完整 14 项重验通过。该失败与重验见 `evidence/desktop-security-checks.json`，不计入通过次数。
 
-必须继续完成平台安装、内置运行依赖、完整资源及许可审计、凭据存储、升级回滚与卸载策略、持久训练任务管理、崩溃恢复和跨平台验收。CSP 为兼容当前 Next hydration 保留 inline script/style；nonce/hash CSP 收紧和所有页面功能回归尚未完成。现有 UI 没有因此满足工作包 G 的导航/布局/交互要求。来源查看、编辑器远程资源等被网络策略阻断的能力必须改成本地受控资源并验收，不能为此放开任意远程内容。
+必须继续完成平台安装、完整资源及许可审查、凭据存储、升级回滚与卸载策略、持久训练任务管理、崩溃恢复和跨平台验收。内置运行依赖的后续 I 切片另有检查与真实启动边界，不能追溯扩充上述 A 回执。CSP 为兼容当前 Next hydration 保留 inline script/style；nonce/hash CSP 收紧和所有页面功能回归尚未完成。现有 UI 没有因此满足工作包 G 的导航/布局/交互要求。来源查看、编辑器远程资源等被网络策略阻断的能力必须改成本地受控资源并验收，不能为此放开任意远程内容。
