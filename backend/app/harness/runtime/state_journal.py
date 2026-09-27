@@ -129,29 +129,50 @@ class StateJournal:
         with self.connection() as connection:
             return self._read(connection)
 
-    def commit(self, payload: dict[str, Any], *, expected_revision: int) -> dict[str, Any]:
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """One writer transaction for state plus explicitly initialized extensions."""
         with self.connection() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            previous = self._read(connection)
-            revision = previous["revision"]
-            if revision != expected_revision:
-                raise RunStateConflictError(f"run state revision is {revision}, expected {expected_revision}")
-            committed = {**payload, "revision": revision + 1}
-            old_states = {node["key"]: node["state"] for node in previous["graph"]["nodes"]}
-            for node in committed["graph"]["nodes"]:
-                before = old_states.get(node["key"])
-                if before is None or before == node["state"]:
-                    continue
-                event_id = str(uuid4())
-                event = {"event": "agent_state", "event_id": event_id, "revision": revision + 1,
-                         "run_id": self.run_id, "agent": node["key"], "from_state": before,
-                         "to_state": node["state"], "timestamp": committed["updated_at"]}
-                if "termination" in node["metadata"]:
-                    event["termination"] = node["metadata"]["termination"]
-                connection.execute("INSERT INTO state_events(event_id,revision,payload) VALUES (?,?,?)",
-                                   (event_id, revision + 1, self._encode(event)))
-            connection.execute("UPDATE run_state SET revision=?,payload=? WHERE id=1",
-                               (revision + 1, self._encode(committed)))
+            yield connection
+
+    def validate_transaction(self, connection: sqlite3.Connection) -> None:
+        """Reject cross-journal connections and calls outside a transaction."""
+        databases = connection.execute("PRAGMA database_list").fetchall()
+        main = next((row[2] for row in databases if row[1] == "main"), None)
+        identity = connection.execute("SELECT run_id,journal_id,schema_version FROM identity WHERE id=1").fetchone()
+        if (not connection.in_transaction or main is None or Path(main).resolve() != self.path
+                or identity != (self.run_id, self.journal_id, 1)):
+            raise RunStateIntegrityError("transaction does not belong to this state journal")
+
+    def commit(self, payload: dict[str, Any], *, expected_revision: int) -> dict[str, Any]:
+        with self.transaction() as connection:
+            return self.commit_in_transaction(connection, payload, expected_revision=expected_revision)
+
+    def commit_in_transaction(self, connection: sqlite3.Connection, payload: dict[str, Any], *,
+                              expected_revision: int) -> dict[str, Any]:
+        """Stage state/outbox in the caller's transaction; never commits by itself."""
+        self.validate_transaction(connection)
+        previous = self._read(connection)
+        revision = previous["revision"]
+        if revision != expected_revision:
+            raise RunStateConflictError(f"run state revision is {revision}, expected {expected_revision}")
+        committed = {**payload, "revision": revision + 1}
+        old_states = {node["key"]: node["state"] for node in previous["graph"]["nodes"]}
+        for node in committed["graph"]["nodes"]:
+            before = old_states.get(node["key"])
+            if before is None or before == node["state"]:
+                continue
+            event_id = str(uuid4())
+            event = {"event": "agent_state", "event_id": event_id, "revision": revision + 1,
+                     "run_id": self.run_id, "agent": node["key"], "from_state": before,
+                     "to_state": node["state"], "timestamp": committed["updated_at"]}
+            if "termination" in node["metadata"]:
+                event["termination"] = node["metadata"]["termination"]
+            connection.execute("INSERT INTO state_events(event_id,revision,payload) VALUES (?,?,?)",
+                               (event_id, revision + 1, self._encode(event)))
+        connection.execute("UPDATE run_state SET revision=?,payload=? WHERE id=1",
+                           (revision + 1, self._encode(committed)))
         return committed
 
     def pending_events(self) -> list[dict[str, Any]]:

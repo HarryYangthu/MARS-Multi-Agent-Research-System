@@ -398,7 +398,17 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     root = _RUN_ROOT.get() or run_root
     if root is None:
         raise ResourceBudgetError("production model calls require a run resource scope")
-    budget = RunModelBudget(root)
+    from app.harness.llm.research_accounting import ContractModelBudget, bounded_contract_config
+    from app.harness.runtime.research_execution_scope import current_research_execution
+    scope = current_research_execution(root)
+    budget: RunModelBudget | ContractModelBudget
+    if scope is not None:
+        if not provider.budget_attempts_observable:
+            raise ResourceBudgetError("provider has no verified contract attempt accounting adapter")
+        config = bounded_contract_config(scope, config)
+        budget = ContractModelBudget(scope, endpoint=provider.base_url)
+    else:
+        budget = RunModelBudget(root)
     while True:
         try:
             reservation = budget.reserve(messages, config, correlation or {})
@@ -413,6 +423,8 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
 
     def observe(kind: str, data: dict[str, Any]) -> None:
         nonlocal unknown_attempt, started_attempts, finished_attempts, attempt_sequence_valid
+        if isinstance(budget, ContractModelBudget):
+            budget.observe(reservation, kind, data)
         if kind == "sdk_attempt_started":
             number = data.get("attempt")
             if (type(number) is not int or number != started_attempts + 1
@@ -439,8 +451,18 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     from dataclasses import replace
     actual = replace(config, attempt_observer=observe)
     try:
-        result = await provider.complete(messages, actual)
+        if scope is None:
+            result = await provider.complete(messages, actual)
+        else:
+            from app.harness.llm.provider_base import llm_call_deadline_seconds
+            remaining = scope.ledger.snapshot().activity_remaining_us / 1_000_000
+            async with asyncio.timeout(min(remaining, llm_call_deadline_seconds(actual))):
+                result = await provider.complete(messages, actual)
+        if isinstance(budget, ContractModelBudget):
+            budget.record_response_identity(reservation, result)
     except BaseException as exc:
+        if isinstance(budget, ContractModelBudget):
+            budget.record_failure_identity(reservation, getattr(exc, "model_identity", None))
         budget.settle(reservation, usage=getattr(exc, "usage", None), complete=False,
                       outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
                       sdk_attempts=started_attempts, attempts_complete=attempts_are_known())
@@ -448,4 +470,6 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     budget.settle(reservation, usage=result.raw.get("usage"), complete=not unknown_attempt,
                   outcome="completed", sdk_attempts=started_attempts,
                   attempts_complete=attempts_are_known())
+    if scope is not None and scope.ledger.snapshot().reservation_overrun:
+        raise ResourceBudgetError("actual model usage exceeded the reserved contract bounds")
     return result

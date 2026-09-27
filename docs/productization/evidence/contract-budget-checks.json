@@ -1,0 +1,38 @@
+{
+  "schema": "verification.contract-budget-increment.v1",
+  "date": "2026-09-28",
+  "budget_extension_version": 2,
+  "pytest": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "146",
+    "time": "6.333",
+    "timestamp": "2026-09-28T04:19:48.540049+08:00",
+    "hostname": "HarrydeMacBook-Air.local"
+  },
+  "strict_mypy_files": 10,
+  "import_contracts": 4,
+  "native_provider_success_substitutes": false,
+  "full_research_accepted": false,
+  "contract_start_enabled": false,
+  "logs": {
+    "release-evidence/productization/20260928/budget-model-v2.xml": "65aafaeb2abad9544514fed60d2158643c376e103fb69e20b83328629a209cbb",
+    "release-evidence/productization/20260928/budget-model-v2.log": "f24b0ee38cbdf15269c7724da1f3143f026dc85a8058799166ce6a9a39672381",
+    "release-evidence/productization/20260928/model-scope-final.log": "12a9a4a8915fb8d2bb5b4227220247cde267c1a0620203589fe47280d5be4a7f",
+    "release-evidence/productization/20260928/budget-model-imports.log": "9910dcf09a566990680db287546868f9d7a9cc49c5609d3513f4da5e9f6925d7"
+  },
+  "source_fingerprints": {
+    "backend/app/harness/runtime/research_budget_ledger.py": "7cc22961afebd27508202f3af4259c5d9d9260bd15a03b1e1d463b5ced6de1b1",
+    "backend/app/harness/runtime/state_journal.py": "fff133994f5728ae50563b459d7d27f76a0844b14ef2776b5588b2263ada68f2",
+    "backend/app/harness/runtime/research_execution_scope.py": "261387d29d89239bd682b6152e4de5db5017b256406ab59418e0480927a07696",
+    "backend/app/harness/llm/accounting.py": "0364190bbf23dd2045eaca14c93402aaf59299bbd585851bd1ce7d22b5847479",
+    "backend/app/harness/llm/research_accounting.py": "f68fd03a62fa0a6b2db2586b797e7eb043f07a4169f62507087c2ebfcb2c6058",
+    "backend/app/harness/llm/provider_base.py": "e36bf98bc92c0e37be2f53809981ec5554a95fe2b1de18599d90eddd71a6ec6c",
+    "backend/app/harness/llm/openai_provider.py": "1cb04235dadbaa3e6d38a947e6d7b2f7c832cd503718ba50f6fd67c94d6a8f2a",
+    "scripts/verify_contract_model.py": "6907798e3bc520b0935f1277748bbaf69ff0aec214e7f5d32e20cdd118475893"
+  },
+  "real_probe_receipt": "contract-model-real.json",
+  "post_probe_change": "Added read-only host scope getter; request admission/settlement unchanged."
+}

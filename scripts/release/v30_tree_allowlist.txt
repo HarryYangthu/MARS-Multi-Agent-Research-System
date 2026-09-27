@@ -597,3 +597,6 @@ scripts/desktop/build_macos.py
 scripts/desktop/verify_bundle.py
 scripts/desktop/smoke_macos.py
 scripts/desktop/runtime_probe.cjs
+backend/app/harness/runtime/research_budget_ledger.py
+backend/app/harness/runtime/research_execution_scope.py
+backend/app/harness/llm/research_accounting.py

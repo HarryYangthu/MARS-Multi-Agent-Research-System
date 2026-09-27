@@ -85,3 +85,9 @@ G/F/H 仍为进行中，未用这些局部证据替代两领域研究、五名�
 所有构建/启动失败及修复详见 `MACOS_TEST_BUNDLE.md` 与 `evidence/macos-self-contained-local-test.json`。测试应用使用其冻结的源快照，未混入随后开发的预算/项目 scope；不能宣称它等于后续源码 HEAD。整个 GUI 外套 sandbox-exec 未通过 macOS 嵌套 sandbox 限制，保持 Electron 自身 sandbox，不以关闭隔离换通过。尚无 Developer ID、公证、正式安装升级、Windows 自包含包或完整研究验收。
 
 此前 `981ac04` 的 Core compatibility CI 五个作业与 Windows native CPU launcher 均已通过；Linux SSH StrictModes 临时目录问题已在真实 Linux CI 复验通过。
+
+## 冻结预算 SQLite 与模型边界增量（2026-09-28）
+
+预算扩展 v2 与 run_state/outbox 共用事务权威；23 项预算均有持久字段与准入检查，真实模型边界已接入，合同研究整体仍阻断。146 项定向测试、10 文件 strict mypy 和 4 条依赖合同通过，详情见 `CONTRACT_MODEL_ACCOUNTING.md`、`RESEARCH_BUDGET_LEDGER.md` 与 `evidence/contract-budget-checks.json`。
+
+最终 v2 的真实 GLM-5.3 诊断为 1 次请求/1 次 SDK attempt，34 输入、27 计费输出 token，重复请求发送前拒绝；缺报价故费用未知。早期 v1 的真实诊断独立保留。审查发现并修复部分 usage 下界被预留掩盖、自定义 endpoint query 凭据落盘、失败响应模型身份遗漏；修复包括真实连接拒绝与纯计账回归，未伪造模型/服务成功。精确源指纹和阶段边界随证据保存。

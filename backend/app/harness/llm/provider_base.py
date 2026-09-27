@@ -118,6 +118,7 @@ class Delta:
 
 class LLMProvider(ABC):
     name: str = "base"
+    budget_attempts_observable: bool = False
 
     @property
     def base_url(self) -> str | None:
@@ -149,9 +150,9 @@ def public_endpoint_url(value: str) -> str:
     """Keep endpoint routing information while removing URL credentials."""
     parsed = urlsplit(value)
     authority = parsed.netloc.rsplit("@", 1)[-1]
-    query = [(name, "REDACTED" if any(marker in name.casefold() for marker in (
-        "key", "token", "secret", "password", "credential", "authorization",
-    )) else item) for name, item in parse_qsl(parsed.query, keep_blank_values=True)]
+    # Endpoint services may put bearer credentials under arbitrary names such
+    # as auth or sig. No unknown query value is safe diagnostic metadata.
+    query = [(name, "REDACTED") for name, _ in parse_qsl(parsed.query, keep_blank_values=True)]
     return urlunsplit((parsed.scheme, authority, parsed.path.rstrip("/"), urlencode(query), ""))
 
 

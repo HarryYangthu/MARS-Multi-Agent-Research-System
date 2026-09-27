@@ -110,6 +110,8 @@ class VisibleStreamAccumulator:
 
 class _OpenAICompatProvider(LLMProvider):
     name = "openai"
+    # SDK-level retries are disabled; every explicit attempt invokes the observer.
+    budget_attempts_observable = True
 
     def __init__(
         self,
