@@ -10,7 +10,9 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import re
+from statistics import mean
 from typing import Any
 
 from loguru import logger
@@ -525,107 +527,63 @@ def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str
 
 
 def _summarize_execution_metrics(*, rows: list[Any], source_ref: str) -> str:
+    """Summarize finite stored values without inventing metric direction or success.
+
+    The file alone does not define comparison policy. Keep source row identities
+    so callers can inspect receipts before making acceptance or ranking claims.
+    """
     metric_rows: list[dict[str, Any]] = []
-    for item in rows:
+    numeric: dict[str, list[float]] = {}
+    ignored_values = 0
+    for index, item in enumerate(rows):
         if not isinstance(item, dict):
             continue
         metrics = item.get("metrics")
         if not isinstance(metrics, dict):
             continue
-        metric_rows.append(
-            {
-                "run_id": item.get("run_id", ""),
-                "metrics": metrics,
-                "duration_seconds": item.get("duration_seconds"),
-            }
-        )
-    numeric: dict[str, list[float]] = {}
-    for item in metric_rows:
-        metrics = item["metrics"]
-        if not isinstance(metrics, dict):
-            continue
+        finite: dict[str, float] = {}
         for key, value in metrics.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                ignored_values += 1
+                continue
             try:
                 number = float(value)
-            except (TypeError, ValueError):
+            except OverflowError:
+                ignored_values += 1
                 continue
+            if not math.isfinite(number):
+                ignored_values += 1
+                continue
+            finite[str(key)] = number
             numeric.setdefault(str(key), []).append(number)
+        run_id = item.get("run_id")
+        metric_rows.append({"source_row": index, "run_id": run_id if isinstance(run_id, str) else "",
+                            "metrics": finite})
 
     lines = [
         "# Actual execution metrics",
         f"source: {source_ref}",
-        "This is measured post-run evidence. Do not describe the batch as unexecuted if this section is present.",
+        "These are stored post-run metric records, not an execution plan. Verify job status and provenance in the original receipts.",
+        "Metric direction, units, targets and comparison protocol must come from this task's approved contract; no ranking or goal decision is inferred here.",
         f"- rows: {len(metric_rows)}",
+        f"- omitted_non_numeric_or_non_finite_values: {ignored_values}",
     ]
     for key in sorted(numeric):
         values = numeric[key]
         if not values:
             continue
-        mean = sum(values) / len(values)
         lines.append(
-            f"- {key}: min={min(values):.6g}, max={max(values):.6g}, mean={mean:.6g}"
+            f"- {key}: min={min(values):.6g}, max={max(values):.6g}, mean={mean(values):.6g}, count={len(values)}"
         )
-
-    best_res = _best_metric_row(metric_rows, metric="RES", lower_is_better=True)
-    if best_res is not None:
-        lines.append(
-            "- best_RES: run_id={run_id}, RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
-                run_id=best_res.get("run_id", ""),
-                res=_metric_value(best_res, "RES"),
-                loss=_metric_value(best_res, "loss"),
-                pim=_metric_value(best_res, "PIM"),
-                ape=_metric_value(best_res, "APE"),
-            )
-        )
-    top_rows = sorted(
-        metric_rows,
-        key=lambda item: float(_metric_value(item, "RES", default=999999.0)),
-    )[:5]
-    if top_rows:
-        lines.append("## Top rows by lower RES")
-        for item in top_rows:
-            lines.append(
-                "- {run_id}: RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
-                    run_id=item.get("run_id", ""),
-                    res=_metric_value(item, "RES"),
-                    loss=_metric_value(item, "loss"),
-                    pim=_metric_value(item, "PIM"),
-                    ape=_metric_value(item, "APE"),
-                )
-            )
+    if not numeric:
+        lines.append("- finite measurements: unavailable; no outcome can be established from these records")
+    if metric_rows:
+        lines.append("## First stored rows in source order (not ranked)")
+        for item in metric_rows[:5]:
+            lines.append("- " + json.dumps(item, ensure_ascii=False, sort_keys=True, allow_nan=False))
+        if len(metric_rows) > 5:
+            lines.append(f"- additional rows: {len(metric_rows) - 5}; inspect {source_ref} for all records")
     return "\n".join(lines)
-
-
-def _best_metric_row(
-    rows: list[dict[str, Any]],
-    *,
-    metric: str,
-    lower_is_better: bool,
-) -> dict[str, Any] | None:
-    candidates = [
-        item
-        for item in rows
-        if _metric_value(item, metric, default=None) is not None
-    ]
-    if not candidates:
-        return None
-    return sorted(
-        candidates,
-        key=lambda item: float(_metric_value(item, metric, default=0.0)),
-        reverse=not lower_is_better,
-    )[0]
-
-
-def _metric_value(
-    row: dict[str, Any],
-    metric: str,
-    *,
-    default: Any = "n/a",
-) -> Any:
-    metrics = row.get("metrics")
-    if not isinstance(metrics, dict):
-        return default
-    return metrics.get(metric, default)
 
 
 def _execution_intent_text(run: RunHandle) -> str:

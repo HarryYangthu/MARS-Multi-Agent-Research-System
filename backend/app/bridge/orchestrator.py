@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,8 +80,11 @@ class RunSession:
     runners: dict[str, NodeRunner] = field(default_factory=dict)
     waiting_for_feedback: bool = False
     read_only: bool = False
+    read_only_reason: str | None = None
     termination: dict[str, Any] | None = None
     state_revision: int = 0
+    state_event_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stop_state_error: dict[str, str] | None = None
 
 
 class Orchestrator:
@@ -167,6 +171,32 @@ class Orchestrator:
     def discard_session(self, run_id: str) -> None:
         self._sessions.pop(run_id, None)
 
+    def migrate_run_state(self, run_id: str) -> dict[str, Any]:
+        """Explicitly adopt validated legacy state without scheduling execution."""
+        run = self.run_store.get(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        if run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS:
+            return {"ok": False, "status": "service_owned", "run_id": run_id}
+        if self.owned_tasks.active(run_id) is not None or self.owned_tasks.closing:
+            return {"ok": False, "status": "driver_busy", "run_id": run_id}
+        store = RunStateStore(run)
+        snapshot = store.load()
+        if snapshot is None:
+            return {"ok": False, "status": "missing_persisted_state", "run_id": run_id}
+        if not snapshot.migration_required:
+            # Another process may have completed migration after this process
+            # cached the old read-only session. Re-read it on the next access.
+            self.discard_session(run_id)
+            return {"ok": True, "status": "already_current", "run_id": run_id,
+                    "revision": snapshot.revision, "research_started": False}
+        store.migrate_legacy()
+        self.discard_session(run_id)
+        session = self.session(run_id)
+        return {"ok": True, "status": "migrated", "run_id": run_id,
+                "revision": session.state_revision, "read_only": session.read_only,
+                "research_started": False}
+
     # ---------------------------------------------------------------- drive
 
     def _stopping(self, session: RunSession) -> bool:
@@ -174,7 +204,7 @@ class Orchestrator:
 
     def _spawn_owned(self, session: RunSession, operation: str,
                      factory: Callable[[], Awaitable[None]]) -> bool:
-        if self._stopping(session):
+        if session.read_only or self._stopping(session):
             return False
         return self.owned_tasks.spawn(session.run.run_id, operation, factory,
                                       finished=lambda: self._finish_owned_stop(session),
@@ -235,53 +265,87 @@ class Orchestrator:
 
     def _finish_owned_stop(self, session: RunSession) -> None:
         """Commit cancellation only after the owned coroutine's real cleanup."""
-        termination = session.termination
-        if termination is None or termination.get("cleanup_complete"):
+        if session.stop_state_error is not None or session.termination is None or session.termination.get("cleanup_complete"):
             return
+        termination = dict(session.termination)
+        graph = RunGraph.from_dict(deepcopy(session.graph.to_dict()))
         interrupted = list(termination.get("interrupted_nodes", []))
-        for key, state in session.graph.all_states().items():
+        for key, state in graph.all_states().items():
             if state != NodeState.RUNNING:
                 continue
             interrupted.append(key)
-            session.graph.transition(key, NodeState.FAILED)
-            session.graph.nodes[key].metadata["termination"] = {
+            graph.transition(key, NodeState.FAILED)
+            graph.nodes[key].metadata["termination"] = {
                 "type": "cancelled", "reason": termination["reason"],
             }
-            session.run.write_event("agent_events", {
-                "run_id": session.run.run_id, "agent": key, "from_state": "running", "to_state": "failed",
-                "termination": {"type": "cancelled", "reason": termination["reason"]},
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            })
         termination.update(cleanup_complete=True, interrupted_nodes=interrupted,
                            finished_at=datetime.now(tz=timezone.utc).isoformat(), automatic_resume=False)
-        states = session.graph.all_states().values()
+        states = graph.all_states().values()
         status = ("failed" if NodeState.FAILED in states else "waiting_review" if NodeState.WAITING_REVIEW in states
-                  else "completed" if session.graph.is_complete() else "stopped")
+                  else "completed" if graph.is_complete() else "stopped")
+        prior_termination = session.termination
+        session.termination = termination
         try:
-            self._persist_state(session, status=status)
-        except Exception:
-            termination["cleanup_complete"] = False
-            raise
+            self._persist_state(session, status=status, graph=graph)
+        except Exception as exc:
+            if session.termination is termination:
+                # Reload can also fail when the database disappeared. Discard
+                # our uncommitted cleanup_complete candidate in that case.
+                session.termination = prior_termination
+            # The owned coroutine has ended, but the durable cleanup boundary
+            # could not commit. Preserve that distinction and release its lock.
+            self._record_stop_state_error(session, exc, phase="cleanup")
+            return
+        # agent_state is already in SQLite's outbox, including when this callback
+        # runs synchronously after cancellation before an async publisher runs.
         session.run.write_event("run_lifecycle", {"event": "run.cancelled", "run_id": session.run.run_id,
                                                  "termination": dict(termination)})
 
+    @staticmethod
+    def _record_stop_state_error(session: RunSession, error: Exception, *, phase: str) -> None:
+        # Process-local error evidence must not masquerade as a committed run
+        # termination. _persist_state already reloads/blocks the cached session.
+        session.stop_state_error = {"type": type(error).__name__, "phase": phase,
+                                    "message": "owned task stop state could not be persisted"}
+        logger.error("Owned stop state persistence failed: run={} phase={} type={}",
+                     session.run.run_id, phase, type(error).__name__)
+
+    @staticmethod
+    def _stop_result(session: RunSession, *, complete: bool) -> dict[str, Any]:
+        if session.stop_state_error is not None:
+            return {"ok": False, "status": "stop_state_error" if complete else "stop_incomplete",
+                    "run_id": session.run.run_id, "owned_task_done": complete, "state_persisted": False,
+                    "state_persistence_error": dict(session.stop_state_error),
+                    "termination": dict(session.termination or {})}
+        return {"ok": complete, "status": "stopped" if complete else "stop_incomplete",
+                "run_id": session.run.run_id, "termination": dict(session.termination or {})}
+
     def _request_owned_stop(self, run_id: str, *, reason: str) -> tuple[RunSession, asyncio.Task[None]] | dict[str, Any]:
-        """Mark and cancel synchronously, before queued work can start."""
+        """Always signal owned cancellation, even when durable state fails."""
         task = self.owned_tasks.active(run_id)
         # Do not recover a historical run just to mutate its state at stop.
         session = self._sessions.get(run_id)
         if task is None or session is None:
-            if session is not None and self.owned_tasks.stopping(run_id) and session.termination:
-                self._finish_owned_stop(session)
-                return {"ok": True, "status": "stopped", "run_id": run_id, "termination": dict(session.termination)}
+            if session is not None and self.owned_tasks.stopping(run_id):
+                if session.stop_state_error is not None:
+                    return self._stop_result(session, complete=True)
+                if session.termination:
+                    self._finish_owned_stop(session)
+                    return self._stop_result(session, complete=True)
             return {"ok": False, "status": "not_owned", "run_id": run_id,
                     "error": "no live task owned by this process; historical execution was not changed"}
-        if session.termination is None:
-            session.termination = {"type": "cancelled", "reason": reason[:500], "scope": "owned_async_tasks",
-                "requested_at": datetime.now(tz=timezone.utc).isoformat(), "cleanup_complete": False,
-                "automatic_resume": False}
-            self._persist_state(session, status="cancelling")
-        self.owned_tasks.cancel_once(run_id)
+        try:
+            if session.termination is None and session.stop_state_error is None:
+                session.termination = {"type": "cancelled", "reason": reason[:500], "scope": "owned_async_tasks",
+                    "requested_at": datetime.now(tz=timezone.utc).isoformat(), "cleanup_complete": False,
+                    "automatic_resume": False}
+                self._persist_state(session, status="cancelling")
+        except Exception as exc:
+            self._record_stop_state_error(session, exc, phase="request")
+        finally:
+            # In particular, SQLite/CAS errors must not leave the actual task
+            # alive. cancel_once also protects asynchronous cleanup on retries.
+            self.owned_tasks.cancel_once(run_id)
         return session, task
 
     async def _wait_owned_stop(self, requested: tuple[RunSession, asyncio.Task[None]] | dict[str, Any],
@@ -292,8 +356,9 @@ class Orchestrator:
         complete = await self.owned_tasks.wait(task, timeout=grace_seconds)
         if complete:
             self._finish_owned_stop(session)
-        return {"ok": complete, "status": "stopped" if complete else "stop_incomplete", "run_id": session.run.run_id,
-                "termination": dict(session.termination or {})}
+            if session.stop_state_error is None:
+                await self.replay_state_events(session.run.run_id)
+        return self._stop_result(session, complete=complete)
 
     async def stop_owned_run(self, run_id: str, *, reason: str = "user_request",
                              grace_seconds: float = 10.0) -> dict[str, Any]:
@@ -316,9 +381,12 @@ class Orchestrator:
 
     async def _run(self, run_id: str) -> None:
         session = self.session(run_id)
+        if session.read_only:
+            raise ValueError("read-only historical or service-owned run cannot execute through the orchestrator")
         if self._stopping(session):
             return
         graph = session.graph
+        await self.replay_state_events(run_id)
         self._persist_state(session, status="running")
         await self._publish_state(session, channel="run.lifecycle", payload={
             "event": "run.started",
@@ -822,6 +890,8 @@ class Orchestrator:
         matching waiting node and starts the downstream scheduler.
         """
         session = self.session(run_id)
+        if session.read_only:
+            return {"ok": False, "status": "read_only", "run_id": run_id}
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution", "run_id": run_id}
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="approval"):
@@ -857,6 +927,8 @@ class Orchestrator:
 
     async def _resume_approved_artifact(self, session: RunSession, *, agent: str) -> dict[str, Any]:
         run_id = session.run.run_id
+        if session.read_only:
+            return {"ok": False, "status": "read_only", "run_id": run_id}
         if self._stopping(session):
             return {"ok": False, "status": "stopped", "run_id": run_id}
         node_key = self._latest_node_for_stage(session, agent)
@@ -1092,6 +1164,8 @@ class Orchestrator:
         diagnosis_version: str,
     ) -> dict[str, Any]:
         session = self.session(run_id)
+        if session.read_only:
+            return {"ok": False, "status": "read_only", "run_id": run_id}
         if self._stopping(session) or self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
         if self.owned_tasks.active(run_id) is not None:
@@ -1144,6 +1218,8 @@ class Orchestrator:
         reason: str,
     ) -> dict[str, Any]:
         session = self.session(run_id)
+        if session.read_only:
+            return {"ok": False, "status": "read_only", "run_id": run_id}
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
@@ -1237,9 +1313,17 @@ class Orchestrator:
         if run is None:
             return None
         read_only = run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS
+        read_only_reason = "service_owned" if read_only else None
         snapshot = RunStateStore(run).load()
         if snapshot is None:
+            # Artifacts are display evidence, never a durable execution checkpoint.
+            # Even a pipeline entrypoint must not promote this inferred graph.
+            read_only = True
+            read_only_reason = "missing_persisted_state" if run.entrypoint in _ORCHESTRATED_ENTRYPOINTS else "service_owned"
             graph = self._infer_readonly_graph_from_artifacts(run)
+            for node in graph.nodes.values():
+                node.metadata.update(read_only=True, recovery_source=(
+                    "artifacts_only" if run.entrypoint in _ORCHESTRATED_ENTRYPOINTS else "external_service"))
             request = RunRequest(
                 task=run.task,
                 project=run.project,
@@ -1247,6 +1331,9 @@ class Orchestrator:
                 user_request="",
             )
         else:
+            if snapshot.migration_required and not read_only:
+                read_only = True
+                read_only_reason = "legacy_state_migration_required"
             graph = snapshot.graph
             request = RunRequest(
                 task=str(snapshot.request.get("task", run.task)),
@@ -1272,6 +1359,7 @@ class Orchestrator:
             bus=self.bus,
             waiting_for_feedback=waiting,
             read_only=read_only,
+            read_only_reason=read_only_reason,
             termination=snapshot.termination if snapshot is not None else None,
             state_revision=snapshot.revision if snapshot is not None else 0,
         )
@@ -1375,22 +1463,47 @@ class Orchestrator:
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    def _persist_state(self, session: RunSession, *, status: str) -> None:
-        session.state_revision = RunStateStore(session.run).write(
-            graph=session.graph,
-            request={
-                "task": session.request.task,
-                "project": session.request.project,
-                "entrypoint": session.request.entrypoint,
-                "standalone": session.request.standalone,
-                "user_request": session.request.user_request,
-                "auto_approve": session.request.auto_approve,
-                "extra": dict(session.request.extra),
-            },
-            status=status,
-            termination=session.termination,
-            expected_revision=session.state_revision,
-        )
+    def _persist_state(self, session: RunSession, *, status: str, graph: RunGraph | None = None) -> None:
+        if session.read_only:
+            raise ValueError("read-only run cannot persist executable state")
+        store = RunStateStore(session.run)
+        try:
+            revision = store.write(
+                graph=graph or session.graph,
+                request={
+                    "task": session.request.task,
+                    "project": session.request.project,
+                    "entrypoint": session.request.entrypoint,
+                    "standalone": session.request.standalone,
+                    "user_request": session.request.user_request,
+                    "auto_approve": session.request.auto_approve,
+                    "extra": dict(session.request.extra),
+                },
+                status=status,
+                termination=session.termination,
+                expected_revision=session.state_revision,
+            )
+        except Exception:
+            # A CAS loser must not leave speculative states runnable in memory.
+            # Block the cached session until the caller explicitly reloads it.
+            session.read_only = True
+            session.read_only_reason = "state_persistence_error"
+            try:
+                snapshot = store.load()
+                if snapshot is not None:
+                    session.graph = snapshot.graph
+                    session.termination = snapshot.termination
+                    session.state_revision = snapshot.revision
+            except (OSError, ValueError):
+                pass  # Missing/corrupt authority stays blocked; do not infer state.
+            raise
+        session.state_revision = revision
+        if graph is not None:
+            # Preserve the graph object referenced by the current driver. The
+            # candidate only changes state/metadata; topology remains RunGraph's.
+            for key, node in graph.nodes.items():
+                session.graph.restore_state(key, node.state)
+                session.graph.nodes[key].metadata = deepcopy(node.metadata)
 
     @staticmethod
     def _persist_request_extra(run: RunHandle, extra: dict[str, Any]) -> None:
@@ -1418,36 +1531,45 @@ class Orchestrator:
         node_key: str,
         new_state: NodeState,
     ) -> None:
-        prev = session.graph.state(node_key)
-        if prev == new_state:
+        if session.read_only:
+            raise ValueError("read-only run cannot transition")
+        if session.graph.state(node_key) == new_state:
             return
-        session.graph.transition(node_key, new_state)
-        payload = {
-            "agent": node_key,
-            "run_id": session.run.run_id,
-            "from_state": prev.value,
-            "to_state": new_state.value,
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-        }
-        session.run.write_event("agent_events", payload)
-        await self.langgraph_runtime.emit_transition(
-            run=session.run,
-            bus=session.bus,
-            node_key=node_key,
-            from_state=prev,
-            to_state=new_state,
-        )
-        TraceRecorder(session.run).record_event_ref(
-            channel="agent_events",
-            event="agent_state",
-            payload=payload,
-        )
-        self._persist_state(session, status="running")
-        await self._publish_state(
-            session,
-            channel=f"run.{session.run.run_id}.agent_state",
-            payload=payload,
-        )
+        candidate = RunGraph.from_dict(deepcopy(session.graph.to_dict()))
+        candidate.transition(node_key, new_state)
+        # No file event, bus publication, or live-graph mutation precedes commit.
+        self._persist_state(session, status="running", graph=candidate)
+        await self.replay_state_events(session.run.run_id)
+
+    async def replay_state_events(self, run_id: str) -> int:
+        """Drain committed agent_state events; duplicates retain the same ID.
+
+        This method never runs agents. A reconnect/restart can call it without
+        making a historical RUNNING node executable or changing its state.
+        """
+        session = self.session(run_id)
+        store = RunStateStore(session.run)
+        delivered = 0
+        async with session.state_event_lock:
+            for payload in store.pending_events():
+                try:
+                    session.run.write_event("agent_events", payload)
+                    await self.langgraph_runtime.emit_transition(
+                        run=session.run, bus=session.bus, node_key=payload["agent"],
+                        from_state=NodeState(payload["from_state"]), to_state=NodeState(payload["to_state"]),
+                    )
+                    TraceRecorder(session.run).record_event_ref(
+                        channel="agent_events", event="agent_state", payload=payload,
+                    )
+                    await self._publish_state(session, channel=f"run.{run_id}.agent_state", payload=payload)
+                    store.mark_published(payload["event_id"])
+                    delivered += 1
+                except Exception as exc:
+                    # The transition is committed, so delivery failure must not
+                    # turn it into a failed agent operation. Keep the outbox row.
+                    logger.warning("Committed state event pending delivery: run={} type={}", run_id, type(exc).__name__)
+                    break
+        return delivered
 
     async def _publish_state(
         self,

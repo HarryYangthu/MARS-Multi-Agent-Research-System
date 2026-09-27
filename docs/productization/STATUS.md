@@ -17,8 +17,8 @@
 | A | 进行中 | 基线冻结、精确发行清单、macOS 生产页面桌面壳和进程生命周期已有证据；干净安装、完整清理和升级仍未完成 |
 | B | 进行中 | 通用项目/任务合同、有限预算、共享 API/CLI 预检与冻结；现有 UI/CLI 执行循环尚未合并，领域执行参数尚待 adapter 化 |
 | C | 进行中 | 全部默认角色及辩论参与者改用 GLM-5.3；原生只读文件工具闭环实测；完整能力库及逐项认证仍待完成 |
-| D | 进行中 | SDK 自动重试计入全局模型请求上限，未知请求保守预留；状态/预算统一事务、分项 token 与活动时间、完整取消恢复仍待完成 |
-| E | 未开始 | 等待统一执行服务与 D；现有流程不能代替此次完整研究验收 |
+| D | 进行中 | SDK 重试、输入/计费输出分项有限；状态与 agent_state 事件原子保存、历史只读/显式迁移，迁移校验项目/运行身份与路径归属；持久化失败仍取消实际 owned task。预算/作业统一事务、活动时间与完整取消恢复仍待完成 |
+| E | 进行中 | 下游默认提示和模板已去领域假设及伪成功示例，复用项目知识快照；真实研究到实验的统一闭环仍未完成 |
 | F | 未开始 | SSH 密码、远端环境和两种代码接入模式待实施/实测 |
 | G | 未开始 | 现有页面已可在桌面壳打开；统一用户旅程、异常状态和用户测试仍未实施 |
 | H | 未开始 | 修正旧 CLI 报告中的请求/SDK 尝试/未知额度计数；结果中心与离线复现包仍未实施 |
@@ -29,14 +29,19 @@
 
 - [VERIFICATION.md](VERIFICATION.md)：本批完整回归、真实 GLM 型号/工具回执及明确验收边界。
 
+- [状态增量回执](evidence/state-increment-checks.json)：最终 2798 通过、178 跳过，597 个源文件 strict mypy 与 4 条依赖合同通过；不代表完整产品验收。
+
 - [BASELINE.md](BASELINE.md)：初始失败、环境边界、修复及回归。Python 3.13.9 本机检查不替代 CI 的 Python 3.11 或 Windows 实机。
 - [CLEANUP_INVENTORY.md](CLEANUP_INVENTORY.md)：精确清单及动态依赖；已删除未使用个人页面/图片，移除受跟踪的 TypeScript 缓存，清空默认个人执行路径。
 - [DESKTOP_DECISION.md](DESKTOP_DECISION.md)：实际 Electron/Python/Next 生产页面验证；[全部烟测尝试](evidence/desktop-smoke-attempts.json)、[安全回归](evidence/desktop-security-checks.json)、[第二实例](evidence/desktop-second-instance.json)。保留失败，不拼接成发布批次。
+- [STATE_JOURNAL.md](STATE_JOURNAL.md)：RunGraph/事件事务、旧任务只读和显式迁移。
+- [TOKEN_BUDGET.md](TOKEN_BUDGET.md)：输入/计费输出上限及未知量保留。
+- [AGENT_RESOURCE_MIGRATION.md](AGENT_RESOURCE_MIGRATION.md)：默认资源通用化与项目知识边界。
 - [PROJECT_CONTRACT.md](PROJECT_CONTRACT.md)：API/CLI 预检、冻结与保护范围。返回 prepared 明确不代表研究已经启动。
 
 桌面原型仍依赖开发环境中的 Python 和 Next 生产构建；打包状态明确拒绝启动，避免被误认为可安装产品。真实 GLM 检查只证明指定工具与协议链路，费用因缺少核验价格表显示未知；不证明正式 Idea Reflection、论文审查、PIMC 仿真或科学目标达成。
 
-当前发行门禁仍阻断：源码存在需要迁移的领域标记，Git 历史秘密扫描有四条待分类候选；没有生成可发布归档，也没有改写历史或放松扫描规则。
+当前发行门禁仍被待迁移的领域内容阻断，没有生成可发布归档。Git 历史扫描的七条命中已逐项证明为摘要、空变量或协议/幂等标识；按精确不可变提交指纹确认误报后复扫通过，新命中仍阻断。Git 历史未改写。
 
 ## 外部验收资源
 

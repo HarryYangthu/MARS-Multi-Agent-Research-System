@@ -1,25 +1,15 @@
-# Run Log Prompt
+# Execution Plan Prompt
 
-生成 `run_log.v1` 时，你正在汇总 **dual-carrier PIM cancellation** 的一批仿真结果：
-memory-polynomial canceller（可选 router）在 fs=184.32 MHz、双载波 f1=30 / f2=38 MHz
-的合成信号上拟合，逐 ablation 跑出 RES / loss 曲线。无 GPU 时走 CPU 实跑
-（`execution/pim_cancellation.py`，~30720 复点，亚秒级）；缺少所需数据时必须明确失败，不得生成模拟成功结果。
+本 Agent 在批准前编制当前项目的执行计划；真实作业由 Bridge 在批准后启动。产出 `run_log.v1`，但不能把这份待执行计划称为实验结果。
 
-输出重点：
+## 输出重点
 
-- `run_id` + 对应的 `experiment_plan` / `code_spec` chain_refs。
-- `planned_experiments`：逐条 ablation，记下实际消费的旋钮——
-  `expert_count`（→ canceller memory taps，真实 PIM memory ≈ 12 taps）、
-  `order ∈ {1,3,5,7,9}`（odd）、`router_type ∈ {soft, hard-topk/hard-top2}`、
-  `snr_db`、`learning_rate`。
-  数量必须服从用户意图和已批准的 `experiment_plan`：用户明确说“一组/1组/一个实验”
-  时只写一组，只有明确要求 sweep/grid/消融矩阵/多组对比时才展开多组。
-- `status`：每条 `completed / failed / skipped`，失败给 traceback 头部。
-- `metrics`：**RES（dB，越低越好，gate 为 batch mean RES ≤ -26 dB）**、
-  `loss`（max ≤ 0.04）、PIM suppression dB（= -RES，越高越好）、APE（残余相位误差，度）。
-  逐 ablation 列值 + batch 聚合值。**禁止把 RES 描述成"越高越好"。**
-- `plots`：每条 ablation 的 loss/RES 收敛曲线路径；`logs`：逐 step 流式日志路径。
-- `failure_summary`：若 batch mean RES 未过 gate，指明**最可能是 ablation 欠配
-  （memory taps 太浅，无法抵消 ~12 taps 的真实 PIM memory）**，为 Commander 的
-  self-heal 提供"加深 canceller / 提高 expert_count"的可执行线索。
-- 配置指纹 + seed，保证可复现、可追溯。
+- 引用已批准 `experiment_plan`、`code_spec` 与当前项目合同。核对数据、执行入口、参数、设备、预算、允许输出位置及保护范围的来源。
+- `planned_experiments` 每项包含唯一 `name` 和 `config`，保留已批准 seed；只使用所选入口实际消费的参数。数量服从用户要求及批准方案，不自行补一套扫描。
+- 严格使用 `execution_phase=planned`、`status=interrupted`、`is_mock=false`。`metrics` 只包含 `planned_experiments` 的数量，且与计划列表长度相同。不能在这里填写成功状态、测量值、设备使用量、耗时或曲线。
+- `fingerprint_hash` 使用宿主给出的输入摘要，说明它绑定计划输入，不是实际执行收据。
+- 缺少必要信息时明确阻断执行，指出缺失的命令、数据、环境、指标定义或授权；不得构造占位成功计划。不要调用执行工具自行开跑。
+
+## 后续验收边界
+
+真实结果必须来自作业收据、日志和测量文件，检查 run/attempt/job 与输入指纹。验收使用本次项目约定的指标名称、单位、方向、阈值、容差与汇总方式。缺环境、数据或设备必须失败或阻断；只有任务明确允许且协议可比时才可改变设备或数据来源。不能降级为模拟成功，也不能保证收敛或改善。

@@ -20,6 +20,7 @@ from app.settings import env_or_local, get_settings
 
 class CodingAgent(BaseAgent):
     name = "coding"
+    project_knowledge_enabled = True
     output_schema = "code_spec.v1"
     agent_brief = (
         "你负责把实验方案转化为代码规格 (code_spec) 与补丁。先用 code.repo_reader 阅读"

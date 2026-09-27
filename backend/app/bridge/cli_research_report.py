@@ -15,7 +15,9 @@ from typing import Any
 from urllib.parse import quote
 
 from app.harness.agent_loop.trace import atomic_json
-from app.harness.llm.accounting import ResourceBudgetError, charged_model_attempts, reserved_model_attempts
+from app.harness.llm.accounting import (
+    ResourceBudgetError, charged_model_attempts, reserved_model_attempts, validate_token_components,
+)
 from app.harness.schema.frontmatter_parser import dumps
 from app.harness.schema.validator import validate_document
 
@@ -170,6 +172,12 @@ def _collect_budgets(root: Path, warnings: list[str], *, inherited_stage: Path |
                       "reserved_tokens", "charged_input_tokens", "charged_output_tokens",
                       "reserved_input_tokens", "reserved_output_tokens", "charged_cost", "reserved_cost",
                       "price", "usage", "correlation")}}
+            try:
+                validate_token_components(row)
+            except ResourceBudgetError:
+                warnings.append(f"Invalid token-component accounting in {_relative(root, path)}")
+                for key in ("charged_tokens", "charged_input_tokens", "charged_output_tokens"):
+                    entry[key] = None
             try:
                 reserved = reserved_model_attempts(row)
                 charged = charged_model_attempts(row)

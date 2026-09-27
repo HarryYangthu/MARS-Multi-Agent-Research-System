@@ -105,6 +105,17 @@ def charged_token_component(row: Mapping[str, Any], component: str) -> int:
     return int(value)
 
 
+def validate_token_components(row: Mapping[str, Any]) -> None:
+    if type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0:
+        raise ResourceBudgetError("invalid total-token reservation record")
+    for component in ("input", "output"):
+        charged_token_component(row, component)
+    present = [f"charged_{component}_tokens" in row for component in ("input", "output")]
+    if any(present) and (not all(present) or
+            charged_token_component(row, "input") + charged_token_component(row, "output") != row.get("charged_tokens")):
+        raise ResourceBudgetError("inconsistent token-component reservation record")
+
+
 class RunModelBudget:
     def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None) -> None:
         self.root = root.resolve()
@@ -159,12 +170,7 @@ class RunModelBudget:
                     or type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0):
                 raise ResourceBudgetError("invalid resource reservation record")
             charged_model_attempts(row)
-            for component in ("input", "output"):
-                charged_token_component(row, component)
-            present = [f"charged_{component}_tokens" in row for component in ("input", "output")]
-            if any(present) and (not all(present) or
-                    charged_token_component(row, "input") + charged_token_component(row, "output") != row["charged_tokens"]):
-                raise ResourceBudgetError("inconsistent token-component reservation record")
+            validate_token_components(row)
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state

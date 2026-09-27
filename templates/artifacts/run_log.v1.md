@@ -1,21 +1,22 @@
 ---
 schema: run_log.v1
-project: pimc
+project: "PROJECT_ID_FROM_TASK"
 agent: execution
-upstream_artifact: code_spec.approved.md
-run_id: "2026-05-04T2310_pimc_ablation_run3"
-batch_size: 512
-gpu_used: ["L40S:1", "L40S:2"]
-duration_seconds: 3420
-status: completed
+run_id: "RUN_ID_FROM_HOST"
+execution_phase: planned
+status: interrupted
 metrics:
-  RES: -42.3
-  PIM: -18.7
-  APE: 23.6
-fingerprint_hash: "sha256:abcd1234deadbeef0000aaaa"
+  planned_experiments: 1
+planned_experiments:
+  - name: "REPLACE_WITH_APPROVED_EXPERIMENT"
+    config: {}
+# 仅为 schema 格式占位；实际计划必须使用宿主提供的输入摘要，绝不是作业收据。
+fingerprint_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 is_mock: false
 ---
 
-# 执行日志
+# 待执行计划格式参考
 
-正文使用中文总结执行批次、关键指标、错误数量、异常实验、资源占用和是否达到目标。run_id、metric、fingerprint_hash、文件路径等技术字段保持原样。
+以上名称、数量、空配置和零摘要只是字段结构，不能用于执行或冒充收据。实际输出须使用当前 run、已批准的实验配置/seed、确切数量和宿主输入摘要。缺少必要命令、数据、环境或预算时明确阻断，不填占位成功。
+
+本 Agent 不开作业。计划阶段 metrics 只记录计划数量，不填写实验测量、耗时或设备使用量。实际执行状态、有限测量值和真实证据哈希由批准后的执行器另行写入；计划批准不能证明实验完成。正文说明约束、来源及待验证内容。

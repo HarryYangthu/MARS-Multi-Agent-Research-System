@@ -10,6 +10,7 @@ from app.harness.schema.frontmatter_parser import parse
 
 class ExecutionAgent(BaseAgent):
     name = "execution"
+    project_knowledge_enabled = True
     output_schema = "run_log.v1"
     native_structured_delivery = True
     agent_brief = (

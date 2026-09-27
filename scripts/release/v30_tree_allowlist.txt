@@ -303,6 +303,7 @@ backend/app/harness/runtime/event_bus.py
 backend/app/harness/runtime/queue_manager.py
 backend/app/harness/runtime/readiness.py
 backend/app/harness/runtime/run_graph.py
+backend/app/harness/runtime/state_journal.py
 backend/app/harness/runtime/state_machine.py
 backend/app/harness/runtime/system_status.py
 backend/app/harness/runtime/task_contract.py

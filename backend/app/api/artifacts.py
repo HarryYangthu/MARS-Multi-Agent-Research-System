@@ -108,6 +108,15 @@ class RejectPayload(BaseModel):
     reason: str = ""
 
 
+def _ensure_writable_run(run_id: str) -> None:
+    try:
+        session = get_orchestrator().session(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    if session.read_only:
+        raise HTTPException(status_code=409, detail=f"run is read-only ({session.read_only_reason}); historical artifacts can only be viewed or exported")
+
+
 def _resolve(run_id: str, agent_dir: str, stem: str, version: str) -> Path:
     store = get_run_store()
     run = store.get(run_id)
@@ -378,6 +387,7 @@ async def get_patch(run_id: str, version: str) -> PatchView:
 
 @router.post("/{run_id}/coding/patch/{version}/approve", response_model=ArtifactView)
 async def approve_patch(run_id: str, version: str) -> ArtifactView:
+    _ensure_writable_run(run_id)
     await _apply_patch_or_raise(run_id, version)
     normalized = version if version.startswith("v") else f"v{version}"
     review = get_review_registry().get(run_id, "coding")
@@ -424,6 +434,7 @@ async def approve_patch(run_id: str, version: str) -> ArtifactView:
 async def reject_patch(
     run_id: str, version: str, payload: RejectPayload
 ) -> dict[str, str]:
+    _ensure_writable_run(run_id)
     _patch_path(run_id, version)
     review = get_review_registry().get(run_id, "coding")
     if review is None:
@@ -540,6 +551,7 @@ async def diff_versions(
 async def edit_artifact(
     run_id: str, agent_dir: str, stem: str, version: str, payload: EditPayload
 ) -> ArtifactView:
+    _ensure_writable_run(run_id)
     store = get_run_store()
     run = store.get(run_id)
     if run is None:
@@ -567,6 +579,7 @@ async def edit_artifact(
 async def approve_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
+    _ensure_writable_run(run_id)
     if agent_dir == "coding":
         patch_version = _patch_version_from_artifact(run_id, stem, version)
         if patch_version is None:
@@ -641,6 +654,7 @@ async def reject_artifact(
 async def comment_artifact(
     run_id: str, agent_dir: str, stem: str, payload: CommentPayload
 ) -> dict[str, str]:
+    _ensure_writable_run(run_id)
     review = get_review_registry().get(run_id, agent_dir)
     if review is None:
         raise HTTPException(status_code=404, detail="no review session")

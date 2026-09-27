@@ -79,6 +79,18 @@ Native trace 的 `model_request.model` 仍表示请求配置，`model_response` 
 
 以上测试没有发起外部 LLM 研究请求。测试中的合成 CPU 数值计算属于真实、有限步数的工程验证，不证明 PIMC 数据实验、真实文献研究或用户研究目标达成。依赖缺失导致的 skip 与通过必须分别统计。
 
+### 历史任务只读恢复与显式迁移
+
+发现 `_recover_session()` 在缺少状态快照时会根据产物猜测图，却仍把 `pipeline` / Agent entrypoint 当作可执行任务。现所有无快照恢复均为只读；图中的 `done` / `waiting_review` 仅供历史产物展示，不证明原任务真实完成。`GET /api/runs/{id}` 返回 `read_only=true`、`read_only_reason=missing_persisted_state` 和空操作列表；任务 `status` 保持 `null`。真实 schema 产物的版本列表、正文读取和已有文件下载仍可用。
+
+启动、恢复、审批后推进、重试、反馈循环以及直接调用 orchestrator driver 均拒绝这类图。产物编辑/审批/评论和 patch 审批在写文件或执行补丁前拒绝；不能通过“先应用补丁、再拒绝恢复”绕过只读边界。
+
+完整旧 JSON 状态走不同路径：显示 `legacy_state_migration_required` 与 `available_actions: ["migrate_state"]`。用户可显式调用 `POST /api/runs/{id}/migrate-state`；bridge 调用存储层的受锁校验/迁移，成功后丢弃旧缓存，但不启动研究，响应固定包含 `research_started=false`。原 JSON 原文保存在 `run_state.legacy.json`，authority 记录其 SHA-256；`run_state.json` 随后为 SQLite 状态的可再生投影。缺失状态、损坏/身份不符状态、其他服务拥有的任务及活跃 driver 锁均拒绝迁移。迁移不补造模型、预算或实验回执。
+
+新增 12 项真实临时文件/API 回归，与既有 external projection、API lifecycle、owned cancellation 模块合跑：**58 项通过、1 项跳过，9.37 秒**。覆盖 6 种无状态历史场景、真实 HTTP 读/下载及 11 个拒绝入口、迁移前只读、真实 driver 锁竞争、显式迁移后的图/原文/哈希、幂等迁移和无自动任务。跳过项需要用户提供真实研究 checkpoint，未伪造替代。
+
+随后增加显式 `POST /api/runs/{id}/replay-state-events`。只有具备有效 SQLite authority 的任务可请求补投已提交 outbox；响应列出已投递/待投递数量以及 `research_started=false`。缺少 authority 的纯产物/旧 JSON 历史直接 409，不创建锁文件。数据库丢失或损坏也明确 409，只返回安全错误类型。新增 6 项真实 API 回归，包括实际本地 EventBus 收到已提交事件、空 outbox、重复请求及异常状态；核验图、revision、状态投影均未推进。该模块现为 **18 项通过**，与 22 项真实 state journal 测试合跑为 **40 项通过，2.99 秒**。没有运行 Agent、模型或实验。
+
 ## 当前真实入口和持久化边界
 
 | 范围 | 当前实现 | 产品化缺口 |
@@ -88,10 +100,10 @@ Native trace 的 `model_request.model` 仍表示请求配置，`model_response` 
 | CLI 实验 | `harness/research_trial.py`、`execution/research_process.py`、`configs/cli_research.yaml` | `channels=16`、RES dB、候选文件与静态数据协议仍在通用路径中 |
 | 项目接入 | `harness/project_workspace.py`、`api/projects.py` | 可原地接入目录并保存 `.mars` 身份；缺少命令、数据/输出、指标、执行环境和预算的一体合同 |
 | 项目扩展 | `harness/project_packs/`、`bridge/extension_runtime.py` | 已有 adapter 声明及真实进程协议，可复用；需与目录项目使用同一接入合同 |
-| UI 运行状态 | `storage/run_state_store.py` | 文件锁、fsync、revision 冲突检查和审批恢复已有实现；状态、预算、事件和作业未统一事务提交 |
+| UI 运行状态 | `storage/run_state_store.py` + `harness/runtime/state_journal.py` | 新 RunGraph snapshot 与 agent_state outbox 由 SQLite 原子提交；旧 JSON 显式迁移、保留原件；预算/作业/批准回执仍未统一事务 |
 | CLI 运行状态 | 独立 `state.json`、`input/manifest.json` 与 trial 文件 | 不是 UI 的 `run_state.json`，不能把“两者使用同一个 native tool loop”误称为同一研究状态机 |
 | 任务生命周期 | Orchestrator 的 owned tasks、start/resume/stop/shutdown | 可复用已有归属与恢复保护；仍需完整暂停状态、全局预算与远程待核对语义 |
-| 事件 | `Orchestrator._transition()` 先写事件后写状态 | 两个文件各自原子，不等于跨事件、状态、预算和 artifact 引用的原子事务 |
+| 事件 | `Orchestrator._transition()` 先提交状态与 agent_state，再发送 outbox | 稳定 event_id 支持至少一次投递与重投；其他生命周期事件、预算和 artifact 引用仍未加入同一事务 |
 
 动态依赖包括 YAML 配置、schema、prompts、Project Pack 文件、adapter argv、项目规则以及源码快照。静态 import 未引用某个文件不构成删除依据。
 

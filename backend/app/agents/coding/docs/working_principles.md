@@ -1,29 +1,10 @@
-# Coding Agent 工作原则 (pimc)
+# Coding Agent 工作原则
 
-Coding Agent 把 PIMC 实验方案转成代码规格和可审核补丁:对象是
-**memory-polynomial canceller + router**(消双载波 odd-order PIM,
-3 阶交调落在 2f1−f2 / 2f2−f1)。
+把当前项目的实验方案实现为可审查、可复现的代码改动。
 
-## 硬性原则
-
-- **不改受保护 baseline**:`Paper_Total_0327`(`libs/Model.py`)的方法体与构造签名冻结;
-  `baseline/**`、`production_interface/**` 对 MARS 只读。违反即被 Gate 5 在 tool dispatch
-  路径直接拦截。
-- **保持 `forward(x, stream_label)` 接口兼容**:第三个位置参数必须叫 `stream_label`;
-  新功能只能加带默认值的 keyword-only 参数,禁止位置重排。
-- **改动必须 ADDITIVE**:扩 memory taps / 换 router 一律走新 module 或子类
-  (如 `DeepMemoryCanceller(Paper_Total_0327)`),baseline 原样保留作对照。
-- 把仿真器真正消费的旋钮正确接上 canceller:`expert_count`(→ memory taps,真实 ≈ 12)、
-  `order` ∈ {1,3,5,7,9}(奇)、`router_type` ∈ {soft, hard-topk/hard-top2}、
-  `snr_db`、`learning_rate`。
-- 每个 patch 说明文件、风险、测试、回滚路径;tensor op 前后必须带 shape 注释。
-- 测试要锁住指标方向:`RES`(dB)**越低越好**,门限 `RES <= -26 dB`(mean)、
-  `loss <= 0.04`(max),加深 taps 时 RES 应下降。**绝不**把 RES 当成越高越好。
-- 新依赖必须有理由,能不用就不用。
-
-## 与自愈环的关系
-
-`max_iterations=2`,`allowed_targets=[experiment, coding]`,`default_target=experiment`。
-RES 未过门多半是 experiment 侧 memory 欠配,会回到 Experiment 而非 Coding;
-只有确属代码缺陷(旋钮没接上 / basis 构造错 / shape 不匹配)才回退到 Coding,
-修复仍须 ADDITIVE、不破冻结面、不反向接错指标方向。
+- 阅读真实源码与项目规则，确认允许写入范围、保护 baseline、评测入口和接口。缺少必要信息时明确阻断，不按其他项目的默认约束写代码。
+- 参数必须接到真实实现，形状、类型、设备和随机性遵循本项目接口。tensor 操作前后标注 shape。
+- 通过受治理工具实际修改文件，保留 Gate 5；核对最终 diff 与工具收据。补丁建议、代码规格或 schema 通过均不是实现完成证明。
+- 对照基线和受保护文件保持完整，不修改数据划分、目标或评分程序以取得更好数值。
+- 测试验证接口与算法行为，研究收益由独立真实实验判断。未运行标记 skipped，失败如实保留；不伪造服务、工具或测试结果。
+- 每次变更说明文件、风险、必要依赖和回滚路径。修改范围与重试次数受本次任务预算约束。

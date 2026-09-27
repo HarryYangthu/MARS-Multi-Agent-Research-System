@@ -169,3 +169,22 @@ def test_export_preserves_component_charges_without_reporting_unknown_as_zero(tm
     report = (tmp_path / "report.md").read_text()
     assert "配额已记账 Token（包含未知调用保留量）：—" in report
     assert "输入：—；计费输出：—" in report
+
+
+def test_report_rejects_inconsistent_split_totals_like_the_runtime(tmp_path: Path) -> None:
+    from app.bridge.cli_research_report import write_report
+
+    ledger = RunModelBudget(tmp_path, configuration=policy())
+    reservation = ledger.reserve(messages(), config(), {})
+    ledger.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    raw = read(ledger)
+    raw["requests"][reservation.request_id].update(charged_input_tokens=1, charged_output_tokens=2)
+    ledger.path.write_text(json.dumps(raw))
+    with pytest.raises(ResourceBudgetError, match="inconsistent token-component"):
+        ledger.reserve(messages(), config(), {})
+    write_report(tmp_path, {"project": "token-budget-test", "task": "Inspect corrupt totals", "budget": {}}, {})
+    evidence = json.loads((tmp_path / "evidence/summary.json").read_text())
+    assert any("Invalid token-component" in warning for warning in evidence["warnings"])
+    row = evidence["model_budgets"][0]["requests"][0]
+    assert all(row[key] is None for key in ("charged_tokens", "charged_input_tokens", "charged_output_tokens"))
+    assert "输入：—；计费输出：—" in (tmp_path / "report.md").read_text()

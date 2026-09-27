@@ -94,6 +94,9 @@ class RunDetail(RunSummary):
     graph: dict[str, Any]
     status: str | None = None
     termination: dict[str, Any] | None = None
+    read_only: bool = False
+    read_only_reason: str | None = None
+    available_actions: list[str] = Field(default_factory=list)
 
 
 class RetryAgentPayload(BaseModel):
@@ -276,6 +279,9 @@ async def get_run(run_id: str) -> RunDetail:
         graph=session.graph.to_dict(),
         status=snapshot.status if snapshot else None,
         termination=session.termination,
+        read_only=session.read_only,
+        read_only_reason=session.read_only_reason,
+        available_actions=["migrate_state"] if session.read_only_reason == "legacy_state_migration_required" else [],
     )
 
 
@@ -367,10 +373,7 @@ async def start_run(run_id: str) -> dict[str, str]:
     if session.read_only:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"run entrypoint '{session.run.entrypoint}' is managed by its "
-                "dedicated service API"
-            ),
+            detail=f"run is read-only ({session.read_only_reason}); historical artifacts cannot resume execution; service-owned runs use their dedicated service API",
         )
     try:
         assert_ready_for_run(project=session.run.project)
@@ -382,11 +385,52 @@ async def start_run(run_id: str) -> dict[str, str]:
     return {"status": str(result["status"]), "run_id": run_id}
 
 
+@router.post("/{run_id}/migrate-state")
+async def migrate_run_state(run_id: str) -> dict[str, Any]:
+    _ensure_active_run(run_id)
+    try:
+        result = get_orchestrator().migrate_run_state(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail={"status": "migration_blocked", "error": str(exc)}) from exc
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/{run_id}/replay-state-events")
+async def replay_state_events(run_id: str) -> dict[str, Any]:
+    _ensure_active_run(run_id)
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    store = RunStateStore(run)
+    # Reject artifact-only/legacy history before acquiring locks or recovering
+    # sessions. Replay requires committed journal events, never an inferred graph.
+    if not store.authority_path.is_file():
+        raise HTTPException(status_code=409, detail={"status": "state_replay_unavailable",
+                                                    "reason": "missing_state_authority"})
+    try:
+        snapshot = store.load()
+        if snapshot is None or snapshot.migration_required:
+            raise ValueError("committed run state authority required")
+        delivered = await get_orchestrator().replay_state_events(run_id)
+        pending = len(store.pending_events())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail={"status": "state_replay_unavailable",
+                                                    "error_type": type(exc).__name__}) from exc
+    return {"run_id": run_id, "status": "pending" if pending else "replayed",
+            "delivered_count": delivered, "pending_count": pending, "research_started": False}
+
+
 @router.post("/{run_id}/resume", status_code=202)
 async def resume_run(run_id: str) -> dict[str, Any]:
     _ensure_active_run(run_id)
     orch = get_orchestrator()
     session = orch.session(run_id)
+    if session.read_only:
+        raise HTTPException(status_code=409, detail=f"run is read-only ({session.read_only_reason}); no trusted execution state is available to this API")
     try:
         assert_ready_for_run(project=session.run.project)
     except ProductionReadinessError as exc:
