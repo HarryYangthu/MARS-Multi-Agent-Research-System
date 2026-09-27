@@ -20,6 +20,7 @@ from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Me
 from app.harness.llm.accounting import guarded_complete, run_resource_scope
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 from app.harness.schema.validator import ValidationResult, validate_document
+from app.harness.runtime.project_scope import ProjectScope, current_project_scope
 from app.settings import repo_root
 
 
@@ -109,6 +110,7 @@ class BaseAgent(ABC):
         return AgentLoopPolicy.from_mapping(raw)
 
     async def build_context(self, request: RunRequest) -> ContextPack:
+        scope = _request_project_scope(request)
         from app.storage.agent_context_store import load_agent_code_repositories
         sources = {"project_rules": True, "code_repositories": True}
         configured = request.extra.get("context_sources", {})
@@ -124,7 +126,7 @@ class BaseAgent(ABC):
         project_path = project_root(request.project)
         folder_context = (load_folder_context(
             request.project, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
-            if sources.get("project_references", True) else None)
+            if scope is None and sources.get("project_references", True) else None)
         folder = folder_project(request.project) if sources["project_rules"] else None
         rules_root = folder.root if folder is not None else project_path
         rules_path = rules_root / "AGENTS.md"
@@ -133,7 +135,7 @@ class BaseAgent(ABC):
         rules = (rules_path.read_text() if sources["project_rules"] and rules_path.is_file()
                  else "No project-specific rules supplied in this context.")
         repositories = (load_agent_code_repositories(self.name, project=request.project)
-                        if sources["code_repositories"] else ())
+                        if scope is None and sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
         metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources}
         if folder_context is not None:
@@ -141,14 +143,24 @@ class BaseAgent(ABC):
             metadata["folder_context"] = {k: v for k, v in folder_context.items() if k != "files"}
             metadata["folder_context"]["files"] = [{k: v for k, v in f.items() if k != "content"} for f in folder_context["files"]]
         from app.harness.context.project_knowledge import load_project_knowledge
+        if scope is not None:
+            scope.run_file("input/project_knowledge.v1.json")
         knowledge, knowledge_record = (load_project_knowledge(
             project_path, Path(str(request.extra["run_root"])) if request.extra.get("run_root") else None)
-            if self.project_knowledge_enabled and sources.get("project_references", True)
+            if (scope is not None or self.project_knowledge_enabled) and sources.get("project_references", True)
             and folder_context is None else ("", {}))
         if knowledge:
+            if scope is not None and knowledge != (scope.metadata_root / "knowledge.md").read_text(encoding="utf-8"):
+                raise ValueError("Project knowledge snapshot differs from the bound contract references")
             rules_path_label = knowledge_record["source"]
             rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge
             metadata["project_knowledge"] = {key: value for key, value in knowledge_record.items() if key != "content"}
+        if scope is not None:
+            metadata["project_scope"] = {"run_id": scope.run_id, "task_sha256": scope.task_sha256,
+                "snapshot_id": scope.snapshot_id, "data_access": "not_granted", "commands": "not_granted"}
+            upstream["bound_project_scope"] = json.dumps({"source_read_files": scope.readable_files,
+                "allowed_write_paths": scope.allowed_write_paths, "protected_paths": scope.protected_paths,
+                "data_access": "not_granted", "commands": "not_granted"}, ensure_ascii=False)
         if repositories:
             upstream[f"{self.name}_code_repositories"] = json.dumps(
                 [asdict(repository) for repository in repositories], ensure_ascii=False)
@@ -169,8 +181,7 @@ class BaseAgent(ABC):
         from app.harness.persistence import path_lock
         from app.harness.tools.config import tool_config
 
-        root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
-                        repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()
+        root = _request_run_root(request)
         request.runtime["run_root"] = str(root)
         invocation = str(request.extra.get("resume_invocation") or request.extra.get("invocation_id")
                          or request.runtime.get("invocation_id") or digest({"root": str(root), "agent": self.name,
@@ -190,6 +201,10 @@ class BaseAgent(ABC):
         frozen = {"schema": "agent.context_resources.v1", "skills": selection.manifest,
                   "resources": resources.manifest if resources else None}
         path = root / "context" / "resources" / (digest({"agent": self.name, "invocation": invocation}) + ".json")
+        scope = _request_project_scope(request)
+        if scope is not None:
+            path = scope.run_file(path.relative_to(root).as_posix())
+            scope.run_file(path.with_suffix(".lock").relative_to(root).as_posix())
         with path_lock(path.with_suffix(".lock")):
             if path.exists():
                 if json.loads(path.read_text()) != frozen:
@@ -204,6 +219,12 @@ class BaseAgent(ABC):
         metadata["agent_resources"] = resources.manifest if resources else None
         metadata["resource_snapshot"] = str(path)
         request.runtime["skill_selection"] = selection
+        if _request_project_scope(request) is not None:
+            # Global project_id is not a run capability. Do not even load a
+            # same-name global memory store before namespace binding exists.
+            request.runtime.pop("memory_snapshot", None)
+            metadata["memory"] = {"state": "not_bound", "record_ids": []}
+            return
         memory = prepare_memory_context(run_root=root, agent=self.name, node_key=invocation,
                                         project=request.project, task=request.user_request,
                                         max_tokens=None if metadata["context_sources"].get("memory", True) else 0)
@@ -236,8 +257,12 @@ class BaseAgent(ABC):
         from app.harness.context.injection_runtime import complete_memory_usage
         outcome = "failed"
         try:
-            root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
-                            repo_root() / "runs" / ("agent_" + uuid.uuid4().hex)))
+            scope = _request_project_scope(request)
+            if scope is not None and context.metadata.get("project_scope") != {
+                    "run_id": scope.run_id, "task_sha256": scope.task_sha256,
+                    "snapshot_id": scope.snapshot_id, "data_access": "not_granted", "commands": "not_granted"}:
+                raise ValueError("Agent context does not belong to its bound project scope")
+            root = _request_run_root(request)
             request.extra["run_root"] = str(root)
             with run_resource_scope(root):
                 artifact = await self.draft(request, context)
@@ -419,8 +444,7 @@ class BaseAgent(ABC):
         from app.harness.tools.registry import ToolContext
         from app.harness.tools.config import tool_config
         from app.harness.agent_loop.review import ExternalReview
-        run_root = Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
-                            repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()
+        run_root = _request_run_root(request)
         request.extra["run_root"] = str(run_root)
         invocation = str(request.extra.get("resume_invocation") or request.extra.get("invocation_id")
                          or request.runtime.get("invocation_id") or uuid.uuid4().hex)
@@ -495,3 +519,39 @@ class BaseAgent(ABC):
         # Never add fields, close incomplete frontmatter, or discard a preamble to make
         # an invalid model document appear valid.
         return text.strip()
+
+
+def _request_project_scope(request: RunRequest) -> ProjectScope | None:
+    scope = current_project_scope(request.project,
+        str(request.extra["run_id"]) if request.extra.get("run_id") is not None else None)
+    for mapping in (request.extra, request.runtime):
+        if scope is None and mapping.get("research_task_sha256") is not None:
+            raise ValueError("Contract-backed agent context requires a host-bound project scope")
+        value = mapping.get("run_root")
+        if value:
+            path = Path(str(value))
+            if scope is not None and (path.is_symlink() or path.resolve() != scope.run_root):
+                raise ValueError("Agent request root differs from its bound project scope")
+            if scope is None:
+                contract = path / "input/research_task.v1.json"
+                if contract.exists() or contract.is_symlink():
+                    raise ValueError("Contract-backed agent context requires a host-bound project scope")
+                from app.harness.runtime.state_journal import StateJournal
+                journal = StateJournal.from_authority(path.resolve(), run_id=path.resolve().name)
+                if journal is not None:
+                    saved_request = journal.read().get("request")
+                    extra = saved_request.get("extra") if isinstance(saved_request, dict) else None
+                    if isinstance(extra, dict) and extra.get("research_task_sha256") is not None:
+                        raise ValueError("Contract-backed agent context requires a host-bound project scope")
+    if scope is not None:
+        request.extra["run_root"] = str(scope.run_root)
+        request.extra["run_id"] = scope.run_id
+    return scope
+
+
+def _request_run_root(request: RunRequest) -> Path:
+    scope = _request_project_scope(request)
+    if scope is not None:
+        return scope.run_root
+    return Path(str(request.extra.get("run_root") or request.runtime.get("run_root") or
+                    repo_root() / "runs" / ("agent_" + uuid.uuid4().hex))).resolve()

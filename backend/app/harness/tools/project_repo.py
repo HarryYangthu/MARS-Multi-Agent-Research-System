@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from app.harness.project_workspace import project_root
+from app.harness.runtime.project_scope import ProjectScope, current_project_scope
 from app.settings import repo_root
 
 
@@ -43,9 +44,15 @@ class ProjectRepo:
     allowed_paths: tuple[str, ...]
     protected_paths: tuple[str, ...]
     ignore_patterns: tuple[str, ...]
+    scope: ProjectScope | None = None
 
 
 def load_project_repo(project: str) -> ProjectRepo:
+    scope = current_project_scope(project)
+    if scope is not None:
+        return ProjectRepo(project=project, root=scope.candidate_root, repo_mode="run_bound",
+            read_only=False, allowed_paths=scope.allowed_write_paths,
+            protected_paths=scope.protected_paths, ignore_patterns=scope.excluded_paths, scope=scope)
     project_dir = project_root(project)
     cfg_path = project_dir / "repo_link.yaml"
     raw: dict[str, Any] = {}
@@ -76,7 +83,15 @@ def resolve_allowed_path(
     *,
     require_exists: bool = False,
     require_text: bool = False,
+    for_write: bool = False,
 ) -> Path:
+    if repo.scope is not None:
+        if current_project_scope(repo.project) != repo.scope:
+            raise ValueError("Project repository capability is not bound to this execution")
+        target = repo.scope.resolve_file(rel_path, write=for_write, must_exist=require_exists)
+        if require_text and target.suffix.lower() not in TEXT_SUFFIXES:
+            raise ValueError(f"unsupported text file type '{target.suffix}'")
+        return target
     rel = Path(rel_path)
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise ValueError("path must be a relative path inside the project repo")
@@ -96,6 +111,8 @@ def resolve_allowed_path(
 
 
 def validate_repo_writable(repo: ProjectRepo) -> None:
+    if repo.scope is not None:
+        raise ValueError("External coding adapters are not admitted for a bound research contract")
     if repo.read_only:
         raise ValueError("project repo is read_only in repo_link.yaml")
     if not repo.root.exists():

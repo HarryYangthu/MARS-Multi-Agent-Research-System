@@ -28,6 +28,12 @@ def _digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode()).hexdigest()
 
 
+class ContractModelIdentityError(ResourceBudgetError):
+    def __init__(self, usage: object) -> None:
+        self.usage = usage
+        super().__init__("provider response model identity mismatch")
+
+
 def bounded_contract_config(scope: ResearchExecutionScope, config: LLMConfig) -> LLMConfig:
     if type(config.max_retries) is not int or config.max_retries < 0:
         raise ResourceBudgetError("max_retries must be a nonnegative integer")
@@ -74,7 +80,7 @@ class ContractModelBudget:
         self.responses[reservation.request_id] = record
         if (completion.is_mock or not record["model_matches_requested"] or not record["provider_matches_requested"]
                 or record["response_model_status"] != "consistent"):
-            raise ResourceBudgetError("provider response model identity mismatch")
+            raise ContractModelIdentityError(completion.raw.get("usage"))
 
     def record_failure_identity(self, reservation: Reservation, identity: object) -> None:
         if not isinstance(identity, dict) or reservation.request_id in self.responses:

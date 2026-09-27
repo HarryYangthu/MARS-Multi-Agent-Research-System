@@ -11,8 +11,8 @@ import pytest
 
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.openai_provider import CustomEndpointProvider
-from app.harness.llm.provider_base import LLMConfig, Message, public_endpoint_url
-from app.harness.llm.research_accounting import ContractModelBudget, bounded_contract_config
+from app.harness.llm.provider_base import Completion, LLMConfig, Message, public_endpoint_url
+from app.harness.llm.research_accounting import ContractModelBudget, ContractModelIdentityError, bounded_contract_config
 from app.harness.runtime.research_execution_scope import (
     ResearchExecutionScope, bind_research_execution, current_research_execution,
 )
@@ -99,6 +99,23 @@ def test_partial_usage_is_a_lower_bound_even_when_total_is_unknown(tmp_path: Pat
     assert snapshot.used["input_tokens"] is not None and snapshot.used["input_tokens"] > 1
     with pytest.raises(ResourceBudgetError, match="reservation_overrun"):
         budget.reserve([Message("user", "different arithmetic input")], config, {})
+
+
+def test_rejected_response_identity_preserves_observed_usage_lower_bound(tmp_path: Path) -> None:
+    # Pure validation of a malformed envelope; this never invokes a provider.
+    ledger, _ = _setup(tmp_path)
+    budget = ContractModelBudget(ResearchExecutionScope(ledger, "idea", "identity"), endpoint=None)
+    reservation = budget.reserve([Message("user", "parser input")],
+        LLMConfig(provider="custom", model="expected", max_tokens=8, max_retries=0), {})
+    envelope = Completion(text="", provider="custom", model="wrong", raw={
+        "usage": {"prompt_tokens": 1, "completion_tokens": 80, "total_tokens": 81},
+        "response_model_status": "consistent"})
+    with pytest.raises(ContractModelIdentityError) as caught:
+        budget.record_response_identity(reservation, envelope)
+    budget.settle(reservation, usage=caught.value.usage, complete=False, outcome="failed",
+                  sdk_attempts=1, attempts_complete=True)
+    assert ledger.snapshot().used["billed_output_tokens"] == 80
+    assert ledger.snapshot().reservation_overrun
 
 
 @pytest.mark.asyncio

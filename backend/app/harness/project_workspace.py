@@ -69,6 +69,9 @@ def list_folder_projects(*, registry: Path | None = None) -> list[FolderProject]
 
 
 def folder_project(name: str, *, registry: Path | None = None) -> FolderProject | None:
+    from app.harness.runtime.project_scope import current_project_scope
+    if current_project_scope(name) is not None:
+        return None
     if not _PROJECT_ID.fullmatch(name) or name in {".", ".."}:
         raise ValueError("invalid project name")
     path = _entries(registry or registry_path()).get(name)
@@ -82,6 +85,10 @@ def folder_project(name: str, *, registry: Path | None = None) -> FolderProject 
 
 def project_root(project: str) -> Path:
     """Metadata root; the research repository itself is resolved via repo_link."""
+    from app.harness.runtime.project_scope import current_project_scope
+    scope = current_project_scope(project)
+    if scope is not None:
+        return scope.metadata_root
     folder = folder_project(project)
     if folder is not None:
         return folder.metadata_root

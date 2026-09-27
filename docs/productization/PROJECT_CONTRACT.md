@@ -92,7 +92,7 @@ execution:
 
 绝对路径用于明确用户选择的外部资源，无需搬动原目录；非 Git 目录同样可以预检。`knowledge` 和 `data` 可显式声明空列表，例如代码生成合成样本的项目；这不等于存在真实训练数据。相对代码范围为字面文件/目录，不接受 `..`、盘符、反斜杠或 glob。其子树匹配有路径分隔符边界。所有 `baseline_files` 自动保护，`protected_paths` 始终优先于 `allowed_paths`。入口文件与范围不能经过符号链接；输出路径需使用不含符号链接的规范路径，且不得覆盖代码根目录或与保护范围重叠。
 
-`source_write_allowed(project, relative_path)` 提供同一保护规则的确定性查询，但尚未接入实际写入工具和最终 diff 校验。命令是 executable 与 arguments 的结构化数组；预检只核对声明文件与可执行文件存在，不证明参数正确、依赖完整或命令已在隔离环境运行。此处没有 shell、环境安装或虚构执行成功。
+`source_write_allowed(project, relative_path)` 提供同一保护规则的确定性查询。新增 [run 项目 scope](RUN_PROJECT_SCOPE.md) 在可信 owner 显式绑定后，将合同允许写入与保护范围接入代码工具、文本 diff 与 Gate 5；默认合同执行仍阻断，最终候选和执行适配尚未验收。命令是 executable 与 arguments 的结构化数组；预检只核对声明文件与可执行文件存在，不证明参数正确、依赖完整或命令已在隔离环境运行。此处没有 shell、环境安装或虚构执行成功。
 
 ## 指纹及证据边界
 

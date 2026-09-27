@@ -600,3 +600,5 @@ scripts/desktop/runtime_probe.cjs
 backend/app/harness/runtime/research_budget_ledger.py
 backend/app/harness/runtime/research_execution_scope.py
 backend/app/harness/llm/research_accounting.py
+backend/app/harness/runtime/project_scope.py
+backend/app/bridge/research_project_scope.py
