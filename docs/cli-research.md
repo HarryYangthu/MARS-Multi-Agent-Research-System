@@ -18,7 +18,9 @@ mars project --server http://127.0.0.1:8010 preflight --config /absolute/project
 mars project --server http://127.0.0.1:8010 freeze --config /absolute/project.yaml \
   --goal "比较声明的候选与基线" --mode manual --output /absolute/new-task.json
 mars project --server http://127.0.0.1:8010 create --contract /absolute/new-task.json \
-  --name "比较候选与基线"
+  --name "比较候选与基线" --request-id YOUR_RETAINED_REQUEST_ID
+mars project --server http://127.0.0.1:8010 request-status YOUR_RETAINED_REQUEST_ID \
+  --task-sha256 YOUR_FROZEN_TASK_SHA256
 ```
 
 `run` 输出分别保留 `http_status`、`http_ok` 和后端 `response`；HTTP 202 只表示受理，研究状态及结果看实际响应。缺服务、认证失败、只读历史、无可恢复 checkpoint 等明确返回非零；超时的 mutation 结果可能未知，先 `show` 核对，客户端不自动重试。停止的持久化失败与实际任务清理完成是不同状态，原样保留。
@@ -27,7 +29,13 @@ mars project --server http://127.0.0.1:8010 create --contract /absolute/new-task
 
 `project --server` 从所选后端读取默认预算，并调用同一个预检/冻结服务；输出哈希在写文件前复核，已存在的输出不覆盖。`prepared` 始终附 `research_started:false`，不会执行声明的命令或模型。省略 `--server` 时仍支持本地只读预检/冻结，详见 [项目合同](productization/PROJECT_CONTRACT.md)。
 
-`project create` 必须显式选择后端。该后端再次验证冻结指纹和声明源文件，成功保存实际 run、合同和 SQLite 初始状态，返回 HTTP 201 / `created` / `research_started:false`；CLI 此时退出 0 表示创建成功。它不启动研究；当前 `execution_admission.ready:false` 列出项目命令/保护范围及全部预算尚未绑定的阻断原因。`run show` 可查看同一个任务，`start/resume` 返回 409、CLI 退出 2。源文件在冻结后改变也返回 409，不建立新 run，不修改已导出的合同。请求超时可能已创建任务，先用 `run list` 核对，不自动重试创建。
+`project create` 必须显式选择后端。保存前提供并自行保留稳定的 `--request-id`，后端将其绑定名称与冻结合同哈希；同 ID 同内容返回同一个真实 run，不同内容返回 409。省略 ID 保留旧客户端行为，回执明确 `idempotent:false`，重复调用可能另建任务。CLI 不自动生成、换 ID 或重发请求。
+
+成功保存实际 run、合同和 SQLite 初始状态后，HTTP 201 / `created` / `research_started:false` 还需通过 CLI 的身份核对，才输出 `creation_confirmed:true` 并退出 0。它不启动研究；当前 `execution_admission.ready:false` 列出尚未完成的执行准入。`run show` 可查看同一个任务，`start/resume` 仍受相同后端规则限制。
+
+请求超时可能已经完成保存。使用相同 `--server` 与原 ID 执行 `project request-status`，此命令只读，原合同文件和原源码均可不在场。可选 `--task-sha256` 核对预先保留的合同哈希：匹配时 `contract_match:true`；省略时为 null，表示只确认该请求的真实创建记录，没有宣称匹配某个本地合同。新建保存命令始终核对它实际读取的冻结哈希。
+
+pending（含 HTTP 202）、unknown、rejected、404、401 或内容冲突均退出 2，`creation_confirmed:false`。`http_ok:true` 只说明 HTTP 成功。明确的分配前预检拒绝返回持久 `rejected/admitted:false`；用户修改、重新冻结后可明确使用新 ID。unknown 或 404 不允许据此推断未保存，也不会自动新建。详情及真实验证见 [CLI 幂等保存](productization/CLI_CREATION_IDEMPOTENCY.md)。
 
 ## 旧 StaticPIMC 专用流程
 

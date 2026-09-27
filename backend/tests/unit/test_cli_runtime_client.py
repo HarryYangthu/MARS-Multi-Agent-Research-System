@@ -648,3 +648,177 @@ def test_cli_subprocess_create_requires_explicit_backend_and_cannot_fall_back_lo
     result = cli_process(backend, tmp_path, "project", "create", "--contract", "not-read.json", "--name", "No local owner", token=backend.token)
     assert result.returncode == 2 and json.loads(result.stdout)["error_code"] == "server_required"
     assert list(tmp_path.iterdir()) == []
+
+
+def _cli_frozen_file(directory: Path) -> tuple[Path, dict[str, Any]]:
+    from tests.unit.test_research_run_admission import frozen_input
+    payload = frozen_input(directory).model_dump(mode="json")
+    path = directory / "cli-frozen.json"
+    path.write_text(json.dumps(payload))
+    return path, payload
+
+
+def test_cli_explicit_id_replays_and_lookup_requires_no_source(backend: LiveBackend, tmp_path: Path) -> None:
+    contract, payload = _cli_frozen_file(tmp_path)
+    request_id = "cli-idempotent-save"
+    arguments = ("project", "--server", backend.origin, "create", "--contract", str(contract),
+                 "--name", "CLI idempotent task", "--request-id", request_id)
+    created = cli_process(backend, tmp_path, *arguments, token=backend.token)
+    assert created.returncode == 0, created.stderr
+    report = json.loads(created.stdout)
+    assert report["creation_confirmed"] is True and report["contract_match"] is True
+    assert report["response"]["idempotent"] is True and report["response"]["request_id"] == request_id
+    shutil.rmtree(tmp_path / "code")
+    repeated = cli_process(backend, tmp_path, *arguments, token=backend.token)
+    assert repeated.returncode == 0 and json.loads(repeated.stdout) == report
+    contract.unlink()
+    lookup_args = ("project", "--server", backend.origin, "request-status", request_id)
+    lookup = cli_process(backend, tmp_path, *lookup_args, "--task-sha256", payload["task_sha256"], token=backend.token)
+    assert lookup.returncode == 0
+    verified = json.loads(lookup.stdout)
+    assert verified["creation_confirmed"] and verified["contract_match"] is True
+    assert verified["response"]["run"] == report["response"]
+    without_hash = cli_process(backend, tmp_path, *lookup_args, token=backend.token)
+    assert without_hash.returncode == 0 and json.loads(without_hash.stdout)["contract_match"] is None
+    mismatch = cli_process(backend, tmp_path, *lookup_args, "--task-sha256", "0" * 64, token=backend.token)
+    assert mismatch.returncode == 2 and json.loads(mismatch.stdout)["error_code"] == "creation_response_mismatch"
+    assert "Traceback" not in mismatch.stderr
+
+
+def test_cli_id_conflict_does_not_allocate_another_run(backend: LiveBackend, tmp_path: Path) -> None:
+    contract, _ = _cli_frozen_file(tmp_path)
+    base = ("project", "--server", backend.origin, "create", "--contract", str(contract), "--request-id", "cli-body-conflict")
+    first = cli_process(backend, tmp_path, *base, "--name", "Original CLI task", token=backend.token)
+    assert first.returncode == 0
+    conflict = cli_process(backend, tmp_path, *base, "--name", "Different CLI task", token=backend.token)
+    assert conflict.returncode == 2
+    report = json.loads(conflict.stdout)
+    assert report["http_status"] == 409 and report["creation_confirmed"] is False
+    assert report["response"]["detail"]["code"] == "creation_request_conflict"
+
+
+def test_cli_pending_and_unknown_are_nonzero_without_resubmission(backend: LiveBackend, tmp_path: Path) -> None:
+    from tests.unit.test_research_creation import interrupted_creation
+    contract, frozen = _cli_frozen_file(tmp_path)
+    payload: dict[str, Any] = {"name": "CLI unknown outcome", "contract": frozen, "request_id": "cli-pending-to-unknown"}
+    child = tmp_path / "child"
+    child.mkdir()
+    lookup_args = ("project", "--server", backend.origin, "request-status", payload["request_id"], "--task-sha256", frozen["task_sha256"])
+    create_args = ("project", "--server", backend.origin, "create", "--contract", str(contract), "--name", payload["name"], "--request-id", payload["request_id"])
+    with interrupted_creation(backend.runtime / "runs", child, payload, "intent") as process:
+        for arguments in (lookup_args, create_args):
+            pending = cli_process(backend, tmp_path, *arguments, token=backend.token)
+            report = json.loads(pending.stdout)
+            assert pending.returncode == 2 and report["creation_confirmed"] is False
+            assert report["http_ok"] is True and report["response"]["status"] == "pending"
+        process.kill()
+        process.wait(timeout=5)
+        lookup = cli_process(backend, tmp_path, *lookup_args, token=backend.token)
+        assert lookup.returncode == 2 and json.loads(lookup.stdout)["response"]["status"] == "unknown"
+        repeat = cli_process(backend, tmp_path, *create_args, token=backend.token)
+        assert repeat.returncode == 2 and json.loads(repeat.stdout)["http_status"] == 409
+        assert json.loads(repeat.stdout)["response"]["detail"]["run_id"] is None
+
+
+def test_cli_rejected_lookup_and_explicit_new_request(backend: LiveBackend, tmp_path: Path) -> None:
+    contract, frozen = _cli_frozen_file(tmp_path)
+    baseline = tmp_path / "code/baseline.py"
+    original = baseline.read_bytes()
+    baseline.write_text("# source changed after freezing")
+    base = ("project", "--server", backend.origin, "create", "--contract", str(contract), "--name", "CLI preflight rejection")
+    rejected = cli_process(backend, tmp_path, *base, "--request-id", "cli-preflight-rejected", token=backend.token)
+    assert rejected.returncode == 2
+    receipt = json.loads(rejected.stdout)
+    assert receipt["creation_confirmed"] is False and receipt["response"]["detail"]["admitted"] is False
+    lookup = cli_process(backend, tmp_path, "project", "--server", backend.origin, "request-status", "cli-preflight-rejected",
+                         "--task-sha256", frozen["task_sha256"], token=backend.token)
+    assert lookup.returncode == 2 and json.loads(lookup.stdout)["response"]["status"] == "rejected"
+    baseline.write_bytes(original)
+    accepted = cli_process(backend, tmp_path, *base, "--request-id", "cli-preflight-new-request", token=backend.token)
+    assert accepted.returncode == 0 and json.loads(accepted.stdout)["creation_confirmed"] is True
+
+
+@pytest.mark.parametrize("invalid", ["token", "token_prefix", "path"])
+def test_cli_request_id_cannot_leak_credentials_or_escape_route(backend: LiveBackend, tmp_path: Path, invalid: str) -> None:
+    contract, _ = _cli_frozen_file(tmp_path)
+    value = backend.token if invalid == "token" else backend.token[:12] if invalid == "token_prefix" else "../outside"
+    for arguments in (
+        ("request-status", "--", value),
+        ("create", "--contract", str(contract), "--name", "Never submit credential", "--request-id=" + value),
+    ):
+        result = cli_process(backend, tmp_path, "project", "--server", backend.origin, *arguments, token=backend.token)
+        assert result.returncode == 2 and json.loads(result.stdout)["error_code"] == "invalid_request"
+        assert "Traceback" not in result.stderr
+
+
+def test_cli_lookup_missing_unauthorized_and_no_server_are_nonzero(backend: LiveBackend, tmp_path: Path) -> None:
+    arguments = ("project", "--server", backend.origin, "request-status", "cli-not-registered")
+    missing = cli_process(backend, tmp_path, *arguments, token=backend.token)
+    assert missing.returncode == 2 and json.loads(missing.stdout)["http_status"] == 404
+    denied = cli_process(backend, tmp_path, *arguments, token=None)
+    assert denied.returncode == 2 and json.loads(denied.stdout)["http_status"] == 401
+    no_server = cli_process(backend, tmp_path, "project", "request-status", "cli-not-registered", token=backend.token)
+    assert no_server.returncode == 2 and json.loads(no_server.stdout)["error_code"] == "server_required"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cli_actual_timeout_is_recovered_by_readonly_request_lookup(backend: LiveBackend, tmp_path: Path) -> None:
+    from app.storage.research_creation_store import ResearchCreationStore
+    contract, frozen = _cli_frozen_file(tmp_path)
+    # Give only this CLI process a short, real YAML-configured network deadline.
+    cli_runtime = tmp_path / "client-runtime"
+    for line in (ROOT / "scripts/release/runtime_assets.txt").read_text().splitlines():
+        if line and not line.startswith("#"):
+            destination = cli_runtime / line
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / line, destination)
+    (cli_runtime / "configs/cli_runtime.yaml").write_text("schema_id: cli_runtime.v1\ntimeout_seconds: 0.05\nmax_response_bytes: 1048576\n")
+    short_client = LiveBackend(backend.origin, backend.token, cli_runtime)
+    catalog = ResearchCreationStore(backend.runtime / "runs")
+    catalog.initialize()
+    with catalog.connection(writable=True) as connection:
+        connection.execute("BEGIN EXCLUSIVE")
+        try:
+            timed_out = cli_process(short_client, tmp_path, "project", "--server", backend.origin, "create", "--contract", str(contract),
+                "--name", "CLI actual timeout", "--request-id", "cli-real-timeout", token=backend.token)
+            assert timed_out.returncode == 2, timed_out.stderr
+            assert json.loads(timed_out.stdout)["error_code"] == "timeout"
+            assert "request-status" in timed_out.stderr
+        finally:
+            connection.rollback()
+    # Explicit lookup calls are reads. Neither helper submits another creation.
+    deadline = time.monotonic() + 10
+    while True:
+        lookup = cli_process(backend, tmp_path, "project", "--server", backend.origin, "request-status", "cli-real-timeout",
+            "--task-sha256", frozen["task_sha256"], token=backend.token)
+        if lookup.returncode == 0:
+            break
+        assert time.monotonic() < deadline, lookup.stdout + lookup.stderr
+        time.sleep(0.01)
+    report = json.loads(lookup.stdout)
+    assert report["creation_confirmed"] is True and report["response"]["run"]["research_started"] is False
+
+
+
+@pytest.mark.parametrize("damage", ["request_id", "hash", "started", "idempotent", "envelope_hash", "nested_run_id"])
+def test_cli_creation_parser_rejects_authored_inconsistent_evidence(damage: str) -> None:
+    # Pure parser inputs only; these are never a provider, tool or service result.
+    from app.cli import _creation_response
+    from app.cli_runtime_client import RuntimeResponse
+    run: dict[str, Any] = {"status": "created", "research_started": False, "request_id": "parser-request-id",
+        "idempotent": True, "entrypoint": "pipeline", "run_id": "authored_parser_input", "task": "parser input",
+        "project": "parser", "created_at": "2026-09-28T00:00:00Z", "task_sha256": "1" * 64,
+        "execution_admission": {"ready": False}}
+    envelope: dict[str, Any] = {"request_id": "parser-request-id", "task_sha256": "1" * 64,
+        "status": "created", "admitted": True, "research_started": False,
+        "run_id": "authored_parser_input", "run": run, "reason": None}
+    if damage == "envelope_hash":
+        envelope["task_sha256"] = "2" * 64
+    elif damage == "nested_run_id":
+        run["run_id"] = "another_parser_input"
+    else:
+        field = {"request_id": "request_id", "hash": "task_sha256", "started": "research_started", "idempotent": "idempotent"}[damage]
+        run[field] = {"request_id": "another-request-id", "hash": "2" * 64, "started": True, "idempotent": False}[damage]
+    with pytest.raises(RuntimeClientError) as failure:
+        _creation_response(RuntimeResponse(200, envelope), request_id="parser-request-id", expected_task_sha256="1" * 64, lookup=True)
+    assert failure.value.code == "creation_response_mismatch"

@@ -190,6 +190,29 @@ def _created_receipt(run: RunHandle, extra: dict[str, Any], task_sha256: str,
         request_id=request_id, idempotent=request_id is not None)
 
 
+def validate_saved_run_journal_schema(connection: sqlite3.Connection) -> None:
+    """Check the core v1 authority shape without initializing or repairing it.
+
+    A readable snapshot alone is insufficient: committed transitions also own
+    the durable outbox. Extensions may add tables or columns, but cannot remove
+    or redefine the core fields. Call within the reader's existing transaction.
+    """
+    required: dict[str, dict[str, tuple[str, int, int]]] = {
+        "identity": {"id": ("INTEGER", 0, 1), "run_id": ("TEXT", 1, 0),
+                     "journal_id": ("TEXT", 1, 0), "schema_version": ("INTEGER", 1, 0)},
+        "run_state": {"id": ("INTEGER", 0, 1), "revision": ("INTEGER", 1, 0), "payload": ("TEXT", 1, 0)},
+        "state_events": {"sequence": ("INTEGER", 0, 1), "event_id": ("TEXT", 1, 0),
+                         "revision": ("INTEGER", 1, 0), "payload": ("TEXT", 1, 0),
+                         "published": ("INTEGER", 1, 0)},
+    }
+    for table, columns in required.items():
+        kind = connection.execute("SELECT type FROM sqlite_master WHERE name=?", (table,)).fetchone()
+        actual = {row[0]: (row[1].upper(), row[2], row[3]) for row in connection.execute(
+            'SELECT name,type,"notnull",pk FROM pragma_table_info(?)', (table,))}
+        if kind != ("table",) or any(actual.get(name) != shape for name, shape in columns.items()):
+            raise ResearchContractIntegrityError("Saved run authority core schema is incomplete or invalid")
+
+
 def _verify_created_run(store: RunStore, intent: CreationIntent) -> ResearchRunCreated:
     """Read the actual authority without recovery, projection repair or live preflight."""
     if intent.run_id is None:
@@ -214,6 +237,7 @@ def _verify_created_run(store: RunStore, intent: CreationIntent) -> ResearchRunC
     try:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("BEGIN")
+        validate_saved_run_journal_schema(connection)
         if connection.execute("SELECT run_id,journal_id,schema_version FROM identity WHERE id=1").fetchone() != (journal.run_id, journal.journal_id, 1):
             raise ResearchContractIntegrityError("Creation authority identity differs")
         snapshot = RunStateStore(run)._snapshot(StateJournal._read(connection))

@@ -10,6 +10,7 @@ import secrets
 from pathlib import Path
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -127,6 +128,45 @@ def test_corrupt_creation_evidence_never_allocates_replacement(tmp_path: Path, d
     assert replay.status == "unknown"
     # POST may rewrite only its OS lease inode; all stored bytes stay unchanged.
     assert files(store.runs_root) == before
+
+
+@pytest.mark.parametrize("damage", [
+    "drop_identity", "drop_run_state", "drop_state_events", "sequence", "event_id", "revision", "payload", "published",
+    "outbox_view", "outbox_column_type",
+])
+def test_actual_http_incomplete_journal_is_unknown_without_repair_or_reallocation(
+    backend: LiveBackend, tmp_path: Path, damage: str,
+) -> None:
+    payload = _payload(tmp_path, "journal-schema-" + damage)
+    with _http(backend) as client:
+        created = client.post("/api/research-contracts/runs", json=payload)
+        assert created.status_code == 201
+        run_id = created.json()["run_id"]
+        root = backend.runtime / "runs" / run_id
+        with sqlite3.connect(root / "run_state.sqlite3") as connection:
+            if damage.startswith("drop_"):
+                table = damage.removeprefix("drop_")
+                connection.execute(f"DROP TABLE {table}")
+            elif damage == "outbox_view":
+                connection.execute("ALTER TABLE state_events RENAME TO saved_events")
+                connection.execute("CREATE VIEW state_events AS SELECT * FROM saved_events")
+            elif damage == "outbox_column_type":
+                connection.execute("DROP TABLE state_events")
+                connection.execute("CREATE TABLE state_events (sequence INTEGER PRIMARY KEY, event_id TEXT NOT NULL, "
+                                   "revision INTEGER NOT NULL, payload TEXT NOT NULL, published TEXT NOT NULL)")
+            else:
+                connection.execute(f"ALTER TABLE state_events RENAME COLUMN {damage} TO damaged_column")
+        before = files(backend.runtime / "runs")
+        lookup = client.get("/api/research-contracts/requests/" + payload["request_id"])
+        assert lookup.status_code == 200
+        status = lookup.json()
+        assert status["status"] == "unknown" and status["run_id"] == run_id
+        assert status["run"] is None and status["admitted"] is None and status["research_started"] is False
+        assert status["reason"] == "creation_evidence_unavailable"
+        assert files(backend.runtime / "runs") == before
+        replay = client.post("/api/research-contracts/runs", json=payload)
+        assert replay.status_code == 409 and replay.json()["detail"] == status
+        assert files(backend.runtime / "runs") == before
 
 
 CHILD_CREATION = r'''

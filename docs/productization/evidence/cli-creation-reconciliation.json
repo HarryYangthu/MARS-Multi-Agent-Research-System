@@ -1,0 +1,38 @@
+{
+  "schema": "verification.cli_creation_reconciliation.v1",
+  "status": "passed",
+  "tests": {
+    "cli_module": 79,
+    "creation_module": 38,
+    "independent_actual_cli": 3
+  },
+  "strict_mypy": {
+    "cli_files": 3,
+    "creation_files": 2
+  },
+  "source_sha256": {
+    "backend/app/cli.py": "fba0ba391f50c672562b8331a45bc32269ca4539687e026b97ff6cf12ccba255",
+    "backend/app/cli_runtime_client.py": "9619be8e829cfd2f7f496c314ecb31d7cf057b06816936b9245d0f0b98d160a6",
+    "backend/app/bridge/research_run_service.py": "bdba4f6f2a59af7c574f9192ef7b1d99b102daa6acb0e154b67edb0819c24a9b",
+    "backend/tests/unit/test_cli_runtime_client.py": "44e33553966e7466e9394e1b57f9a3e81fe1ac5826b7b88d7d86be1a5605ab97",
+    "backend/tests/unit/test_research_creation.py": "7d0291e0fb2a4df830714b404cb322e122e8e1bc826293721254c5f0fd916c38"
+  },
+  "evidence": {
+    "cli-idempotency.pytest.log": "a94da78f75f6ca1abc11aa2167cdfd39dcb6ee296b1aec57cce7fc220af6f912",
+    "cli-idempotency.mypy.log": "8228fcc5ce46d42d01caf3cd941f4e9c5f2bcc372bb5b147a2f0572d2dd675a8",
+    "creation-outbox.pytest.log": "d722335afb1afe2e60c2ca633b93ae82605d906dfdf4e021379be2ec18f2aabf",
+    "creation-outbox.mypy.log": "f9b031e5c45aa702cd4fef028d465551cb20a2c4698e0913c7b00766b20ac4d8",
+    "cli-idempotency-independent.log": "b3d17dab855c3ee17af23bb9806b58d32ec57b21dd9b51b387d252fd7ce8241c",
+    "test_mars_cli_idempotency_independent.py": "aea79fcef2817f2db04635948ba80bc0386c7302fb4b7449be31e906c06a3398"
+  },
+  "independent_finding": {
+    "initial": "Dropping real state_events after saving still confirmed created",
+    "fix": "Read-only core SQL table/column shape verification; corruption returns unknown and nonzero CLI exit without repair",
+    "verified": "Missing DB, non-database, dropped outbox; legacy no-ID duplicates explicitly non-idempotent; real 422 token redaction"
+  },
+  "boundaries": [
+    "Only correlated created evidence confirms save; no research execution claimed",
+    "No automatic ID allocation, replacement or retry",
+    "No full paused research recovery, installer or platform matrix claim"
+  ]
+}

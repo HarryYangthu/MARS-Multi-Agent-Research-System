@@ -19,6 +19,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from app.storage.research_creation_store import REQUEST_ID_PATTERN
+
 
 class RuntimeClientError(RuntimeError):
     """Safe transport/protocol failure without request objects or credentials."""
@@ -162,9 +164,23 @@ class RuntimeClient:
         return await self._request("POST", "/api/research-contracts/prepare",
                                    payload={"project": dict(project), "goal": goal, "mode": mode, "budget": dict(budget)})
 
-    async def create_research_run(self, *, name: str, contract: Mapping[str, Any]) -> RuntimeResponse:
-        return await self._request("POST", "/api/research-contracts/runs",
-                                   payload={"name": name, "contract": dict(contract)})
+    def _creation_request_id(self, request_id: str) -> str:
+        if (re.fullmatch(REQUEST_ID_PATTERN, request_id) is None
+                or self._token and self._token[:12] in request_id):
+            # IDs are public correlation metadata. Never send a session token
+            # accidentally pasted here as a URL or a persisted creation key.
+            raise RuntimeClientError("invalid_request", "Request ID must be a valid independent non-secret identifier")
+        return request_id
+
+    async def create_research_run(self, *, name: str, contract: Mapping[str, Any],
+                                  request_id: str | None = None) -> RuntimeResponse:
+        payload: dict[str, Any] = {"name": name, "contract": dict(contract)}
+        if request_id is not None:
+            payload["request_id"] = self._creation_request_id(request_id)
+        return await self._request("POST", "/api/research-contracts/runs", payload=payload)
+
+    async def creation_status(self, request_id: str) -> RuntimeResponse:
+        return await self._request("GET", "/api/research-contracts/requests/" + self._creation_request_id(request_id))
 
     async def _request(self, method: str, path: str, *, params: Mapping[str, str] | None = None,
                        payload: dict[str, Any] | None = None) -> RuntimeResponse:

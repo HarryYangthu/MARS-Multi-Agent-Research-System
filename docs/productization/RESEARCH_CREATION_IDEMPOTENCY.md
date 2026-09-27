@@ -11,7 +11,7 @@
 - 已登记且持有创建 lease：HTTP 202，返回 pending 核对 envelope。
 - 不能确认创建结果：HTTP 409，`detail` 为 unknown 核对 envelope。不会自动重建或换 ID。
 - 分配之前的真实 live preflight 明确拒绝：HTTP 422，`detail` 为持久 rejected envelope，`admitted: false`、`run_id: null`。用户可以明确修改、重新冻结后使用新 ID。旧 rejected ID 永不隐式重试。
-- 无 `request_id` 的旧客户端保持兼容：仍创建真实任务，回执 `request_id: null`、`idempotent: false`；网络重试可能创建另一任务。当前 CLI 仍属此类，不宣称已有请求幂等保障。
+- 无 `request_id` 的旧客户端保持兼容：仍创建真实任务，回执 `request_id: null`、`idempotent: false`；网络重试可能创建另一任务。CLI 显式请求 ID 与只读核对见 [CLI_CREATION_IDEMPOTENCY.md](CLI_CREATION_IDEMPOTENCY.md)；未传 ID 时仍不具备请求幂等保障。
 
 `GET /api/research-contracts/requests/{request_id}` 只读核对，返回：
 
@@ -37,7 +37,7 @@
 1. POST 显式初始化 catalog schema v1；GET 使用 SQLite `mode=ro`、`query_only`，不会初始化/升级 catalog、创建 lease 父目录或修复运行投影。
 2. 每个 ID 持有独立跨进程 OS lease，SQLite 唯一键与 `BEGIN IMMEDIATE` 保护意图提交。已有 ID 不读取可变源文件，直接核对保存证据。新 ID 先做真实 live preflight；拒绝仅记录 rejected，完全不调用 RunStore/Orchestrator。
 3. 预检通过后，以 SQLite `synchronous=FULL` 提交 pending 意图，再调用原 Orchestrator。它在实际 `RunStore.create()` 返回后，立刻通过 host `on_run_allocated` hook 持久绑定真实 run_id，然后沿原路径写冻结合同、request options、run metadata 与 StateJournal。
-4. 完成后从真正的 SQLite authority、request、冻结文件及元数据核对名称、项目、入口、目标与合同哈希，再标记创建完成。GET 不调用 `Orchestrator.session()` 或 `RunStateStore.load()`，避免恢复/审批投影副作用；使用相同纯 snapshot 校验器读取实际 authority。
+4. 完成后从真正的 SQLite authority、request、冻结文件及元数据核对名称、项目、入口、目标与合同哈希，再标记创建完成。同一只读事务还要求 schema v1 的 `identity`、`run_state`、`state_events` 都是实际表，必要列的名称、类型、非空与主键定义完整；只可读 snapshot 不能代替缺失的事务 outbox。独立扩展表/新增列不受影响。GET 不调用 `Orchestrator.session()` 或 `RunStateStore.load()`，避免恢复/审批投影副作用；使用相同纯 snapshot 校验器读取实际 authority。
 5. lease 消失且权威证据完整，即使进程死于 StateJournal 提交后、catalog completion 前，也能核对为 created。证据缺失或坏损时保持 unknown；旧 request 不能重新调用 create。删除/回收站中的 run 不会被重建。
 
 **已知不可消除窗口：** RunStore 的 mkdir/meta 写入与 allocation callback 之间，进程退出可能留下未绑定孤儿目录。此时 catalog 查询为 unknown、run_id=null；不会按名称猜测目录、自动认领或重建。这不是“没有孤儿 run”的承诺。首次预检通过到原 Orchestrator 再次验证之间，源文件也可能变化；一旦意图已提交，此类后续异常保守保持 unknown，不能冒充 rejected。
@@ -60,3 +60,5 @@ catalog 丢失而已有 lease 证据时，显式初始化也拒绝重建空 cata
 
 
 后续只读审查真实复现：把 `.initialize.lock` 硬链接到自有临时目录的 27 字节 sentinel 后，原 FileLock 初始化取得锁会截断该 inode，使外部 sentinel 变为 0 字节。现已在进入 `path_lock` 前要求初始化锁为单链接普通文件，定向回归验证拒绝后外部内容完全保留；未扩大通用锁组件。另将保存记录中的无效 request ID 统一为 `CreationCatalogIntegrityError`，避免内部解码契约泄漏普通 `ValueError`。常规 GET 的合法 URL 与 SQL 精确键查询本就使无效 ID 记录难以被选中，因此未把纯解码失败冒充已复现的 HTTP 500。
+
+2026-09-28 独立 CLI 审查另有真实失败：成功保存之后仅执行 `DROP TABLE state_events`，原 `request-status` 仍返回 `created`/`creation_confirmed: true` 并退出 0。现补上述核心 schema 只读检查；缺任一核心表、outbox 必要列改名、替换为视图或列类型损坏时，GET 返回原 run ID 的 `unknown`，同 ID POST 返回 409，保存文件完全不变、无初始化/修复/第二次分配。新增 10 个实际 HTTP + SQLite 损坏用例；本模块最终 **38 passed / 7.34 s**，相关 2 文件 strict mypy 通过。核验只确认保存身份与必要 authority 结构，不把 `created` 宣称为研究已启动、运行生命周期健康或所有实验结果均已验证。

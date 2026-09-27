@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 from typing import Any, Literal, NoReturn
@@ -59,6 +60,77 @@ def _runtime_response(response: RuntimeResponse) -> dict[str, Any]:
     return {"http_status": response.status_code, "http_ok": response.ok, "response": response.payload}
 
 
+
+def _creation_protocol_error() -> NoReturn:
+    raise RuntimeClientError("creation_response_mismatch",
+        "Backend creation evidence does not match this request; inspect the saved request before continuing")
+
+
+def _creation_response(response: RuntimeResponse, *, request_id: str | None,
+                       expected_task_sha256: str | None, lookup: bool,
+                       expected_name: str | None = None) -> dict[str, Any]:
+    """Keep transport facts; only explicit, correlated evidence confirms a save."""
+    result = {**_runtime_response(response), "creation_confirmed": False, "contract_match": None}
+
+    def check_hash(value: Any, *, unknown: bool = False) -> str | None:
+        if value is None and unknown:
+            return None
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            _creation_protocol_error()
+        if expected_task_sha256 is not None and value != expected_task_sha256:
+            _creation_protocol_error()
+        return value
+
+    def check_run(value: Any) -> str:
+        if (not isinstance(value, dict) or value.get("status") != "created"
+                or value.get("research_started") is not False or value.get("request_id") != request_id
+                or value.get("idempotent") is not (request_id is not None)
+                or value.get("entrypoint") != "pipeline"
+                or not isinstance(value.get("run_id"), str)
+                or re.fullmatch(r"[A-Za-z0-9_.-]+", value["run_id"]) is None or value["run_id"] in {".", ".."}
+                or not isinstance(value.get("task"), str) or not value["task"].strip()
+                or expected_name is not None and value["task"] != expected_name
+                or not isinstance(value.get("project"), str) or not value["project"]
+                or not isinstance(value.get("created_at"), str) or not value["created_at"]
+                or not isinstance(value.get("execution_admission"), dict)
+                or type(value["execution_admission"].get("ready")) is not bool):
+            _creation_protocol_error()
+        fingerprint = check_hash(value.get("task_sha256"))
+        assert fingerprint is not None
+        return fingerprint
+
+    if not lookup and response.status_code == 201:
+        check_run(response.payload)
+        result.update(creation_confirmed=True, contract_match=expected_task_sha256 is not None)
+        return result
+    value = response.payload
+    if not response.ok:
+        detail = value.get("detail") if isinstance(value, dict) else None
+        if not isinstance(detail, dict) or detail.get("status") not in {"unknown", "rejected"}:
+            return result
+        value = detail
+    elif response.status_code != (200 if lookup else 202):
+        _creation_protocol_error()
+    if (not isinstance(value, dict) or request_id is None or value.get("request_id") != request_id
+            or value.get("research_started") is not False
+            or value.get("status") not in {"pending", "created", "unknown", "rejected"}):
+        _creation_protocol_error()
+    status = value["status"]
+    expected_admission = True if status in {"pending", "created"} else False if status == "rejected" else None
+    if value.get("admitted") is not expected_admission:
+        _creation_protocol_error()
+    fingerprint = check_hash(value.get("task_sha256"), unknown=status == "unknown")
+    if expected_task_sha256 is not None and fingerprint is not None:
+        result["contract_match"] = True
+    if status == "created":
+        if not lookup or check_run(value.get("run")) != fingerprint or value.get("run_id") != value["run"]["run_id"]:
+            _creation_protocol_error()
+        result["creation_confirmed"] = True
+    elif (value.get("run") is not None or status == "rejected" and value.get("run_id") is not None
+          or not lookup and response.status_code == 202 and status != "pending"):
+        _creation_protocol_error()
+    return result
+
 def _export_frozen(frozen: FrozenResearchTask, output_path: Path) -> dict[str, Any]:
     if contract_sha256(frozen.task) != frozen.task_sha256:
         raise ValueError("Frozen task fingerprint does not match its content")
@@ -79,8 +151,16 @@ async def _remote_project(options: argparse.Namespace) -> dict[str, Any]:
                     if response.ok else _runtime_response(response))
         if options.project_command == "create":
             frozen = validate_frozen_research_task(json.loads(options.contract.read_text(encoding="utf-8")))
-            return _runtime_response(await client.create_research_run(name=options.name,
-                                                                       contract=frozen.model_dump(mode="json")))
+            response = await client.create_research_run(name=options.name, contract=frozen.model_dump(mode="json"),
+                                                        request_id=options.request_id)
+            return _creation_response(response, request_id=options.request_id, expected_task_sha256=frozen.task_sha256,
+                                      lookup=False, expected_name=options.name.strip())
+        if options.project_command == "request-status":
+            expected = options.task_sha256
+            if expected is not None and re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+                raise RuntimeClientError("invalid_request", "Expected task fingerprint must be a SHA-256 digest")
+            response = await client.creation_status(options.request_id)
+            return _creation_response(response, request_id=options.request_id, expected_task_sha256=expected, lookup=True)
         project = load_project_contract(options.config.expanduser().resolve())
         if options.project_command == "preflight":
             response = await client.preflight(project.model_dump(mode="json"))
@@ -135,6 +215,10 @@ def parser() -> argparse.ArgumentParser:
     create = project_commands.add_parser("create", help="Save a frozen task under the selected backend owner; does not start research")
     create.add_argument("--contract", type=Path, required=True, help="Previously frozen task JSON")
     create.add_argument("--name", required=True, help="Task name displayed by the shared backend")
+    create.add_argument("--request-id", help="Stable non-secret ID retained before sending; omission is non-idempotent")
+    request_status = project_commands.add_parser("request-status", help="Read a saved creation request without starting or retrying it")
+    request_status.add_argument("request_id", help="Previously retained creation request ID")
+    request_status.add_argument("--task-sha256", help="Optional expected frozen task hash; no source files are read")
     for action in ("preflight", "freeze"):
         contract_command = project_commands.add_parser(action)
         contract_command.add_argument("--config", type=Path, required=True, help="research_project.v1 YAML")
@@ -208,8 +292,8 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
     if options.command == "project":
         if options.server:
             return await _remote_project(options)
-        if options.project_command == "create":
-            raise RuntimeClientError("server_required", "Project creation requires an explicit --server backend owner")
+        if options.project_command in {"create", "request-status"}:
+            raise RuntimeClientError("server_required", "Project creation and lookup require an explicit --server backend owner")
         if options.project_command == "defaults":
             return default_research_budget().model_dump(mode="json")
         project = load_project_contract(options.config.expanduser().resolve())
@@ -260,10 +344,15 @@ def main() -> int:
     except KeyboardInterrupt:
         if options.command == "run":
             logger.warning("Client interrupted; inspect the same backend with mars run --server <origin> show <run_id> before retrying")
+        elif options.command == "project" and getattr(options, "project_command", None) == "create":
+            logger.warning("Client interrupted; use project --server <origin> request-status <request_id> to inspect an identified save before retrying")
         else:
             logger.warning("Interrupted; inspect the selected workflow's saved status before continuing")
         return 130
     except RuntimeClientError as exc:
+        if options.command == "project" and getattr(options, "project_command", None) == "create" and exc.code in {
+                "timeout", "connection_failed", "invalid_response", "response_too_large", "creation_response_mismatch"}:
+            logger.warning("Save outcome may be unknown; use project --server <origin> request-status <request_id>; do not replace or resend the request automatically")
         sys.stdout.write(json.dumps({"http_ok": False, "error_code": exc.code,
             "http_status": exc.status_code, "message": str(exc)}, ensure_ascii=False) + "\n")
         return 2
@@ -282,6 +371,8 @@ def main() -> int:
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     if result.get("http_ok") is False:
         return 2
+    if options.command == "project" and options.project_command in {"create", "request-status"}:
+        return 0 if result.get("creation_confirmed") is True else 2
     if options.command == "doctor":
         return 0 if result["ready"] else 2
     if options.command == "project" and result.get("ready") is False:
