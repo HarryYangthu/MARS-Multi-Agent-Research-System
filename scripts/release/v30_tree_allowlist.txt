@@ -587,3 +587,7 @@ frontend/src/components/RunResultsPanel.tsx
 frontend/src/lib/results.ts
 frontend/src/components/FrozenResearchImport.tsx
 frontend/src/lib/clientPolicy.ts
+backend/app/execution/local/__init__.py
+backend/app/execution/local/runner.py
+backend/app/execution/local/worker.py
+backend/app/api/desktop_session.py

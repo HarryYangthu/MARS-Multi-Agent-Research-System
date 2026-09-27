@@ -1,0 +1,111 @@
+{
+  "schema_id": "productization_local_runner_checks.v1",
+  "base_commit": "42849d949dd9b0b1622699b041eaaa2ebb81c294",
+  "source_fingerprints": [
+    {
+      "path": "backend/app/execution/local/__init__.py",
+      "sha256": "dbd86942a94902e399031517bcb4f368e6645951537ecf3abb95c7eab0d11211"
+    },
+    {
+      "path": "backend/app/execution/local/runner.py",
+      "sha256": "8cfc4512c36b0bb1b77965c82419467315b8a66c5b56967b6642a306ef84a2da"
+    },
+    {
+      "path": "backend/app/execution/local/worker.py",
+      "sha256": "3fa9a29eb9e9b8c2d9284c7c21ecd9b3ae520b8bec2be9e7753d5c0e0547c58d"
+    },
+    {
+      "path": "backend/app/bridge/results_service.py",
+      "sha256": "cb4cad8c2ac3e07beb0341b5dd54e69e501fe0c4107f21b20006fecb9bc90036"
+    },
+    {
+      "path": "backend/app/harness/tools/execution/local_command.py",
+      "sha256": "39d348750c3404bb15d836e50dc6d90eb194e5cf181589f5653f1bf31488f596"
+    },
+    {
+      "path": "backend/tests/unit/test_local_durable_runner.py",
+      "sha256": "c8e5218ab013b2940f011d4bdafa933f7b96b671873268b40244c2087bd99821"
+    },
+    {
+      "path": "backend/tests/unit/test_ssh_connection.py",
+      "sha256": "19fff0e5687a285029051f890804d94f6bead1123c9d55dc955ec6b514b73129"
+    },
+    {
+      "path": "scripts/release/v30_tree_allowlist.txt",
+      "sha256": "8e351c543145f57f28cab1cb74a4d6a2f8786c858de19e2edf0192cf5eecd06b"
+    }
+  ],
+  "pytest": {
+    "mars-local-runner-reviewed.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "97",
+      "time": "16.830",
+      "timestamp": "2026-09-28T04:03:29.175635+08:00"
+    },
+    "mars-sshd-secure-parent.xml": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "35",
+      "time": "4.831",
+      "timestamp": "2026-09-28T04:05:12.614963+08:00"
+    }
+  },
+  "strict_mypy": {
+    "runner_and_results_files": 6,
+    "ssh_test_files": 1
+  },
+  "import_contracts": {
+    "kept": 4,
+    "broken": 0
+  },
+  "independent_review_findings_fixed": [
+    "Control metadata is not measurement evidence",
+    "Corrupt receipt status cannot promote real failed job to completed"
+  ],
+  "logs": [
+    {
+      "path": "mars-local-runner-reviewed.xml",
+      "sha256": "7ce3a3302537b89a8c9db3950e330a8d515f4fcbca9694c34e74b483630e274b"
+    },
+    {
+      "path": "mars-local-runner-reviewed.log",
+      "sha256": "b2cace8d442dfd18f85561da7ba0822d6c7c22d40c04361fb9e32fe98ee722ed"
+    },
+    {
+      "path": "mars-local-runner-reviewed-mypy.log",
+      "sha256": "ab35ee42183d4d6d3ba483825ab037d18a5a15622d03be01d82220b1564851ff"
+    },
+    {
+      "path": "mars-local-runner-imports.log",
+      "sha256": "74c5df939ae505d9555d1411b3330d5808638cd370e59dda6709a9950ff3dacb"
+    },
+    {
+      "path": "mars-sshd-secure-parent.xml",
+      "sha256": "947bcb2bad5d10bdb48ac238d8034ada13767b325c9e432344414dc46d122c6c"
+    },
+    {
+      "path": "mars-sshd-secure-parent.log",
+      "sha256": "23814bd54c3f40e10907bbb3fbbf634b818152cf7afb3d0013ebceb07460326b"
+    },
+    {
+      "path": "mars-sshd-secure-parent-mypy.log",
+      "sha256": "5d4b6d285b77932e3d08212c3b4974d0a803f98ec60408ac6ccf6a063fa6c19e"
+    },
+    {
+      "path": "mars-sshd-unsafe-parent.log",
+      "sha256": "f46419e5ed1b2e98804823d7ebba612f8373efe0cc9dddf49d68ba88b44bf894"
+    }
+  ],
+  "boundaries": [
+    "POSIX trusted CPU only; no OS sandbox.",
+    "Not connected to orchestrator or all contract budgets.",
+    "Stop uses immediate process group termination; cooperative checkpoint grace not implemented.",
+    "Local daemon StrictModes failure reproduced and fixed, next Linux CI remains pending.",
+    "No full product acceptance."
+  ]
+}

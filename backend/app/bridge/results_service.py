@@ -19,12 +19,14 @@ from typing import Any
 
 import yaml
 
+from app.execution.local.runner import LocalJobSpec
 from app.harness.llm.accounting import (
     ResourceBudgetError, charged_model_attempts, charged_token_component,
     reserved_model_attempts, validate_token_components,
 )
 from app.harness.runtime.state_journal import StateJournal
 from app.harness.schema.validator import validate_document
+from app.harness.tools.execution.local_command import LOCAL_COMMAND_CONTROL_FILES
 from app.settings import repo_root
 from app.storage.run_state_store import RunStateStore
 from app.storage.run_store import RunHandle
@@ -172,12 +174,35 @@ class ResultReader:
             self.limitations.append("权威状态不可用或校验失败；没有回退为成功状态。")
         return result, {}, []
 
+    def _verify_durable_submission(self, parent: str, receipt: dict[str, Any], request: dict[str, Any]) -> None:
+        """Validate saved identity only; never acquire a worker lease or recover jobs."""
+        record, data = self.record(parent + "/submission.json")
+        spec = LocalJobSpec.model_validate(record.get("spec"))
+        fingerprint = "sha256:" + sha256(canonical(spec.model_dump(mode="json")))
+        submitted, deadline = finite_number(record.get("submitted_at")), finite_number(record.get("deadline_at"))
+        if (record.get("schema") != "local_job_submission.v1" or record.get("spec_sha256") != fingerprint
+                or receipt.get("submission_sha256") != fingerprint
+                or record.get("run_root") != str(self.run.root.resolve())
+                or spec.run_id != self.run.run_id or spec.project != self.run.project
+                or spec.job_id != Path(parent).name or receipt.get("job_id") != spec.job_id
+                or receipt.get("invocation_id") != spec.job_id or request.get("invocation_id") != spec.job_id
+                or receipt.get("attempt_id") != spec.attempt_id or receipt.get("experiment_id") != spec.experiment_id
+                or submitted is None or deadline is None or deadline != submitted + spec.timeout_seconds
+                or receipt.get("deadline_at") != deadline
+                or record.get("request_sha256") != "sha256:" + sha256(canonical(request))
+                or request.get("config") != spec.config or request.get("seed") != spec.seed
+                or request.get("steps") != spec.steps):
+            raise ValueError("Durable job submission identity mismatch")
+        self.source("local_job_submission", data)
+
     def jobs(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         experiments: list[dict[str, Any]] = []
         metrics: list[dict[str, Any]] = []
         curves: list[dict[str, Any]] = []
         directory = safe_path(self.run.root, "execution/local_commands")
-        receipts = list(itertools.islice(directory.glob("*/*/execution_receipt.json"), self.policy["max_jobs"] + 1))
+        durable = safe_path(self.run.root, "execution/local_jobs")
+        receipts = list(itertools.islice(itertools.chain(directory.glob("*/*/execution_receipt.json"),
+            durable.glob("*/execution_receipt.json")), self.policy["max_jobs"] + 1))
         if len(receipts) > self.policy["max_jobs"]:
             self.limitations.append("作业数量超过读取上限，结果不完整。")
         for path in sorted(receipts[:self.policy["max_jobs"]]):
@@ -190,11 +215,14 @@ class ResultReader:
                 source_id = self.source("local_command_receipt", raw)
                 experiment["source_id"] = source_id
                 request, request_data = self.record(parent + "/job.json")
+                is_durable = path.parent.parent == durable
+                if is_durable:
+                    self._verify_durable_submission(parent, receipt, request)
                 identifiers = ("run_id", "experiment_id", "invocation_id")
                 if (receipt.get("schema") != "local_command_receipt.v1" or request.get("schema") != "local_command_request.v1"
                         or receipt.get("run_id") != self.run.run_id or request.get("project") != self.run.project
                         or any(not isinstance(receipt.get(key), str) or not receipt[key] or receipt[key] != request.get(key) for key in identifiers)
-                        or re.fullmatch(r"[a-f0-9]{32}", receipt["invocation_id"]) is None
+                        or (not is_durable and re.fullmatch(r"[a-f0-9]{32}", receipt["invocation_id"]) is None)
                         or path.parent.name != receipt["invocation_id"]
                         or receipt.get("request_sha256") != "sha256:" + sha256(request_data)):
                     raise ValueError("Receipt identity mismatch")
@@ -247,7 +275,7 @@ class ResultReader:
                     if not isinstance(name, str):
                         raise ValueError("Invalid measurement path")
                     admitted = parent + "/" + name
-                    if Path(name).name in {"result.json", "job.json", "execution_receipt.json", "stdout.log", "stderr.log"}:
+                    if Path(name).name in LOCAL_COMMAND_CONTROL_FILES:
                         raise ValueError("Metadata is not measurement evidence")
                     data = self.read(admitted, evidence=True)
                     item = expected.get(admitted, {})

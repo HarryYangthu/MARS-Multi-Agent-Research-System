@@ -11,6 +11,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from collections.abc import Iterator
 from typing import Any, cast
@@ -47,11 +48,26 @@ class LocalSshd:
 
 
 @pytest.fixture(scope="module")
-def sshd(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LocalSshd]:
+def sshd_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    # OpenSSH StrictModes checks every ancestor outside the account's home.
+    # Linux pytest defaults to world-writable /tmp, so keep generated private
+    # keys under a private, disposable child of HOME without weakening sshd.
+    with tempfile.TemporaryDirectory(prefix=".mars-sshd-test-", dir=Path.home()) as name:
+        root = Path(name)
+        try:
+            yield root
+        finally:
+            log = root / "sshd.log"
+            if log.is_file():
+                shutil.copyfile(log, tmp_path_factory.mktemp("sshd-diagnostics") / "sshd.log")
+
+
+@pytest.fixture(scope="module")
+def sshd(sshd_root: Path) -> Iterator[LocalSshd]:
     binary = shutil.which("sshd") or ("/usr/sbin/sshd" if Path("/usr/sbin/sshd").is_file() else None)
     if binary is None:
         pytest.skip("actual local OpenSSH sshd unavailable; no SSH success substitute")
-    root = tmp_path_factory.mktemp("actual-local-sshd")
+    root = sshd_root
     host = asyncssh.generate_private_key("ssh-ed25519")
     wrong = asyncssh.generate_private_key("ssh-ed25519")
     client = asyncssh.generate_private_key("ssh-ed25519")
@@ -121,7 +137,7 @@ async def test_real_key_authentication_and_fixed_command(sshd: LocalSshd) -> Non
     transport = sshd.transport()
     assert transport.local_findings() == ()
     receipt = await transport.preflight()
-    assert receipt.status == "authenticated" and receipt.host_key_verified
+    assert receipt.status == "authenticated" and receipt.host_key_verified, sshd.log.read_text()
     assert receipt.scope == "ssh_connection_only" and receipt.host_key_sha256 == sshd.fingerprint
     command = await transport.run(("/usr/bin/id", "-u"), timeout_seconds=3)
     assert command.returncode == 0 and command.stdout.strip() == str(os.getuid())
