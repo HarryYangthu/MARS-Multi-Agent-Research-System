@@ -6,13 +6,17 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.dependencies import get_orchestrator, get_run_store
-from app.bridge.orchestrator import RunRequest
+from app.api.dependencies import existing_orchestrator, get_orchestrator, get_run_store
+from app.bridge.orchestrator import RunRequest, RunSession
 from app.bridge.idea_input_context import IdeaRequirements, validate_idea_context
 from app.bridge.run_observability import build_run_observability
+from app.bridge.research_contract_service import ResearchContractIntegrityError
+from app.bridge.research_run_service import (
+    CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
+)
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 from app.storage.data_source_store import DataSourceStore
-from app.storage.run_state_store import RunStateStore
+from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -97,6 +101,8 @@ class RunDetail(RunSummary):
     read_only: bool = False
     read_only_reason: str | None = None
     available_actions: list[str] = Field(default_factory=list)
+    research_task_sha256: str | None = None
+    execution_admission: ResearchExecutionAdmission | None = None
 
 
 class RetryAgentPayload(BaseModel):
@@ -110,6 +116,27 @@ def _ensure_active_run(run_id: str) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
+
+
+def _execution_session(run_id: str) -> RunSession:
+    try:
+        session = get_orchestrator().session(run_id)
+        check_research_run_storage_paths(session.run)
+        return session
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except (RunStateIntegrityError, ResearchContractIntegrityError) as exc:
+        raise HTTPException(status_code=409, detail={"status": "run_state_unavailable",
+            "research_started": False, "error_type": type(exc).__name__, "control": _run_control(run_id)}) from exc
+
+
+def _run_control(run_id: str) -> dict[str, Any]:
+    owner = existing_orchestrator()
+    if owner is not None:
+        return owner.run_control(run_id)
+    return {"run_id": run_id, "owned_task_active": False, "stopping": False, "owned_task_done": None,
+            "cleanup_complete": None, "state_persisted": None, "state_persistence_error": None,
+            "available_actions": []}
 
 
 @router.post("", response_model=RunDetail)
@@ -263,12 +290,12 @@ async def list_trashed_runs(project: str = "") -> list[TrashRunSummary]:
 @router.get("/{run_id}", response_model=RunDetail)
 async def get_run(run_id: str) -> RunDetail:
     _ensure_active_run(run_id)
-    orch = get_orchestrator()
+    session = _execution_session(run_id)
     try:
-        session = orch.session(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="run not found") from exc
-    snapshot = RunStateStore(session.run).load()
+        snapshot = RunStateStore(session.run).load()
+    except RunStateIntegrityError as exc:
+        raise HTTPException(status_code=409, detail={"status": "run_state_unavailable",
+            "research_started": False, "error_type": type(exc).__name__, "control": _run_control(run_id)}) from exc
     return RunDetail(
         run_id=session.run.run_id,
         project=session.run.project,
@@ -281,8 +308,18 @@ async def get_run(run_id: str) -> RunDetail:
         termination=session.termination,
         read_only=session.read_only,
         read_only_reason=session.read_only_reason,
-        available_actions=["migrate_state"] if session.read_only_reason == "legacy_state_migration_required" else [],
+        available_actions=(["migrate_state"] if session.read_only_reason == "legacy_state_migration_required" else [])
+                          + _run_control(run_id)["available_actions"],
+        research_task_sha256=session.request.extra.get(CONTRACT_HASH_KEY),
+        execution_admission=research_execution_admission(session.run, session.request.extra),
     )
+
+
+@router.get("/{run_id}/control")
+async def get_run_control(run_id: str) -> dict[str, Any]:
+    # Even a removed/corrupt metadata file must not hide a live cancellation
+    # handle. Absence of process ownership is not evidence of remote completion.
+    return _run_control(run_id)
 
 
 @router.delete("/{run_id}", response_model=TrashRunSummary)
@@ -366,10 +403,9 @@ async def get_run_health(run_id: str) -> dict[str, Any]:
 async def start_run(run_id: str) -> dict[str, str]:
     _ensure_active_run(run_id)
     orch = get_orchestrator()
-    try:
-        session = orch.session(run_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="run not found") from exc
+    session = _execution_session(run_id)
+    if research_execution_admission(session.run, session.request.extra) is not None:
+        raise HTTPException(status_code=409, detail=orch.start_owned_run(run_id))
     if session.read_only:
         raise HTTPException(
             status_code=409,
@@ -428,7 +464,9 @@ async def replay_state_events(run_id: str) -> dict[str, Any]:
 async def resume_run(run_id: str) -> dict[str, Any]:
     _ensure_active_run(run_id)
     orch = get_orchestrator()
-    session = orch.session(run_id)
+    session = _execution_session(run_id)
+    if research_execution_admission(session.run, session.request.extra) is not None:
+        raise HTTPException(status_code=409, detail=orch.resume_owned_run(run_id))
     if session.read_only:
         raise HTTPException(status_code=409, detail=f"run is read-only ({session.read_only_reason}); no trusted execution state is available to this API")
     try:
@@ -470,8 +508,13 @@ async def retry_agent(
 
 @router.post("/{run_id}/stop", status_code=202)
 async def stop_run(run_id: str) -> dict[str, Any]:
-    _ensure_active_run(run_id)
-    result = await get_orchestrator().stop_owned_run(run_id)
+    owner = existing_orchestrator()
+    if owner is None or not owner.run_control(run_id)["owned_task_active"]:
+        _ensure_active_run(run_id)
+        if owner is None:
+            raise HTTPException(status_code=409, detail={"ok": False, "status": "not_owned", "run_id": run_id,
+                "error": "no live task owned by this process; historical execution was not changed"})
+    result = await owner.stop_owned_run(run_id)
     if not result["ok"]:
         raise HTTPException(status_code=409, detail=result)
     return result

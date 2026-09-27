@@ -14,6 +14,7 @@ import { AgentContextPanel } from "@/components/AgentContextPanel";
 import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
 import { TensorBoardPanel } from "@/components/TensorBoardPanel";
 import { ReportsPanel } from "@/components/ReportsPanel";
+import { RunControlBar } from "@/components/RunControlBar";
 import { SidebarToggleButton } from "@/components/SidebarToggleButton";
 import { TimelinePanel } from "@/components/TimelinePanel";
 import {
@@ -715,7 +716,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   }
 
   async function saveArtifactEdits(): Promise<ArtifactView | null> {
-    if (!artifact || editing === null) return null;
+    if (!artifact || editing === null || run?.read_only) return null;
     // Accept both body-only editing (default UI) and full markdown documents.
     const m = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/.exec(editing);
     const body = m ? m[2] : editing;
@@ -934,7 +935,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   const firstWaitingReviewAgent = firstStageInState(run?.states, "waiting_review");
   const activeAgentIsWaitingReview = activeAgentState === "waiting_review";
   const reviewTargetAgent = activeAgentIsWaitingReview ? activeAgent : firstWaitingReviewAgent;
-  const canReviewCurrentAgent = Boolean(artifact && activeAgentIsWaitingReview);
+  const canReviewCurrentAgent = Boolean(artifact && activeAgentIsWaitingReview && !run?.read_only);
   const reviewActionHint = canReviewCurrentAgent
     ? "当前产物可以审核。"
     : reviewTargetAgent && reviewTargetAgent !== activeAgent
@@ -959,7 +960,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       {!primarySidebarCollapsed ? (
       <aside className="border-r border-mars-border bg-mars-panel/60 p-4">
         <div className="flex items-center justify-between gap-2">
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-300">
+          <Link href="/lab" className="text-xs text-slate-500 hover:text-slate-300">
             &larr; 实验台
           </Link>
           <div className="flex items-center gap-2">
@@ -1045,7 +1046,8 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       </aside>
       ) : null}
 
-      <section className="flex flex-col">
+      <section className="flex min-h-0 min-w-0 flex-col">
+        <RunControlBar key={runId} runId={runId} run={run} onChange={setRun} />
         {(() => {
           const isWaiting =
             activeAgentIsWaitingReview &&
@@ -1178,7 +1180,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
                 <div className={`shrink-0 gap-2 ${isContextView || isWorkspaceView || isTimelineView || isReportsView ? "hidden" : "flex"}`}>
                   <button
                     onClick={save}
-                    disabled={!artifact}
+                    disabled={!artifact || run?.read_only}
                     className="rounded border border-mars-border px-3 py-1.5 text-sm hover:bg-mars-panel disabled:opacity-50"
                   >
                     {t("run.editor.save")}
@@ -3550,6 +3552,7 @@ function AgentWorkbench({
               agent={agent}
               state={state}
               artifact={artifact}
+              readOnly={Boolean(run?.read_only)}
               onOpenTimeline={onOpenTimeline}
               onOpenArtifact={() => setSelectedPath(artifactFileName)}
             />
@@ -3644,7 +3647,7 @@ function AgentWorkbench({
           </div>
           <WorkbenchProcessPanel
             state={state}
-            copy={copy}
+            copy={run?.read_only ? { ...copy, handoff: "只读记录；启动与继续条件见任务控制区。" } : copy}
             evaluation={evaluation}
             activityRows={activityRows}
             warnings={warnings}
@@ -4267,6 +4270,7 @@ function WorkbenchWorkLogPanel({
   agent,
   state,
   artifact,
+  readOnly,
   onOpenArtifact,
   onOpenTimeline,
 }: {
@@ -4277,13 +4281,14 @@ function WorkbenchWorkLogPanel({
   agent: string;
   state: string;
   artifact: ArtifactView | null;
+  readOnly: boolean;
   onOpenArtifact: () => void;
   onOpenTimeline: () => void;
 }): JSX.Element {
   const items = workLog?.items ?? [];
   const latest = items.at(-1);
   const elapsed = workLog?.elapsed_seconds ?? latest?.elapsed_seconds ?? null;
-  const nextAction = latest?.next_action || agentNextAction(agent, state, artifact);
+  const nextAction = readOnly ? "查看任务控制区的只读或受阻原因；当前不能批准、编辑或继续研究。" : latest?.next_action || agentNextAction(agent, state, artifact);
   const contextCount = items.filter((item) => item.kind === "context").length;
   const toolCount = items.filter((item) => item.kind === "tool").length;
   const feedbackCount = items.filter((item) => item.kind === "human_feedback" || item.kind === "revision").length;

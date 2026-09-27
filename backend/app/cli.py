@@ -19,7 +19,7 @@ import yaml
 from app.bridge.cli_research_service import CliResearchService, configuration, initialize, prepare_protocol
 from app.bridge.research_contract_service import (
     FrozenResearchTask, ProjectPreflight, contract_sha256, default_research_budget,
-    freeze_research_task, load_project_contract, preflight_project,
+    freeze_research_task, load_project_contract, preflight_project, validate_frozen_research_task,
 )
 from app.cli_runtime_client import RuntimeClient, RuntimeClientError, RuntimeResponse
 from app.harness.runtime.research_contract import ContractModel
@@ -77,6 +77,10 @@ async def _remote_project(options: argparse.Namespace) -> dict[str, Any]:
             response = await client.defaults()
             return (ProjectResearchBudget.model_validate(response.payload).model_dump(mode="json")
                     if response.ok else _runtime_response(response))
+        if options.project_command == "create":
+            frozen = validate_frozen_research_task(json.loads(options.contract.read_text(encoding="utf-8")))
+            return _runtime_response(await client.create_research_run(name=options.name,
+                                                                       contract=frozen.model_dump(mode="json")))
         project = load_project_contract(options.config.expanduser().resolve())
         if options.project_command == "preflight":
             response = await client.preflight(project.model_dump(mode="json"))
@@ -128,6 +132,9 @@ def parser() -> argparse.ArgumentParser:
     project.add_argument("--server", help="Use the selected backend for the same preflight and freeze service")
     project_commands = project.add_subparsers(dest="project_command", required=True)
     project_commands.add_parser("defaults", help="Show the finite standard research budgets")
+    create = project_commands.add_parser("create", help="Save a frozen task under the selected backend owner; does not start research")
+    create.add_argument("--contract", type=Path, required=True, help="Previously frozen task JSON")
+    create.add_argument("--name", required=True, help="Task name displayed by the shared backend")
     for action in ("preflight", "freeze"):
         contract_command = project_commands.add_parser(action)
         contract_command.add_argument("--config", type=Path, required=True, help="research_project.v1 YAML")
@@ -201,6 +208,8 @@ async def dispatch(options: argparse.Namespace) -> dict[str, Any]:
     if options.command == "project":
         if options.server:
             return await _remote_project(options)
+        if options.project_command == "create":
+            raise RuntimeClientError("server_required", "Project creation requires an explicit --server backend owner")
         if options.project_command == "defaults":
             return default_research_budget().model_dump(mode="json")
         project = load_project_contract(options.config.expanduser().resolve())

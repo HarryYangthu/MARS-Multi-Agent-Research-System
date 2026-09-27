@@ -24,6 +24,10 @@ from app.bridge.commander_agent import CommanderAgent, FeedbackDecision
 from app.bridge.langgraph_runtime import LangGraphRuntimeFacade
 from app.bridge.node_key import attempt_key, parse_node_key
 from app.bridge.owned_run_tasks import OwnedRunTasks
+from app.bridge.research_contract_service import FrozenResearchTask, validate_frozen_research_task
+from app.bridge.research_run_service import (
+    CONTRACT_HASH_KEY, check_research_run_storage_paths, persist_run_research_contract, research_execution_admission,
+)
 from app.bridge.workflow_service import (
     LINEAR_STAGES,
     EntryPoint,
@@ -108,10 +112,19 @@ class Orchestrator:
 
     # --------------------------------------------------------------- create
 
-    def create_session(self, request: RunRequest) -> RunSession:
+    def create_session(self, request: RunRequest, *, research_contract: FrozenResearchTask | None = None) -> RunSession:
         from app.bridge.research_context import archive_research_context
         from app.bridge.idea_input_context import validate_idea_extra
 
+        if research_contract is not None:
+            research_contract = validate_frozen_research_task(research_contract, check_live_files=True)
+            if (request.project != research_contract.task.project.project_id
+                    or request.user_request != research_contract.task.goal or request.entrypoint != "pipeline"
+                    or request.standalone or request.auto_approve or request.data_source is not None or request.extra):
+                raise ValueError("Research contract cannot be combined with independent run overrides")
+            request.extra = {CONTRACT_HASH_KEY: research_contract.task_sha256}
+        elif CONTRACT_HASH_KEY in request.extra:
+            raise ValueError("Research contract identity requires the complete frozen contract")
         research_context = validate_idea_extra(request.extra)
         from app.bridge.evaluation_policy import policy_for_task
         evaluation_policy = policy_for_task(request.extra.get("evaluation_policy"))
@@ -127,10 +140,13 @@ class Orchestrator:
         settings = get_settings()
         if settings.is_production and request.auto_approve:
             raise ValueError("production mode cannot create auto-approved runs")
-        assert_ready_for_run(project=request.project)
+        if research_contract is None:
+            assert_ready_for_run(project=request.project)
         from app.harness.context.folder_context import load_folder_context
         from app.harness.agent_loop.trace import atomic_json
-        folder_context = load_folder_context(request.project)
+        # A contract-backed project is not an alias for mutable global project
+        # metadata. Execution remains blocked until its adapters are bound.
+        folder_context = load_folder_context(request.project) if research_contract is None else None
         run = self.run_store.create(
             task=request.task,
             project=request.project,
@@ -141,6 +157,8 @@ class Orchestrator:
         run.meta["evaluation_policy"] = evaluation_policy
         run.meta["selected_skills_by_agent"] = skills
         atomic_json(run.root / "run_meta.json", run.meta)
+        if research_contract is not None:
+            persist_run_research_contract(run, research_contract)
         if folder_context is not None:
             atomic_json(run.root / "input/folder_context.v1.json", folder_context)
         graph = (
@@ -158,6 +176,7 @@ class Orchestrator:
         if self.langgraph_runtime.enabled():
             self.langgraph_runtime.write_manifest(run=run, graph=graph)
         self._persist_state(session, status="created")
+        self._contract_execution_block(session)
         return session
 
     def session(self, run_id: str) -> RunSession:
@@ -166,10 +185,42 @@ class Orchestrator:
             if recovered is None:
                 raise KeyError(run_id)
             return recovered
-        return self._sessions[run_id]
+        session = self._sessions[run_id]
+        self._contract_execution_block(session)
+        return session
+
+    @staticmethod
+    def _contract_execution_block(session: RunSession) -> dict[str, Any] | None:
+        admission = research_execution_admission(session.run, session.request.extra)
+        if admission is None:
+            return None
+        reason = ("research_contract_integrity_error" if any(
+            item.code == "research_contract_integrity_error" for item in admission.blockers)
+            else "research_contract_execution_pending")
+        if not session.read_only or (session.read_only_reason or "").startswith("research_contract_"):
+            session.read_only = True
+            session.read_only_reason = reason
+        return {"ok": False, "status": "contract_execution_blocked", "run_id": session.run.run_id,
+                "research_started": False, "execution_admission": admission.model_dump(mode="json")}
 
     def discard_session(self, run_id: str) -> None:
         self._sessions.pop(run_id, None)
+
+    def run_control(self, run_id: str) -> dict[str, Any]:
+        """Process-local cancellation facts only, independent of saved state."""
+        active = self.owned_tasks.active(run_id) is not None
+        stopping = self.owned_tasks.stopping(run_id)
+        session = self._sessions.get(run_id)
+        termination = session.termination if session is not None else None
+        state_error = session.stop_state_error if session is not None else None
+        if stopping and session is None:
+            state_error = {"type": "MissingRunSession", "phase": "request",
+                           "message": "owned task has no in-memory persistence session"}
+        return {"run_id": run_id, "owned_task_active": active, "stopping": stopping,
+            "owned_task_done": not active if active or stopping else None,
+            "cleanup_complete": bool(termination.get("cleanup_complete")) if termination is not None else None,
+            "state_persisted": False if state_error is not None else True if termination is not None else None,
+            "state_persistence_error": state_error, "available_actions": ["stop"] if active else []}
 
     def migrate_run_state(self, run_id: str) -> dict[str, Any]:
         """Explicitly adopt validated legacy state without scheduling execution."""
@@ -204,6 +255,8 @@ class Orchestrator:
 
     def _spawn_owned(self, session: RunSession, operation: str,
                      factory: Callable[[], Awaitable[None]]) -> bool:
+        if self._contract_execution_block(session) is not None:
+            return False
         if session.read_only or self._stopping(session):
             return False
         return self.owned_tasks.spawn(session.run.run_id, operation, factory,
@@ -212,6 +265,8 @@ class Orchestrator:
 
     def start_owned_run(self, run_id: str) -> dict[str, Any]:
         session = self.session(run_id)
+        if blocked := self._contract_execution_block(session):
+            return blocked
         if self.owned_tasks.active(run_id) is not None:
             return {"ok": True, "status": "already_running", "run_id": run_id}
         if session.read_only or self._stopping(session) or self.owned_tasks.closing:
@@ -229,6 +284,8 @@ class Orchestrator:
         """Explicitly continue persisted loops; never turn start into an implicit replay."""
         from app.bridge.task_runtime import resumable_task
         session = self.session(run_id)
+        if blocked := self._contract_execution_block(session):
+            return blocked
         if self.owned_tasks.active(run_id) is not None:
             return {"ok": True, "status": "already_running", "run_id": run_id}
         if session.read_only or self._stopping(session) or self.owned_tasks.closing:
@@ -364,6 +421,15 @@ class Orchestrator:
                              grace_seconds: float = 10.0) -> dict[str, Any]:
         if not 0 <= grace_seconds <= 60:
             raise ValueError("stop grace must be in [0,60] seconds")
+        task = self.owned_tasks.active(run_id)
+        if task is not None and run_id not in self._sessions:
+            # A removed registry/session record must not strand a live task.
+            # Cancellation remains real; durable cleanup cannot be claimed.
+            self.owned_tasks.cancel_once(run_id)
+            complete = await self.owned_tasks.wait(task, timeout=grace_seconds)
+            return {"ok": False, "status": "stop_state_error" if complete else "stop_incomplete",
+                    "run_id": run_id, "owned_task_done": complete, "state_persisted": False,
+                    "state_persistence_error": self.run_control(run_id)["state_persistence_error"]}
         requested = self._request_owned_stop(run_id, reason=reason)
         return await self._wait_owned_stop(requested, grace_seconds=grace_seconds)
 
@@ -381,6 +447,8 @@ class Orchestrator:
 
     async def _run(self, run_id: str) -> None:
         session = self.session(run_id)
+        if self._contract_execution_block(session) is not None:
+            raise ValueError("Research contract execution is blocked until all declared boundaries are enforced")
         if session.read_only:
             raise ValueError("read-only historical or service-owned run cannot execute through the orchestrator")
         if self._stopping(session):
@@ -1312,6 +1380,7 @@ class Orchestrator:
         run = self.run_store.get(run_id)
         if run is None:
             return None
+        check_research_run_storage_paths(run)
         read_only = run.entrypoint not in _ORCHESTRATED_ENTRYPOINTS
         read_only_reason = "service_owned" if read_only else None
         snapshot = RunStateStore(run).load()
@@ -1363,6 +1432,7 @@ class Orchestrator:
             termination=snapshot.termination if snapshot is not None else None,
             state_revision=snapshot.revision if snapshot is not None else 0,
         )
+        self._contract_execution_block(session)
         self._sessions[run_id] = session
         return session
 

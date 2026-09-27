@@ -28,7 +28,7 @@ export function ExecutionAutoOpen(): null {
         seen.current.add(key);
         if (opened) return;
         try { sessionStorage.setItem(key, "1"); } catch { /* use in-memory deduplication */ }
-        router.push(`/?project=${encodeURIComponent(active.project)}&run=${encodeURIComponent(active.run_id || "")}`);
+        router.push(`/lab?project=${encodeURIComponent(active.project)}&run=${encodeURIComponent(active.run_id || "")}`);
       } catch { /* backend restart: retry without interrupting the page */ }
       finally { if (!stopped) timer = setTimeout(() => void poll(), 2000); }
     };

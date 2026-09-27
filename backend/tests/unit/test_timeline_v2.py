@@ -8,7 +8,34 @@ from app.api.timeline import (
     _event_items,
     _tool_call_worklog,
     _trace_items,
+    _worklog_items,
+    _run_started_at,
+    _latest_agent_status,
 )
+from app.storage.run_store import RunStore
+
+
+def test_saved_task_does_not_invent_workflow_start(tmp_path: Path) -> None:
+    run = RunStore(tmp_path / "runs").create(task="Awaiting execution admission", project="general")
+    items = _worklog_items(run=run)
+    assert len(items) == 1
+    assert items[0].timestamp == run.created_at
+    assert items[0].status == "created"
+    assert items[0].title == "任务记录已创建"
+    assert items[0].next_action == ""
+    assert _latest_agent_status(items) == "created"
+    assert _run_started_at(run) == ""
+
+
+def test_start_event_projection_is_distinct_from_task_creation() -> None:
+    # Pure event translation only; this does not impersonate an executed run.
+    from app.api.timeline import _websocket_worklog
+
+    item = _websocket_worklog(index=1, payload={"event": "run.started", "timestamp": "2026-09-28T00:01:00Z"},
+                              fallback_timestamp="", timestamp_hints={})
+    assert item is not None and item.status == "started"
+    assert item.timestamp == "2026-09-28T00:01:00Z"
+    assert item.evidence_refs == ["events/websocket_events.jsonl"]
 
 
 def test_timeline_merges_events_trace_and_context(tmp_path: Path) -> None:

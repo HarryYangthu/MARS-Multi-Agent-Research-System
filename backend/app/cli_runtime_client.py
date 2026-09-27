@@ -162,6 +162,10 @@ class RuntimeClient:
         return await self._request("POST", "/api/research-contracts/prepare",
                                    payload={"project": dict(project), "goal": goal, "mode": mode, "budget": dict(budget)})
 
+    async def create_research_run(self, *, name: str, contract: Mapping[str, Any]) -> RuntimeResponse:
+        return await self._request("POST", "/api/research-contracts/runs",
+                                   payload={"name": name, "contract": dict(contract)})
+
     async def _request(self, method: str, path: str, *, params: Mapping[str, str] | None = None,
                        payload: dict[str, Any] | None = None) -> RuntimeResponse:
         client = self._client

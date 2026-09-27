@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import tempfile
-from typing import Any
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -32,6 +33,7 @@ from app.execution.remote.transport import (
     TransportResult,
 )
 from app.settings import env_or_local, repo_root
+from app.execution.remote.ssh_transport import AsyncSshTransport, SshConnectionPolicy, SshCredentials
 
 _SAFE_REMOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:-]+$")
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$")
@@ -63,6 +65,10 @@ class RemoteInputUpload:
 @dataclass(frozen=True)
 class RemoteExecutorConfig:
     enabled: bool = False
+    transport: Literal["system_ssh", "asyncssh"] = "system_ssh"
+    auth_method: Literal["key", "password"] = "key"
+    host_key_sha256: str = ""
+    max_output_bytes: int = 1_048_576
     host: str = ""
     port: int = 22
     user: str = ""
@@ -77,6 +83,12 @@ class RemoteExecutorConfig:
     heartbeat_stale_seconds: float = 600.0
 
     def __post_init__(self) -> None:
+        if self.transport not in {"system_ssh", "asyncssh"} or self.auth_method not in {"key", "password"}:
+            raise ValueError("Unsupported SSH transport or authentication method")
+        if self.transport == "system_ssh" and self.auth_method != "key":
+            raise ValueError("Password authentication requires explicit asyncssh transport")
+        if type(self.max_output_bytes) is not int or self.max_output_bytes <= 0:
+            raise ValueError("SSH output limit must be a positive integer")
         if not 1 <= self.port <= 65_535:
             raise ValueError("SSH port must be between 1 and 65535")
         if self.host and _HOST_RE.fullmatch(self.host) is None:
@@ -104,7 +116,7 @@ class RemoteExecutorConfig:
             ("transfer timeout", self.transfer_timeout_seconds),
             ("heartbeat stale threshold", self.heartbeat_stale_seconds),
         ):
-            if timeout_value <= 0:
+            if not math.isfinite(timeout_value) or timeout_value <= 0:
                 raise ValueError(f"{timeout_label} must be positive")
 
     def missing_fields(self) -> tuple[str, ...]:
@@ -112,13 +124,16 @@ class RemoteExecutorConfig:
         for label, value in (
             ("MARS_REMOTE_SSH_HOST", self.host),
             ("MARS_REMOTE_SSH_USER", self.user),
-            ("MARS_REMOTE_SSH_KEY_PATH", self.key_path),
             ("MARS_REMOTE_SSH_KNOWN_HOSTS", self.known_hosts_path),
             ("MARS_REMOTE_ROOT", self.remote_root),
             ("MARS_REMOTE_PYTHON", self.python),
         ):
             if not value:
                 missing.append(label)
+        if self.auth_method == "key" and self.key_path is None:
+            missing.append("MARS_REMOTE_SSH_KEY_PATH")
+        if self.transport == "asyncssh" and not self.host_key_sha256:
+            missing.append("MARS_REMOTE_SSH_HOST_KEY_SHA256")
         return tuple(missing)
 
 
@@ -130,12 +145,22 @@ class RemoteExecutor:
         config: RemoteExecutorConfig,
         *,
         transport: RemoteTransport | None = None,
+        credentials: SshCredentials | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._config = config
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        if credentials is not None and (config.transport != "asyncssh" or transport is not None):
+            raise ValueError("Explicit credentials require the built-in asyncssh connection layer")
         if transport is not None:
             self._transport: RemoteTransport | None = transport
+        elif config.transport == "asyncssh":
+            self._transport = (AsyncSshTransport(SshConnectionPolicy(
+                host=config.host, port=config.port, user=config.user, known_hosts_path=config.known_hosts_path,
+                expected_host_key_sha256=config.host_key_sha256,
+                connect_timeout_seconds=config.connect_timeout_seconds, max_output_bytes=config.max_output_bytes,
+            ), auth_method=config.auth_method, key_path=config.key_path, credentials=credentials)
+                if config.host and config.user and config.known_hosts_path is not None and config.host_key_sha256 else None)
         elif config.key_path is not None and config.known_hosts_path is not None:
             self._transport = SystemSshTransport(
                 host=config.host,
@@ -170,7 +195,7 @@ class RemoteExecutor:
                 status="blocked",
                 findings=local_findings,
                 error_code="local_ssh_prerequisite_missing",
-                error="local OpenSSH prerequisites are unavailable",
+                error="local SSH prerequisites are unavailable",
             )
         result = await transport.run(
             self._runner_argv("readiness"),
@@ -393,6 +418,8 @@ def load_remote_executor_config(
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     execution = _mapping(raw).get("execution", {})
     remote = _mapping(_mapping(execution).get("remote_gpu", {}))
+    if set(remote) & {"password", "passphrase", "private_key", "credentials"}:
+        raise ValueError("Inline SSH credentials are prohibited in execution YAML")
     env_names = _mapping(remote.get("env", {}))
     def env_value(key: str) -> str:
         name = str(env_names.get(key, "")).strip()
@@ -413,6 +440,10 @@ def load_remote_executor_config(
     )
     return RemoteExecutorConfig(
         enabled=enabled,
+        transport=cast(Literal["system_ssh", "asyncssh"], env_value("transport") or remote.get("transport", "system_ssh")),
+        auth_method=cast(Literal["key", "password"], env_value("auth_method") or remote.get("auth_method", "key")),
+        host_key_sha256=env_value("host_key_sha256"),
+        max_output_bytes=_parse_int(remote.get("max_output_bytes"), default=1_048_576),
         host=env_value("host"),
         port=_parse_int(env_value("port"), default=22),
         user=env_value("user"),
@@ -485,16 +516,22 @@ def _parse_bool(value: str, *, default: bool) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    raise ValueError(f"invalid boolean value: {value!r}")
+    raise ValueError("Invalid remote executor boolean configuration")
 
 
 def _parse_int(value: object, *, default: int) -> int:
     if value in {None, ""}:
         return default
-    return int(str(value))
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid remote executor integer configuration") from None
 
 
 def _parse_float(value: object, *, default: float) -> float:
     if value in {None, ""}:
         return default
-    return float(str(value))
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid remote executor numeric configuration") from None

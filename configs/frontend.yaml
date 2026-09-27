@@ -1,4 +1,9 @@
 frontend:
+  client:
+    request_timeout_ms: 15000
+    control_refresh_ms: 2000
+    readiness_refresh_ms: 10000
+    max_contract_bytes: 1048576
   workbench:
     layout: codex_three_pane
     default_left_panel: runs
@@ -24,4 +29,3 @@ frontend:
     mode: controlled_form_with_yaml_diff
     apply_to_running_runs: false
     high_risk_requires_confirm: true
-

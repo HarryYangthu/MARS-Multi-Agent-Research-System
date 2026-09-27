@@ -34,6 +34,7 @@ from app.api import knowledge as knowledge_api
 from app.api import projects as projects_api
 from app.api import readiness as readiness_api
 from app.api import reports as reports_api
+from app.api import results as results_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import research_contracts as research_contracts_api
@@ -174,6 +175,7 @@ def create_app() -> FastAPI:
     app.include_router(runtime_api.router)
     app.include_router(config_api.router)
     app.include_router(reports_api.router)
+    app.include_router(results_api.router)
     app.include_router(events_api.router)
     app.include_router(stats_api.router)
     app.include_router(system_api.router)

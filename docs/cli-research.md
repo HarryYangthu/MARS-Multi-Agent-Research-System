@@ -1,6 +1,6 @@
 # CLI 项目合同、共享任务控制与历史兼容
 
-`mars run` 连接网页使用的同一个后端，由该后端持有运行、审核和恢复状态；CLI 不新建调度器。当前先提供已有任务的控制与通用合同准备，通用合同到完整研究执行的接入仍在开发。
+`mars run` 连接网页使用的同一个后端，由该后端持有运行、审核和恢复状态；CLI 不新建调度器。现在支持已有任务控制、通用合同准备和冻结合同任务创建。合同任务尚未具备完整预算/执行适配，因此创建后明确阻断启动。
 
 ## 共享后端任务
 
@@ -17,6 +17,8 @@ mars project --server http://127.0.0.1:8010 defaults
 mars project --server http://127.0.0.1:8010 preflight --config /absolute/project.yaml
 mars project --server http://127.0.0.1:8010 freeze --config /absolute/project.yaml \
   --goal "比较声明的候选与基线" --mode manual --output /absolute/new-task.json
+mars project --server http://127.0.0.1:8010 create --contract /absolute/new-task.json \
+  --name "比较候选与基线"
 ```
 
 `run` 输出分别保留 `http_status`、`http_ok` 和后端 `response`；HTTP 202 只表示受理，研究状态及结果看实际响应。缺服务、认证失败、只读历史、无可恢复 checkpoint 等明确返回非零；超时的 mutation 结果可能未知，先 `show` 核对，客户端不自动重试。停止的持久化失败与实际任务清理完成是不同状态，原样保留。
@@ -24,6 +26,8 @@ mars project --server http://127.0.0.1:8010 freeze --config /absolute/project.ya
 地址仅允许本机 loopback，`localhost` 固定为 `127.0.0.1`；拒绝 URL 内凭据、路径、查询串、重定向和代理环境。网络读取的总时限、响应字节上限来自 `configs/cli_runtime.yaml`，不承诺同步 JSON 解析的可抢占 CPU 时限。此 CLI 没有添加研究启动权限，仍由相同 API/bridge 的准入规则决定。
 
 `project --server` 从所选后端读取默认预算，并调用同一个预检/冻结服务；输出哈希在写文件前复核，已存在的输出不覆盖。`prepared` 始终附 `research_started:false`，不会执行声明的命令或模型。省略 `--server` 时仍支持本地只读预检/冻结，详见 [项目合同](productization/PROJECT_CONTRACT.md)。
+
+`project create` 必须显式选择后端。该后端再次验证冻结指纹和声明源文件，成功保存实际 run、合同和 SQLite 初始状态，返回 HTTP 201 / `created` / `research_started:false`；CLI 此时退出 0 表示创建成功。它不启动研究；当前 `execution_admission.ready:false` 列出项目命令/保护范围及全部预算尚未绑定的阻断原因。`run show` 可查看同一个任务，`start/resume` 返回 409、CLI 退出 2。源文件在冻结后改变也返回 409，不建立新 run，不修改已导出的合同。请求超时可能已创建任务，先用 `run list` 核对，不自动重试创建。
 
 ## 旧 StaticPIMC 专用流程
 

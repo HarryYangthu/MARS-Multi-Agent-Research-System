@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { TopBar } from "@/components/TopBar";
+import { FrozenResearchImport } from "@/components/FrozenResearchImport";
 import { ProjectContextFiles } from "@/components/ProjectContextFiles";
 import {
   createRun,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/dataSourceSelection";
 import { useI18n } from "@/lib/i18n";
 import { useProject } from "@/lib/project";
+import { isUncertainRequestError } from "@/lib/clientPolicy";
 
 const VALID_ENTRYPOINTS = new Set([
   "pipeline",
@@ -96,6 +98,16 @@ function NewRunInner(): JSX.Element {
   }, [selectedProject]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [savedRunId, setSavedRunId] = useState<string | null>(null);
+  const [uncertainSubmission, setUncertainSubmission] = useState(false);
+  const submitRequest = useRef<AbortController | null>(null);
+  const submissionScope = `${selectedProject}:${project}:${entrypoint}`;
+  const activeScope = useRef(submissionScope);
+  activeScope.current = submissionScope;
+  useEffect(() => {
+    setBusy(false); setSavedRunId(null); setUncertainSubmission(false); setErr(null);
+    return () => submitRequest.current?.abort();
+  }, [submissionScope]);
   const [schemaErrors, setSchemaErrors] = useState<{ path: string; message: string }[] | null>(
     null,
   );
@@ -138,7 +150,8 @@ function NewRunInner(): JSX.Element {
       .catch((e) => setErr(`Failed to load template: ${e}`));
   }, [entrypoint, usesTemplate]);
 
-  async function uploadSelectedData(): Promise<DataSourceProfile | null> {
+  async function uploadSelectedData(signal?: AbortSignal): Promise<DataSourceProfile | null> {
+    const scope = activeScope.current;
     if (!dataFile) {
       return dataSource;
     }
@@ -152,16 +165,19 @@ function NewRunInner(): JSX.Element {
         kind: dataKind,
         channelCount: parseOptionalInteger(dataChannels),
         description: dataDescription,
-      });
+      }, signal);
+      signal?.throwIfAborted();
+      if (activeScope.current !== scope) throw new DOMException("Project changed", "AbortError");
       setDataSource(profile);
       writeActiveDataSourceId(project, profile.id);
       return profile;
     } catch (e) {
+      if (signal?.aborted || activeScope.current !== scope) throw e;
       const message = String(e);
       setDataError(message);
       throw e;
     } finally {
-      setDataBusy(false);
+      if (!signal?.aborted && activeScope.current === scope) setDataBusy(false);
     }
   }
 
@@ -189,11 +205,18 @@ function NewRunInner(): JSX.Element {
   }
 
   async function submit(): Promise<void> {
+    if (busy || savedRunId || uncertainSubmission) return;
+    const controller = new AbortController();
+    submitRequest.current = controller;
+    const scope = activeScope.current;
+    const active = (): boolean => !controller.signal.aborted && activeScope.current === scope;
+    let createdRunId: string | null = null;
     setBusy(true);
     setErr(null);
     setSchemaErrors(null);
     try {
-      const activeDataSource = dataFile && !dataSource ? await uploadSelectedData() : dataSource;
+      const activeDataSource = dataFile && !dataSource ? await uploadSelectedData(controller.signal) : dataSource;
+      if (!active()) return;
       const suppliedContext: IdeaContext = {};
       for (const { key } of RESEARCH_FIELDS) {
         const value = researchContext[key];
@@ -220,11 +243,21 @@ function NewRunInner(): JSX.Element {
       if (usesTemplate) {
         body.seed_artifact = seedArtifact;
       }
-      const detail = await createRun(body);
-      await startRun(detail.run_id);
+      const detail = await createRun(body, controller.signal);
+      if (!active()) return;
+      createdRunId = detail.run_id;
+      setSavedRunId(detail.run_id);
+      await startRun(detail.run_id, controller.signal);
+      if (!active()) return;
       const initialAgent = entrypoint === "pipeline" ? "commander" : entrypoint;
       router.push(`/runs/${detail.run_id}?agent=${initialAgent}`);
     } catch (e) {
+      if (!active()) return;
+      if (isUncertainRequestError(e)) {
+        setUncertainSubmission(true);
+        setErr(createdRunId ? "任务已保存，但尚不能确认是否已启动。请打开任务核对状态，不要重复创建。" : "连接中断或等待超时，尚不能确认任务是否已保存。请先到研究任务列表核对；离页不会撤销服务器已受理的操作。");
+        return;
+      }
       const msg = String(e);
       // Try to parse Schema 422 errors from the server.
       const m = /HTTP 422: (.+)/.exec(msg);
@@ -236,7 +269,6 @@ function NewRunInner(): JSX.Element {
               body.detail.errors as { path: string; message: string }[],
             );
             setErr(t("newrun.submit.failed"));
-            setBusy(false);
             return;
           }
         } catch {
@@ -244,7 +276,8 @@ function NewRunInner(): JSX.Element {
         }
       }
       setErr(msg);
-      setBusy(false);
+    } finally {
+      if (active()) setBusy(false);
     }
   }
 
@@ -254,21 +287,20 @@ function NewRunInner(): JSX.Element {
       <main className="container mx-auto max-w-4xl overflow-auto px-6 py-8">
         <header className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-100">New Run</h1>
+            <h1 className="text-2xl font-bold text-slate-100">新建研究</h1>
             <p className="mt-1 text-sm text-slate-400">
-              Entry: <span className="text-mars-accent">{entrypoint}</span>
-              <span className="ml-3 text-slate-500">
-                {usesTemplate ? t("newrun.mode.template") : t("newrun.mode.research")}
-              </span>
+              选择项目并描述研究目标；确认输入资料、模型连接与允许修改的范围。
             </p>
           </div>
           <Link
-            href="/"
+            href="/runs"
             className="rounded border border-mars-border bg-mars-panel px-3 py-1.5 text-xs text-slate-300 hover:bg-mars-subtle"
           >
-            ← Lab
+            ← 研究任务
           </Link>
         </header>
+
+        <FrozenResearchImport />
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -531,17 +563,18 @@ function NewRunInner(): JSX.Element {
               </ul>
             </div>
           ) : err ? (
-            <pre className="whitespace-pre-wrap rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+            <pre role="alert" className="whitespace-pre-wrap rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
               {err}
             </pre>
           ) : null}
+          {savedRunId || uncertainSubmission ? <p className="text-sm text-amber-100"><Link className="underline" href={savedRunId ? `/runs/${encodeURIComponent(savedRunId)}` : "/runs"}>{savedRunId ? "打开已保存任务，核对启动状态" : "到研究任务列表核对"}</Link></p> : null}
 
           <button
-            disabled={busy}
+            disabled={busy || !project || Boolean(savedRunId) || uncertainSubmission}
             onClick={submit}
             className="rounded bg-mars-accent px-5 py-2 font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Creating…" : "Start Run"}
+            {busy ? "正在保存并请求启动…" : "保存并启动研究"}
           </button>
         </div>
 

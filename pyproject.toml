@@ -28,6 +28,7 @@ dependencies = [
   "pypdf[fonts]>=6.17",
   "socksio>=1.0.0",
   "filelock>=3.15",
+  "asyncssh[bcrypt]>=2.24,<3",
   "tensorboard>=2.16",
   "protobuf<7",
 ]

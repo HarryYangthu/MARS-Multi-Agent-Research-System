@@ -25,7 +25,13 @@ from app.execution.remote.transport import (
     TransportResult,
 )
 
+from app.execution.remote.ssh_transport import AsyncSshTransport, SshConnectionPolicy, SshCredentials, SshPreflight
+
 __all__ = [
+    "AsyncSshTransport",
+    "SshConnectionPolicy",
+    "SshCredentials",
+    "SshPreflight",
     "DownloadedArtifact",
     "RemoteExecutionError",
     "RemoteExecutor",

@@ -40,13 +40,18 @@ execution:
   remote_gpu:
     enabled: false
     endpoint: ""               # Deprecated V2 status field; remote_job.v1 uses system OpenSSH.
-    transport: system_ssh
+    transport: system_ssh     # Explicit legacy default; choose asyncssh for pinned password/key authentication.
+    auth_method: key
+    max_output_bytes: 1048576
     protocol: remote_job.v1
     runner: app.execution.remote.runner
     # Connection values are resolved from environment variables. The YAML only
     # stores their names so credentials and machine-specific paths never land in git.
     env:
       enabled: MARS_REMOTE_ENABLED
+      transport: MARS_REMOTE_SSH_TRANSPORT
+      auth_method: MARS_REMOTE_SSH_AUTH_METHOD
+      host_key_sha256: MARS_REMOTE_SSH_HOST_KEY_SHA256
       host: MARS_REMOTE_SSH_HOST
       port: MARS_REMOTE_SSH_PORT
       user: MARS_REMOTE_SSH_USER

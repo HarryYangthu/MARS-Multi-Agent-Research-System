@@ -1,0 +1,8 @@
+schema_id: results_policy.v1
+max_input_file_bytes: 2097152
+max_evidence_file_bytes: 16777216
+max_total_read_bytes: 67108864
+max_jobs: 128
+max_metrics: 2048
+max_curve_points: 2000
+max_export_bytes: 16777216

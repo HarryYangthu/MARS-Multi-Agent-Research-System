@@ -590,3 +590,61 @@ def test_cli_subprocess_invalid_arguments_never_echo_session_token(
     assert response.returncode == 2
     assert "Traceback" not in response.stderr
     assert not (tmp_path / "unused.json").exists()
+
+
+def test_cli_subprocess_creates_real_contract_run_under_shared_owner_without_starting(
+    backend: LiveBackend, tmp_path: Path,
+) -> None:
+    project = project_input(tmp_path)
+    config = tmp_path / "project.yaml"
+    config.write_text(json.dumps(project), encoding="utf-8")
+    contract = tmp_path / "frozen.json"
+
+    def project_command(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return cli_process(backend, tmp_path, "project", "--server", backend.origin, *arguments, token=backend.token)
+
+    frozen = project_command("freeze", "--config", str(config), "--goal", "Read the declared task before execution",
+                             "--mode", "manual", "--output", str(contract))
+    assert frozen.returncode == 0 and json.loads(frozen.stdout)["research_started"] is False
+    saved = contract.read_bytes()
+    with httpx.Client(base_url=backend.origin, trust_env=False, timeout=5,
+                      headers={"X-MARS-Desktop-Token": backend.token}) as direct:
+        before = direct.get("/api/runs").json()
+        denied = cli_process(backend, tmp_path, "project", "--server", backend.origin, "create",
+                             "--contract", str(contract), "--name", "Unauthorized", token=None)
+        assert denied.returncode == 2 and json.loads(denied.stdout)["http_status"] == 401
+        assert direct.get("/api/runs").json() == before
+        created = project_command("create", "--contract", str(contract), "--name", "CLI contract admission")
+        assert created.returncode == 0, created.stderr
+        report = json.loads(created.stdout)
+        assert report["http_status"] == 201 and report["http_ok"] is True
+        receipt = report["response"]
+        assert receipt["status"] == "created" and receipt["research_started"] is False
+        assert receipt["task_sha256"] == json.loads(saved)["task_sha256"]
+        run_id = receipt["run_id"]
+        assert len(direct.get("/api/runs").json()) == len(before) + 1
+        shown = cli_process(backend, tmp_path, "run", "--server", backend.origin, "show", run_id, token=backend.token)
+        assert shown.returncode == 0
+        assert json.loads(shown.stdout)["response"] == direct.get("/api/runs/" + run_id).json()
+        assert json.loads(shown.stdout)["response"]["execution_admission"]["ready"] is False
+        assert set(json.loads(shown.stdout)["response"]["states"].values()) == {"pending"}
+        root = backend.runtime / "runs" / run_id
+        assert json.loads((root / "input/research_task.v1.json").read_bytes()) == json.loads(saved)
+        state_before = (root / "run_state.sqlite3").read_bytes()
+        for action in ("start", "resume"):
+            blocked = cli_process(backend, tmp_path, "run", "--server", backend.origin, action, run_id, token=backend.token)
+            assert blocked.returncode == 2
+            assert json.loads(blocked.stdout)["response"]["detail"]["status"] == "contract_execution_blocked"
+        assert (root / "run_state.sqlite3").read_bytes() == state_before
+        assert not (root / "resources").exists() and not (root / "agent_traces").exists()
+        (Path(project["paths"]["code"]) / "baseline.py").write_text("# Changed after freeze\n")
+        stale = project_command("create", "--contract", str(contract), "--name", "Stale")
+        assert stale.returncode == 2 and json.loads(stale.stdout)["http_status"] == 409
+        assert len(direct.get("/api/runs").json()) == len(before) + 1
+        assert contract.read_bytes() == saved
+
+
+def test_cli_subprocess_create_requires_explicit_backend_and_cannot_fall_back_locally(backend: LiveBackend, tmp_path: Path) -> None:
+    result = cli_process(backend, tmp_path, "project", "create", "--contract", "not-read.json", "--name", "No local owner", token=backend.token)
+    assert result.returncode == 2 and json.loads(result.stdout)["error_code"] == "server_required"
+    assert list(tmp_path.iterdir()) == []

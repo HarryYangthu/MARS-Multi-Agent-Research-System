@@ -43,10 +43,40 @@ class ProjectPreflightError(ValueError):
         super().__init__("; ".join(issue.message for issue in report.issues))
 
 
+class ResearchContractIntegrityError(ValueError):
+    """The saved declaration or its independently stored identity disagrees."""
+
+
+class StaleResearchContractError(ValueError):
+    """Declared live files changed after the task was frozen."""
+
+
 def contract_sha256(contract: ContractModel) -> str:
     payload = json.dumps(contract.model_dump(mode="json"), ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def validate_frozen_research_task(value: Any, *, check_live_files: bool = False) -> FrozenResearchTask:
+    """Verify content identities; inspecting saved evidence never reads live code."""
+    if isinstance(value, FrozenResearchTask):
+        value = value.model_dump(mode="json")
+    frozen = FrozenResearchTask.model_validate(value)
+    if (contract_sha256(frozen.task) != frozen.task_sha256
+            or contract_sha256(frozen.task.project) != frozen.task.project_sha256):
+        raise ResearchContractIntegrityError("Research contract fingerprint does not match its contents")
+    expected_files = set(frozen.task.project.baseline_files)
+    expected_files.update(name for command in frozen.task.project.commands for name in command.entrypoint_files)
+    fingerprint_paths = [item.path for item in frozen.task.input_fingerprints]
+    if len(fingerprint_paths) != len(set(fingerprint_paths)) or set(fingerprint_paths) != expected_files:
+        raise ResearchContractIntegrityError("Research contract fingerprints do not match declared source files")
+    if check_live_files:
+        report = preflight_project(frozen.task.project)
+        if not report.ready:
+            raise ProjectPreflightError(report)
+        if report.input_fingerprints != frozen.task.input_fingerprints:
+            raise StaleResearchContractError("Declared source files changed; freeze a new research contract")
+    return frozen
 
 
 def parse_project_contract(value: Any) -> ProjectContract:
