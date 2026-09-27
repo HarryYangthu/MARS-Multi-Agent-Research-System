@@ -605,3 +605,8 @@ backend/app/bridge/research_project_scope.py
 backend/app/harness/tools/research_accounting.py
 backend/app/bridge/research_job_service.py
 configs/research_jobs.yaml
+frontend/src/components/LegacyResearchForm.tsx
+frontend/src/components/NewResearchWizard.tsx
+frontend/src/lib/researchContracts.ts
+frontend/src/lib/researchSubmission.ts
+frontend/src/lib/researchWizard.ts

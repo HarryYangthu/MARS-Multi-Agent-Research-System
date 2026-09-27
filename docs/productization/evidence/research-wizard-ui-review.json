@@ -1,0 +1,151 @@
+{
+  "schema_id": "research_wizard_ui_review.v1",
+  "observed_at_utc": "2026-09-27T20:45:01.674300+00:00",
+  "claim": "Real UI -> existing local backend -> frozen task and created pending run; no research execution claimed",
+  "source_sha256": {
+    "frontend/src/app/runs/new/page.tsx": "4201369d7e61a9a184682b187b590e56f08699e1c5ccbd630c79313ff7d7d844",
+    "frontend/src/components/NewResearchWizard.tsx": "5e5734f75f72941aaa3a1d8e2130195b054f0d408449214928d72ab2eda19cdd",
+    "frontend/src/components/LegacyResearchForm.tsx": "c9aebbb96e29d178d7e8b3d013dd94a1d6fa5726a1f947e3a848c6f4140251a6",
+    "frontend/src/components/FrozenResearchImport.tsx": "e626993b202b38410df28fabd2c5dcf0b500c2422f2d6e5fe1623489e80754a1",
+    "frontend/src/components/FolderProjectDialog.tsx": "ce16edde0fb13a1d805b5da7e17abe2c519bcdcb9c9a1055bc96db25e66eb493",
+    "frontend/src/lib/researchContracts.ts": "54606c77758510d704f7484d8b739d9179f28e26cb3fa5504faa0ae345edfd28",
+    "frontend/src/lib/researchWizard.ts": "ec2c3316437878555303170790ca241f12e148e2f00598e16fbda69cca481ada",
+    "frontend/src/lib/researchSubmission.ts": "1c3ed57d57c98d33f36c85a28be191ae735c3352a1bd60cf8941b7be68eaf3ea",
+    "frontend/scripts/research-wizard-smoke.ts": "061cf36bbb2e9c5b2a6dcbeadb195820ac890d00f566b141d1d2e39a70051211"
+  },
+  "build_id": "sz8KnZaQ1l3xcFkVSxBIm",
+  "screenshots": {
+    "01-empty-1280.png": "e4719fe748afa0591fd3e4b620d811e5c17cb9041c1359ad774be637285f453f",
+    "02-required-errors-1280.png": "7d40ee066e6057955eb4465f6d6fa12629f8163086be50b715c798b501197d72",
+    "03-commands-1440.png": "bf3b5815b741d5e657722e60af6251b2dfc2ffbd16722128d04ca232263b89fd",
+    "04-missing-real-file-1440.png": "09eb7ae06caae0ef35db972a81118fa678989b5ec287539e024f12784079b9b6",
+    "05-preflight-offline.png": "ce0e8db76415bac23bea3574dfda83ead5b3a54624ad2b7b83fb10805ee18586",
+    "06-frozen-1440.png": "86826a4856c5f98e0eba0ab628b5a1300974e1fff678579b45eedade138c7801",
+    "07-real-timeout.png": "bb4b7f4fb7b10bb84dff7fbf0b946a699702c2522aefa2b3f522c47e1014858f",
+    "08-saved-not-started-1440.png": "e952f8da8ba9a20b4d87544bebabcaef8e8ac8236bb5f22891d5637cad5d6259",
+    "09-save-timeout-unknown.png": "15506fcbc35b2e1c9166d773a25a2cdb51e368c252cd27e507e20ad23caf6452",
+    "10-unknown-reload-lock.png": "37e12db3565141b04fbda022036a1d1ed09f234ae88f8faf6778fecfdb8d3443",
+    "11-departed-runs.png": "7a58ba3f4882099571cb845dd8857e888067dd4880e08c5002ba3fbef6cd362e",
+    "12-final-chinese-file-error-1280.png": "bf263fe26e96aab2038ff1c5df83b7979debb4c8418aaeb0b3d99141c6043376",
+    "13-final-repeated-error-limit.png": "0b9616ae973dc83bf3f6e82b5c29f8c49c2a3ed19e721bf40e3783bd42e8675d",
+    "14-final-saved-1280.png": "57dbeafc3d0bb0414ca99d278f6cc943f656c3e3983b2df86d67dc19fe5dfc93",
+    "15-final-saved-1440.png": "d8bdbce7ea9d15743a22fd232cd5dc24f9e595cbc625fcd8dc85f3c9777b857b",
+    "departure-advanced-check.png": "ab1177085fa35927d3e2a86718b3313e23dcd7f8ca214d694f237871f3973720"
+  },
+  "network_evidence": {
+    "browser-requests.txt": "174492363e9803100ada6e20f7bd68ace12c08f16db1d6356999e628e4eb5247",
+    "requests-departure.txt": "fd8f80caf8564850fd666fbecd3a10445db864ef2b39c1c5adeedef294a194c3",
+    "requests-final.txt": "2bf67ec350ec5acc08a449ebc1426049f1370241181e09dbec9b0ab8d29aa30f",
+    "requests-unknown.txt": "f4215aadee1c242bb10280959a1a4d1d6264f00d0cb0393aaea58dbd9fbe40a3"
+  },
+  "viewports": [
+    [
+      1280,
+      720
+    ],
+    [
+      1440,
+      900
+    ]
+  ],
+  "checks": {
+    "blank_form_17_issues": true,
+    "keyboard_error_focus": "research-name",
+    "nested_file_error_focus": "research-paths-knowledge",
+    "real_missing_knowledge_rejected": true,
+    "final_chinese_missing_file_message": true,
+    "repeated_error_limit_3_rejected_before_http": true,
+    "budget_edit_invalidates_preflight_and_frozen": true,
+    "offline_preflight_fails_and_explicit_retry_succeeds": true,
+    "prepare_deadline_with_owned_frontend_process_stopped": true,
+    "save_deadline_unknown_with_later_real_backend_acceptance": true,
+    "save_unknown_locks_after_reload": true,
+    "leave_during_save_retains_lock_and_no_followup_start": true,
+    "frontend_requests_start_count": 0,
+    "command_execution_sentinel_exists": false,
+    "final_browser_page_errors": []
+  },
+  "runs": [
+    {
+      "run_id": "2026-09-27T2040_task",
+      "name": "向导真实文件预检",
+      "status": "created",
+      "read_only": true,
+      "available_actions": [],
+      "states": {
+        "idea": "pending",
+        "experiment": "pending",
+        "coding": "pending",
+        "execution": "pending",
+        "writing": "pending"
+      },
+      "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13",
+      "model_requests_budget": 59,
+      "model_tool_execution_receipts": []
+    },
+    {
+      "run_id": "2026-09-27T2042_task",
+      "name": "向导保存超时验收",
+      "status": "created",
+      "read_only": true,
+      "available_actions": [],
+      "states": {
+        "idea": "pending",
+        "experiment": "pending",
+        "coding": "pending",
+        "execution": "pending",
+        "writing": "pending"
+      },
+      "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13",
+      "model_requests_budget": 59,
+      "model_tool_execution_receipts": []
+    },
+    {
+      "run_id": "2026-09-27T2042_task_ede90a559e2f",
+      "name": "向导离页等待验收",
+      "status": "created",
+      "read_only": true,
+      "available_actions": [],
+      "states": {
+        "idea": "pending",
+        "experiment": "pending",
+        "coding": "pending",
+        "execution": "pending",
+        "writing": "pending"
+      },
+      "task_sha256": "da9213be1a92979b674cab29b616bb5420bbc68083b1cd1e14bc2f46167bfa13",
+      "model_requests_budget": 59,
+      "model_tool_execution_receipts": []
+    },
+    {
+      "run_id": "2026-09-27T2044_task",
+      "name": "向导最终源码保存验收",
+      "status": "created",
+      "read_only": true,
+      "available_actions": [],
+      "states": {
+        "idea": "pending",
+        "experiment": "pending",
+        "coding": "pending",
+        "execution": "pending",
+        "writing": "pending"
+      },
+      "task_sha256": "6764484be33eac4de33d5348cca48cec75ae4b7c00fc7731a31d221fd9a723b5",
+      "model_requests_budget": 60,
+      "model_tool_execution_receipts": []
+    }
+  ],
+  "limitations": [
+    "No full research run or measured scientific output",
+    "No durable backend idempotency or authoritative request reconciliation yet",
+    "Session storage lock is local to one browser tab and not an authorization boundary",
+    "No cross-session editable project-profile reuse yet",
+    "No independent five-user onboarding acceptance or high-DPI matrix",
+    "Disk-full and SSH-disconnect wizard flows not certified"
+  ],
+  "attempts": [
+    "First build used default backend rewrite and was superseded by explicit 8012 rewrite build before UI testing",
+    "First real missing-file error was English; final reviewed build localizes known preflight codes",
+    "Root review found repeated_error_limit upper-bound gap and manual unknown unlock; both fixed before final browser pass"
+  ]
+}
