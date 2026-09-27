@@ -95,6 +95,16 @@ def charged_model_attempts(row: Mapping[str, Any]) -> int:
     return int(charged)
 
 
+def charged_token_component(row: Mapping[str, Any], component: str) -> int:
+    """Legacy rows retain their entire total in each unknown token bucket."""
+    if component not in {"input", "output"}:
+        raise ValueError("unknown token component")
+    value = row.get(f"charged_{component}_tokens", row.get("charged_tokens"))
+    if type(value) is not int or value < 0:
+        raise ResourceBudgetError("invalid token-component reservation record")
+    return int(value)
+
+
 class RunModelBudget:
     def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None) -> None:
         self.root = root.resolve()
@@ -114,6 +124,9 @@ class RunModelBudget:
                 continue
             if type(limits.get(key)) is not int or limits[key] < 1:
                 raise ValueError(f"{key} must be a positive integer")
+        for key in ("max_input_tokens", "max_billed_output_tokens"):
+            if key in limits and (type(limits[key]) is not int or limits[key] < 1):
+                raise ValueError(f"{key} must be a positive integer when configured")
         _number(limits.get("max_elapsed_seconds"), "max_elapsed_seconds", positive=True)
         if limits.get("max_cost") is not None:
             _number(limits["max_cost"], "max_cost", positive=True)
@@ -146,6 +159,12 @@ class RunModelBudget:
                     or type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0):
                 raise ResourceBudgetError("invalid resource reservation record")
             charged_model_attempts(row)
+            for component in ("input", "output"):
+                charged_token_component(row, component)
+            present = [f"charged_{component}_tokens" in row for component in ("input", "output")]
+            if any(present) and (not all(present) or
+                    charged_token_component(row, "input") + charged_token_component(row, "output") != row["charged_tokens"]):
+                raise ResourceBudgetError("inconsistent token-component reservation record")
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
@@ -262,6 +281,8 @@ class RunModelBudget:
         prompt_bound = len(_canonical({"messages": [m.to_wire() for m in messages],
                                       "tools": config.tools}).encode()) + 32 * (len(messages) + 1)
         reserved_tokens = (prompt_bound + config.max_tokens) * attempts
+        reserved_input = prompt_bound * attempts
+        reserved_output = config.max_tokens * attempts
         price = self.configuration.get("prices", {}).get(config.provider + "/" + config.model)
         cost: float | None = None
         if price is not None:
@@ -287,6 +308,10 @@ class RunModelBudget:
                 raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts")
             if sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
+            for component, key, amount in (("input", "max_input_tokens", reserved_input),
+                                           ("output", "max_billed_output_tokens", reserved_output)):
+                if key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
+                    raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
             if limits.get("max_cost") is not None:
                 if cost is None or any(row["charged_cost"] is None for row in rows):
                     raise ResourceBudgetError("monetary limit requires explicit prices for every selected model")
@@ -297,6 +322,8 @@ class RunModelBudget:
             state["requests"][identifier] = {"status": "in_flight", "started_at": time.time(),
                 "provider": config.provider, "model": config.model, "correlation": dict(correlation),
                 "reserved_tokens": reserved_tokens, "charged_tokens": reserved_tokens,
+                "reserved_input_tokens": reserved_input, "charged_input_tokens": reserved_input,
+                "reserved_output_tokens": reserved_output, "charged_output_tokens": reserved_output,
                 "reserved_cost": cost, "charged_cost": cost, "usage": None, "usage_complete": False,
                 "price": price, "max_sdk_attempts": attempts, "charged_attempts": attempts,
                 "observed_attempts": None, "attempts_complete": False}
@@ -341,11 +368,18 @@ class RunModelBudget:
                        usage_complete=known)
             if known:
                 row["charged_tokens"] = usage["total_tokens"]
+                row["charged_input_tokens"] = usage["prompt_tokens"]
+                # completion_tokens includes billed reasoning for conforming
+                # providers. Any unexplained remainder stays charged as output,
+                # never silently disappears from the separate output ceiling.
+                row["charged_output_tokens"] = usage["total_tokens"] - usage["prompt_tokens"]
                 if row["price"] is not None:
                     price = row["price"]
                     row["charged_cost"] = (usage["prompt_tokens"] * price["input_per_million"]
-                        + usage["completion_tokens"] * price["output_per_million"]) / 1_000_000
-            row["reservation_exceeded"] = known and row["charged_tokens"] > row["reserved_tokens"]
+                        + row["charged_output_tokens"] * price["output_per_million"]) / 1_000_000
+            row["reservation_exceeded"] = known and (row["charged_tokens"] > row["reserved_tokens"]
+                or row["charged_input_tokens"] > row.get("reserved_input_tokens", row["reserved_tokens"])
+                or row["charged_output_tokens"] > row.get("reserved_output_tokens", row["reserved_tokens"]))
             atomic_write_json(self.path, state)
             lease = self._leases.pop(reservation.request_id, None)
             if lease is not None:

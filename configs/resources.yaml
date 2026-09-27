@@ -3,6 +3,8 @@ limits:
   # Finite aggregate model limit, shared by inherited child tasks.
   max_model_requests: 60
   max_total_tokens: 1128000
+  max_input_tokens: 1000000
+  max_billed_output_tokens: 128000
   max_parallel_model_calls: 2
   max_elapsed_seconds: 5400
   # No verified price table yet: monetary cost is unknown, never a fake zero.

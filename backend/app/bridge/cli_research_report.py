@@ -167,7 +167,9 @@ def _collect_budgets(root: Path, warnings: list[str], *, inherited_stage: Path |
                 row = {"max_sdk_attempts": None}
             entry = {"request_id": identifier, **{key: row.get(key) for key in
                      ("provider", "model", "status", "started_at", "finished_at", "usage_complete", "charged_tokens",
-                      "reserved_tokens", "charged_cost", "reserved_cost", "price", "usage", "correlation")}}
+                      "reserved_tokens", "charged_input_tokens", "charged_output_tokens",
+                      "reserved_input_tokens", "reserved_output_tokens", "charged_cost", "reserved_cost",
+                      "price", "usage", "correlation")}}
             try:
                 reserved = reserved_model_attempts(row)
                 charged = charged_model_attempts(row)
@@ -508,9 +510,15 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
                     f"其中未知调用保留尝试：{_display(attempt_counts['retained_unknown_sdk_attempts'])}。"
                     "max_model_requests 限制 SDK 尝试配额；保留量不表示实际已发送次数。旧账本缺少观测字段时按原重试上限保留；缺少原上限时按全局最大重试上限保留。")
         body.append("冻结模型配额：\n```json\n" + json.dumps(ledger["limits"], ensure_ascii=False, indent=2) + "\n```")
-        charged = sum(row["charged_tokens"] for row in ledger["requests"] if type(row.get("charged_tokens")) is int)
+        token_totals: dict[str, int | None] = {}
+        for field in ("charged_tokens", "charged_input_tokens", "charged_output_tokens"):
+            values = [row.get(field) for row in ledger["requests"]]
+            token_totals[field] = sum(values) if all(type(value) is int and value >= 0 for value in values) else None
         unresolved = sum(row.get("usage_complete") is not True for row in ledger["requests"])
-        body.append(f"配额已记账 Token（包含未知调用保留量）：{charged}；用量不完整请求：{unresolved}。此数值不作为实际 Token 消耗。")
+        body.append(f"配额已记账 Token（包含未知调用保留量）：{_display(token_totals['charged_tokens'])}；"
+                    f"输入：{_display(token_totals['charged_input_tokens'])}；"
+                    f"计费输出：{_display(token_totals['charged_output_tokens'])}；用量不完整请求：{unresolved}。"
+                    "此数值不作为实际 Token 消耗；旧账本缺少分项时显示未知。")
     failures = [row for row in evidence["execution_attempts"] if row["status"] != "completed"]
     if failures or evidence["stage_failures"]:
         body += ["## 失败与恢复证据", "```json\n" + json.dumps({"workers": failures, "stages": evidence["stage_failures"]}, ensure_ascii=False, indent=2) + "\n```"]
