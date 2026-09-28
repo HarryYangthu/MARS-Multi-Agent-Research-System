@@ -71,3 +71,5 @@ Windows 11 x64 干净实机、Linux GPU/SSH 两种认证环境、发布签名/�
 设置复用与能力页集成回归 **3434 通过、181 跳过**，strict mypy **638 文件**、**4 条依赖合同**通过；同一生产构建 `ff-frkrcV1rRSLgTrUJ47` 已实测复杂项目复用/明确保存、真实读锁拒绝、目录搜索/断网恢复/窄屏布局。详情见 [设置复用](RESEARCH_SETTINGS_REUSE.md)、[能力页](CAPABILITY_CATALOG.md) 和 [集成回执](evidence/catalog-settings-integration.json)。`ccf0a54` 两项 GitHub 工作流通过。
 
 正式 Agent 与封存 SQL 阶段接线 `660df12` 已通过 GitHub Core compatibility CI 和 Windows native CPU launcher。新停止增量见 [持久停止](RESEARCH_RUN_STOP.md) 与 [真实页面/CPU 回执](evidence/research-stop-browser.json)。完整研究启动、暂停恢复和发布矩阵仍未验收。
+
+新手引导已串联模型 API 配置、代码文件夹接入、背景 Markdown 上传/预览及研究表单预填，真实浏览器路径通过；配置保存不冒充连接验证。详见 [引导说明](ONBOARDING.md)。

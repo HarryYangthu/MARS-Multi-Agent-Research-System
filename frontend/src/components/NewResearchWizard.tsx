@@ -17,6 +17,7 @@ import {
 import { useResearchSubmission } from "@/lib/useResearchSubmission";
 import { ResearchSaveRecovery } from "./ResearchSaveRecovery";
 import { useProject } from "@/lib/project";
+import { getProjectAutoContext } from "@/lib/api";
 
 const STEPS = ["研究目标", "项目路径", "命令与指标", "预算与预检"];
 const INPUT = "w-full min-w-0 rounded-md border border-mars-border bg-mars-bg px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30 disabled:opacity-50";
@@ -47,6 +48,27 @@ export function NewResearchWizard(): JSX.Element {
   const defaultsRequest = useRef<AbortController | null>(null);
   const revision = useRef(0);
   const feedback = useRef<HTMLDivElement | null>(null);
+
+  const seededProject = useRef("");
+  useEffect(() => {
+    const name = new URLSearchParams(window.location.search).get("project");
+    const chosen = projects.find((item) => item.name === name);
+    if (!chosen || seededProject.current === chosen.name) return;
+    const controller = new AbortController();
+    const currentRevision = revision.current;
+    void getProjectAutoContext(chosen.name, controller.signal).then((context) => {
+      if (controller.signal.aborted || revision.current !== currentRevision) return;
+      seededProject.current = chosen.name;
+      setDraft((current) => ({ ...current, projectId: chosen.name, displayName: chosen.display_name || chosen.name,
+        code: chosen.repo_path || chosen.folder_path || "",
+        knowledge: context.files.filter((file) => file.role === "reference").map((file) => `${context.folder.replace(/[\\/]+$/, "")}/${file.path}`).join("\n"),
+      }));
+      setNotice("已从新手引导带入项目代码和背景资料，请继续填写目标、命令与指标。");
+    }).catch(() => {
+      if (!controller.signal.aborted) setNotice("引导中的项目资料暂时无法读取，请在项目路径步骤手动核对。");
+    });
+    return () => controller.abort();
+  }, [projects]);
 
   useEffect(() => {
     mounted.current = true;

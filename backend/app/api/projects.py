@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.bridge.extension_runtime import get_extension_runtime
 from app.harness.project_packs.registry import LoadedProjectPack
-from app.settings import repo_root
+from app.settings import get_settings, repo_root
 from app.harness.project_workspace import folder_project, list_folder_projects, open_folder, project_root
 from app.harness.context.folder_context import discover_folder_context
 from app.harness.agent_loop.trace import digest
@@ -177,6 +177,28 @@ def project_context_record(name: str) -> dict[str, Any]:
                           "role": "instructions" if path.name == "AGENTS.md" else "reference"})
     return {"project": name, "folder": str(root), "files": files,
             "total_chars": sum(f["chars"] for f in files), "warnings": []}
+
+
+@router.post("/{name}/background", status_code=201)
+async def upload_project_background(name: str, request: Request,
+                                    filename: str = Query(min_length=1, max_length=240)) -> dict[str, Any]:
+    from asyncio import to_thread
+    from app.bridge.project_onboarding import save_background
+    try:
+        folder = folder_project(name)
+        if folder is None:
+            raise ValueError("请先通过打开文件夹接入项目，再上传背景资料")
+        limit = get_settings().mars_folder_context_max_chars * 4
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > limit:
+                raise HTTPException(status_code=413, detail="背景文档过大，请整理必要内容后上传")
+            data.extend(chunk)
+        return await to_thread(save_background, folder, filename, bytes(data))
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="同名背景文档已存在，请重命名后上传；原文件未覆盖") from exc
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{name}/auto-context")

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 
 const CONFIG_SECTIONS = [
+  { href: "/onboarding", title: "新手使用引导", description: "逐步配置 API、接入代码、上传背景资料并准备首个研究任务。", badge: "从这里开始" },
   {
     href: "/config/capabilities",
     title: "研究能力",

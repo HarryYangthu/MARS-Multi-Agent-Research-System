@@ -1959,7 +1959,7 @@ export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
 }
 
 export async function getAgentLlmConfig(): Promise<AgentLlmConfigView> {
-  return jsonOrThrow(await fetch(`${BASE}/api/config/agent-llm`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/config/agent-llm`));
 }
 
 export async function updateAgentLlmConfig(params: {
@@ -1967,7 +1967,7 @@ export async function updateAgentLlmConfig(params: {
   actor?: string;
 }): Promise<AgentLlmConfigView> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/config/agent-llm`, {
+    await boundedFetch(`${BASE}/api/config/agent-llm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2157,4 +2157,10 @@ export async function getProjectContextDocument(project: string, path: string, s
   const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/auto-context/document`);
   url.searchParams.set("path", path);
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
+}
+
+export async function uploadProjectBackground(project: string, file: File): Promise<ProjectContextDocument> {
+  const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/background`);
+  url.searchParams.set("filename", file.name);
+  return jsonOrThrow(await boundedFetch(url, { method: "POST", headers: { "Content-Type": "text/markdown; charset=utf-8" }, body: file }));
 }
