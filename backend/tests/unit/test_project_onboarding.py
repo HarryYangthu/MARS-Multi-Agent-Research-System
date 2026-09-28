@@ -51,8 +51,9 @@ def test_code_binding_preserves_identity_rules_and_source(tmp_path: Path) -> Non
     (code / "baseline.py").write_text("VALUE = 42\n")
     assert bind_code_folder(folder, str(code)) == code
     after = yaml.safe_load(link.read_text())
-    assert {k: v for k, v in after.items() if k != "repo_path"} == {k: v for k, v in before.items() if k != "repo_path"}
+    assert {k: v for k, v in after.items() if k not in {"repo_path", "repo_role", "read_only"}} == {k: v for k, v in before.items() if k not in {"repo_path", "repo_role", "read_only"}}
     assert after["repo_path"] == str(code)
+    assert after["read_only"] is True and after["repo_role"] == "simulation_baseline"
     assert (folder.metadata_root / "project.yaml").read_bytes() == marker
     assert list(code.iterdir()) == [code / "baseline.py"]
     assert (code / "baseline.py").read_text() == "VALUE = 42\n"
@@ -174,10 +175,14 @@ def test_created_project_can_resume_setup_without_changing_identity(tmp_path: Pa
             assert imported.json()["folder_path"] == str(folder)
             # Real registered code implementation resolves the imported folder.
             import asyncio
-            from app.harness.tools.code import repo_reader_tool
+            from app.harness.tools.code import repo_reader_tool, write_file_tool
             from app.harness.tools.registry import ToolContext
             result = asyncio.run(repo_reader_tool({"path": "baseline.py"}, ToolContext("setup-check", name, "coding")))
             assert result.ok and result.output["content"] == "VALUE = 42\n"
+            assert imported.json()["repo_read_only"] is True
+            denied = asyncio.run(write_file_tool({"path": "baseline.py", "content": "changed"}, ToolContext("setup-check", name, "coding")))
+            assert not denied.ok and "read_only" in str(denied.error)
+            assert (external / "baseline.py").read_text() == "VALUE = 42\n"
             assert not (external / ".mars").exists()
             context_after = client.get(f"/api/projects/{name}/auto-context").json()
             assert context_after["files"] == context["files"]

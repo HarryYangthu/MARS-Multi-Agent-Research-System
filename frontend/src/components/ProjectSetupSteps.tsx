@@ -45,7 +45,7 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     <h3 className="text-base font-semibold">{step === 3 ? "项目已创建" : STEPS[step]}</h3>
     <div hidden={step !== 1}><OnboardingModelSetup onStatus={setApiSaved} onBusy={setModelBusy} /></div>
     <div hidden={step !== 2} className="space-y-4">
-      <p className="text-sm leading-6 text-slate-400">这里仅准备代码与补充背景，不填写研究目标。本次想做什么，完成配置后再在对话中告诉系统。</p>
+      <p className="text-sm leading-6 text-slate-400">这里仅准备仿真基线代码仓与补充背景，不填写研究目标。本次想做什么，完成配置后再在对话中告诉系统。</p>
       {project.project_type === "folder" ? <ProjectCodeFolder project={project} onBusy={setCodeBusy} /> : null}
       <p className="text-sm leading-6 text-slate-400">背景信息可整理成一份文件，例如已有工作、领域术语、数据说明和参考方法。已有 README 足够时可跳过。</p>
       {project.project_type === "folder" ? <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传补充背景文件<input aria-label="上传补充背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">选择一份 Markdown 或 TXT 文件即可。TXT 会转存为同名 Markdown，内容不改写；同名资料不覆盖。文档仅作背景参考。</span></label> : <p className="text-sm text-slate-400">此项目的背景资料由项目包管理，可在项目资料中查看。</p>}

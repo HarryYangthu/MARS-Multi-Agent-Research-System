@@ -728,6 +728,8 @@ export type ProjectSummary = {
   tags: string[];
   repo_path: string;
   repo_exists: boolean;
+  repo_read_only?: boolean;
+  repo_role?: string;
 };
 
 export type EventEntry = {

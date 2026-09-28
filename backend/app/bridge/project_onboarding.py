@@ -73,5 +73,7 @@ def bind_code_folder(project: FolderProject, path: str) -> Path:
         if raw.get("repo_mode") != "local_path":
             raise ValueError("当前代码关联不是本地文件夹模式，请保留现有工程配置")
         raw["repo_path"] = str(code)
+        raw["repo_role"] = "simulation_baseline"
+        raw["read_only"] = True
         atomic_write_text(link, yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
     return code
