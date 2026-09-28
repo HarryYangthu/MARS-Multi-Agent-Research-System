@@ -10,6 +10,7 @@ from app.api.dependencies import existing_orchestrator, get_orchestrator, get_ru
 from app.bridge.orchestrator import RunRequest, RunSession
 from app.bridge.idea_input_context import IdeaRequirements, validate_idea_context
 from app.bridge.run_observability import build_run_observability
+from app.bridge.research_activity import build_research_activity
 from app.bridge.research_contract_service import ResearchContractIntegrityError
 from app.bridge.research_run_service import (
     CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
@@ -375,6 +376,14 @@ async def permanently_delete_run(run_id: str) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found in trash") from exc
+
+
+@router.get("/{run_id}/activity")
+async def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return build_research_activity(run, limit=max(1, min(limit, 500)))
 
 
 @router.get("/{run_id}/observability")

@@ -5,6 +5,8 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
+import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
+import { conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 
 const storageKey = (project: string): string => `mars.commander.conv.${project}`;
@@ -24,11 +26,21 @@ export function ResearchConversation({ project, name }: { project: string; name:
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [pending, setPending] = useState<{ text: string; after: number } | null>(null);
   const sending = useRef(false);
   const alive = useRef(true);
   const bottom = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  const activity = useResearchActivity(conversation?.linked_run_id, project);
+  const processing = busy || conversation?.processing === true;
+  const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
+  const entries = conversationEntries(conversation?.messages ?? [], [...publicActivities, ...activity.activities]);
+  const groups = groupConversationEntries(entries);
+  const lastEntry = entries.at(-1)?.id;
+  const current = [...publicActivities].reverse().find(item => item.status === "running")?.title;
+
 
   useEffect(() => {
     alive.current = true;
@@ -48,21 +60,21 @@ export function ResearchConversation({ project, name }: { project: string; name:
   // Read actual persisted/in-flight Commander messages, including tool receipts.
   // Polling never sends the user's message again.
   useEffect(() => {
-    if (!conversation?.conv_id || (!busy && !conversation.linked_run_id)) return;
+    if (!conversation?.conv_id || (!busy && !conversation.processing && !conversation.linked_run_id)) return;
     const id = conversation.conv_id;
     let active = true;
     let reading = false;
     const timer = setInterval(() => {
       if (reading) return;
       reading = true;
-      void getConversation(id).then((value) => { if (active) setConversation(value); })
-        .catch(() => { /* The send/refresh operation reports connection errors. */ })
+      void getConversation(id).then((value) => { if (active) { setConversation(value); setPollError(""); } })
+        .catch(() => { if (active) setPollError("对话进度更新失败，正在重试。"); })
         .finally(() => { reading = false; });
     }, CLIENT_POLICY.controlRefreshMs);
     return () => { active = false; clearInterval(timer); };
-  }, [conversation?.conv_id, conversation?.linked_run_id, busy]);
+  }, [conversation?.conv_id, conversation?.linked_run_id, conversation?.processing, busy]);
 
-  useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [conversation?.messages.length, pending, busy]);
+  useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
 
   async function refresh(): Promise<void> {
     const id = conversation?.conv_id || savedConversation(project);
@@ -80,8 +92,8 @@ export function ResearchConversation({ project, name }: { project: string; name:
 
   async function send(): Promise<void> {
     const text = draft.trim();
-    if (!text || sending.current || loading || needsRefresh) return;
-    sending.current = true; setBusy(true); setError("");
+    if (!text || sending.current || conversation?.processing || loading || needsRefresh) return;
+    follow.current = true; sending.current = true; setBusy(true); setError("");
     setPending({ text, after: conversation?.messages.length ?? 0 }); setDraft("");
     try {
       const current = conversation || await createConversation(project);
@@ -105,15 +117,18 @@ export function ResearchConversation({ project, name }: { project: string; name:
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
       <div className="flex gap-3 text-xs text-slate-400">
         <Link href="/runs" className="hover:text-white">研究记录</Link>
-        <button type="button" disabled={busy || loading} onClick={() => { remember(project, null); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+    <div className="flex min-h-[65vh] min-w-0 flex-1 flex-col lg:min-h-0">
+    <div onScroll={event => { const el = event.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6">
         {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
-        {messages.map((message, index) => <ResearchMessage key={`${conversation?.conv_id}-${index}`} message={message} />)}
+        {groups.map((entry, index) => entry.kind === "message" ? <ResearchMessage key={entry.id} message={entry.message} /> : <ActivityGroup key={entry.id} activities={entry.activities} expanded={index === groups.length - 1} />)}
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
-        {busy ? <p role="status" className="text-sm text-slate-400">系统正在处理…</p> : null}
+        {processing ? <p role="status" className="text-sm text-indigo-300">{current || "正在处理本次请求…"}</p> : null}
+        {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}`} className="text-sm text-indigo-300 hover:underline">查看关联研究任务 →</Link> : null}
         <div ref={bottom} />
       </div>
@@ -125,10 +140,13 @@ export function ResearchConversation({ project, name }: { project: string; name:
           <textarea aria-label="研究目标或补充要求" value={draft} onChange={(event) => setDraft(event.target.value)} rows={3} placeholder="描述你的研究目标，或继续补充要求…" onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行</span><button type="submit" disabled={busy || loading || needsRefresh || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{busy ? "处理中…" : "发送"}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行</span><button type="submit" disabled={processing || loading || needsRefresh || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : "发送"}</button></div>
         </div>
       </div>
     </form>
+    </div>
+    <ResearchAgentPanel run={activity.run} runId={conversation?.linked_run_id} activities={activity.activities} processing={processing} current={current} error={activity.error} updated={activity.updated} />
+    </div>
   </section>;
 }
 

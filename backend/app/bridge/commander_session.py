@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from app.harness.runtime.conversation_state import ConversationState
 from app.settings import repo_root
@@ -49,6 +50,18 @@ class ChatMessage:
 
 
 @dataclass
+class ConversationActivity:
+    """Public execution milestones, never model reasoning or raw tool arguments."""
+
+    id: str
+    kind: str
+    title: str
+    timestamp: str = field(default_factory=_now)
+    status: str = "running"
+    ended_at: str | None = None
+
+
+@dataclass
 class CommanderSession:
     conv_id: str
     project: str
@@ -63,6 +76,23 @@ class CommanderSession:
     messages: list[ChatMessage] = field(default_factory=list)
     context_version: int = 3
     context_compaction: dict[str, Any] = field(default_factory=dict)
+    activities: list[ConversationActivity] = field(default_factory=list)
+    processing: bool = False
+
+    def begin_activity(self, kind: str, title: str) -> ConversationActivity:
+        activity = ConversationActivity(id=uuid4().hex, kind=kind, title=title)
+        self.activities.append(activity)
+        return activity
+
+    def finish_activity(self, activity: ConversationActivity, status: str = "completed") -> None:
+        activity.status = status
+        activity.ended_at = _now()
+
+    def interrupt_activities(self) -> None:
+        for activity in self.activities:
+            if activity.status == "running":
+                self.finish_activity(activity, "interrupted")
+        self.processing = False
 
     def add(self, msg: ChatMessage) -> ChatMessage:
         msg.state = self.state.value
@@ -89,6 +119,8 @@ class CommanderSession:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "message_count": len(self.messages),
+            "activities": [asdict(item) for item in self.activities],
+            "processing": self.processing,
         }
 
     def _maybe_rollup(self) -> None:
@@ -204,7 +236,7 @@ class CommanderSessionStore:
             state = ConversationState(meta.get("state", "idle"))
         except ValueError:
             state = ConversationState.IDLE
-        return CommanderSession(
+        session = CommanderSession(
             conv_id=conv_id,
             project=str(meta.get("project", "pimc")),
             state=state,
@@ -224,7 +256,11 @@ class CommanderSessionStore:
             messages=messages,
             context_version=int(meta.get("context_version", 2)),
             context_compaction=dict(meta.get("context_compaction", {})),
+            activities=[ConversationActivity(**item) for item in meta.get("activities", [])],
         )
+        # A process restart cannot imply that an old provider/tool call is still live.
+        session.interrupt_activities()
+        return session
 
 
 _store: CommanderSessionStore | None = None

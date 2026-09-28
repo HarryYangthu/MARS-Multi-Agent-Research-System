@@ -1585,7 +1585,7 @@ export async function getRunObservability(
 ): Promise<RunObservabilityView> {
   const url = apiUrl(`${BASE}/api/runs/${runId}/observability`);
   url.searchParams.set("limit", String(limit));
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url));
 }
 
 export async function startFeedbackLoop(
@@ -1937,7 +1937,7 @@ export async function getRunWorkLog(
   if (agent) {
     url.searchParams.set("agent", agent);
   }
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url));
 }
 
 export async function getReportBundle(runId: string): Promise<ReportBundle> {
@@ -2047,6 +2047,8 @@ export type ChatMessageView = {
 };
 
 export type Conversation = {
+  processing?: boolean;
+  activities?: import("./researchActivity").CommanderActivity[];
   conv_id: string;
   project: string;
   state: string;
@@ -2067,7 +2069,7 @@ export async function createConversation(project = "pimc"): Promise<Conversation
 }
 
 export async function getConversation(convId: string): Promise<Conversation> {
-  return jsonOrThrow(await fetch(`${BASE}/api/chat/conversations/${convId}`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${convId}`));
 }
 
 export async function sendChatMessage(convId: string, text: string): Promise<Conversation> {
@@ -2180,4 +2182,9 @@ export async function testModelConnection(params: { provider: string; model: str
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
     signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
   }));
+}
+
+export type RunActivityView = Pick<RunObservabilityView, "run_id" | "project" | "timeline">;
+export async function getRunActivity(runId: string): Promise<RunActivityView> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/activity`));
 }

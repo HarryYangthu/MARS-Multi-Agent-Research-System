@@ -20,7 +20,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.bridge.commander_session import ChatMessage, CommanderSession
+from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -89,45 +89,75 @@ class Commander:
         self, session: CommanderSession, text: str
     ) -> list[ChatMessage]:
         """Process one user turn; returns the messages emitted this turn."""
-        session.add(ChatMessage(role="user", content=text))
-        ctx = ToolContext(
-            orchestrator=self.orchestrator,
-            session=session,
-            run_store=self.run_store,
-        )
-        emitted: list[ChatMessage] = []
+        if session.processing:
+            raise ValueError("conversation is already processing a message")
+        session.processing = True
+        try:
+            session.add(ChatMessage(role="user", content=text))
+            ctx = ToolContext(
+                orchestrator=self.orchestrator,
+                session=session,
+                run_store=self.run_store,
+            )
+            emitted: list[ChatMessage] = []
 
-        for _step in range(self.max_react_steps):
-            decision = await self._decide(session)
+            for _step in range(self.max_react_steps):
+                activity = session.begin_activity("model", "总控正在调用模型")
+                get_session_store().persist(session)
+                try:
+                    decision = await self._decide(session)
+                except asyncio.CancelledError:
+                    session.finish_activity(activity, "interrupted")
+                    raise
+                except Exception:
+                    session.finish_activity(activity, "failed")
+                    raise
+                session.finish_activity(activity)
+                get_session_store().persist(session)
 
-            if decision.next_state:
-                self._try_transition(session, decision.next_state)
+                if decision.next_state:
+                    self._try_transition(session, decision.next_state)
 
-            if decision.reply:
-                emitted.append(session.add(ChatMessage(role="assistant", content=decision.reply)))
+                if decision.reply:
+                    emitted.append(session.add(ChatMessage(role="assistant", content=decision.reply)))
 
-            if not decision.actions:
-                break
+                if not decision.actions:
+                    break
 
-            for action in decision.actions:
-                tool = str(action.get("tool", ""))
-                args = action.get("args", {}) or {}
-                if not isinstance(args, dict):
-                    args = {}
-                result = await execute_tool(tool, args, ctx)
-                emitted.append(
-                    session.add(
-                        ChatMessage(
-                            role="tool",
-                            content=_summarize_result(tool, result),
-                            tool_name=tool,
-                            tool_args=args,
-                            tool_result=result,
+                for action in decision.actions:
+                    tool = str(action.get("tool", ""))
+                    args = action.get("args", {}) or {}
+                    if not isinstance(args, dict):
+                        args = {}
+                    activity = session.begin_activity("tool", f"总控正在执行工具 · {tool}")
+                    get_session_store().persist(session)
+                    try:
+                        result = await execute_tool(tool, args, ctx)
+                    except asyncio.CancelledError:
+                        session.finish_activity(activity, "interrupted")
+                        raise
+                    except Exception:
+                        session.finish_activity(activity, "failed")
+                        raise
+                    session.finish_activity(activity, "failed" if result.get("ok") is False else "completed")
+                    emitted.append(
+                        session.add(
+                            ChatMessage(
+                                role="tool",
+                                content=_summarize_result(tool, result),
+                                tool_name=tool,
+                                tool_args=args,
+                                tool_result=result,
+                            )
                         )
                     )
-                )
-            # loop again so the LLM can react to tool results
-        return emitted
+                    get_session_store().persist(session)
+                # loop again so the LLM can react to tool results
+            return emitted
+
+        finally:
+            session.interrupt_activities()
+            get_session_store().persist(session)
 
     # ----------------------------------------------------------- decision
 
