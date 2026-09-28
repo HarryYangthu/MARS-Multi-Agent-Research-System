@@ -638,3 +638,4 @@ frontend/src/app/onboarding/page.tsx
 frontend/src/components/ProjectSetupSteps.tsx
 frontend/src/components/OnboardingModelSetup.tsx
 backend/app/bridge/model_connection_test.py
+frontend/src/components/ProjectCodeFolder.tsx

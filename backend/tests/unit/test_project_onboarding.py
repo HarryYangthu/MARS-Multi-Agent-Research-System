@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from app.bridge.project_onboarding import save_background
+from app.bridge.project_onboarding import bind_code_folder, save_background
 from app.harness.context.folder_context import discover_folder_context
 from app.harness.project_workspace import FolderProject, open_folder
 
@@ -29,6 +29,49 @@ def test_background_upload_is_discovered_as_reference_without_overwriting_code(t
         save_background(folder, "研究背景.md", b"different")
     assert (folder.root / "context/研究背景.md").read_text().startswith("# 背景")
     assert save_background(folder, "AGENTS.md", b"untrusted instructions")["role"] == "reference"
+
+
+def test_txt_background_keeps_text_and_cannot_overwrite_markdown(tmp_path: Path) -> None:
+    folder = project(tmp_path)
+    content = "已有工作与领域术语。\n不填写本次研究目标。\n"
+    saved = save_background(folder, "补充.TXT", content.encode())
+    assert saved["path"] == "context/补充.md"
+    assert (folder.root / "context/补充.md").read_text() == content
+    with pytest.raises(FileExistsError):
+        save_background(folder, "补充.md", b"overwrite")
+
+
+def test_code_binding_preserves_identity_rules_and_source(tmp_path: Path) -> None:
+    folder = project(tmp_path)
+    link = folder.metadata_root / "repo_link.yaml"
+    before = yaml.safe_load(link.read_text())
+    marker = (folder.metadata_root / "project.yaml").read_bytes()
+    code = tmp_path / "external-code"
+    code.mkdir()
+    (code / "baseline.py").write_text("VALUE = 42\n")
+    assert bind_code_folder(folder, str(code)) == code
+    after = yaml.safe_load(link.read_text())
+    assert {k: v for k, v in after.items() if k != "repo_path"} == {k: v for k, v in before.items() if k != "repo_path"}
+    assert after["repo_path"] == str(code)
+    assert (folder.metadata_root / "project.yaml").read_bytes() == marker
+    assert list(code.iterdir()) == [code / "baseline.py"]
+    assert (code / "baseline.py").read_text() == "VALUE = 42\n"
+    for invalid in ("relative/code", str(tmp_path / "absent"), str(code / "baseline.py")):
+        with pytest.raises((OSError, ValueError)):
+            bind_code_folder(folder, invalid)
+        assert yaml.safe_load(link.read_text()) == after
+
+
+def test_code_binding_rejects_redirected_metadata(tmp_path: Path) -> None:
+    folder = project(tmp_path)
+    link = folder.metadata_root / "repo_link.yaml"
+    outside = tmp_path / "outside.yaml"
+    outside.write_bytes(link.read_bytes())
+    link.unlink()
+    link.symlink_to(outside)
+    with pytest.raises(ValueError):
+        bind_code_folder(folder, str(tmp_path))
+    assert yaml.safe_load(outside.read_text())["repo_path"] == ".."
 
 
 @pytest.mark.parametrize("filename,data", [("../escape.md", b"x"), ("x\\escape.md", b"x"), (".hidden.md", b"x"),
@@ -122,5 +165,23 @@ def test_created_project_can_resume_setup_without_changing_identity(tmp_path: Pa
             other_context = client.get(f"/api/projects/{other.json()['name']}/auto-context").json()
             assert all(row["path"] != "context/背景.md" for row in other_context["files"])
             assert not (tmp_path / "other/context/背景.md").exists()
+            external = tmp_path / "existing-engineering-code"
+            external.mkdir()
+            (external / "baseline.py").write_text("VALUE = 42\n")
+            imported = client.put(f"/api/projects/{name}/code-folder", json={"path": str(external)})
+            assert imported.status_code == 200, imported.text
+            assert imported.json()["name"] == name and imported.json()["repo_path"] == str(external)
+            assert imported.json()["folder_path"] == str(folder)
+            # Real registered code implementation resolves the imported folder.
+            import asyncio
+            from app.harness.tools.code import repo_reader_tool
+            from app.harness.tools.registry import ToolContext
+            result = asyncio.run(repo_reader_tool({"path": "baseline.py"}, ToolContext("setup-check", name, "coding")))
+            assert result.ok and result.output["content"] == "VALUE = 42\n"
+            assert not (external / ".mars").exists()
+            context_after = client.get(f"/api/projects/{name}/auto-context").json()
+            assert context_after["files"] == context["files"]
+            reopened_again = client.post("/api/projects/folder", json={"path": str(folder)})
+            assert reopened_again.json()["repo_path"] == str(external)
     finally:
         reset_settings_cache()

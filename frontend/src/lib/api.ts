@@ -2166,6 +2166,12 @@ export async function uploadProjectBackground(project: string, file: File): Prom
 }
 
 export type ModelConnectionResult = { ok: boolean; code: string; message: string; elapsed_ms: number; requested_model: string; configuration_saved: false };
+export async function importProjectCodeFolder(project: string, path: string): Promise<ProjectSummary> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/code-folder`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+  }));
+}
+
 export async function testModelConnection(params: { provider: string; model: string; base_url: string; api_key: string }, signal?: AbortSignal): Promise<ModelConnectionResult> {
   const deadline = AbortSignal.timeout(CLIENT_POLICY.connectionTestTimeoutMs);
   return jsonOrThrow(await fetch(`${BASE}/api/config/test-connection`, {

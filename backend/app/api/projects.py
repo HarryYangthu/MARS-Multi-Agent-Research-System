@@ -141,6 +141,23 @@ def open_project_folder(payload: OpenFolderPayload) -> ProjectSummary:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+class CodeFolderPayload(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+@router.put("/{name}/code-folder", response_model=ProjectSummary)
+def import_code_folder(name: str, payload: CodeFolderPayload) -> ProjectSummary:
+    from app.bridge.project_onboarding import bind_code_folder
+    try:
+        folder = folder_project(name)
+        if folder is None:
+            raise ValueError("请先创建或打开一个文件夹项目")
+        bind_code_folder(folder, payload.path)
+        return _summary(folder.metadata_root, folder.name)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/folders")
 def browse_project_folders(path: str = "") -> dict[str, Any]:
     root = Path(path).expanduser() if path else Path.home()

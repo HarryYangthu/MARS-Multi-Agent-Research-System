@@ -140,9 +140,9 @@ def open_folder(path: str, *, create: bool = False, registry: Path | None = None
                                stream, allow_unicode=True, sort_keys=False)
         if create:
             (root / "context").mkdir(exist_ok=True)
-            (root / "README.md").write_text(f"# {root.name}\n\n在这里记录项目目的和研究对象。\n\n"
+            (root / "README.md").write_text(f"# {root.name}\n\n在这里记录研究领域、术语与已有工作；本次研究目标在配置后的对话中填写。\n\n"
                                            "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n", encoding="utf-8")
-            (root / "AGENTS.md").write_text("# 项目约定\n\n请补充研究目标、术语、约束和必须保留的接口。\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("# 项目约定\n\n请补充项目约束、代码规范和必须保留的接口；本次研究目标在对话中填写。\n", encoding="utf-8")
         entries[project.name] = str(root)
         atomic_json(index, entries)
         return project
