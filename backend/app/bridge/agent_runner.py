@@ -22,6 +22,10 @@ from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.bridge.task_runtime import admit_handoffs, bind_task
+from app.bridge.research_run_service import load_run_research_contract
+from app.bridge.research_stage_runtime import (
+    BoundResearchStage, load_bound_research_stage, record_research_stage_result, research_stage_dispatch,
+)
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.runtime.task_contract import FailureEnvelope, ResultEnvelope
 from app.harness.execution_intent import (
@@ -46,6 +50,38 @@ async def run_agent_node(
     registry: AgentRegistry | None = None,
     resume_invocation: str | None = None,
     predecessor_task_ids: list[str] | None = None,
+) -> None:
+    """Use the same runner, with sealed SQL ownership for contract-backed work."""
+    from app.harness.runtime.state_journal import StateJournal
+    authority = StateJournal.from_authority(run.root, run_id=run.run_id)
+    saved_request = authority.read().get("request", {}) if authority is not None else {}
+    saved_extra = saved_request.get("extra", {}) if isinstance(saved_request, dict) else {}
+    if not isinstance(saved_extra, dict):
+        raise ValueError("Agent request authority has invalid options")
+    if load_run_research_contract(run, saved_extra if authority is not None else None) is None:
+        await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
+            resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
+        return
+    if revision_reason:
+        raise ValueError("Contract revisions require a new bound graph attempt; legacy revision dispatch is unavailable")
+    selected = registry if registry is not None else get_registry()
+    stage = load_bound_research_stage(run, node_key, agent=selected.get(parse_node_key(node_key).stage))
+    if predecessor_task_ids is not None and predecessor_task_ids != stage.task.predecessor_task_ids:
+        raise ValueError("Caller dependencies differ from the authoritative stage")
+    with research_stage_dispatch(stage, resume_invocation=resume_invocation):
+        await _execute_agent_node(run, node_key, bus=bus, registry=selected, research_stage=stage)
+
+
+async def _execute_agent_node(
+    run: RunHandle,
+    node_key: str,
+    *,
+    bus: Any | None = None,
+    revision_reason: str = "",
+    registry: AgentRegistry | None = None,
+    resume_invocation: str | None = None,
+    predecessor_task_ids: list[str] | None = None,
+    research_stage: BoundResearchStage | None = None,
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
@@ -72,7 +108,8 @@ async def run_agent_node(
         if dir_name != stage:
             continue
         if (
-            attempt == 1
+            research_stage is None
+            and attempt == 1
             and not revision_reason
             and resume_invocation is None
             and (run.subdir(stage) / f"{stem}.v1.md").exists()
@@ -86,13 +123,18 @@ async def run_agent_node(
         return
 
     # Build a RunRequest from on-disk state.
-    user_request = ""
+    user_request = research_stage.task.goal if research_stage is not None else ""
     user_request_path = run.subdir("input") / "user_request.md"
-    if user_request_path.exists():
+    if research_stage is None and user_request_path.exists():
         user_request = user_request_path.read_text(encoding="utf-8")
 
-    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
-    admit_handoffs(run, node_key, supplied_context=upstream)
+    if research_stage is None:
+        upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+        admit_handoffs(run, node_key, supplied_context=upstream)
+    else:
+        upstream, feedback_context = dict(research_stage.upstream), {}
+        from app.bridge.research_stage_runtime import validate_bound_handoffs
+        validate_bound_handoffs(research_stage)
     if revision_reason:
         run.write_event(
             "agent_events",
@@ -117,7 +159,9 @@ async def run_agent_node(
     debate_path = run.subdir(stage) / transcript_name
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
-    request_extra = _load_run_request_extra(run)
+    # Mutable legacy request options cannot override the sealed context, choose
+    # skills, or change model/execution behavior for contract-backed stages.
+    request_extra = _load_run_request_extra(run) if research_stage is None else {}
     skill_selection = request_extra.get("selected_skills_by_agent", {})
     if not isinstance(skill_selection, dict):
         raise ValueError("selected_skills_by_agent must be an object")
@@ -125,7 +169,7 @@ async def run_agent_node(
     if not isinstance(selected_skills, list) or any(not isinstance(name, str) for name in selected_skills):
         raise ValueError("selected skills must be explicit names")
     request_extra["skills"] = selected_skills
-    task = bind_task(run, node_key, goal=user_request, upstream=upstream,
+    task = research_stage.task if research_stage is not None else bind_task(run, node_key, goal=user_request, upstream=upstream,
                     output_schema=str(agent.output_schema), resume_invocation=resume_invocation,
                     predecessor_task_ids=predecessor_task_ids)
     request_extra.update(task.model_dump(include={"task_id", "parent_task_id", "node_id", "invocation_id", "parent_invocation_id"}))
@@ -168,11 +212,11 @@ async def run_agent_node(
             artifact = await agent.draft(request, context)
     except Exception as exc:
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
-            code="agent_execution_failed", message=str(exc) or type(exc).__name__, outcome_known=False,
+            code="agent_execution_failed", message=("Contract Agent execution failed; inspect its native receipts"
+                if research_stage is not None else str(exc) or type(exc).__name__), outcome_known=False,
             evidence_refs=[f"agent_traces/{stage}/{task.invocation_id}"])
-        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-                    ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
-                                   status="failed", failure=failure).model_dump())
+        _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+                                   status="failed", failure=failure))
         _write_agent_failure_diagnostic(
             run=run,
             node_key=node_key,
@@ -194,15 +238,13 @@ async def run_agent_node(
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
             code="output_schema_invalid", message=str(validation.first_error()),
             evidence_refs=[target.relative_to(run.root).as_posix()])
-        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-            ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="invalid",
-                           failure=failure).model_dump())
+        _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+                           status="invalid", failure=failure))
         raise ArtifactValidationError(validation)
     ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
-    atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-        ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
+    _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
             artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
-            artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()).model_dump())
+            artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()))
 
     logger.info("agent {} wrote {}", node_key, ref.path.relative_to(run.root))
     try:
@@ -288,6 +330,13 @@ async def run_agent_node(
 
     # Long-term Memory writes happen only after HITL/auto approval. Drafts stay
     # in the run directory and review queue until promoted to *.approved.md.
+
+
+def _save_stage_result(run: RunHandle, stage: BoundResearchStage | None, result: ResultEnvelope) -> None:
+    if stage is not None:
+        record_research_stage_result(stage, result)
+    else:
+        atomic_json(run.root / "input/task_results" / (result.invocation_id + ".json"), result.model_dump())
 
 
 def _write_agent_failure_diagnostic(

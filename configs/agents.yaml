@@ -200,6 +200,9 @@ coding:
   - python_research
   - c_production
   loop:
+    protocol: native_tools
+    mode: react
+    native_observation_history: true
     input_token_budget: 48000
     max_validation_repairs: 2
     max_tool_steps: 20

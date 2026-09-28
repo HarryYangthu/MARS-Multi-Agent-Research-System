@@ -631,3 +631,4 @@ backend/app/bridge/research_job_control.py
 frontend/src/components/CapabilityLibrary.tsx
 frontend/src/lib/capabilityCatalog.ts
 frontend/src/app/config/capabilities/page.tsx
+backend/app/bridge/research_stage_runtime.py

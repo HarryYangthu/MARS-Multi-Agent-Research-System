@@ -1,6 +1,6 @@
 # E 前置：同一 SQL 内的阶段调用身份
 
-本增量只为现有 RunGraph 节点保存不可变 `TaskEnvelope`，不启动模型、工具或命令，不新增阶段状态或调度器，也不解除合同 run 的 `execution_admission: blocked`。它不替换 `task_runtime.py`、`agent_runner.py` 或 Orchestrator；旧 JSON invocation 的迁移与正式接线仍需独立验收。
+本增量只为现有 RunGraph 节点保存不可变 `TaskEnvelope`，不启动模型、工具或命令，不新增阶段状态或调度器，也不解除合同 run 的 `execution_admission: blocked`。后续 [正式 runner 接线](RESEARCH_STAGE_RUNTIME.md) 已为合同任务消费该身份；旧 JSON invocation 迁移和完整 Orchestrator 启动仍需独立验收。
 
 ## 接口与权威来源
 

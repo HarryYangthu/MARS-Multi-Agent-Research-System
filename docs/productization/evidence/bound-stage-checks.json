@@ -1,0 +1,29 @@
+{
+  "schema": "development_validation.v1",
+  "scope": "SQL-bound registered Agent runner and native Coding configuration",
+  "pytest": {
+    "passed": 3461,
+    "skipped": 181,
+    "failed": 0,
+    "seconds": 202.74,
+    "skip_boundary": "External/platform/legacy evidence requirements remain unverified, not positive acceptance"
+  },
+  "strict_mypy": {
+    "source_files": 641,
+    "passed": true
+  },
+  "import_contracts": {
+    "kept": 4,
+    "broken": 0
+  },
+  "dedicated_runtime_tests": 26,
+  "model_receipt": "bound-coding-real.json",
+  "log_sha256": {
+    "bound-stage-full.log": "602cac2017ba4be3f1ddde83350a6cc39993dcef082b3caeec4413086a268692",
+    "bound-stage-full.xml": "2a363e61bd43364b7802078ffc9978d96a186136f5954fb40ccbc368c22f3924",
+    "bound-stage-full.mypy.log": "eb68391b5ee6273e7a46bdf623adab65bc55c9d43d14bd79ed90d2f0a3aed692",
+    "bound-stage-imports.log": "2177d6e9833d1779c6f539430f06259bfd1d2eeb1283a161be2ddf9039e7c279"
+  },
+  "product_start_admitted": false,
+  "full_research_accepted": false
+}
