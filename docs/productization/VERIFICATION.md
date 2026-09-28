@@ -151,3 +151,7 @@ CLI 明确保留请求号和冻结哈希，保存超时后仅通过显式 GET �
 阶段 TaskEnvelope 与同一 SQL 的图节点、冻结输入、审批证据和配置指纹绑定，重复/恢复沿用同一 invocation。新增 59 项，相关 97 项通过；父任务实际删除 outbox 的复现推动共享 scope 恢复补核心 schema 拒绝。作业控制新增 15 项、相关 100 项通过；真实双 worker 验证坏 submission、非法目录行和忙锁不阻止其余合法作业停止。两组 strict 分别 3/4 文件通过，精确日志见 [回执](evidence/research-owner-primitives.json)。
 
 查询阶段绑定不等于允许重放，批量停止的 run_stop_confirmed 始终为 false。新接口未替换主编排器，没有用局部终态推断整 run 停止；完整研究 start、执行暂停/恢复和发布门槛仍未验收。
+
+## 只读能力目录（2026-09-28）
+
+新目录模块 13 项、相关注册/技能联合 25 项通过（4.39 秒）；strict 3 文件、4 条依赖边界通过。真实 HTTP 会话验证、配置漂移、MCP 注册闭包及未执行的脚本 marker、技能文件损坏均已检查。首次父检查命令误用不存在的测试文件（exit 4/no tests），修正后才取得 25 项结果；保留日志见 [回执](evidence/capability-catalog-checks.json)。所有依赖仍 unknown，所有认证仍 not_run；这些检查不代表真实工具链认证。

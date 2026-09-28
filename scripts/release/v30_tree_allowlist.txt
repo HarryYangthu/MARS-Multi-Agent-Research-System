@@ -619,5 +619,7 @@ frontend/src/components/ResearchSaveRecovery.tsx
 frontend/src/lib/useResearchSubmission.ts
 
 backend/app/bridge/research_scope_recovery.py
+backend/app/bridge/capability_catalog_service.py
+backend/app/api/capabilities.py
 backend/app/bridge/research_stage_service.py
 backend/app/bridge/research_job_control.py

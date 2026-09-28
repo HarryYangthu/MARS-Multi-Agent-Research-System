@@ -20,6 +20,7 @@ from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
 from app.api import chat as chat_api
+from app.api import capabilities as capabilities_api
 from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
@@ -155,6 +156,7 @@ def create_app() -> FastAPI:
 
     app.include_router(runs_api.router)
     app.include_router(research_contracts_api.router)
+    app.include_router(capabilities_api.router)
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(diagnoses_api.router)

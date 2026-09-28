@@ -16,7 +16,7 @@
 |---|---|---|
 | A | 进行中 | 基线冻结、精确发行清单、macOS 生产页面桌面壳和进程生命周期已有证据；干净安装、完整清理和升级仍未完成 |
 | B | 进行中 | 通用项目/任务合同、有限预算、run 独立源码快照和候选文件能力；CLI 经同一后端预检/冻结并控制同一 owner，支持显式保存请求号与只读核对。全目录候选变更审计、Gate5与知识隔离已验证；完整执行接入、数据/命令 adapter 和桌面 CLI 身份交接待完成 |
-| C | 进行中 | 全部默认角色及辩论参与者改用 GLM-5.3；原生只读文件工具闭环实测；完整能力库及逐项认证仍待完成 |
+| C | 进行中 | 全部默认角色及辩论参与者改用 GLM-5.3；原生只读文件工具闭环实测；只读能力目录已区分注册、配置与漂移；界面与逐项认证仍待完成 |
 | D | 进行中 | StateJournal 原子状态/outbox与冻结预算扩展共用SQLite；模型、五个文件工具、候选实现额度与可信本地 CPU 作业已绑定同一账本。独立截止、并发准入、崩溃后未知保留和损坏输入下逐项停止已验证；Reader、提案/辩论/迭代及完整 owner 暂停恢复仍待完成 |
 | E | 进行中 | 下游默认提示和模板已去领域假设及伪成功示例，复用项目知识快照；同 SQL 阶段调用身份可封存/恢复；真实研究到实验的统一闭环仍未完成 |
 | F | 进行中 | AsyncSSH 密码/密钥连接层、严格主机校验与 SFTP 路径约束；真实本机 sshd 密钥/加密密钥/拒绝路径已测。密码成功、Linux GPU 和两种远端代码模式待验收 |
@@ -65,3 +65,5 @@ Windows 11 x64 干净实机、Linux GPU/SSH 两种认证环境、发布签名/�
 `92e7a39` 保存/结果与 `2d97595` 项目权限恢复均已通过 GitHub Core compatibility CI 和 Windows native CPU launcher。CLI 显式幂等保存与核对新增验证见 [说明](CLI_CREATION_IDEMPOTENCY.md) 和 [回执](evidence/cli-creation-reconciliation.json)，不解除产品 start 阻断。
 
 阶段调用身份与逐项作业控制的验证、独立失败和修复见 [阶段说明](RESEARCH_STAGE_BINDING.md)、[作业控制](RESEARCH_JOB_CONTROL.md) 与 [回执](evidence/research-owner-primitives.json)。这是现有 owner 的内部基础接口；完整 start、暂停和恢复接线仍待完成。
+
+[能力目录](CAPABILITY_CATALOG.md) 的真实 HTTP/配置/技能检查已通过，见 [回执](evidence/capability-catalog-checks.json)。只读盘点不执行工具，尚未认证的能力保持 not_run。

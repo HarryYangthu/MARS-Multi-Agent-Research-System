@@ -1,0 +1,29 @@
+{
+  "schema": "verification.capability_catalog.v1",
+  "status": "passed",
+  "new_tests": 13,
+  "parent_related_tests": 25,
+  "parent_seconds": 4.39,
+  "strict_files": 3,
+  "import_contracts": 4,
+  "source_sha256": {
+    "backend/app/bridge/capability_catalog_service.py": "7707e45edd2eac677bf1835432790ec6c7c18eede4217af319b1b9312ca7a8cc",
+    "backend/app/api/capabilities.py": "2d3fa2dfa6dcfece460c4fa8e1b064db0f82aa705b9747f67f3f540abdd4b743",
+    "backend/tests/unit/test_capability_catalog.py": "796ecb6f7adc792fbc1739cd71339293784f5ba8cb3452f29e7bc71a889a5a73"
+  },
+  "evidence": {
+    "capability-catalog.pytest.log": "16d3c61354f77c79d95252048cbb534edf7bb1a26119384f53065fefd0c9590e",
+    "capability-catalog.mypy.log": "8228fcc5ce46d42d01caf3cd941f4e9c5f2bcc372bb5b147a2f0572d2dd675a8",
+    "capability-catalog.imports.log": "71ee7ae90b3aca75b211625e6bd9ccd52d19706616f10f41c5c56b548a69cf4c",
+    "capability-parent.log": "92595de77cf8279be6b406ac814882410db50dd7a5fe83f7eeeb952f2eece36b",
+    "capability-parent-final.log": "42102744310a7bca70919bc180ba92186557e8ab8b7e36adeadf02444abf2e48",
+    "capability-parent-final.xml": "f37770dd24800cead5386d7da053a782be9faf2759c946ac05de37447e352a48"
+  },
+  "retained_attempt": "First parent command named a nonexistent test file; exit 4/no tests; corrected paths passed",
+  "boundaries": [
+    "Passive actual registry/configuration/skill inspection only",
+    "Dependencies unknown; certifications not_run; no execution authority",
+    "No model/MCP/handler invocation or health probe",
+    "No full research start or platform installation claim"
+  ]
+}
