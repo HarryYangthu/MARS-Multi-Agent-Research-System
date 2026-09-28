@@ -97,9 +97,11 @@ def _resolve_raw_ref(*, run_root: Path, raw_ref: str) -> Path:
         raise ValueError("raw_ref escapes context/raw")
     legacy_root = (run_root / "context" / "raw").resolve()
     agent_root = (run_root / "context" / "agents").resolve()
+    materials_root = (run_root / "context" / "materials").resolve()
     if (
         path != legacy_root
         and legacy_root not in path.parents
+        and materials_root not in path.parents
         and path != agent_root
         and agent_root not in path.parents
     ):

@@ -869,6 +869,10 @@ function DiagnosticsPanel({
   diagnostics: Record<string, unknown>;
   fallbackRisk?: Record<string, number>;
 }): JSX.Element {
+  const runtime = asRecord(diagnostics.runtime_context);
+  if (runtime.version === 3) {
+    return <RuntimeContextDiagnostics diagnostics={diagnostics} runtime={runtime} />;
+  }
   const warnings = asStringArray(diagnostics.warnings);
   const riskRecord = asRecord(diagnostics.risk_counts);
   const fallbackRecord = fallbackRisk ?? {};
@@ -1073,4 +1077,56 @@ function numberEntries(value: Record<string, unknown>): [string, number][] {
   return Object.entries(value)
     .filter((entry): entry is [string, number] => typeof entry[1] === "number")
     .sort((left, right) => right[1] - left[1]);
+}
+
+
+function RuntimeContextDiagnostics({ diagnostics, runtime }: {
+  diagnostics: Record<string, unknown>;
+  runtime: Record<string, unknown>;
+}): JSX.Element {
+  const used = asNumber(runtime.used) ?? 0;
+  const budget = asNumber(runtime.budget) ?? 0;
+  const before = asNumber(runtime.before) ?? used;
+  const entries = numberEntries(asRecord(runtime.components));
+  const decisions = asRecordArray(runtime.decisions);
+  const usage = asRecord(diagnostics.provider_usage);
+  const actual = asNumber(usage.prompt_tokens ?? usage.input_tokens);
+  const labels: Record<string, string> = {
+    rules_task: "规则与任务", tools_schema: "工具定义", background: "项目背景",
+    code: "代码与接口", upstream: "上游成果", tool: "工具返回", history: "工作历史",
+  };
+  const preview = diagnostics.source === "planning_preview_not_sent";
+  return <div className="space-y-4 text-sm">
+    <div className="flex flex-wrap gap-4">
+      <span>{preview ? "规划预览 · 未发送" : "实际请求记录"}</span>
+      <span>输入上界估算 {used.toLocaleString()} / {budget.toLocaleString()}</span>
+      <span>占用 {budget ? (used / budget * 100).toFixed(1) : "0"}%</span>
+      <span>实际输入 token：{actual === null ? "暂无" : actual.toLocaleString()}</span>
+    </div>
+    <div className="h-2 overflow-hidden rounded bg-mars-panel" role="progressbar"
+      aria-label="输入预算占用（保守上界）" aria-valuemin={0} aria-valuemax={budget} aria-valuenow={used}>
+      <div className="h-full bg-violet-500" style={{ width: `${Math.min(100, budget ? used / budget * 100 : 0)}%` }} />
+    </div>
+    <table className="w-full text-left text-xs"><thead><tr><th>成分</th><th>输入上界</th><th>占比</th></tr></thead>
+      <tbody>{entries.map(([kind, value]) => <tr key={kind} className="border-t border-mars-border">
+        <td className="py-2">{labels[kind] ?? kind}</td><td>{value.toLocaleString()}</td>
+        <td>{used ? (value / used * 100).toFixed(1) : "0"}%</td>
+      </tr>)}</tbody>
+    </table>
+    <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+      <span>触发阈值：{String(runtime.trigger_percent)}%</span>
+      <span>本次压缩：{runtime.triggered === true ? `${before.toLocaleString()} → ${used.toLocaleString()}` : "未触发"}</span>
+      {runtime.triggered === true && runtime.target_reached === false ? <span>必要内容已保留，未强制压到目标</span> : null}
+    </div>
+    {decisions.length ? <details><summary className="cursor-pointer">材料处理记录（{decisions.length}）</summary>
+      <ul className="mt-2 space-y-2 text-xs">{decisions.map((d, i) => <li key={i}>
+        {String(d.source)} · {String(d.action)}
+      </li>)}</ul></details> : null}
+    <details><summary className="cursor-pointer text-xs">请求与原文校验信息</summary>
+      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify({
+        estimator: runtime.estimator, payload_sha256: diagnostics.payload_sha256,
+        payload_ref: diagnostics.payload_ref, provider_usage: diagnostics.provider_usage,
+      }, null, 2)}</pre>
+    </details>
+  </div>;
 }

@@ -499,6 +499,8 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     reg.register("knowledge.run_archive", run_archive_tool)
     reg.register("knowledge.ingest_document", ingest_document_tool)
     # code.*
+    from app.harness.tools.context_material import read_material_tool
+    reg.register("context.read_material", read_material_tool)
     reg.register("code.repo_reader", repo_reader_tool)
     reg.register("code.patch_generator", patch_generator_tool)
     reg.register("code.apply_patch", apply_patch_tool)

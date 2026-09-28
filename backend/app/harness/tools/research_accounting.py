@@ -124,7 +124,9 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
                  args: dict[str, Any], ctx: ToolContext, handler: ToolFn) -> ToolPlan:
     # Identity-check the real adapters, not merely their configurable names.
     from app.harness.tools import code
+    from app.harness.tools.context_material import read_material_tool
     adapters: dict[str, ToolFn] = {
+        "context.read_material": read_material_tool,
         "code.repo_reader": code.repo_reader_tool, "code.write_file": code.write_file_tool,
         "code.apply_patch": code.apply_patch_tool, "code.delete_file": code.delete_file_tool,
         "code.rollback_patch": code.rollback_patch_tool,
@@ -133,16 +135,26 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
         raise ValueError("unsupported contract budget adapter")
     if ctx.dry_run:
         raise ValueError("contract dry-run tool accounting is not admitted")
-    fields = {"code.repo_reader": {"path", "char_offset"}, "code.write_file": {"path", "content"},
+    fields = {"context.read_material": {"ref", "char_offset"}, "code.repo_reader": {"path", "char_offset"}, "code.write_file": {"path", "content"},
               "code.apply_patch": {"diff", "version", "files"}, "code.delete_file": {"path"},
               "code.rollback_patch": {"rollback_ref"}}[name]
     if args.keys() - fields - {"_approval_id"}:
         raise ValueError("unsupported contract tool argument")
     actual = dict(args)
     meaningful: dict[str, Any]
+    paths: tuple[str, ...]
     backup: tuple[str, str] | None = None
     requested_version_digest = None
-    if name == "code.apply_patch":
+    if name == "context.read_material":
+        from app.harness.context.runtime_pack import read_material
+        ref, offset = str(args.get("ref", "")), args.get("char_offset", 0)
+        if type(offset) is not int:
+            raise ValueError("invalid material offset")
+        project.run_file(f"context/materials/{ref}.json", must_exist=True)
+        page = read_material(project.run_root, ref, offset, 1)
+        paths = ()
+        meaningful = {"ref": ref, "char_offset": offset, "sha256": page["ref"]}
+    elif name == "code.apply_patch":
         diff = args.get("diff")
         if not isinstance(diff, str) or not diff:
             raise ValueError("contract patch requires textual diff")
@@ -198,7 +210,7 @@ def _reserve(plan: ToolPlan) -> tuple[str | None, BudgetReservation | None]:
     tool = BudgetReservation(reservation_id=plan.identifier, operation_id=plan.identifier,
         operation_fingerprint=plan.fingerprint, kind="tool", amounts=BudgetAmounts(tool_executions=1))
     implementation = None
-    if plan.name != "code.repo_reader":
+    if plan.name not in {"code.repo_reader", "context.read_material"}:
         fingerprint = digest({"schema": "code_candidate_entry.v1", "task": plan.project.task_sha256,
             "snapshot": plan.project.snapshot_id,
             "candidate": plan.project.candidate_root.relative_to(plan.project.run_root).as_posix()})
@@ -251,7 +263,7 @@ def _receipt(plan: ToolPlan, result: ToolResult, after: dict[str, object] | None
 def _unknown(plan: ToolPlan, result: ToolResult, *, reason: str, handler_started: bool, implementation: BudgetReservation | None) -> None:
     errors: list[str] = []
     try:
-        after = _states(plan.project, plan.paths, write=plan.name != "code.repo_reader")
+        after = _states(plan.project, plan.paths, write=plan.name not in {"code.repo_reader", "context.read_material"})
         reference, _ = _receipt(plan, result, after, outcome="unknown", handler_started=handler_started)
         result.evidence_refs.append(reference)
     except Exception as exc:
@@ -291,7 +303,7 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
                 return _blocked("contract tool lock wait exhausted")
             await asyncio.sleep(min(0.05, max(0, deadline - time.monotonic())))
     try:
-        if _states(plan.project, plan.paths, write=plan.name != "code.repo_reader") != plan.before:
+        if _states(plan.project, plan.paths, write=plan.name not in {"code.repo_reader", "context.read_material"}) != plan.before:
             return _blocked("source changed after tool preflight; prepare a new operation")
         if plan.backup:
             path = plan.project.run_file(plan.backup[0], must_exist=True)
@@ -326,8 +338,8 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
                 _unknown(plan, result, reason="tool_failed_or_uncertain", handler_started=handler_started, implementation=implementation)
                 return result
             validate(instance=result.output, schema=output_schema)
-            after = _states(plan.project, plan.paths, write=plan.name != "code.repo_reader")
-            if plan.name == "code.repo_reader" and after != plan.before:
+            after = _states(plan.project, plan.paths, write=plan.name not in {"code.repo_reader", "context.read_material"})
+            if plan.name in {"code.repo_reader", "context.read_material"} and after != plan.before:
                 raise ValueError("source changed during read")
             reference, evidence_hash = _receipt(plan, result, after, outcome="observed_success")
             with plan.execution.ledger.transaction() as transaction:

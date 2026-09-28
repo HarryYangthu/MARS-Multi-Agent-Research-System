@@ -247,7 +247,19 @@ async def test_author_reviewer_and_code_tools_use_only_selected_folder(tmp_path:
     from app.bridge.commander import _system_prompt
     from app.bridge.commander_session import CommanderSession
     commander_prompt = _system_prompt(CommanderSession(conv_id="folder-context", project=a.name))
-    assert commander_prompt.count("ALPHA_CONTEXT_END") == 1400 and "BETA_ONLY_CONTEXT" not in commander_prompt
+    assert "ALPHA_CONTEXT_END" not in commander_prompt and "BETA_ONLY_CONTEXT" not in commander_prompt
+    # Background is now a reference message, never part of the system prompt.
+    from app.bridge.commander import Commander
+    from app.bridge.orchestrator import Orchestrator
+    from app.storage.run_store import RunStore
+    from app.harness.llm.model_registry import get_agent_config
+    from dataclasses import replace
+    cfg = replace(get_agent_config("commander"), model_provider="local_vllm",
+                  base_url="http://127.0.0.1:1/v1", base_url_env="", api_key_env="")
+    commander = Commander(orchestrator=Orchestrator(run_store=RunStore(tmp_path / "commander-runs")), agent_config=cfg)
+    commander_messages = commander._build_messages(CommanderSession(conv_id="folder-context", project=a.name))
+    assert sum(m.content.count("ALPHA_CONTEXT_END") for m in commander_messages) == 1400
+    assert not any("BETA_ONLY_CONTEXT" in m.content for m in commander_messages)
     ctx = ToolContext("actual-files", a.name, "idea", extra={"run_root": str(run_root)})
     code = await repo_reader_tool({"path": "baseline.py"}, ctx)
     assert code.ok and code.output["content"] == "alpha_value = 17\n"
@@ -280,8 +292,10 @@ async def test_task_creation_freezes_context_before_agent_starts(tmp_path: Path,
     recovered = Orchestrator(run_store=RunStore(tmp_path / "runs")).session(session.run.run_id)
     context = await FocusedIdeaAgent().build_context(RunRequest(
         project=recovered.request.project, user_request="Inspect this project", extra={"run_root": str(recovered.run.root)}))
-    assert "CONTEXT_AT_CREATION" in context.project
-    assert "CHANGED_AFTER_CREATION" not in context.project
+    references = "\n".join(item["text"] for item in context.metadata["references"])
+    assert "CONTEXT_AT_CREATION" in references
+    assert "CHANGED_AFTER_CREATION" not in references
+    assert "CONTEXT_AT_CREATION" not in context.project  # Background must not become a system rule.
     from app.harness.context.project_layer import build_project_layer
     manifest_context = build_project_layer(project=project.name, run_root=session.run.root).render()
     assert "CONTEXT_AT_CREATION" in manifest_context and "CHANGED_AFTER_CREATION" not in manifest_context

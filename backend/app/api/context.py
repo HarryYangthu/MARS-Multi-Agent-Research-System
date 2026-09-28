@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_run_store
-from app.harness.context.engine import CompileContextInput, compile_context
+from app.bridge.context_preview import preview_runtime_context
 from app.harness.context.manifest_v2 import manifest_file_for_id
 from app.harness.context.raw_store import read_raw_context
 from app.harness.llm.model_registry import get_agent_config
@@ -93,28 +93,14 @@ async def get_context_raw(run_id: str, raw_ref: str) -> dict[str, Any]:
 async def preview_context(payload: ContextPreviewPayload) -> dict[str, Any]:
     _ensure_enabled()
     try:
-        cfg = get_agent_config(payload.agent)
+        get_agent_config(payload.agent)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    result = compile_context(
-        CompileContextInput(
-            agent=payload.agent,
-            node_key=payload.agent,
-            project=payload.project,
-            output_schema=cfg.output_schema,
-            system=f"MARS {payload.agent} agent. Output schema: {cfg.output_schema}.",
-            project_context=f"Project: {payload.project}.",
-            task=payload.task,
-            upstream=payload.upstream,
-            metadata={},
-            run_id="preview",
-            run_root=None,
-            purpose="preview",
-            tool_names=cfg.tools,
-        ),
-        write=False,
-    )
-    return result.manifest.to_dict()
+    try:
+        return preview_runtime_context(payload.agent, payload.project, payload.task, payload.upstream)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 
 def _ensure_enabled() -> None:

@@ -290,6 +290,11 @@ class NativeAgentLoop:
         if request.review_plan_factory is not None:
             validate_review_provider(request.provider, configured_provider=request.config.provider)
             fingerprint = digest({"base": fingerprint, "reflection_rubric": request.reflection_rubric})
+        runtime_policy = request.context_metadata.get("runtime_policy", {})
+        modern_context = runtime_policy.get("version") == 3
+        if modern_context:
+            fingerprint = digest({"base": fingerprint, "runtime_policy": runtime_policy,
+                                  "materials": request.context_metadata.get("materials", {})})
         correlation = dict(request.correlation)
         correlation.setdefault("invocation_id", request.trace_root.name)
         correlation.setdefault("trace_id", request.tool_context.run_id)
@@ -505,6 +510,24 @@ class NativeAgentLoop:
                         trace.emit("review_evidence_unavailable", {"reason": str(exc), "unit_id": unit.unit_id})
                         trace.snapshot(state)
                         break
+                elif modern_context:
+                    from app.harness.context.runtime_native import pack_native
+                    from app.harness.context.runtime_policy import input_budget
+                    phase_cfg = phase_config()
+                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
+                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
+                    phase_tools = () if reviewing else wire_tools
+                    messages, manifest = pack_native(
+                        pinned=(request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
+                        history=state["history"], feedback=feedback, candidate=state["candidate"],
+                        budget=effective_budget, tools=phase_tools, policy=runtime_policy,
+                        metadata=request.context_metadata, root=(Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)) if p.trace == "full" else None),
+                        previous=state.get("context_compaction", {}).get(state["next_phase"]),
+                        agent=request.tool_context.agent, readback_available="context.read_material" in request.tools and not reviewing,
+                        native=native, reviewing=reviewing, review_issues=state["review_issues"],
+                        validation_issues=state["validation_issues"], required_review_tools=request.required_review_tools,
+                        native_observation_history=p.native_observation_history, deduplicate_evidence=p.deduplicate_evidence_enabled)
+                    state.setdefault("context_compaction", {})[state["next_phase"]] = manifest["state"]
                 else:
                     messages, manifest = pack_context(
                         (request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
@@ -516,6 +539,16 @@ class NativeAgentLoop:
                         native_observation_history=p.native_observation_history,
                         deduplicate_evidence=p.deduplicate_evidence_enabled,
                     )
+                if modern_context and unit is not None:
+                    from app.harness.context.runtime_pack import pack_messages
+                    from app.harness.context.runtime_policy import input_budget
+                    phase_cfg = phase_config()
+                    messages, modern_manifest = pack_messages(messages, policy=runtime_policy,
+                        budget=input_budget(runtime_policy, p.input_token_budget, output_reserve=phase_cfg.max_tokens,
+                            model_window=phase_cfg.extra.get("context_window")),
+                        root=None, agent=request.tool_context.agent, readback_available=False)
+                    manifest.update(modern_manifest)
+                    manifest["estimated_upper_bound_tokens"] = modern_manifest["used"]
                 manifest["tool_schema_upper_bound_tokens"] = phase_schema_budget
                 manifest["total_input_upper_bound_tokens"] = manifest["estimated_upper_bound_tokens"] + phase_schema_budget
                 if reviewing and unit is None:
@@ -531,6 +564,16 @@ class NativeAgentLoop:
                 state["pending"] = "model"
                 call_config = phase_config()
                 review_request = start_review_unit(state, messages) if planned_review else None
+                runtime_manifest_path = None
+                if modern_context and manifest.get("version") == 3 and p.trace == "full":
+                    from app.harness.context.runtime_manifest import record_manifest
+                    runtime_manifest_path = record_manifest(
+                        Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)),
+                        agent=request.tool_context.agent, node=correlation["node_id"], project=request.tool_context.project,
+                        messages=messages, tools=call_config.tools, manifest=manifest)
+                    if manifest["triggered"]:
+                        trace.emit("context_compressed", {"before": manifest["before"], "after": manifest["used"],
+                            "target_reached": manifest["target_reached"], "decisions": manifest["decisions"]})
                 trace.emit("context_packed", manifest)
                 trace.emit("model_request", {"request": counts["model_requests"], "phase": state["next_phase"],
                                              "provider": call_config.provider, "model": call_config.model,
@@ -580,6 +623,9 @@ class NativeAgentLoop:
                 if completion.is_mock or completion.provider in {"mock", "fake"}:
                     raise RuntimeError("non-real completion rejected")
                 counts["model_responses"] += 1
+                if runtime_manifest_path is not None:
+                    from app.harness.context.runtime_manifest import record_usage
+                    record_usage(runtime_manifest_path, completion.raw.get("usage"))
                 usage(completion.raw.get("usage"))
                 state["pending"] = None
                 state["last_model_error"] = None

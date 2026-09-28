@@ -244,6 +244,19 @@ async def run_debate(
                 messages.append(
                     Message(role="assistant", content=f"上一轮发言：\n{last_text}")
                 )
+            if context.metadata.get("runtime_policy", {}).get("version") == 3:
+                from app.harness.context.runtime_pack import Material, pack_messages
+                from app.harness.context.runtime_policy import input_budget as effective_input_budget
+                from app.harness.context.runtime_manifest import record_manifest
+                policy = context.metadata["runtime_policy"]
+                root = Path(str(context.metadata["run_root"]))
+                messages, packed_manifest = pack_messages(messages, policy=policy,
+                    budget=effective_input_budget(policy, AgentLoopPolicy.from_mapping(agent_config.raw.get("loop", {})).input_token_budget,
+                        output_reserve=cfg.max_tokens, model_window=cfg.extra.get("context_window")),
+                    tools=cfg.tools, materials={k: Material(**v) for k,v in context.metadata.get("materials", {}).items()},
+                    root=root, agent=agent_name, readback_available=False)
+                record_manifest(root, agent=agent_name, node=agent_name, project=request.project,
+                    messages=messages, tools=cfg.tools, manifest=packed_manifest, purpose=f"debate_{role}")
             _write_debate_manifest(
                 request=request,
                 agent_name=agent_name,

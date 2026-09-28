@@ -215,6 +215,10 @@ class FocusedIdeaAgent(IdeaAgent):
             Message("user", "项目背景与约束：\n" + context.project),
             Message("user", "本次显式要求：\n" + json.dumps(request.extra.get("idea_requirements", {}), ensure_ascii=False))]
         messages += [Message("user", "输入资料 " + label + ":\n" + content) for label, content in context.upstream.items()]
+        if context.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_pack import reference_message
+            messages.extend(reference_message("background", item["source"], item["text"])
+                            for item in context.metadata.get("references", []))
         return messages
 
     def reflection_rubric(self) -> str:

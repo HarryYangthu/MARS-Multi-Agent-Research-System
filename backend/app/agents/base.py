@@ -63,6 +63,10 @@ class ContextPack:
             preserve_upstream=True,
         )
         self.metadata["last_compiled_manifest"] = compiled.manifest
+        if self.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_assembly import assemble_materials
+            base = [compiled.messages[0], Message("system", self.project), Message("user", self.task)]
+            return assemble_materials(base, self.upstream, self.metadata)
         return compiled.messages
 
 
@@ -111,6 +115,11 @@ class BaseAgent(ABC):
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         scope = _request_project_scope(request)
+        from app.harness.context.runtime_policy import freeze_policy, role_profile
+        root = _request_run_root(request)
+        request.runtime["run_root"] = str(root)
+        runtime_policy = freeze_policy(root, legacy_resume=bool(request.extra.get("resume_invocation")))
+        modern = runtime_policy.get("version") == 3
         from app.storage.agent_context_store import load_agent_code_repositories
         sources = {"project_rules": True, "code_repositories": True}
         configured = request.extra.get("context_sources", {})
@@ -139,9 +148,18 @@ class BaseAgent(ABC):
         repositories = (load_agent_code_repositories(self.name, project=request.project)
                         if scope is None and sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
-        metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources}
+        metadata: dict[str, Any] = {"required_upstream_refs": required, "context_sources": sources,
+                                    "runtime_policy": runtime_policy, "original_user_request": request.user_request,
+                                    "task_contract": request.extra.get("task_contract", {})}
         if folder_context is not None:
-            rules = render_folder_context(folder_context, include_instructions=sources["project_rules"])
+            if modern:
+                from app.harness.context.folder_context import is_context_template
+                rules = "\n\n".join(f["content"] for f in folder_context["files"]
+                    if f["role"] == "instructions" and sources["project_rules"] and not is_context_template(f))
+                metadata["references"] = [{"source": f["path"], "text": f["content"], "sha256": f["sha256"]}
+                    for f in folder_context["files"] if f["role"] != "instructions" and not is_context_template(f)]
+            else:
+                rules = render_folder_context(folder_context, include_instructions=sources["project_rules"])
             metadata["folder_context"] = {k: v for k, v in folder_context.items() if k != "files"}
             metadata["folder_context"]["files"] = [{k: v for k, v in f.items() if k != "content"} for f in folder_context["files"]]
         from app.harness.context.project_knowledge import load_project_knowledge
@@ -155,7 +173,10 @@ class BaseAgent(ABC):
             if scope is not None and knowledge != (scope.metadata_root / "knowledge.md").read_text(encoding="utf-8"):
                 raise ValueError("Project knowledge snapshot differs from the bound contract references")
             rules_path_label = knowledge_record["source"]
-            rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge
+            if modern:
+                metadata.setdefault("references", []).append({"source": rules_path_label, "text": knowledge})
+            else:
+                rules += f"\n\nProject knowledge ({rules_path_label}; reference material):\n" + knowledge
             metadata["project_knowledge"] = {key: value for key, value in knowledge_record.items() if key != "content"}
         if scope is not None:
             metadata["project_scope"] = {"run_id": scope.run_id, "task_sha256": scope.task_sha256,
@@ -167,6 +188,11 @@ class BaseAgent(ABC):
             upstream[f"{self.name}_code_repositories"] = json.dumps(
                 [asdict(repository) for repository in repositories], ensure_ascii=False)
             metadata[f"{self.name}_code_repository_count"] = len(repositories)
+        if modern:
+            metadata["code_profile"] = role_profile(runtime_policy, self.name)
+            if sources["code_repositories"] and (repositories or scope is not None):
+                from app.harness.context.repo_index import repository_index
+                metadata["repository_index"] = repository_index(request.project, int(runtime_policy["index_files"]))
         self._prepare_runtime_context(request, upstream, metadata)
         return ContextPack(
             system=f"MARS {self.name} agent. {self.agent_brief}",
@@ -353,6 +379,10 @@ class BaseAgent(ABC):
                     Message(role="system", content=context.project),
                     Message(role="system", content=schema_instruction),
                     Message(role="user", content=context.task)]
+        if context.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_assembly import assemble_materials
+            messages = assemble_materials(messages, context.upstream, context.metadata)
+            return messages
         for label, content in context.upstream.items():
             # Complete upstream artifacts stay pinned. Fail on budget overflow rather than
             # quietly dropping task-critical evidence; label does not elevate data trust.
@@ -463,6 +493,11 @@ class BaseAgent(ABC):
         correlation.setdefault("node_id", str(request.extra.get("node_key", self.name)))
         correlation.setdefault("task_id", correlation["node_id"])
         tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        if context.metadata.get("runtime_policy", {}).get("version") == 3:
+            extras = ["context.read_material"]
+            if context.metadata.get("context_sources", {}).get("code_repositories", True):
+                extras.append("code.repo_reader")
+            tools = tuple(dict.fromkeys((*tools, *(name for name in extras if tool_config(name).enabled))))
         registry = self.loop_registry(request, context)
         read_tools = self.configured_read_tools()
         read_scope = registry.scope_for_read_tools(self.name, read_tools) if read_tools else None

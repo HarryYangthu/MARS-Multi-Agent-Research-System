@@ -66,10 +66,17 @@ async def repo_reader_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
     offset = args.get("char_offset", 0)
     if type(offset) is not int or offset < 0 or (raw and offset >= len(raw)):
         return ToolResult(ok=False, error="char_offset must identify a character inside the file")
-    end = min(len(raw), offset + _MAX_READ_BYTES)
+    limit = _MAX_READ_BYTES
+    if ctx.extra.get("run_root"):
+        from app.harness.context.runtime_policy import freeze_policy
+        policy = freeze_policy(Path(str(ctx.extra["run_root"])))
+        if policy.get("version") == 3:
+            limit = min(limit, int(policy["read_chars"]))
+    end = min(len(raw), offset + limit)
     return ToolResult(
         ok=True,
         output={
+            "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
             "repo_root": str(root),
             "path": rel,
             "truncated": end < len(raw),
