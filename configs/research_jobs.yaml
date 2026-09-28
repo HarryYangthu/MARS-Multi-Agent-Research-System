@@ -3,3 +3,6 @@ research_jobs:
   snapshot_max_file_bytes: 16777216
   snapshot_max_total_bytes: 536870912
   snapshot_max_files: 20000
+
+research_job_control:
+  lock_timeout_seconds: 1.0

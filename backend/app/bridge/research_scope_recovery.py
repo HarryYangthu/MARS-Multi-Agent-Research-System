@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from app.bridge.research_run_service import load_run_research_contract
+from app.bridge.research_run_service import load_run_research_contract, validate_saved_run_journal_schema
 from app.harness.runtime.project_scope import ProjectScope, safe_scope_path, verify_candidate_scope
 from app.harness.runtime.research_budget_ledger import ResearchBudgetLedger
 from app.harness.runtime.research_contract import ContractModel, relative_scope
@@ -65,6 +65,7 @@ def _identity(run: RunHandle, ledger: ResearchBudgetLedger) -> tuple[Path, dict[
     with ledger.journal.connection() as connection:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("BEGIN")
+        validate_saved_run_journal_schema(connection)
         ledger.in_transaction(connection).snapshot()
         request = ledger.journal._read(connection).get("request")
     extra = request.get("extra") if isinstance(request, dict) else None

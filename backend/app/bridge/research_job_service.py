@@ -330,7 +330,7 @@ class ResearchJobService:
             status = self.runner.status(job_id)
             submission = safe_scope_path(self.root, f"execution/local_jobs/{job_id}/submission.json", must_exist=True)
             raw = json.loads(submission.read_text(encoding="utf-8"))
-            if raw.get("spec_sha256") != _digest(_spec_payload(binding.spec)):
+            if not isinstance(raw, dict) or raw.get("spec_sha256") != _digest(_spec_payload(binding.spec)):
                 raise ValueError("Runner submission does not match the authoritative job")
             if status.status == "unknown":
                 raise ValueError("Runner lost its execution owner")
@@ -413,7 +413,7 @@ class ResearchJobService:
             binding = existing[0]
             submission = safe_scope_path(self.root, f"execution/local_jobs/{job_id}/submission.json", must_exist=True)
             raw = json.loads(submission.read_text(encoding="utf-8"))
-            if raw.get("spec_sha256") != _digest(_spec_payload(binding.spec)):
+            if not isinstance(raw, dict) or raw.get("spec_sha256") != _digest(_spec_payload(binding.spec)):
                 raise ValueError("Runner submission does not match the authoritative job")
             current = self.runner.status(job_id)
             if current.status in {"queued", "running"}:

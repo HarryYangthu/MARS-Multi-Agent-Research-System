@@ -1,0 +1,57 @@
+{
+  "schema": "verification.research_owner_primitives.v1",
+  "status": "passed",
+  "stage_binding": {
+    "new_tests": 59,
+    "combined_tests": 97,
+    "seconds": 8.36,
+    "strict_files": 3
+  },
+  "job_control": {
+    "new_tests": 15,
+    "combined_tests": 100,
+    "seconds": 23.39,
+    "strict_files": 4
+  },
+  "source_sha256": {
+    "backend/app/bridge/research_stage_service.py": "dfacdcbd54f187772bc4e2d56b6010798751d2b83c787e993600966ab2ff8bb0",
+    "backend/app/bridge/research_scope_recovery.py": "dc60055354105b1fb66921a2f3425f7a74158671515ede4a743967df2c032ebf",
+    "backend/app/bridge/research_job_control.py": "329eec292f73b0d7d88acc961f0234734be88f40a455adbf6086555cf617f4d6",
+    "backend/app/bridge/research_job_service.py": "b7f971ce6f9e61a448bc637edc0bf8e93807a5b47a648c4a99f5b548e42fa799",
+    "backend/app/harness/persistence.py": "970382f9c9e4e805fee6bed72d7b43d694dd398f6497b9eb8ecc5e9caf43c97f",
+    "backend/tests/unit/test_research_stage_service.py": "4fc9a652919b2d162ca85d2a5173459b94ef1d0c2c4091f5300bcf7246685b2b",
+    "backend/tests/unit/test_research_job_control.py": "c30fde86f417d90be599b80a0443b33f5ac4a418b86023f2ba6145c72ce3b774",
+    "configs/research_jobs.yaml": "58cca06f90763fcb30641ad3697a680ce87bc403cbd40a854e4bc183dddff065"
+  },
+  "evidence": {
+    "stage-binding-parent.log": "f5d302d38f913b02e9c2101f1014d3c32c08d95a52209bb2e5e0f3f37d1d13ea",
+    "stage-binding-reviewed.log": "704b0201904df1779cd000ca6557f3d76593ae20819f0865f7039eea52826341",
+    "stage-binding-reviewed.xml": "9e36513a61250e1c1c9bfb0d1fe154580c42791bfd2831290c20391b6ee2b450",
+    "stage-binding-reviewed.mypy.log": "8228fcc5ce46d42d01caf3cd941f4e9c5f2bcc372bb5b147a2f0572d2dd675a8",
+    "job-control-first.log": "235ba3e000d8f921c9e55fcec311879dfe3fa0cf5c369289e58ffea798ad8289",
+    "job-control-combined.log": "3bb1997b9ef12b79b817d90886412e87a67deb34953728e637ecb9933b58d90d",
+    "job-control-final.log": "2c1ee3c9e1ed0fc2385192036dfcdc703106f006cb9ffe39529617f5cd202150",
+    "job-control-reviewed.log": "1fe8ae9e388ce30f5483f4dbae8db26830f554a52ebb022a8053245a800424d1",
+    "job-control-reviewed.xml": "427fc46172f4e15bda7072bd8bd5dce1cc3ce428ddbbfc7cf29c595c3e5f21a3",
+    "job-control-reviewed.mypy.log": "71144743c83babea384888a735db0c4daba3d4d7b7942b6839984bd5c21b52bb",
+    "job-control-independent-before-submission-probe.log": "2fe639b9a63199f72b5a90d0bd9414e3830d4dc1a86271580d0a1923a40df021",
+    "job-control-independent-after-submission-probe.log": "5c2b2d8d1b3128d7fb155c0907ae9b600232b79720a8cc6d41be4742de1461a4",
+    "job-control-independent-path-lock-probe.log": "cce86d0419a838a630a694b60269d3bbeb62d4aead0abb6838b6bc20d213783e",
+    "job-control-independent-catalog-after.log": "cbc7d346e8471be9374234c7b1dd5e3ab74e6c06f5c17b5163841ff39ae1b984",
+    "mars-review-job-control.py": "bd5ad90601432116f00bf039b302fbbb53ef53804e8627fc3ac2c3b953cd3bd6",
+    "mars-review-job-catalog.py": "37da3a6e9cbb9029e12ba2d66c3ddfbb575f5dfdb5cb5bcf05f45d8235793dc8",
+    "mars-review-path-lock.py": "37d3a7fcf400676b15311c9ab5cfdb49c2673668669274d27dd829aad155a752"
+  },
+  "resolved_findings": [
+    "Missing core outbox previously allowed stage restoration; shared scope check now rejects incomplete table or column schema",
+    "JSON array submission previously aborted all stops; per-job isolation and object validation preserve later stops",
+    "Invalid SQL job ID previously hid healthy jobs; invalid row counted without path use or raw echo"
+  ],
+  "boundaries": [
+    "Host-only primitives, not new product execution admission",
+    "No model call, no stage driver or output-producer lineage claim",
+    "Job batch always reports run_stop_confirmed false",
+    "Finite per-lock wait is not a total batch SLA",
+    "Local trusted CPU only; no SSH/GPU/OS isolation acceptance"
+  ]
+}

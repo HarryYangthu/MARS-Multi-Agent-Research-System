@@ -145,3 +145,9 @@ G/F/H 仍为进行中，未用这些局部证据替代两领域研究、五名�
 CLI 明确保留请求号和冻结哈希，保存超时后仅通过显式 GET 核对原任务；pending/unknown/rejected 均非零退出，只有身份一致的 created 才确认保存。原 CLI 模块 79 项、创建服务模块 38 项通过；各自 strict 3/2 文件通过。独立真实 CLI/uvicorn 三项检查通过，日志指纹见 [回执](evidence/cli-creation-reconciliation.json)。
 
 独立检查先实际发现删除 state_events 后仍误报 created；修复后只读检查核心 SQL 表与列结构，原复现返回 unknown，不初始化、修复或重新分配任务。缺数据库、无效数据库、无请求号重复保存和真实 422 凭据脱敏也已独立检查。该增量确认保存关系，不证明完整研究的执行、暂停或恢复。
+
+## 阶段调用与逐项作业控制（2026-09-28）
+
+阶段 TaskEnvelope 与同一 SQL 的图节点、冻结输入、审批证据和配置指纹绑定，重复/恢复沿用同一 invocation。新增 59 项，相关 97 项通过；父任务实际删除 outbox 的复现推动共享 scope 恢复补核心 schema 拒绝。作业控制新增 15 项、相关 100 项通过；真实双 worker 验证坏 submission、非法目录行和忙锁不阻止其余合法作业停止。两组 strict 分别 3/4 文件通过，精确日志见 [回执](evidence/research-owner-primitives.json)。
+
+查询阶段绑定不等于允许重放，批量停止的 run_stop_confirmed 始终为 false。新接口未替换主编排器，没有用局部终态推断整 run 停止；完整研究 start、执行暂停/恢复和发布门槛仍未验收。
