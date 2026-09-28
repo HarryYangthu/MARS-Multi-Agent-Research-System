@@ -33,27 +33,25 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     try {
       const saved = await uploadProjectBackground(project.name, file);
       setRevision((value) => value + 1);
-      setMessage(`背景已保存为 ${saved.path}，可在下方预览。${saved.previous_path ? "旧背景已保留副本。" : ""}`);
+      setMessage(`已保存 ${saved.path}`);
       setBackupPath(saved.previous_path ?? "");
     } catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "上传未能确认，请重新扫描资料列表后再试。"); }
     finally { setUploading(false); }
   }
 
-  return <div className="mt-4 space-y-5">
+  return <div className="mt-4 space-y-4">
     <ol aria-label="新建项目步骤" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
       {STEPS.map((title, index) => <li key={title} aria-current={index === step ? "step" : undefined} className={`rounded-lg border px-3 py-2 ${index === step ? "border-indigo-400 bg-indigo-500/10 text-indigo-100" : "border-mars-border text-slate-400"}`}>{index === 0 ? "✓" : index + 1} {title}</li>)}
     </ol>
-    <div className="rounded-lg bg-mars-panel p-3 text-xs leading-5 text-slate-400"><p>项目资料目录：</p><p className="mt-1 break-all text-slate-200">{project.folder_path || project.repo_path}</p></div>
-    <h3 className="text-base font-semibold">{step === 3 ? "项目已创建" : STEPS[step]}</h3>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs leading-5"><span className="shrink-0 text-slate-500">项目目录</span><span className="min-w-0 break-all text-slate-300">{project.folder_path || project.repo_path}</span></div>
+    {step !== 2 ? <h3 className="text-base font-semibold">{step === 3 ? "项目已创建" : STEPS[step]}</h3> : null}
     <div hidden={step !== 1}><OnboardingModelSetup onStatus={setApiSaved} onBusy={setModelBusy} /></div>
-    <div hidden={step !== 2} className="space-y-4">
-      <p className="text-sm leading-6 text-slate-400">这里仅准备仿真基线代码仓与补充背景，不填写研究目标。本次想做什么，完成配置后再在对话中告诉系统。</p>
+    <div hidden={step !== 2} className="space-y-3">
       {project.project_type === "folder" ? <ProjectCodeFolder project={project} onBusy={setCodeBusy} /> : null}
-      <p className="text-sm leading-6 text-slate-400">上传一份背景文件，说明已有工作、领域术语、数据或参考方法。系统会将它保存为 README.md，无需再填写一份项目介绍；已有背景足够时可跳过。</p>
-      {project.project_type === "folder" ? <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传背景文件<input aria-label="上传背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">支持 Markdown / TXT，内容不改写。再次上传会更新本项目的 README.md，并保留旧版副本。背景文件不作为 Agent 操作规则。</span></label> : <p className="text-sm text-slate-400">此项目的背景资料由项目包管理，可在项目资料中查看。</p>}
+      {project.project_type === "folder" ? <label className="block rounded-lg border border-mars-border p-4 text-sm"><span className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">背景文件</span><span className="text-xs text-slate-500">README.md · Markdown / TXT</span></span><input aria-label="上传背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /></label> : null}
       {uploading ? <p role="status" className="text-sm">正在上传…</p> : null}
       {message ? <p role="status" className="text-sm text-emerald-200">{message}</p> : null}
-      {backupPath ? <details className="text-xs leading-5 text-slate-400"><summary className="cursor-pointer">查看旧版备份位置</summary><p className="mt-2 break-all">{project.folder_path}/{backupPath}</p></details> : null}
+      {backupPath ? <details className="text-xs leading-5 text-slate-400"><summary className="cursor-pointer">旧版备份</summary><p className="mt-2 break-all">{project.folder_path}/{backupPath}</p></details> : null}
       {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
       <ProjectContextFiles key={revision} project={project.name} />
     </div>
