@@ -356,3 +356,37 @@ def test_changed_deadline_is_not_admitted_as_original_submission(tmp_path: Path)
     path.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         runner.status(spec.job_id)
+
+
+def test_status_probe_cannot_be_mistaken_for_a_live_worker(tmp_path: Path) -> None:
+    """Hold the actual short status-probe lease while real workers start."""
+    from filelock import FileLock
+    from app.harness.persistence import path_lock
+
+    script = "from pathlib import Path\nwith Path('starts').open('a') as f: f.write('started\\n')\n" + _MEASURE
+    runner, spec, command = _setup(tmp_path, script)
+    directory = runner._directory(spec.job_id, create=True)
+    ready = tmp_path / "worker_imported"
+    helper = "\n".join([
+        "from pathlib import Path", "from app.execution.local.worker import supervise",
+        "import sys", "Path(sys.argv[2]).write_text('ready')", "supervise(Path(sys.argv[1]))",
+    ])
+    process = None
+    try:
+        # status() already uses this order: control lock, then probe worker.lock.
+        with path_lock(directory / "control.lock"), FileLock(directory / "worker.lock"):
+            runner.submit(spec)
+            process = subprocess.Popen([sys.executable, "-c", helper, str(directory), str(ready)])
+            _wait_file(ready)
+            # Import is finished: the real supervisor must wait for the probe's
+            # control transaction, not decide this temporary lease is an owner.
+            with pytest.raises(subprocess.TimeoutExpired):
+                process.wait(timeout=0.25)
+        assert _wait(runner, spec.job_id).status == "completed"
+        assert process.wait(timeout=8) == 0
+        assert (command.parent / "starts").read_text() == "started\n"
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=8)
+        runner.stop(spec.job_id)

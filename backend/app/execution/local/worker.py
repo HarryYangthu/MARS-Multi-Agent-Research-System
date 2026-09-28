@@ -38,10 +38,13 @@ def supervise(directory: Path) -> None:
     if runner._directory(directory.name) != directory:
         raise ValueError("worker directory identity mismatch")
     lease = FileLock(directory / "worker.lock", timeout=0)
-    try:
-        lease.acquire()
-    except FileLockTimeout:
-        return
+    # status() probes this lease while holding control.lock. Serialize acquisition
+    # with that probe: its temporary lease is not evidence of a duplicate worker.
+    with path_lock(directory / "control.lock"):
+        try:
+            lease.acquire()
+        except FileLockTimeout:
+            return
     try:
         _supervise_owned(directory)
     finally:
