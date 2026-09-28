@@ -632,3 +632,4 @@ frontend/src/components/CapabilityLibrary.tsx
 frontend/src/lib/capabilityCatalog.ts
 frontend/src/app/config/capabilities/page.tsx
 backend/app/bridge/research_stage_runtime.py
+backend/app/bridge/research_run_stop.py

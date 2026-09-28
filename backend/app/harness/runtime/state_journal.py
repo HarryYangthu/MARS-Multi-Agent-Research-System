@@ -62,10 +62,10 @@ class StateJournal:
         return cls(database_path, run_id=run_id, journal_id=marker["journal_id"])
 
     @contextmanager
-    def connection(self) -> Iterator[sqlite3.Connection]:
+    def connection(self, *, timeout: float = 10.0) -> Iterator[sqlite3.Connection]:
         # mode=rw is deliberate: a missing authority must never create an empty DB.
         try:
-            connection = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=10)
+            connection = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=timeout)
             try:
                 connection.execute("PRAGMA synchronous=FULL")
                 row = connection.execute("SELECT run_id,journal_id,schema_version FROM identity WHERE id=1").fetchone()
@@ -130,9 +130,9 @@ class StateJournal:
             return self._read(connection)
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self, *, timeout: float = 10.0) -> Iterator[sqlite3.Connection]:
         """One writer transaction for state plus explicitly initialized extensions."""
-        with self.connection() as connection, connection:
+        with self.connection(timeout=timeout) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             yield connection
 

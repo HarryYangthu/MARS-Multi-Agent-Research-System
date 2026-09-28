@@ -6,7 +6,7 @@ import { getRun, type RunDetail } from "@/lib/api";
 import { boundedFetch, CLIENT_POLICY, isUncertainRequestError } from "@/lib/clientPolicy";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
-const STATUS: Record<string, string> = { created: "尚未启动", running: "研究中", waiting_review: "等待审核", waiting_feedback: "等待处理", cancelling: "正在停止", stopped: "已停止", failed: "任务失败", completed: "流程已结束" };
+const STATUS: Record<string, string> = { created: "尚未启动", running: "研究中", waiting_review: "等待审核", waiting_feedback: "等待处理", cancelling: "正在停止", cancelled: "已停止", stopped: "已停止", failed: "任务失败", completed: "流程已结束" };
 const READ_ONLY: Record<string, string> = {
   research_contract_execution_pending: "研究配置已保存。部分预算和修改边界尚未接入执行器，当前不能启动。",
   research_contract_integrity_error: "保存的研究配置缺失或完整性校验失败，当前不能启动或恢复。",
@@ -28,6 +28,7 @@ type OwnerControl = {
   cleanup_complete: boolean | null;
   state_persisted: boolean | null;
   available_actions: string[];
+  research_stop?: { status: string; run_stop_confirmed?: boolean; unconfirmed?: string[] } | null;
 };
 
 export function RunControlBar({ runId, run, onChange }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void }): JSX.Element {
@@ -37,15 +38,23 @@ export function RunControlBar({ runId, run, onChange }: { runId: string; run: Ru
   const [control, setControl] = useState<OwnerControl | null>(null);
   const [controlError, setControlError] = useState(false);
   const mutation = useRef<AbortController | null>(null);
+  const change = useRef(onChange);
+  useEffect(() => { change.current = onChange; }, [onChange]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let lastStopStatus = "";
     async function refresh(): Promise<void> {
       try {
         const response = await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/control`, { signal: controller.signal, cache: "no-store" });
         if (!response.ok) throw new Error("control unavailable");
         const value = await response.json() as OwnerControl;
         if (!controller.signal.aborted) { setControl(value); setControlError(false); }
+        const stopStatus = value.research_stop?.status;
+        if (!controller.signal.aborted && stopStatus !== lastStopStatus && (stopStatus === "stopped" || stopStatus === "stop_incomplete")) {
+          const current = await getRun(runId);
+          if (!controller.signal.aborted) { change.current(current); lastStopStatus = stopStatus; }
+        }
       } catch {
         if (!controller.signal.aborted) setControlError(true);
       } finally {
@@ -73,7 +82,10 @@ export function RunControlBar({ runId, run, onChange }: { runId: string; run: Ru
         throw new Error(ERRORS[status] || "请求未通过。请检查配置、检查点或任务完整性后重试。");
       }
       if (controller.signal.aborted) return;
-      setMessage(action === "stop" ? "当前服务确认本任务的工作进程已停止；仍需核对独立实验作业状态。" : action === "migrate-state" ? "历史状态校验与迁移完成，尚未启动研究。" : "服务已接受请求，任务状态会继续更新。");
+      const accepted: unknown = await response.json();
+      const stopStatus = typeof accepted === "object" && accepted !== null && "status" in accepted ? accepted.status : null;
+      const stopConfirmed = typeof accepted === "object" && accepted !== null && "run_stop_confirmed" in accepted && accepted.run_stop_confirmed === true;
+      setMessage(action === "stop" ? (stopStatus === "stop_requested" ? "停止请求已保存，已禁止新动作。" : stopConfirmed ? "已核对本任务的工作进程、作业回执与活动记录，停止完成。" : "停止请求已响应，请核对最新工作进程及独立实验作业状态。") : action === "migrate-state" ? "历史状态校验与迁移完成，尚未启动研究。" : "服务已接受请求，任务状态会继续更新。");
       try { const current = await getRun(runId); if (!controller.signal.aborted) onChange(current); } catch { if (!controller.signal.aborted) setMessage((current) => `${current} 最新状态暂时无法读取，请稍后刷新。`); }
     } catch (cause: unknown) {
       if (controller.signal.aborted) return;
@@ -83,7 +95,7 @@ export function RunControlBar({ runId, run, onChange }: { runId: string; run: Ru
   }
   const button = "rounded border border-mars-border px-3 py-1.5 text-xs hover:bg-mars-panel2 disabled:opacity-50";
   return <section aria-label="任务控制" className="border-b border-mars-border bg-mars-panel px-4 py-3">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3 text-sm"><Link href="/runs" className="text-slate-400 hover:text-white">← 研究任务</Link><span role="status">{run ? (run.read_only ? "只读记录" : statusLabel) : "正在读取任务…"}</span></div><div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3 text-sm"><Link href="/runs" className="text-slate-400 hover:text-white">← 研究任务</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div><div className="flex flex-wrap gap-2">
       {run ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>结果与导出</Link> : null}
       {run && !run.read_only && run.status === "created" ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("start")}>启动任务</button> : null}
       {control?.available_actions.includes("stop") ? <button type="button" className={`${button} border-rose-400/50 text-rose-200`} disabled={!!busy} onClick={() => void act("stop")}>{busy === "stop" ? "正在请求停止…" : control.stopping ? "核对停止状态" : "停止任务"}</button> : null}
@@ -92,6 +104,7 @@ export function RunControlBar({ runId, run, onChange }: { runId: string; run: Ru
     </div></div>
     {run?.read_only ? <p className="mt-2 text-xs leading-5 text-amber-200">{READ_ONLY[run.read_only_reason || ""] || "此记录没有可供当前服务使用的可信执行状态。已保存产物仍可查看。"}</p> : null}
     {controlError ? <p role="status" className="mt-2 text-xs text-amber-200">暂时无法核对工作进程状态，正在重新连接。</p> : null}
+    {control?.research_stop?.run_stop_confirmed ? <p role="status" className="mt-2 text-xs text-emerald-200">停止核对完成，已保存的产物和预算记录保留。</p> : control?.research_stop?.status === "stop_incomplete" ? <p role="status" className="mt-2 text-xs text-amber-200">仍有工作进程、作业或活动记录未能确认停止。新动作已阻止，请核对停止状态。</p> : null}
     {control?.state_persisted === false ? <p role="alert" className="mt-2 text-xs text-amber-200">停止状态保存失败。{control.owned_task_done ? "本服务的工作进程已经结束。" : "仍需核对工作进程是否完成清理。"}恢复前需修复执行记录。</p> : null}
     {run?.execution_admission?.blockers.length ? <details className="mt-2 text-xs text-slate-400"><summary className="cursor-pointer">查看启动受阻原因</summary><ul className="mt-2 list-inside list-disc space-y-1">{run.execution_admission.blockers.map((blocker) => <li key={blocker.code}>{blocker.message}</li>)}</ul></details> : null}
     {message ? <p role={error ? "alert" : "status"} className={`mt-2 text-xs leading-5 ${error ? "text-amber-200" : "text-emerald-200"}`}>{message}</p> : null}

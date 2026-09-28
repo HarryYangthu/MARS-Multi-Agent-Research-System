@@ -512,8 +512,14 @@ async def stop_run(run_id: str) -> dict[str, Any]:
     if owner is None or not owner.run_control(run_id)["owned_task_active"]:
         _ensure_active_run(run_id)
         if owner is None:
-            raise HTTPException(status_code=409, detail={"ok": False, "status": "not_owned", "run_id": run_id,
-                "error": "no live task owned by this process; historical execution was not changed"})
+            run = get_run_store().get(run_id)
+            if run is not None and run.meta.get("research_task_sha256") is not None:
+                # Contract jobs retain durable ownership across app restarts.
+                # This creates only the controller, never starts research.
+                owner = get_orchestrator()
+            else:
+                raise HTTPException(status_code=409, detail={"ok": False, "status": "not_owned", "run_id": run_id,
+                    "error": "no live task owned by this process; historical execution was not changed"})
     result = await owner.stop_owned_run(run_id)
     if not result["ok"]:
         raise HTTPException(status_code=409, detail=result)

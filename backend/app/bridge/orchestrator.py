@@ -107,6 +107,8 @@ class Orchestrator:
         self.langgraph_runtime = LangGraphRuntimeFacade()
         self._sessions: dict[str, RunSession] = {}
         self.owned_tasks = OwnedRunTasks()
+        from app.bridge.research_run_stop import ResearchRunStops
+        self.research_stops = ResearchRunStops()
         self.max_parallel_nodes = scheduler_parallelism()
         self._resume_invocations: dict[tuple[str, str], str] = {}
 
@@ -216,14 +218,26 @@ class Orchestrator:
         session = self._sessions.get(run_id)
         termination = session.termination if session is not None else None
         state_error = session.stop_state_error if session is not None else None
-        if stopping and session is None:
+        contract = session is not None and session.run.meta.get("research_task_sha256") is not None
+        stop_result = self.research_stops.results.get(run_id)
+        if stop_result is not None:
+            contract = True
+            termination = stop_result.get("termination", termination)
+            if stop_result.get("state_persisted") is False:
+                state_error = {"type": "ResearchStopStateError", "phase": "request",
+                               "message": "research dispatch barrier could not be persisted"}
+        if contract and termination is not None and termination.get("scope") == "research_contract":
+            stopping = not bool(termination.get("cleanup_complete"))
+        if stopping and session is None and not contract:
             state_error = {"type": "MissingRunSession", "phase": "request",
                            "message": "owned task has no in-memory persistence session"}
         return {"run_id": run_id, "owned_task_active": active, "stopping": stopping,
             "owned_task_done": not active if active or stopping else None,
             "cleanup_complete": bool(termination.get("cleanup_complete")) if termination is not None else None,
             "state_persisted": False if state_error is not None else True if termination is not None else None,
-            "state_persistence_error": state_error, "available_actions": ["stop"] if active else []}
+            "state_persistence_error": state_error,
+            "research_stop": stop_result,
+            "available_actions": ["stop"] if active or contract and not (termination or {}).get("cleanup_complete") else []}
 
     def migrate_run_state(self, run_id: str) -> dict[str, Any]:
         """Explicitly adopt validated legacy state without scheduling execution."""
@@ -325,6 +339,10 @@ class Orchestrator:
 
     def _finish_owned_stop(self, session: RunSession) -> None:
         """Commit cancellation only after the owned coroutine's real cleanup."""
+        if session.termination is not None and session.termination.get("scope") == "research_contract":
+            # The contract controller also verifies stage leases, job receipts
+            # and active accounting before committing the terminal graph.
+            return
         if session.stop_state_error is not None or session.termination is None or session.termination.get("cleanup_complete"):
             return
         termination = dict(session.termination)
@@ -433,6 +451,27 @@ class Orchestrator:
             return {"ok": False, "status": "stop_state_error" if complete else "stop_incomplete",
                     "run_id": run_id, "owned_task_done": complete, "state_persisted": False,
                     "state_persistence_error": self.run_control(run_id)["state_persistence_error"]}
+        cached = self._sessions.get(run_id)
+        run = cached.run if cached is not None else self.run_store.get(run_id)
+        if run is not None:
+            from app.harness.runtime.state_journal import StateJournal
+            contract = run.meta.get("research_task_sha256") is not None
+            if cached is not None:
+                contract = contract or cached.request.extra.get("research_task_sha256") is not None
+            if not contract and cached is None:
+                authority = StateJournal.from_authority(run.root, run_id=run.run_id)
+                saved = authority.read().get("request", {}) if authority is not None else {}
+                extra = saved.get("extra", {}) if isinstance(saved, dict) else {}
+                contract = isinstance(extra, dict) and extra.get("research_task_sha256") is not None
+            if contract:
+                def update_cache(payload: dict[str, Any]) -> None:
+                    session = self._sessions.get(run_id)
+                    if session is not None:
+                        snapshot = RunStateStore(run)._snapshot(payload)
+                        session.graph = snapshot.graph
+                        session.termination = snapshot.termination
+                        session.state_revision = snapshot.revision
+                return await self.research_stops.request(run, self.owned_tasks, reason=reason, on_state=update_cache)
         requested = self._request_owned_stop(run_id, reason=reason)
         return await self._wait_owned_stop(requested, grace_seconds=grace_seconds)
 
@@ -440,8 +479,10 @@ class Orchestrator:
         if not 0 <= grace_seconds <= 60:
             raise ValueError("stop grace must be in [0,60] seconds")
         self.owned_tasks.closing = True
-        requested = [self._request_owned_stop(run_id, reason="server_shutdown") for run_id in self.owned_tasks.run_ids()]
-        return list(await asyncio.gather(*(self._wait_owned_stop(item, grace_seconds=grace_seconds) for item in requested)))
+        results = list(await asyncio.gather(*(self.stop_owned_run(run_id, reason="server_shutdown",
+            grace_seconds=grace_seconds) for run_id in self.owned_tasks.run_ids())))
+        await self.research_stops.wait(timeout=grace_seconds)
+        return [self.research_stops.results.get(item["run_id"], item) for item in results]
 
     async def run(self, run_id: str) -> None:
         from app.harness.llm.accounting import run_resource_scope

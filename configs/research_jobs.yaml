@@ -6,3 +6,8 @@ research_jobs:
 
 research_job_control:
   lock_timeout_seconds: 1.0
+
+research_run_stop:
+  sqlite_timeout_seconds: 1.0
+  poll_interval_seconds: 0.1
+  reconciliation_seconds: 30.0

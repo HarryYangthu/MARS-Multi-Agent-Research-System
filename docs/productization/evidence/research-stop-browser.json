@@ -1,0 +1,147 @@
+{
+  "scope": "Real trusted local CPU job stopped from production browser; no model call or complete research workflow",
+  "run_id": "2026-09-28T0252_task",
+  "job_id": "actual-stop-ui-job",
+  "task_sha256": "e37c4f6a76c05000700764453f3b29e7e4ac4401c8260f546985b58dd902eb0b",
+  "frontend_build_id": "WiHH-cqKbXDm79sH-aVns",
+  "browser_stop_http": [
+    {
+      "duration": 6,
+      "responseStatus": 202,
+      "startTime": 20911.10000000149
+    }
+  ],
+  "durable_request_to_confirmation_seconds": 0.117266,
+  "state": "cancelled",
+  "termination": {
+    "automatic_resume": false,
+    "cleanup_complete": true,
+    "finished_at": "2026-09-28T02:53:06.238531+00:00",
+    "reason": "user_request",
+    "requested_at": "2026-09-28T02:53:06.121265+00:00",
+    "scope": "research_contract",
+    "type": "cancelled"
+  },
+  "job": {
+    "run_id": "2026-09-28T0252_task",
+    "job_id": "actual-stop-ui-job",
+    "attempt_id": "attempt1",
+    "experiment_id": "stop-probe",
+    "status": "cancelled",
+    "owner_active": false,
+    "stop_requested": true,
+    "budget_state": "settled",
+    "receipt": {
+      "argv": [
+        "/opt/anaconda3/bin/python3.13",
+        "command.py"
+      ],
+      "attempt_id": "attempt1",
+      "captured_output_bytes": 0,
+      "command_files": [
+        {
+          "path": "/opt/anaconda3/bin/python3.13",
+          "sha256": "sha256:7d93d7c9a6db332a11c716abe30be509417feeef517072aacf09bcc0eadadf9e"
+        },
+        {
+          "path": "/private/tmp/mars-productization-results-ui/runtime/runs/2026-09-28T0252_task/execution/research_job_snapshots/snap_d8d325cc13d504e5d4feae72/command.py",
+          "sha256": "sha256:f749abb89b5932209a4b1d5f4098b5771b1cddd68065642d6fe164c429cad4db"
+        }
+      ],
+      "deadline_at": 1790564023.95467,
+      "device": "cpu",
+      "duration_seconds": 7.051558708000812,
+      "error": "stop_requested",
+      "evidence": [],
+      "execution_backend": "local_process",
+      "experiment_id": "stop-probe",
+      "finished_at": 1790563986.138117,
+      "invocation_id": "actual-stop-ui-job",
+      "job_id": "actual-stop-ui-job",
+      "loss_curve": [],
+      "max_output_bytes": 1048576,
+      "metrics": {},
+      "os_isolated": false,
+      "project": "stop_ui_probe",
+      "request_sha256": "sha256:ff0a580b3babf605bd02478dd74c78c2dc8820dbe0474ccbdf5398f329d46f3d",
+      "result_sha256": null,
+      "returncode": -9,
+      "run_id": "2026-09-28T0252_task",
+      "schema": "local_command_receipt.v1",
+      "started_at": 1790563979.086624,
+      "status": "cancelled",
+      "submission_sha256": "sha256:446b8546a0f54cc8ba0e0a5d9a4ba7e5bdcc3fb7ced9098929a4de4a8dc24725"
+    }
+  },
+  "budget": {
+    "task_sha256": "e37c4f6a76c05000700764453f3b29e7e4ac4401c8260f546985b58dd902eb0b",
+    "used": {
+      "search_candidates": 0,
+      "deep_read_papers": 0,
+      "proposal_candidates": 0,
+      "implemented_candidates": 0,
+      "debate_rounds": 0,
+      "automatic_iterations": 0,
+      "model_requests": 0,
+      "tool_executions": 0,
+      "input_tokens": 0,
+      "billed_output_tokens": 0,
+      "model_cost_micro_cny": 0,
+      "training_process_us": 7051559,
+      "gpu_us": 0
+    },
+    "limits": {
+      "search_candidates": 20,
+      "deep_read_papers": 5,
+      "proposal_candidates": 2,
+      "implemented_candidates": 1,
+      "debate_rounds": 1,
+      "automatic_iterations": 2,
+      "model_requests": 60,
+      "tool_executions": 120,
+      "input_tokens": 1000000,
+      "billed_output_tokens": 128000,
+      "model_cost_micro_cny": 20000000,
+      "training_process_us": 60000000,
+      "gpu_us": 3600000000
+    },
+    "known_cost_subtotal_micro_cny": 0,
+    "cost_ceiling_enforced": false,
+    "cost_usage_exact": true,
+    "activity_us": 7183447,
+    "activity_remaining_us": 292816553,
+    "clock_uncertain": false,
+    "reservation_overrun": false,
+    "unknown_reservations": [],
+    "active_readers": 0,
+    "active_jobs": 0,
+    "active_gpus": 0
+  },
+  "one_original_submission_preserved": true,
+  "sql_job_count": 1,
+  "candidate_scope_verified": true,
+  "source_sha256": {
+    "backend/app/bridge/research_run_stop.py": "7d62ccac1ab7a4dcaacc93c4c9d5a375025363f15228596028292c8aa8905015",
+    "backend/app/bridge/orchestrator.py": "16a718bf15a9cd66f33497bd5d92e53cb85c94f810f31c70672af6c440946da8",
+    "backend/app/bridge/research_job_control.py": "329eec292f73b0d7d88acc961f0234734be88f40a455adbf6086555cf617f4d6",
+    "backend/app/bridge/research_job_service.py": "b7f971ce6f9e61a448bc637edc0bf8e93807a5b47a648c4a99f5b548e42fa799",
+    "backend/app/api/runs.py": "622bd7115238228ad23201bb8dbf30bce590afdcee31fed45d28bf1a1c197a8e",
+    "backend/app/harness/runtime/state_journal.py": "4d9f2b875bae6adc3e27c0f288d71b632e020a2e9a8d488144cfef2f8311c333",
+    "backend/app/execution/local/runner.py": "c3f21491f9e80f37a35240cb71e05f04f23caa3be927401165c0baa202086bb1",
+    "frontend/src/components/RunControlBar.tsx": "b4d0474d77fab7d177446690b9db236ab474baf7f82d124775a745eb3325fca6",
+    "configs/research_jobs.yaml": "9d57ffbdde890e4f7208a665a3e39cec0192b9c8cbd01b709d8e41770077a9e4"
+  },
+  "artifacts": {
+    "release-evidence/productization/20260928/research-stop-ui-final/after.png": "fa85d65d4ff373e5b4b3a427c9037ce971bd568a2061f9d6c621afcb6d3d6eae",
+    "release-evidence/productization/20260928/research-stop-ui-final/after-body.txt": "a505be0dbe0e97c62e7b955c23758817562fdb2bc3c27c744a0017466cd41d37",
+    "release-evidence/productization/20260928/research-stop-ui-final/control.json": "96aab916d3c00e8766ccf5717bcd29004006d733d474af3962ce123f2997e2e5",
+    "release-evidence/productization/20260928/research-stop-ui-final/before-stop.json": "9ab64fd318a3e2b50104b2b964ad0af1e6dbe0c1fbc25800259637ece2b0c947",
+    "/tmp/mars-productization-results-ui/runtime/runs/2026-09-28T0252_task/execution/local_jobs/actual-stop-ui-job/submission.json": "9ab470c6a15f45f6ade5d4680e22e127af15d1bcd8a631a2be7469b35af94037"
+  },
+  "limits": [
+    "trusted native CPU process; not OS sandbox",
+    "no SSH/GPU/pause/checkpoint resume acceptance",
+    "no general stop timing SLA inferred from one sample",
+    "full product start remains blocked"
+  ]
+}

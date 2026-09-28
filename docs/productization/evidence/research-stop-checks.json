@@ -1,0 +1,30 @@
+{
+  "base_commit": "660df122f3205ed4dd937a3b74adee11979c138e",
+  "pytest": {
+    "passed": 3475,
+    "skipped": 181,
+    "seconds": 214.83
+  },
+  "mypy_source_files": 643,
+  "import_contracts": 4,
+  "frontend": {
+    "build_id": "WiHH-cqKbXDm79sH-aVns",
+    "build": "passed",
+    "tsc": "passed",
+    "targeted_eslint": "passed"
+  },
+  "logs": {
+    "release-evidence/productization/20260928/research-stop-full.log": "1d73199d095d51a77bfa4d3c0eb9840a3e2be60aec1b9c6bb5d88e0ea2cf9829",
+    "release-evidence/productization/20260928/research-stop-full.xml": "ec33de6940d5207d82d1d84388741e99946925df7ae6972e2c60507081982c0d",
+    "release-evidence/productization/20260928/research-stop-mypy.log": "ab7d1b0521bff7c9f69c20c43cd392e1604df72b39e0f8f6c0a11f0bff70e770",
+    "release-evidence/productization/20260928/research-stop-imports.log": "dd73deb38017555c461d73c8adbc21545d894c685164696945b86dfd2644d09e",
+    "release-evidence/productization/20260928/research-stop-build.log": "ddc90b6796c845fce096d94e57586a543249f88fc583194e3635e67b42421f2e",
+    "release-evidence/productization/20260928/research-stop-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "release-evidence/productization/20260928/research-stop-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "limits": [
+    "Skipped external/platform evidence is not acceptance",
+    "Full research start remains blocked",
+    "Browser service-restart polling failure remains an independent follow-up"
+  ]
+}
