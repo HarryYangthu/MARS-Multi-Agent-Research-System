@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 PositiveCount = Annotated[int, Field(strict=True, gt=0)]
 NonNegativeCount = Annotated[int, Field(strict=True, ge=0)]
@@ -93,7 +93,7 @@ class CommandContract(ContractModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     purpose: Literal["check", "train", "evaluate"]
     executable: str
-    arguments: tuple[str, ...] = ()
+    arguments: tuple[Annotated[str, StringConstraints(strip_whitespace=False)], ...] = ()
     cwd: str = "."
     entrypoint_files: tuple[str, ...] = Field(min_length=1)
 

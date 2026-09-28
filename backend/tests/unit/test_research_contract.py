@@ -52,6 +52,22 @@ def test_default_budget_matches_frozen_plan() -> None:
     assert (budget.operation_retries, budget.repeated_error_limit) == (2, 2)
 
 
+def test_command_arguments_preserve_exact_process_values_and_frozen_hash(tmp_path: Path) -> None:
+    raw = project_input(tmp_path)
+    arguments = ["train.py", " leading ", "", "\t", "line\nbreak", "carriage\rreturn"]
+    raw["commands"][0]["arguments"] = arguments
+    project = parse_project_contract(raw)
+    assert project.commands[0].arguments == tuple(arguments)
+    assert parse_project_contract(project.model_dump(mode="json")) == project
+    frozen = freeze_research_task(project, goal="Preserve declared process arguments", mode="manual",
+                                  budget=default_research_budget())
+    assert list(frozen.task.project.commands[0].arguments) == arguments
+    raw["commands"][0]["arguments"][1] = "leading"
+    changed = freeze_research_task(parse_project_contract(raw), goal=frozen.task.goal, mode="manual",
+                                   budget=frozen.task.budget)
+    assert changed.task_sha256 != frozen.task_sha256
+
+
 @pytest.mark.parametrize("invalid", [None, -1, float("inf"), float("nan"), True, "1"])
 @pytest.mark.parametrize("field", list(ResearchBudget.model_fields))
 def test_every_budget_requires_an_explicit_finite_valid_number(field: str, invalid: Any) -> None:
