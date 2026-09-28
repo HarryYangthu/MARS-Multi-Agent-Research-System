@@ -51,7 +51,7 @@ export function GettingStarted(): JSX.Element {
   }
   const knownContext = context?.project === selectedProject ? context : null;
   const hasBackground = !!knownContext?.files.some((file) => file.role === "reference");
-  const states = [apiSaved ? "配置已保存 · 连接待验证" : "待配置", accessible ? "代码路径可访问" : "待选择", hasBackground ? `${knownContext?.files.length} 份文档可读取` : "可稍后补充", "目标与运行条件待填写"];
+  const states = [apiSaved ? "配置已保存" : "待配置", accessible ? "代码路径可访问" : "待选择", hasBackground ? `${knownContext?.files.length} 份文档可读取` : "可稍后补充", "目标与运行条件待填写"];
   return <div className="min-h-screen bg-mars-bg"><TopBar /><main className="mx-auto max-w-5xl space-y-6 px-4 py-6 md:p-8">
     <header><Link href="/projects" className="text-sm text-slate-400 hover:text-white">← 返回项目</Link><p className="mt-6 text-xs font-medium tracking-widest text-indigo-200">开始你的第一次研究</p><h1 className="mt-2 text-3xl font-semibold">新手使用引导</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">把模型、代码和背景资料准备好，再描述你希望解决的问题。每一步都可以返回修改；已经保存的配置和资料会保留。</p></header>
     <nav aria-label="新手引导步骤" className="grid grid-cols-2 gap-2 lg:grid-cols-4">{STEPS.map((title, index) => <button key={title} type="button" disabled={busy} aria-current={step === index ? "step" : undefined} onClick={() => setStep(index)} className={`rounded-xl border p-4 text-left focus-visible:ring-2 focus-visible:ring-indigo-300 ${step === index ? "border-indigo-400 bg-indigo-500/10" : "border-mars-border bg-mars-panel"}`}><span className="text-xs text-slate-400">0{index + 1}</span><span className="mt-2 block text-sm font-medium">{title}</span><span className="mt-2 block text-xs leading-5 text-slate-400">{states[index]}</span></button>)}</nav>

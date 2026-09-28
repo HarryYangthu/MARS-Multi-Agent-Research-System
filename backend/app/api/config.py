@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.harness.llm.model_registry import reset_cache_for_tests
 from app.settings import env_or_local, repo_root, set_runtime_env
+
+from app.bridge.model_connection_test import ConnectionTestRequest, ConnectionTestResult, probe_policy, test_model_connection
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -127,6 +129,22 @@ class AgentLlmUpdatePayload(BaseModel):
 @router.get("", response_model=ConfigSnapshot)
 async def get_config() -> ConfigSnapshot:
     return ConfigSnapshot(files=[_read_config(name) for name in CONFIG_NAMES])
+
+
+@router.post("/test-connection", response_model=ConnectionTestResult)
+async def test_connection(request: Request) -> ConnectionTestResult:
+    # Avoid validation details echoing the submitted credential in an error.
+    limit = probe_policy().max_request_bytes
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > limit:
+            raise HTTPException(status_code=413, detail="连接测试配置过大")
+        body.extend(chunk)
+    try:
+        payload = ConnectionTestRequest.model_validate_json(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="连接测试配置不完整或格式错误") from exc
+    return await test_model_connection(payload)
 
 
 @router.get("/agent-llm", response_model=AgentLlmConfigView)

@@ -1,6 +1,7 @@
 frontend:
   client:
     request_timeout_ms: 15000
+    connection_test_timeout_ms: 40000
     control_refresh_ms: 2000
     readiness_refresh_ms: 10000
     max_contract_bytes: 1048576

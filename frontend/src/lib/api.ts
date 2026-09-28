@@ -1,4 +1,4 @@
-import { boundedFetch } from "@/lib/clientPolicy";
+import { boundedFetch, CLIENT_POLICY } from "@/lib/clientPolicy";
 
 // Thin REST client. By default requests stay same-origin and Next rewrites
 // /api/* to the backend; NEXT_PUBLIC_BACKEND_URL remains available for
@@ -2163,4 +2163,13 @@ export async function uploadProjectBackground(project: string, file: File): Prom
   const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/background`);
   url.searchParams.set("filename", file.name);
   return jsonOrThrow(await boundedFetch(url, { method: "POST", headers: { "Content-Type": "text/markdown; charset=utf-8" }, body: file }));
+}
+
+export type ModelConnectionResult = { ok: boolean; code: string; message: string; elapsed_ms: number; requested_model: string; configuration_saved: false };
+export async function testModelConnection(params: { provider: string; model: string; base_url: string; api_key: string }, signal?: AbortSignal): Promise<ModelConnectionResult> {
+  const deadline = AbortSignal.timeout(CLIENT_POLICY.connectionTestTimeoutMs);
+  return jsonOrThrow(await fetch(`${BASE}/api/config/test-connection`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
+    signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
+  }));
 }

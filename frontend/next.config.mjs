@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import YAML from "yaml";
 
 const clientPolicy = YAML.parse(readFileSync(new URL("../configs/frontend.yaml", import.meta.url), "utf8"))?.frontend?.client;
-const policyFields = ["request_timeout_ms", "control_refresh_ms", "readiness_refresh_ms", "max_contract_bytes"];
+const policyFields = ["request_timeout_ms", "connection_test_timeout_ms", "control_refresh_ms", "readiness_refresh_ms", "max_contract_bytes"];
 if (!clientPolicy || policyFields.some((key) => !Number.isSafeInteger(clientPolicy[key]) || clientPolicy[key] <= 0)) {
   throw new Error("configs/frontend.yaml must define a finite positive client policy");
 }
