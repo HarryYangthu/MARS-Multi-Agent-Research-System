@@ -51,3 +51,9 @@
 - 独立 subprocess 使用 host tools override 注册真实 MCP handler；命令是写临时 marker 的实际脚本。连续目录读取、MCP remote tool 更改和移除声明均未启动脚本，原 stdio closure 与漂移可见，无 MCP 握手或成功响应。
 
 日志：`release-evidence/productization/20260928/capability-catalog.pytest.log` 与 `capability-catalog.mypy.log`。此验证不宣称外部依赖健康、provider/工具执行成功或 Windows 打包验收。
+
+## 设置页
+
+`设置 → 研究能力` 提供名称、类型与配置授予角色筛选，区分开启、注册、依赖与认证；权限交集和 Schema 指纹位于高级详情。读取失败时清空旧目录并显示错误，显式刷新重新读取，不自动执行、认证或重载能力。角色筛选描述当前配置授予，不能替代任务授权。
+
+生产构建 `ff-frkrcV1rRSLgTrUJ47` 经实际浏览器核验 44 工具/2 技能、搜索与类型/角色筛选、详情、真实断网/恢复及 390px 布局（无水平溢出），零 JavaScript errors、网络全部 GET。TypeScript、定向 ESLint 与实际 API 正例/7 个纯解析拒绝检查通过；source/截图/日志指纹见 [UI 回执](evidence/capability-catalog-ui.json)。零执行请求不表示能力已经认证。

@@ -1,0 +1,5 @@
+research_templates:
+  default_page_size: 20
+  max_page_size: 50
+  max_record_bytes: 1048576
+  sqlite_timeout_seconds: 2.0

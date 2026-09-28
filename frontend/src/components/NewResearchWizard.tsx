@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { FrozenResearchImport } from "./FrozenResearchImport";
+import { SavedResearchSettingsPicker } from "./SavedResearchSettingsPicker";
+import { CLIENT_POLICY } from "@/lib/clientPolicy";
+import { parseResearchProjectJSON, projectToSimpleDraft, type SavedSettings } from "@/lib/researchTemplates";
 import {
   admissionMessage, getResearchDefaults, preflightResearch, prepareResearch,
   ResearchApiError, researchRequestError, type FrozenResearch, type ResearchIssue, type ResearchPreflight,
@@ -37,6 +40,8 @@ export function NewResearchWizard(): JSX.Element {
   const submission = useResearchSubmission();
   const { created } = submission;
   const [advanced, setAdvanced] = useState(false);
+  const [projectJSON, setProjectJSON] = useState<string | null>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
   const mounted = useRef(false);
   const pending = useRef<AbortController | null>(null);
   const defaultsRequest = useRef<AbortController | null>(null);
@@ -79,6 +84,31 @@ export function NewResearchWizard(): JSX.Element {
   function metric(index: number, value: Partial<MetricDraft>): void {
     update("metrics", draft.metrics.map((item, position) => position === index ? { ...item, ...value } : item));
   }
+  function reuseSettings(value: SavedSettings): void {
+    if (submission.pending || submission.busy || created || busy || advanced) return;
+    defaultsRequest.current?.abort();
+    invalidate();
+    const simple = projectToSimpleDraft(value.project);
+    setDraft((current) => ({ ...(simple || current), name: current.name, goal: current.goal, mode: value.mode }));
+    setProjectJSON(simple ? null : JSON.stringify(value.project, null, 2));
+    setBudget(budgetDraft(value.budget)); setDefaultState("ready"); setDefaultError("");
+    setNotice(simple ? "已完整载入项目、预算与模式，保留当前新名称和目标。需要重新预检与冻结。"
+      : "此项目含普通表单无法无损表达的配置，已保留完整项目 JSON。请在项目路径步骤编辑；当前名称和目标保留，仍需重新预检与冻结。");
+  }
+  function toggleProjectEditor(): void {
+    try {
+      if (projectJSON !== null) {
+        const project = parseResearchProjectJSON(projectJSON, CLIENT_POLICY.maxContractBytes);
+        const simple = projectToSimpleDraft(project);
+        if (!simple) throw new Error("此配置仍无法完整转入普通表单，请继续使用完整 JSON 编辑器，所有命令和参数都会保留。");
+        invalidate(); setDraft((current) => ({ ...simple, name: current.name, goal: current.goal, mode: current.mode })); setProjectJSON(null);
+      } else {
+        const built = buildResearchProject(draft);
+        if (!built.project) { showIssues(built.issues, "请先补全项目声明，再转换为完整 JSON 编辑。"); return; }
+        invalidate(); setProjectJSON(JSON.stringify(built.project, null, 2)); setStep(1);
+      }
+    } catch (error: unknown) { showIssues([], error instanceof Error ? error.message : "项目设置无法转换。"); }
+  }
   function showIssues(next: ResearchIssue[], message: string): void {
     setIssues(next); setNotice(message);
     requestAnimationFrame(() => feedback.current?.focus());
@@ -98,7 +128,10 @@ export function NewResearchWizard(): JSX.Element {
     });
   }
   function checked() {
-    const built = buildResearchProject(draft);
+    let built;
+    try {
+      built = projectJSON === null ? buildResearchProject(draft) : { project: parseResearchProjectJSON(projectJSON, CLIENT_POLICY.maxContractBytes), issues: [] };
+    } catch (error: unknown) { showIssues([{ field: "paths", code: "invalid_project_json", message: error instanceof Error ? error.message : "完整项目 JSON 无效。" }], "请修正项目 JSON；尚未发送预检。"); return null; }
     const limits = validateBudget(budget);
     const all = [...validateResearchGoal(draft), ...built.issues, ...limits.issues];
     if (all.length || !built.project || !limits.budget) {
@@ -146,7 +179,8 @@ export function NewResearchWizard(): JSX.Element {
     <TextField field={errorField} label={label} hint={hint} value={String(draft[key])} rows={rows}
       onChange={(value) => update(key, value)} issues={issues} />
   );
-  const disabled = busy !== null || submission.busy !== null || submission.pending !== null || created !== null || advanced;
+  const externallyDisabled = busy !== null || submission.busy !== null || submission.pending !== null || created !== null || advanced;
+  const disabled = externallyDisabled || pickerBusy;
   const validBudget = validateBudget(budget).budget;
 
   if (created) return <section className={`${PANEL} space-y-5`} aria-labelledby="saved-research-title">
@@ -180,26 +214,30 @@ export function NewResearchWizard(): JSX.Element {
         "预算会随计划冻结。以下是上限设置，不是已消耗用量或完成时间承诺。",
       ][step]}</p></div>
       {step === 0 ? <>
-        <div className="grid gap-4 sm:grid-cols-2">{field("name", "研究名称", "用于任务列表，最多 120 字", undefined, "name")}{field("displayName", "项目名称", "例如：表格回归研究", undefined, "display_name")}</div>
+        <SavedResearchSettingsPicker disabled={externallyDisabled} onLoad={reuseSettings} onBusyChange={setPickerBusy} />
+        <div className="grid gap-4 sm:grid-cols-2">{field("name", "研究名称", "用于任务列表，最多 120 字", undefined, "name")}{projectJSON === null ? field("displayName", "项目名称", "例如：表格回归研究", undefined, "display_name") : <p className="text-sm leading-6 text-amber-100">项目名称与其他声明保留在完整 JSON 中，请到项目路径步骤编辑。当前研究名称和目标独立于来源任务。</p>}</div>
         {field("goal", "研究目标", "说明问题、基线、希望改善的指标和不能改变的条件。", 5)}
-        <div className="grid gap-4 sm:grid-cols-2">{field("projectId", "项目标识", "英文、数字或下划线，例如 tabular_regression", undefined, "project_id")}
+        <div className="grid gap-4 sm:grid-cols-2">{projectJSON === null ? field("projectId", "项目标识", "英文、数字或下划线，例如 tabular_regression", undefined, "project_id") : null}
           <SelectField label="研究模式" value={draft.mode} onChange={(value) => update("mode", value as ResearchDraft["mode"])}>
             <option value="bounded_auto">有上限的自动研究（计划设置）</option><option value="manual">逐阶段人工审核（计划设置）</option></SelectField></div>
-        {projects.length ? <div className="border-t border-mars-border pt-4"><label className="block text-sm text-slate-300" htmlFor="existing-project-source">从已接入项目填入名称和代码位置（可选）</label>
+        {projects.length && projectJSON === null ? <div className="border-t border-mars-border pt-4"><label className="block text-sm text-slate-300" htmlFor="existing-project-source">从已接入项目填入名称和代码位置（可选）</label>
           <select id="existing-project-source" className={`${INPUT} mt-2`} value="" onChange={(event) => {
             const chosen = projects.find((item) => item.name === event.target.value);
             if (!chosen) return;
             invalidate(); setDraft((current) => ({ ...current, projectId: chosen.name, displayName: chosen.display_name || chosen.name, code: chosen.repo_path || chosen.folder_path || "" }));
           }}><option value="">请选择，其他合同项仍需明确填写</option>{projects.map((item) => <option key={item.name} value={item.name}>{item.display_name || item.name}</option>)}</select>
-          <p className="mt-2 text-xs text-slate-500">这里只复制上述字段，不会自动识别命令、数据或指标。当前尚不支持跨次复用完整项目配置；离页后未保存的草稿不会保留。</p></div> : null}
+          <p className="mt-2 text-xs text-slate-500">这里只复制上述字段，不会自动识别命令、数据或指标。完整复用请使用上方的已保存研究设置；离页后未保存的草稿不会保留。</p></div> : null}
       </> : null}
-      {step === 1 ? <>
+      {step === 1 && projectJSON !== null ? <section className="space-y-3"><h3 className="font-medium">完整项目 JSON 编辑器</h3><p className="text-sm leading-6 text-slate-400">保留全部路径、命令名称与用途、参数数组、指标、基线和保护范围。JSON 参数数组可以表达空参数、换行和首尾空白；不要填写密码或私钥。预算仍在预算步骤编辑。此声明必须重新通过后端预检与冻结。</p><TextField field="paths" label="完整项目声明 JSON" value={projectJSON} rows={24} onChange={(value) => { invalidate(); setProjectJSON(value); }} issues={issues} /><button type="button" className={BUTTON} onClick={toggleProjectEditor}>尝试无损转为普通表单</button></section> : null}
+      {step === 1 && projectJSON === null ? <>
         <div className="grid gap-4 md:grid-cols-2">{field("code", "代码目录", "本机完整路径，例如 /path/to/project", undefined, "paths.code")}{field("output", "输出目录", "位于保护范围之外的完整路径", undefined, "paths.output")}</div>
         <div className="grid gap-4 md:grid-cols-2">{field("knowledge", "知识资料（可为空）", "完整路径，一行一项；尚未解析的格式会在后续接入时明确阻断。", 3, "paths.knowledge")}{field("data", "数据引用（可为空）", "完整文件或目录路径，一行一项；空白表示尚未声明数据。", 3, "paths.data")}</div>
         <div className="grid gap-4 md:grid-cols-2">{field("baseline", "必须保护的基线文件", "相对代码目录，一行一个文件，例如 configs/baseline.yaml", 3, "baseline_files")}{field("allowed", "允许修改的文件或目录", "相对代码目录，一行一项，例如 src；不使用通配符。", 3, "allowed_paths")}</div>
         {field("protected", "额外保护范围（可为空）", "相对路径，一行一项。基线和保护范围始终优先于允许修改范围。", 3, "protected_paths")}
+        <button type="button" className={BUTTON} onClick={toggleProjectEditor}>转为完整项目 JSON 编辑</button>
       </> : null}
-      {step === 2 ? <>
+      {step === 2 && projectJSON !== null ? <section className="space-y-3"><p className="text-sm text-slate-300">当前使用完整项目 JSON，命令名称、数量、参数和所有指标均保持原声明。普通三命令表单不会覆盖这些字段。</p><button type="button" className={BUTTON} onClick={() => setStep(1)}>编辑完整项目 JSON</button></section> : null}
+      {step === 2 && projectJSON === null ? <>
         <div className="grid gap-4 sm:grid-cols-2"><SelectField label="执行位置" value={draft.kind} onChange={(value) => update("kind", value as ResearchDraft["kind"])}><option value="local">本机</option><option value="ssh">SSH（环境预检尚未接通）</option></SelectField>
           <SelectField label="设备" value={draft.device} onChange={(value) => update("device", value as ResearchDraft["device"])}><option value="cpu">CPU</option><option value="gpu">GPU（能力预检尚未接通）</option></SelectField></div>
         {draft.kind === "ssh" ? field("connectionRef", "已保存 SSH 连接的引用", "这里只接受引用名称，不填写密码或私钥。当前远程合同预检会明确阻断。", undefined, "execution.connection_ref") : null}
@@ -232,7 +270,7 @@ export function NewResearchWizard(): JSX.Element {
           {(["单次请求", "调研与迭代", "训练"] as const).map((group) => <section key={group} className="mt-5"><h3 className="mb-3 text-sm font-medium">{group}</h3><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{BUDGET_FIELDS.filter((item) => item.group === group).map((item) => <TextField key={item.key} field={`budget.${item.key}`} label={`${item.label}（${item.unit}）`} value={budget[item.key] ?? ""} numeric onChange={(value) => { invalidate(); setBudget((current) => ({ ...current, [item.key]: value })); }} issues={issues} />)}</div></section>)}
         </details>
         </fieldset>
-        <section className="space-y-2 border-t border-mars-border pt-4 text-sm"><h3 className="font-medium">本次计划摘要</h3><p className="break-words text-slate-300">{draft.name || "尚未命名"} · {draft.displayName || "尚未填写项目"} · {draft.mode === "manual" ? "逐阶段人工审核" : "有上限的自动研究"}</p>
+        <section className="space-y-2 border-t border-mars-border pt-4 text-sm"><h3 className="font-medium">本次计划摘要</h3><p className="break-words text-slate-300">{draft.name || "尚未命名"} · {projectJSON !== null ? "完整 JSON 项目声明" : draft.displayName || "尚未填写项目"} · {draft.mode === "manual" ? "逐阶段人工审核" : "有上限的自动研究"}</p>
           <p className="whitespace-pre-wrap break-words text-slate-400">{draft.goal || "尚未填写研究目标"}</p>
           {validBudget ? <p className="text-slate-400">最多检索 {validBudget.search_candidates} 篇、深读 {validBudget.deep_read_papers} 篇；形成 {validBudget.proposal_candidates} 个候选，实施 {validBudget.implemented_candidates} 个。实际步骤仍须满足准入条件。</p> : null}
         </section>

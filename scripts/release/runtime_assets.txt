@@ -90,3 +90,4 @@ templates/artifacts/run_log.v1.md
 configs/research_defaults.yaml
 configs/results.yaml
 configs/research_jobs.yaml
+configs/research_templates.yaml

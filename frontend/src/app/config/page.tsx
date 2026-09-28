@@ -3,6 +3,12 @@ import { TopBar } from "@/components/TopBar";
 
 const CONFIG_SECTIONS = [
   {
+    href: "/config/capabilities",
+    title: "研究能力",
+    description: "查看工具、技能规则与 MCP 的实际注册、权限和验证状态。",
+    badge: "能力目录",
+  },
+  {
     href: "/config/agents",
     title: "模型连接",
     description: "配置研究所用的模型、服务地址和凭据，查看连接检查结果。",

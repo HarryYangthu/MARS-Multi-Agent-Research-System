@@ -39,6 +39,7 @@ from app.api import results as results_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import research_contracts as research_contracts_api
+from app.api import research_templates as research_templates_api
 from app.api import stats as stats_api
 from app.api import system as system_api
 from app.api import templates as templates_api
@@ -156,6 +157,7 @@ def create_app() -> FastAPI:
 
     app.include_router(runs_api.router)
     app.include_router(research_contracts_api.router)
+    app.include_router(research_templates_api.router)
     app.include_router(capabilities_api.router)
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)

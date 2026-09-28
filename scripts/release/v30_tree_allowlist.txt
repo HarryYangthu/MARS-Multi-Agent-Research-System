@@ -619,7 +619,15 @@ frontend/src/components/ResearchSaveRecovery.tsx
 frontend/src/lib/useResearchSubmission.ts
 
 backend/app/bridge/research_scope_recovery.py
+backend/app/bridge/research_templates.py
+backend/app/api/research_templates.py
+configs/research_templates.yaml
+frontend/src/components/SavedResearchSettingsPicker.tsx
+frontend/src/lib/researchTemplates.ts
 backend/app/bridge/capability_catalog_service.py
 backend/app/api/capabilities.py
 backend/app/bridge/research_stage_service.py
 backend/app/bridge/research_job_control.py
+frontend/src/components/CapabilityLibrary.tsx
+frontend/src/lib/capabilityCatalog.ts
+frontend/src/app/config/capabilities/page.tsx
