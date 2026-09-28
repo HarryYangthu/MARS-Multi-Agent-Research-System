@@ -1,20 +1,21 @@
-"""Save user-selected Markdown as reference material in a folder project."""
+"""Save project background as README reference material and bind baseline code."""
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 from typing import Any
 import os
+import uuid
 import yaml
 
 from app.harness.context.folder_context import discover_folder_context
-from app.harness.persistence import atomic_write_text, path_lock
+from app.harness.persistence import atomic_write_text, fsync_directory, path_lock
 from app.harness.project_workspace import FolderProject
 from app.harness.runtime.project_scope import safe_scope_path
 from app.settings import get_settings
 
 
 def save_background(project: FolderProject, filename: str, data: bytes) -> dict[str, Any]:
-    """Create one new reference, never overwrite source or promote it to rules."""
+    """Replace README atomically, preserving its previous bytes outside context."""
     if (not filename or PurePosixPath(filename).name != filename or "\\" in filename
             or filename.startswith(".") or any(ord(char) < 32 for char in filename)
             or PurePosixPath(filename).suffix.lower() not in {".md", ".txt"}):
@@ -25,33 +26,52 @@ def save_background(project: FolderProject, filename: str, data: bytes) -> dict[
     text = data.decode("utf-8-sig")
     if not text.strip() or "\x00" in text:
         raise ValueError("背景文档必须是非空 UTF-8 文本")
-    # Use a .md suffix even for .MD uploads so the existing glob discovers it.
-    relative = "context/" + PurePosixPath(filename).stem + ".md"
+    # The incoming name never grants instruction authority, even AGENTS.md.
+    relative = "README.md"
     lock = safe_scope_path(project.root, ".mars/background-upload.lock")
     with path_lock(lock):
-        before = discover_folder_context(project)
-        if len(before["files"]) >= settings.mars_folder_context_max_files:
+        target = safe_scope_path(project.root, relative)
+        # Account for a replacement, and permit replacing an oversized README.
+        before = discover_folder_context(project, exclude_paths=frozenset({relative}))
+        if len(before["files"]) + 1 > settings.mars_folder_context_max_files:
             raise ValueError("项目背景文档数量已达到上限")
         if before["total_chars"] + len(text) > settings.mars_folder_context_max_chars:
             raise ValueError("项目背景文档总长度超过上限，请精简后上传")
-        target = safe_scope_path(project.root, relative)
-        target.parent.mkdir(exist_ok=True)
-        # Exclusive creation also refuses dangling symlinks and racing uploads.
-        with target.open("x", encoding="utf-8") as stream:
+        previous: Path | None = None
+        if target.exists():
+            previous = safe_scope_path(project.root, f".mars/background-history/README.{uuid.uuid4().hex}.md")
+            previous.parent.mkdir(exist_ok=True)
+            fsync_directory(previous.parent.parent)
+            # Back up bytes without normalizing line endings or a UTF-8 BOM.
+            created = False
             try:
-                stream.write(text)
-                stream.flush()
-            except OSError:
-                target.unlink()
+                with previous.open("xb") as stream:
+                    created = True
+                    stream.write(target.read_bytes())
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                fsync_directory(previous.parent)
+            except Exception:
+                if created:
+                    previous.unlink(missing_ok=True)
                 raise
         try:
+            atomic_write_text(target, text)
             record = discover_folder_context(project)
             document = next((item for item in record["files"] if item["path"] == relative), None)
             if document is None:
-                raise ValueError("项目 context_files 未包含 context/，请先调整项目背景范围")
-            return {key: value for key, value in document.items() if key != "content"}
+                raise ValueError("项目 context_files 未包含 README.md，请先调整项目背景范围")
+            result = {key: value for key, value in document.items() if key != "content"}
+            if previous is not None:
+                result["previous_path"] = previous.relative_to(project.root).as_posix()
+            return result
         except Exception:
-            target.unlink()
+            if previous is not None:
+                os.replace(previous, target)
+                fsync_directory(previous.parent)
+            else:
+                target.unlink(missing_ok=True)
+            fsync_directory(target.parent)
             raise
 
 

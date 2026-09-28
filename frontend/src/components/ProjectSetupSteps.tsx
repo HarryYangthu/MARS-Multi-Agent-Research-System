@@ -22,17 +22,19 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [backupPath, setBackupPath] = useState("");
   const busy = modelBusy || uploading || codeBusy;
   useEffect(() => { onBusy(busy); }, [busy, onBusy]);
 
   async function upload(file: File): Promise<void> {
     if (busy) return;
     if (!/[.](md|txt)$/i.test(file.name)) { setError("请选择 Markdown（.md）或 TXT（.txt）文本文件。"); return; }
-    setUploading(true); setError(""); setMessage("");
+    setUploading(true); setError(""); setMessage(""); setBackupPath("");
     try {
       const saved = await uploadProjectBackground(project.name, file);
       setRevision((value) => value + 1);
-      setMessage(`已上传 ${saved.path}，可在下方预览。`);
+      setMessage(`背景已保存为 ${saved.path}，可在下方预览。${saved.previous_path ? "旧背景已保留副本。" : ""}`);
+      setBackupPath(saved.previous_path ?? "");
     } catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "上传未能确认，请重新扫描资料列表后再试。"); }
     finally { setUploading(false); }
   }
@@ -47,10 +49,11 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     <div hidden={step !== 2} className="space-y-4">
       <p className="text-sm leading-6 text-slate-400">这里仅准备仿真基线代码仓与补充背景，不填写研究目标。本次想做什么，完成配置后再在对话中告诉系统。</p>
       {project.project_type === "folder" ? <ProjectCodeFolder project={project} onBusy={setCodeBusy} /> : null}
-      <p className="text-sm leading-6 text-slate-400">背景信息可整理成一份文件，例如已有工作、领域术语、数据说明和参考方法。已有 README 足够时可跳过。</p>
-      {project.project_type === "folder" ? <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传补充背景文件<input aria-label="上传补充背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">选择一份 Markdown 或 TXT 文件即可。TXT 会转存为同名 Markdown，内容不改写；同名资料不覆盖。文档仅作背景参考。</span></label> : <p className="text-sm text-slate-400">此项目的背景资料由项目包管理，可在项目资料中查看。</p>}
+      <p className="text-sm leading-6 text-slate-400">上传一份背景文件，说明已有工作、领域术语、数据或参考方法。系统会将它保存为 README.md，无需再填写一份项目介绍；已有背景足够时可跳过。</p>
+      {project.project_type === "folder" ? <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传背景文件<input aria-label="上传背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">支持 Markdown / TXT，内容不改写。再次上传会更新本项目的 README.md，并保留旧版副本。背景文件不作为 Agent 操作规则。</span></label> : <p className="text-sm text-slate-400">此项目的背景资料由项目包管理，可在项目资料中查看。</p>}
       {uploading ? <p role="status" className="text-sm">正在上传…</p> : null}
       {message ? <p role="status" className="text-sm text-emerald-200">{message}</p> : null}
+      {backupPath ? <details className="text-xs leading-5 text-slate-400"><summary className="cursor-pointer">查看旧版备份位置</summary><p className="mt-2 break-all">{project.folder_path}/{backupPath}</p></details> : null}
       {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
       <ProjectContextFiles key={revision} project={project.name} />
     </div>

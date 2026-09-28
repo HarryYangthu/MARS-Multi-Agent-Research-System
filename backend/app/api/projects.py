@@ -216,8 +216,6 @@ async def upload_project_background(name: str, request: Request,
                 raise HTTPException(status_code=413, detail="背景文档过大，请整理必要内容后上传")
             data.extend(chunk)
         return await to_thread(save_background, folder, filename, bytes(data))
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail="同名背景文档已存在，请重命名后上传；原文件未覆盖") from exc
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

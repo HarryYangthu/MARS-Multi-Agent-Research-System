@@ -141,6 +141,8 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
         for path in sorted(snapshot.root.glob(pattern)):
             if path.is_file():
                 context[path.relative_to(snapshot.root).as_posix()] = path.read_text(encoding="utf-8")
+    from app.harness.project_workspace import is_generated_project_template
+    context = {name: content for name, content in context.items() if not is_generated_project_template(name, content)}
     frozen_commit = archive_source_commit(source_root=snapshot.root, git_dir=output / "source_commits/baseline.git",
         paths=[item.path for item in snapshot.manifest.files], environment=sanitized_subprocess_environment())
     atomic_json(output / "context/source.json", context)

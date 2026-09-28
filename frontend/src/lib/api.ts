@@ -2138,7 +2138,7 @@ export async function getIdeaMaterialContent(runId: string, materialId: string, 
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
 }
 
-export type ProjectContextDocument = { path: string; chars: number; sha256: string; role: string };
+export type ProjectContextDocument = { path: string; chars: number; sha256: string; role: string; is_template?: boolean };
 export type ProjectAutoContext = { project: string; folder: string; total_chars: number; files: ProjectContextDocument[]; warnings: string[] };
 export type ProjectFolders = { path: string; parent: string; directories: { name: string; path: string }[]; has_more: boolean };
 
@@ -2161,7 +2161,7 @@ export async function getProjectContextDocument(project: string, path: string, s
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
 }
 
-export async function uploadProjectBackground(project: string, file: File): Promise<ProjectContextDocument> {
+export async function uploadProjectBackground(project: string, file: File): Promise<ProjectContextDocument & { previous_path?: string }> {
   const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/background`);
   url.searchParams.set("filename", file.name);
   return jsonOrThrow(await boundedFetch(url, { method: "POST", headers: { "Content-Type": "text/markdown; charset=utf-8" }, body: file }));

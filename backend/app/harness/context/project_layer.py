@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from app.harness.project_workspace import project_root as resolve_project_root
-from app.harness.context.folder_context import load_folder_context
+from app.harness.context.folder_context import is_context_template, load_folder_context
 
 
 @dataclass
@@ -66,8 +66,8 @@ def build_project_layer(*, project: str, run_root: Path | None = None) -> Projec
     if folder is not None:
         return ProjectLayer(
             project=project, project_yaml=project_yaml, repo_link=repo_link,
-            agents_md="\n\n".join(f["content"] for f in folder["files"] if f["role"] == "instructions"),
-            context_docs=tuple((f["path"], f["content"]) for f in folder["files"] if f["role"] == "reference"),
+            agents_md="\n\n".join(f["content"] for f in folder["files"] if f["role"] == "instructions" and not is_context_template(f)),
+            context_docs=tuple((f["path"], f["content"]) for f in folder["files"] if f["role"] == "reference" and not is_context_template(f)),
             full_context=True,
         )
     return ProjectLayer(

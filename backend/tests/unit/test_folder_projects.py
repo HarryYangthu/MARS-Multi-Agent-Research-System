@@ -32,7 +32,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 def test_create_and_reopen_folder_has_stable_identity(tmp_path: Path, registry: Path) -> None:
     project = open_folder(str(tmp_path / "新项目"), create=True)
-    assert project.root.is_dir() and (project.root / "README.md").is_file()
+    assert project.root.is_dir() and not (project.root / "README.md").exists()
     assert (project.root / "AGENTS.md").is_file()
     assert project_root(project.name) == project.root / ".mars"
     assert open_folder(str(project.root)).name == project.name
@@ -51,6 +51,82 @@ def test_open_existing_does_not_overwrite_background_or_code(tmp_path: Path, reg
     open_folder(str(root))
     assert before == ((root / "README.md").read_bytes(), (root / "model.py").read_bytes())
     assert not (root / "AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_generated_templates_are_visible_but_not_injected_and_user_edits_are_preserved(
+    tmp_path: Path, registry: Path, legacy: bool,
+) -> None:
+    from app.harness.context.folder_context import render_folder_context
+    from app.harness.context.project_layer import build_project_layer
+    from app.harness.project_workspace import AGENTS_TEMPLATE
+
+    project = open_folder(str(tmp_path / "project"), create=True)
+    agents = project.root / "AGENTS.md"
+    if legacy:
+        agents.write_text("# 项目约定\n\n请补充研究目标、术语、约束和必须保留的接口。\n")
+        (project.root / "README.md").write_text(
+            "# project\n\n在这里记录项目目的和研究对象。\n\n"
+            "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n")
+    else:
+        assert agents.read_text() == AGENTS_TEMPLATE
+        assert all(label in AGENTS_TEMPLATE for label in ("由谁填写", "何时填写", "写什么", "本文件可选"))
+    before = agents.read_bytes()
+    record = discover_folder_context(project)
+    assert all(row["is_template"] for row in record["files"])
+    rendered = render_folder_context(record)
+    assert "请补充" not in rendered and "由谁填写" not in rendered and "在这里记录" not in rendered
+    layer = build_project_layer(project=project.name)
+    assert not layer.agents_md and not layer.context_docs
+    assert agents.read_bytes() == before
+    # Only exact unedited templates are excluded, never handwritten rules.
+    agents.write_text(agents.read_text() + "\nUser-confirmed baseline constraint.\n")
+    assert next(row for row in discover_folder_context(project)["files"] if row["path"] == "AGENTS.md")["is_template"] is False
+    assert "User-confirmed baseline constraint." in build_project_layer(project=project.name).agents_md
+
+
+def test_intermediate_legacy_templates_are_recognized_after_folder_rename() -> None:
+    from app.harness.project_workspace import is_generated_project_template
+
+    assert is_generated_project_template("AGENTS.md", "# 项目约定\n\n请补充项目约束、代码规范和必须保留的接口；本次研究目标在对话中填写。\n")
+    assert is_generated_project_template("README.md",
+        "# original-project-name\n\n在这里记录研究领域、术语与已有工作；本次研究目标在配置后的对话中填写。\n\n"
+        "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n")
+
+
+@pytest.mark.asyncio
+async def test_templates_are_omitted_from_rules_only_context_and_local_doc_search(tmp_path: Path, registry: Path) -> None:
+    from app.agents.idea.agent import IdeaAgent
+
+    project = open_folder(str(tmp_path / "project"), create=True)
+    agent = IdeaAgent()
+    context = await agent.build_context(RunRequest(project=project.name, user_request="Research", extra={
+        "context_sources": {"project_references": False, "project_rules": True, "code_repositories": False}}))
+    assert "由谁填写" not in context.project
+    result = await local_docs_tool({"query": "AGENTS.md"}, ToolContext("templates", project.name, "idea"))
+    assert result.ok and result.output["hits"] == []
+
+
+def test_old_context_snapshot_without_template_flag_is_unchanged_but_not_injected(tmp_path: Path, registry: Path) -> None:
+    from app.harness.context.folder_context import render_folder_context
+    from app.harness.context.project_layer import build_project_layer
+
+    project = open_folder(str(tmp_path / "project"), create=True)
+    (project.root / "AGENTS.md").write_text("# 项目约定\n\n请补充研究目标、术语、约束和必须保留的接口。\n")
+    record = discover_folder_context(project)
+    for document in record["files"]:
+        document.pop("is_template")
+    record["sha256"] = digest(record)
+    run_root = tmp_path / "legacy-run"
+    snapshot = run_root / "input/folder_context.v1.json"
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_text(json.dumps(record, ensure_ascii=False))
+    original_bytes = snapshot.read_bytes()
+    loaded = load_folder_context(project.name, run_root)
+    assert loaded == record
+    assert "请补充" not in render_folder_context(record)
+    assert not build_project_layer(project=project.name, run_root=run_root).agents_md
+    assert snapshot.read_bytes() == original_bytes
 
 
 @pytest.mark.parametrize("include_rules", [False, True])
@@ -88,7 +164,7 @@ def test_context_auto_discovers_nested_markdown_excludes_secrets_and_escapes(tmp
     outside.write_text("outside private notes")
     (project.root / "context/link.md").symlink_to(outside)
     record = discover_folder_context(project)
-    assert {f["path"] for f in record["files"]} == {"README.md", "AGENTS.md", "context/notes/method.md"}
+    assert {f["path"] for f in record["files"]} == {"AGENTS.md", "context/notes/method.md"}
     assert record["warnings"] and "outside private notes" not in str(record)
     with pytest.raises(ValueError, match="escapes"):
         resolve_allowed_path(load_project_repo(project.name), "context/link.md", require_exists=True)

@@ -121,7 +121,7 @@ class BaseAgent(ABC):
         required = request.extra.get("required_upstream_refs", [])
         if not isinstance(required, list) or any(x not in request.upstream_artifacts for x in required):
             raise ValueError("required_upstream_refs must name supplied upstream artifacts")
-        from app.harness.project_workspace import folder_project, project_root
+        from app.harness.project_workspace import folder_project, is_generated_project_template, project_root
         from app.harness.context.folder_context import load_folder_context, render_folder_context
         project_path = project_root(request.project)
         folder_context = (load_folder_context(
@@ -134,6 +134,8 @@ class BaseAgent(ABC):
             raise ValueError("project rules must remain inside the project folder")
         rules = (rules_path.read_text() if sources["project_rules"] and rules_path.is_file()
                  else "No project-specific rules supplied in this context.")
+        if folder is not None and is_generated_project_template("AGENTS.md", rules):
+            rules = "No project-specific rules supplied in this context."
         repositories = (load_agent_code_repositories(self.name, project=request.project)
                         if scope is None and sources["code_repositories"] else ())
         upstream = dict(request.upstream_artifacts)
