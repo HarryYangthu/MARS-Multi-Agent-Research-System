@@ -7,13 +7,14 @@ import { getAgentLlmConfig, updateAgentLlmConfig, testModelConnection, type Mode
 const INPUT = "mt-2 w-full rounded-lg border border-mars-border bg-mars-bg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400";
 const BUTTON = "rounded-lg border border-mars-border px-4 py-2 text-sm hover:bg-mars-panel2 disabled:opacity-40";
 
-export function OnboardingModelSetup({ onStatus }: { onStatus: (saved: boolean) => void }): JSX.Element {
+export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: boolean) => void; onBusy?: (busy: boolean) => void }): JSX.Element {
   const [config, setConfig] = useState<AgentLlmConfigView | null>(null);
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { onBusy?.(busy); }, [busy, onBusy]);
   const [testing, setTesting] = useState(false);
   const [connection, setConnection] = useState<ModelConnectionResult | null>(null);
   const testRequest = useRef<AbortController | null>(null);

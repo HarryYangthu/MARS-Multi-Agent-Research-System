@@ -1,5 +1,5 @@
-import { GettingStarted } from "@/components/GettingStarted";
+import { redirect } from "next/navigation";
 
-export default function OnboardingPage(): JSX.Element {
-  return <GettingStarted />;
+export default function OnboardingPage(): never {
+  redirect("/projects");
 }

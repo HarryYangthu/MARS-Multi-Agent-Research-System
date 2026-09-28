@@ -635,6 +635,6 @@ backend/app/bridge/research_stage_runtime.py
 backend/app/bridge/research_run_stop.py
 backend/app/bridge/project_onboarding.py
 frontend/src/app/onboarding/page.tsx
-frontend/src/components/GettingStarted.tsx
+frontend/src/components/ProjectSetupSteps.tsx
 frontend/src/components/OnboardingModelSetup.tsx
 backend/app/bridge/model_connection_test.py

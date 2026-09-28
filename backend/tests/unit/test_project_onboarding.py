@@ -91,3 +91,36 @@ def test_api_upload_preserves_bytes_and_rejects_duplicate_and_oversized_body(tmp
             assert (code / "context/background.md").read_text() == content
     finally:
         reset_settings_cache()
+
+
+def test_created_project_can_resume_setup_without_changing_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from app.settings import reset_settings_cache
+
+    monkeypatch.setenv("MARS_FOLDER_PROJECTS_REGISTRY", str(tmp_path / "registry.json"))
+    reset_settings_cache()
+    folder = tmp_path / "new-research"
+    try:
+        with TestClient(create_app()) as client:
+            created = client.post("/api/projects/folder", json={"path": str(folder), "create": True})
+            assert created.status_code == 200, created.text
+            name = created.json()["name"]
+            assert folder.is_dir() and (folder / ".mars").is_dir()
+            # Resume via the real folder API, as opening the project again does.
+            reopened = client.post("/api/projects/folder", json={"path": str(folder)})
+            assert reopened.status_code == 200 and reopened.json()["name"] == name
+            content = "# 背景\n继续配置时上传的研究资料。".encode()
+            uploaded = client.post(f"/api/projects/{name}/background", params={"filename": "背景.md"}, content=content)
+            assert uploaded.status_code == 201
+            assert (folder / "context/背景.md").read_bytes() == content
+            context = client.get(f"/api/projects/{name}/auto-context").json()
+            assert context["project"] == name
+            assert any(row["path"] == "context/背景.md" for row in context["files"])
+            other = client.post("/api/projects/folder", json={"path": str(tmp_path / "other"), "create": True})
+            assert other.status_code == 200 and other.json()["name"] != name
+            other_context = client.get(f"/api/projects/{other.json()['name']}/auto-context").json()
+            assert all(row["path"] != "context/背景.md" for row in other_context["files"])
+            assert not (tmp_path / "other/context/背景.md").exists()
+    finally:
+        reset_settings_cache()
