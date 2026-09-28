@@ -36,6 +36,9 @@ def split_handoff(label: str, text: str, optional_sections: list[str]) -> list[t
     # Only explicitly titled background sections may be offloaded. All metadata,
     # unknown sections, numerical requirements and unstructured prose stay exact.
     parts = re.split(r'(?m)(?=^#{1,6} )', text)
+    optional_titles = {s.casefold() for s in optional_sections}
+    if not any(p and p.splitlines()[0].lstrip('#').strip().casefold() in optional_titles for p in parts):
+        return [(Message('user', f'[untrusted upstream:{label}]\n{text}'), Material('upstream', label))]
     result = []
     for index, part in enumerate(parts):
         if not part:

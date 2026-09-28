@@ -125,3 +125,30 @@ def test_no_offload_when_reader_unavailable(tmp_path: Path) -> None:
 def test_incomplete_tool_pair_rejected() -> None:
     with pytest.raises(ValueError, match='incomplete tool'):
         pack_messages([Message('assistant','', (ToolCall('id','read','{}'),))], policy=load_policy(), budget=4000)
+
+
+@pytest.mark.asyncio
+async def test_real_material_dispatch_requires_host_read_scope(tmp_path: Path) -> None:
+    from app.harness.context.runtime_pack import store_material
+    from app.harness.tools.registry import ToolContext, get_registry
+    freeze_policy(tmp_path)
+    ref = store_material(tmp_path, Message('user', 'real archived background'))
+    registry = get_registry()
+    ctx = ToolContext('context-dispatch', 'synthetic_regression', 'idea', extra={'run_root': str(tmp_path)})
+    denied = await registry.dispatch('context.read_material', {'ref': ref}, ctx)
+    assert not denied.ok and denied.status == 'not_allowed'
+    ctx.supplemental_read_scope = registry.scope_for_read_tools('idea', ('context.read_material',))
+    result = await registry.dispatch('context.read_material', {'ref': ref}, ctx)
+    assert result.ok and result.output['content'] == 'real archived background'
+    with pytest.raises(ValueError, match='cannot authorize'):
+        registry.scope_for_read_tools('idea', ('code.apply_patch',))
+
+
+def test_explicit_model_capacity_is_validated() -> None:
+    from app.harness.llm.model_registry import configured_context_window, get_agent_config
+    config = get_agent_config('idea')
+    assert configured_context_window(replace(config, raw={'model': {'context_window': 32000}})) == 32000
+    assert configured_context_window(replace(config, raw={'model': {}})) is None
+    for invalid in (True, 0, '32000'):
+        with pytest.raises(ValueError, match='positive integer'):
+            configured_context_window(replace(config, raw={'model': {'context_window': invalid}}))

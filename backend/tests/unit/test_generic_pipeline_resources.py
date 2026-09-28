@@ -67,9 +67,11 @@ async def test_downstream_agents_reuse_one_real_project_knowledge_snapshot(tmp_p
     for agent_type in AGENTS:
         agent = agent_type()
         context = await agent.build_context(request_for("pimc", tmp_path / "run"))
-        assert "下游 Agent 的适用边界" in context.project
-        assert "Paper_Total_0327" in context.project
-        assert "不能保证泛化改善" in context.project
+        references = "\n".join(item["text"] for item in context.metadata["references"])
+        assert "下游 Agent 的适用边界" in references
+        assert "Paper_Total_0327" in references
+        assert "不能保证泛化改善" in references
+        assert "下游 Agent 的适用边界" not in context.project
         snapshots.append(context.metadata["project_knowledge"]["sha256"])
     assert len(set(snapshots)) == 1
     path = tmp_path / "run/input/project_knowledge.v1.json"

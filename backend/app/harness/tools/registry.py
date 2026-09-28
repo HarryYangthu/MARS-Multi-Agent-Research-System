@@ -56,6 +56,7 @@ class ToolContext:
     dry_run: bool = False
     approval_mode: str = "auto"
     configured_read_scope: ConfiguredReadToolScope | None = None
+    supplemental_read_scope: ConfiguredReadToolScope | None = None
 
 
 @dataclass
@@ -273,7 +274,10 @@ class ToolRegistry:
             _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
 
-        if not _allowed_for_agent(tool_name, ctx.agent, spec, configured_scope=ctx.configured_read_scope):
+        read_scope = ctx.configured_read_scope
+        if read_scope is None and ctx.supplemental_read_scope is not None and tool_name in ctx.supplemental_read_scope.tools:
+            read_scope = ctx.supplemental_read_scope
+        if not _allowed_for_agent(tool_name, ctx.agent, spec, configured_scope=read_scope):
             result = ToolResult(
                 ok=False,
                 error=f"tool '{tool_name}' is not allowed for agent '{ctx.agent}'",

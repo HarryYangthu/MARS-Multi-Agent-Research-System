@@ -1,4 +1,4 @@
-import { boundedFetch, CLIENT_POLICY } from "@/lib/clientPolicy";
+import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
 
 // Thin REST client. By default requests stay same-origin and Next rewrites
 // /api/* to the backend; NEXT_PUBLIC_BACKEND_URL remains available for

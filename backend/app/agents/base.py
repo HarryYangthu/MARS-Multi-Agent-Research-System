@@ -190,7 +190,7 @@ class BaseAgent(ABC):
             metadata[f"{self.name}_code_repository_count"] = len(repositories)
         if modern:
             metadata["code_profile"] = role_profile(runtime_policy, self.name)
-            if sources["code_repositories"] and (repositories or scope is not None):
+            if sources["code_repositories"] and (any(r.exists and r.repo_path for r in repositories) or scope is not None):
                 from app.harness.context.repo_index import repository_index
                 metadata["repository_index"] = repository_index(request.project, int(runtime_policy["index_files"]))
         self._prepare_runtime_context(request, upstream, metadata)
@@ -492,15 +492,20 @@ class BaseAgent(ABC):
         correlation.setdefault("trace_id", str(request.extra.get("run_id", run_root.name)))
         correlation.setdefault("node_id", str(request.extra.get("node_key", self.name)))
         correlation.setdefault("task_id", correlation["node_id"])
+        extra_read_tools: tuple[str, ...] = ()
         tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
         if context.metadata.get("runtime_policy", {}).get("version") == 3:
             extras = ["context.read_material"]
             if context.metadata.get("context_sources", {}).get("code_repositories", True):
                 extras.append("code.repo_reader")
-            tools = tuple(dict.fromkeys((*tools, *(name for name in extras if tool_config(name).enabled))))
+            extra_read_tools = tuple(name for name in extras if tool_config(name).enabled)
+            tools = tuple(dict.fromkeys((*tools, *extra_read_tools)))
         registry = self.loop_registry(request, context)
         read_tools = self.configured_read_tools()
+        if read_tools:
+            read_tools = tuple(dict.fromkeys((*read_tools, *extra_read_tools)))
         read_scope = registry.scope_for_read_tools(self.name, read_tools) if read_tools else None
+        supplemental_scope = registry.scope_for_read_tools(self.name, extra_read_tools) if extra_read_tools else None
         provider, config = self._select_provider()
 
         async def validate(text: str, observations: list[dict[str, Any]]) -> list[str]:
@@ -517,7 +522,7 @@ class BaseAgent(ABC):
             review_provider=review[0] if review else None, review_config=review[1] if review else None,
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
                                      project=request.project, agent=self.name,
-                                     extra={"run_root": str(run_root), "correlation": correlation}, configured_read_scope=read_scope),
+                                     extra={"run_root": str(run_root), "correlation": correlation}, configured_read_scope=read_scope, supplemental_read_scope=supplemental_scope),
             tools=tools, policy=self.loop_policy, trace_root=trace_root, validate=validate,
             correlation=correlation, context_metadata=dict(context.metadata),
             reflection_rubric=self.reflection_rubric(), resume=bool(request.extra.get("resume_invocation")),

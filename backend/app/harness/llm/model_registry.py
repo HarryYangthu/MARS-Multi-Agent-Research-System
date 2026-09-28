@@ -279,8 +279,17 @@ def _build_real_provider(
     return None
 
 
+def configured_context_window(agent_config: AgentConfig) -> int | None:
+    """Explicit operator-verified capacity; never infer a provider window."""
+    window = agent_config.raw.get("model", {}).get("context_window")
+    if window is not None and (type(window) is not int or window <= 0):
+        raise ValueError("model.context_window must be a positive integer")
+    return window
+
+
 def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
     """Select an explicitly configured real model; never substitute output."""
+    window = configured_context_window(agent_config)
     cfg = LLMConfig(
         provider=agent_config.model_provider,
         model=agent_config.model_name,
@@ -293,6 +302,7 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
         request_timeout_seconds=agent_config.request_timeout_seconds,
         max_retries=agent_config.max_retries,
         retry_base_delay_seconds=agent_config.retry_base_delay_seconds,
+        extra={"context_window": window} if window is not None else {},
     )
 
     if not provider_configured_for_agent(agent_config):

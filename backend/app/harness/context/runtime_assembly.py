@@ -10,8 +10,10 @@ from app.harness.llm.provider_base import Message
 def assemble_materials(base: list[Message], upstream: dict[str, str], metadata: dict[str, Any]) -> list[Message]:
     messages = list(base)
     materials: dict[str, dict[str, Any]] = {}
-    for m in messages:
-        materials[message_key(m)] = asdict(Material('rules_task', 'host/task'))
+    for index, m in enumerate(messages):
+        source = 'user/current task' if m.role == 'user' else {
+            0: 'platform/role', 1: 'project/AGENTS.md', 2: 'output/schema'}.get(index, 'host/rules')
+        materials[message_key(m)] = asdict(Material('rules_task', source))
     for item in metadata.get('references', []):
         m = reference_message('background', item['source'], item['text'])
         messages.append(m)

@@ -244,6 +244,7 @@ async def run_debate(
                 messages.append(
                     Message(role="assistant", content=f"上一轮发言：\n{last_text}")
                 )
+            actual_manifest_path = None
             if context.metadata.get("runtime_policy", {}).get("version") == 3:
                 from app.harness.context.runtime_pack import Material, pack_messages
                 from app.harness.context.runtime_policy import input_budget as effective_input_budget
@@ -255,7 +256,7 @@ async def run_debate(
                         output_reserve=cfg.max_tokens, model_window=cfg.extra.get("context_window")),
                     tools=cfg.tools, materials={k: Material(**v) for k,v in context.metadata.get("materials", {}).items()},
                     root=root, agent=agent_name, readback_available=False)
-                record_manifest(root, agent=agent_name, node=agent_name, project=request.project,
+                actual_manifest_path = record_manifest(root, agent=agent_name, node=agent_name, project=request.project,
                     messages=messages, tools=cfg.tools, manifest=packed_manifest, purpose=f"debate_{role}")
             _write_debate_manifest(
                 request=request,
@@ -279,6 +280,12 @@ async def run_debate(
                 except LLMCompletionError as exc:
                     if exc.reason.get("code") != "empty_final_content":
                         raise
+                    if actual_manifest_path is not None:
+                        from app.harness.context.runtime_manifest import record_usage
+                        record_usage(actual_manifest_path, exc.usage)
+                        actual_manifest_path = record_manifest(root, agent=agent_name, node=agent_name,
+                            project=request.project, messages=messages, tools=cfg.tools, manifest=packed_manifest,
+                            purpose=f"debate_{role}_empty_retry")
                     retry_notes.append(
                         f"{_role_label(role)}第 {r + 1} 轮返回空最终答案；"
                         "已执行有界重试 1/1（empty_final_content）。"
@@ -309,6 +316,9 @@ async def run_debate(
                         input_budget=AgentLoopPolicy.from_mapping(agent_config.raw.get("loop", {})).input_token_budget,
                         run_root=Path(str(request.extra.get("run_root") or request.runtime.get("run_root")))
                         if request.extra.get("run_root") or request.runtime.get("run_root") else None)
+                if actual_manifest_path is not None:
+                    from app.harness.context.runtime_manifest import record_usage
+                    record_usage(actual_manifest_path, completion.raw.get("usage"))
                 role_text = _validate_role_completion(
                     role=role,
                     text=completion.text,

@@ -11,15 +11,9 @@ from app.harness.context.runtime_pack import store_material
 from app.harness.llm.provider_base import Message
 
 
-def record_manifest(root: Path, *, agent: str, node: str, project: str, messages: list[Message],
-                    tools: tuple[dict[str, Any], ...], manifest: dict[str, Any], purpose: str = 'runtime') -> Path:
-    safe = re.sub('[^a-zA-Z0-9_-]', '_', agent)
-    identifier = f'context_manifest.v2.{safe}.{uuid.uuid4().hex}'
-    payload = {'messages': [m.to_wire() for m in messages], 'tools': tools}
-    payload_hash = digest(payload)
-    payload_ref = store_material(root, Message('user', json.dumps(payload, ensure_ascii=False)))
+def manifest_segments(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     native_segments = manifest.get('segments', [])
-    segments = [{**item, 'title': item['source'], 'source_ref': item['source'],
+    return [{**item, 'title': item['source'], 'source_ref': item['source'],
                  'priority': 'critical' if item['protected'] else 'medium',
                  'selection_reason': 'protected input' if item['protected'] else 'task material',
                  'compression': 'reference' if item['compression'] else 'none',
@@ -27,6 +21,16 @@ def record_manifest(root: Path, *, agent: str, node: str, project: str, messages
                  'content_hash': item['id'], 'text_preview': '',
                  'raw_ref': ('materials/' + item['refs'][0] + '.json') if item['refs'] else None}
                 for item in native_segments]
+
+
+def record_manifest(root: Path, *, agent: str, node: str, project: str, messages: list[Message],
+                    tools: tuple[dict[str, Any], ...], manifest: dict[str, Any], purpose: str = 'runtime') -> Path:
+    safe = re.sub('[^a-zA-Z0-9_-]', '_', agent)
+    identifier = f'context_manifest.v2.{safe}.{uuid.uuid4().hex}'
+    payload = {'messages': [m.to_wire() for m in messages], 'tools': tools}
+    payload_hash = digest(payload)
+    payload_ref = store_material(root, Message('user', json.dumps(payload, ensure_ascii=False)))
+    segments = manifest_segments(manifest)
     raw = {'schema': 'context_manifest.v2', 'manifest_id': identifier, 'run_id': root.name,
            'agent': agent, 'node_key': node, 'project': project, 'purpose': purpose,
            'created_at': datetime.now(timezone.utc).isoformat(), 'output_schema': '',

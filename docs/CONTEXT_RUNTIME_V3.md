@@ -24,7 +24,7 @@ Count the complete messages and tool definitions once. The current estimator is 
 UTF-8 serialized byte upper bound, **not an exact tokenizer count**. Provider-reported input usage
 is recorded separately when available. Effective input limit is the smaller of the configured input
 budget and a supplied model context window minus output reserve and safety margin. Without a verified
-window value the configured input ceiling remains in force; no provider window is guessed.
+window value (`agents.<role>.model.context_window`) the configured input ceiling remains in force; no provider window is guessed.
 
 At 80% compact toward 65%. Restore already-compacted units first so resumed calls do not repeatedly
 rehydrate or summarize old inputs. Priority: exact duplicates, old tool observations, completed history,
@@ -41,7 +41,10 @@ conclusions, and active upstream requirements remain lossless.
 
 ## Runtime records and UI
 
-Native act/repair/review and debate use the common packer. New Commander sessions retain the original
+Native act/repair/review, delegated literature research and debate use the common packer.
+Delegated authors and reviewers receive the project reference material as data, separately from project rules.
+Additional runtime read tools are authorized by a host-created read scope, validated against the effective
+tool configuration; this does not grant writes or bypass project boundaries. New Commander sessions retain the original
 dialogue instead of destructive message-count rollups, and use the same packer before each call.
 Legacy sessions keep their recorded version. Actual outgoing messages and tool schemas are hashed
 and archived; manifests include component counts, selection/compaction decisions and provider usage.
@@ -55,3 +58,16 @@ Pure contracts and real temporary-file tests cover trigger boundaries, protected
 integrity, failure/review evidence, paging, tamper/path checks, exact payload hashes, and snapshot restore.
 Live provider/tool checks are a separate acceptance layer; they do not prove scientific research quality
 or successful PIMC simulation. Research baselines, credentials and run originals are never committed.
+
+### Verification recorded on 2026-09-29
+
+- Backend + synthetic-project full regression: 3,526 passed, 181 skipped (external archives,
+  network, target-platform conditions or optional binaries were unavailable); no failures.
+- Follow-up targeted checks cover delegated background carriage, effective readback authorization,
+  debate accounting and explicit model capacity. No provider/tool substitutes were used.
+- Strict mypy: 656 source files; frontend typecheck, context smoke and production build passed.
+- Browser preview at port 3012 displays material rows, component costs and “planning preview / not sent”; no page errors.
+- Real-provider diagnostics are run by `scripts/verify_context_v3_live.py`. The script creates local
+  diagnostic inputs, invokes the configured Idea model and registered tools, interrupts after the
+  actual file read and resumes the same checkpoint. Its receipt distinguishes mechanism validation
+  from scientific acceptance. Failures remain failures; they are not converted to example outputs.

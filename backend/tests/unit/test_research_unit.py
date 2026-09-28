@@ -323,3 +323,23 @@ def test_loader_requires_original_unit_request_even_in_whole_mode(tmp_path: Path
     with pytest.raises(ValueError, match="requires a run-relative path"):
         load_delegated_research(tmp_path, [observation])
     assert {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths} == before
+
+
+def test_delegated_runtime_carries_reference_background_and_readback_scope(tmp_path: Path) -> None:
+    from app.harness.context.runtime_pack import message_key
+    from app.harness.context.runtime_policy import load_policy
+    session = _session(tmp_path, enabled=False)
+    session.context.metadata.update(runtime_policy=load_policy(), references=[
+        {'source': 'README.md', 'text': 'Background supplied by the project owner.'}])
+    messages = session.author_messages(_args(), refs=[], minimum=1,
+        policy=AgentLoopPolicy.from_mapping(session.config.raw['loop']))
+    reference = next(m for m in messages if 'Background supplied by the project owner.' in m.content)
+    assert reference.role == 'user'
+    metadata = session.runtime_context_metadata()
+    assert metadata['runtime_policy']['version'] == 3
+    assert metadata['materials'][message_key(reference)]['protected'] is False
+    assert 'context.read_material' in session.runtime_tools()
+    tool_context = session.research_tool_context(run_id='unit-contract', project='pimc', root=tmp_path)
+    assert tool_context.configured_read_scope is not None
+    assert 'context.read_material' in tool_context.configured_read_scope.tools
+    assert session.supplied_context([])['project reference: README.md'] == 'Background supplied by the project owner.'

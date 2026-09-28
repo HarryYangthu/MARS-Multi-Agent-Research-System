@@ -359,7 +359,9 @@ def test_base_agent_uses_bound_rules_and_declared_knowledge_without_same_name_co
         extra={"context_sources": {"agent_resources": False}})
     with bind_project_scope(scope):
         pack = asyncio.run(agent.build_context(request))
-        assert "SECOND_DOMAIN" in pack.project and "MSE" in pack.project
+        assert "SECOND_DOMAIN" in pack.project
+        assert "MSE" in "\n".join(item["text"] for item in pack.metadata["references"])
+        assert "MSE" not in pack.project
         assert "stream_label" not in pack.project and "-26" not in pack.project
         assert "experiment_code_repositories" not in pack.upstream
         assert "approved_memory" not in pack.upstream and pack.metadata["memory"]["state"] == "not_bound"

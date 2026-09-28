@@ -25,6 +25,8 @@ def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedbac
             failed = '"ok":false' in m.content
             # Failures and review evidence cannot be silently removed as old history.
             materials[key] = Material('tool', 'actual tool observation', failed or bool(options.get('reviewing')))
+        elif m.content.startswith(('[untrusted current candidate', '[untrusted action receipt index')):
+            materials[key] = Material('history', 'active candidate and receipt index', True)
     messages, manifest = pack_messages(full, policy=policy, budget=budget, tools=tools,
         materials=materials, root=root, previous=previous, agent=agent, readback_available=readback_available)
     manifest['estimated_upper_bound_tokens'] = manifest['used'] - manifest['tool_schema_upper_bound_tokens']
