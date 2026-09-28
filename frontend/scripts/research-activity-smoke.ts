@@ -22,3 +22,16 @@ assert.equal(groupConversationEntries(entries).length, 3);
 assert.equal(groupConversationEntries(conversationEntries([], projected)).length, 1);
 assert.deepEqual(runActivities(worklog, obs).map(row => row.id), projected.map(row => row.id));
 console.log("Research activity projection checks passed");
+
+// Default review focus follows actionable work, including retried stages.
+import { latestStages, reviewFocus, artifactBody } from "../src/lib/runReview";
+import type { RunDetail } from "../src/lib/api";
+const run: RunDetail = { run_id: "r", project: "p", task: "t", entrypoint: "experiment", created_at: "", status: "running", states: { idea: "skipped", experiment: "failed", experiment_attempt_2: "waiting_review", coding: "pending" }, graph: { nodes: [], edges: [], entrypoints: ["experiment"] } };
+assert.equal(reviewFocus(run, ""), "experiment");
+assert.equal(reviewFocus(run, "commander"), "experiment");
+assert.equal(reviewFocus(run, "coding"), "coding");
+assert.equal(latestStages(run).find(item => item.stage === "experiment")?.state, "waiting_review");
+assert.equal(reviewFocus({ ...run, states: { idea: "skipped", experiment: "done", coding: "running" } }, ""), "coding");
+assert.equal(artifactBody("---\nschema: experiment_plan.v1\n---\n# Human-readable plan"), "# Human-readable plan");
+assert.equal(artifactBody("# Plan\n---\nKeep this rule"), "# Plan\n---\nKeep this rule");
+console.log("Simple review focus checks passed");

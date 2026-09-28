@@ -1331,7 +1331,7 @@ export async function rollbackToolCall(
 // ---------- artifacts ----------
 export async function listVersions(runId: string, agentDir: string, stem: string) {
   return jsonOrThrow<{ version: string; path: string; filename: string }[]>(
-    await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/versions`),
+    await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/versions`),
   );
 }
 export async function getArtifact(
@@ -1341,7 +1341,7 @@ export async function getArtifact(
   version: string,
 ): Promise<ArtifactView> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}`),
+    await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}`),
   );
 }
 export async function getWorkspaceFile(
