@@ -6,19 +6,27 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/TopBar";
 import { NewResearchWizard } from "@/components/NewResearchWizard";
+import { ResearchConversation } from "@/components/ResearchConversation";
+import { useProject } from "@/lib/project";
 
 const LegacyResearchForm = dynamic(() => import("@/components/LegacyResearchForm"), {
   loading: () => <p role="status" className="p-8 text-sm text-slate-400">正在加载旧项目表单…</p>,
 });
 
 export default function NewResearchPage(): JSX.Element {
-  return <Suspense fallback={<p role="status" className="p-8 text-slate-400">正在打开研究向导…</p>}><NewResearchPageInner /></Suspense>;
+  return <Suspense fallback={<p role="status" className="p-8 text-slate-400">正在打开研究对话…</p>}><NewResearchPageInner /></Suspense>;
 }
 function NewResearchPageInner(): JSX.Element {
   const params = useSearchParams();
-  // Explicit old stage links remain advanced entries. The single main entry
-  // has no query string and always opens the generic contract wizard.
+  const { selectedProject, projects, loading, error } = useProject();
+  const project = projects.find((item) => item.name === selectedProject);
+  // Keep explicit contract/stage forms available through advanced links.
   if (params?.get("mode") === "legacy" || params?.has("entrypoint")) return <LegacyResearchForm />;
+  if (params?.get("mode") !== "contract") return <div className="flex h-dvh min-h-0 flex-col bg-mars-bg"><TopBar />
+    <main className="flex min-h-0 flex-1 flex-col">
+      {loading ? <p role="status" className="p-8 text-sm text-slate-400">正在读取项目…</p> : error ? <p role="alert" className="p-8 text-sm text-amber-200">{error}</p> : project ? <ResearchConversation key={project.name} project={project.name} name={project.display_name || project.name} /> : <div className="m-auto space-y-4 text-center"><p>先选择一个项目，再开始研究。</p><Link href="/projects" className="inline-block rounded-lg bg-mars-accent px-4 py-2 text-sm">选择项目</Link></div>}
+    </main>
+  </div>;
   return <div className="grid h-screen grid-rows-[auto_1fr] bg-mars-bg"><TopBar />
     <main className="mx-auto w-full max-w-5xl overflow-y-auto px-4 py-6 sm:px-6 sm:py-8">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-100">新建研究</h1>

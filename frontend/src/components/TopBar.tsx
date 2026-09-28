@@ -44,7 +44,7 @@ export function TopBar(): JSX.Element {
       </nav>
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <ProjectSwitcher compact />
-        {pathname !== "/runs/new" ? <Link href="/runs/new" className="rounded-md bg-mars-accent px-3 py-2 text-sm font-medium text-white hover:brightness-110">{zh ? "新建研究" : "New research"}</Link> : null}
+        {pathname !== "/runs/new" ? <Link href="/runs/new" className="rounded-md bg-mars-accent px-3 py-2 text-sm font-medium text-white hover:brightness-110">{zh ? "启动研究" : "Start research"}</Link> : null}
         <details className="relative">
           <summary className="cursor-pointer rounded-md border border-mars-border px-3 py-2 text-xs text-slate-300">{zh ? "高级" : "Advanced"}</summary>
           <div className="absolute right-0 top-full mt-2 w-72 space-y-3 rounded-lg border border-mars-border bg-mars-panel p-4 shadow-xl">
@@ -53,6 +53,7 @@ export function TopBar(): JSX.Element {
             <div className="grid gap-2 text-sm text-slate-300">
               <Link href="/lab">{zh ? "实验曲线" : "Experiment curves"}</Link>
               <Link href="/context">{zh ? "上下文详情" : "Context details"}</Link>
+              <Link href="/runs/new?mode=contract">{zh ? "研究合同表单" : "Research contract form"}</Link>
               <Link href="/entries">{zh ? "阶段调试入口" : "Stage debugging"}</Link>
               <Link href="/v31/runs/new">{zh ? "实验性模型发现" : "Experimental discovery"}</Link>
             </div>
