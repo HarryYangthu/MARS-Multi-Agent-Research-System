@@ -6,7 +6,7 @@ import { ProjectContextFiles } from "./ProjectContextFiles";
 import { ProjectSetupSteps } from "./ProjectSetupSteps";
 
 export function FolderProjectDialog({ mode, current, onClose, onOpened }: {
-  mode: "create" | "open" | "context";
+  mode: "create" | "open" | "context" | "configure";
   current?: ProjectSummary;
   onClose: () => void;
   onOpened: (project: ProjectSummary) => Promise<void>;
@@ -15,15 +15,15 @@ export function FolderProjectDialog({ mode, current, onClose, onOpened }: {
   const [path, setPath] = useState("");
   const [folderName, setFolderName] = useState("");
   const [folders, setFolders] = useState<ProjectFolders | null>(null);
-  const [opened, setOpened] = useState<ProjectSummary | null>(mode === "context" ? current ?? null : null);
-  const [busy, setBusy] = useState(mode !== "context");
-  const [configuring, setConfiguring] = useState(mode === "create");
+  const [opened, setOpened] = useState<ProjectSummary | null>((mode === "context" || mode === "configure") ? current ?? null : null);
+  const [busy, setBusy] = useState(mode === "create" || mode === "open");
+  const [configuring, setConfiguring] = useState(mode === "create" || mode === "configure");
   const [setupBusy, setSetupBusy] = useState(false);
   const locked = busy || setupBusy;
   const [error, setError] = useState("");
   useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close(); }, []);
   useEffect(() => {
-    if (mode === "context") return;
+    if (mode === "context" || mode === "configure") return;
     const controller = new AbortController();
     void browseProjectFolders("", controller.signal).then((data) => { if (!controller.signal.aborted) { setFolders(data); setPath(data.path); } }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)); }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();

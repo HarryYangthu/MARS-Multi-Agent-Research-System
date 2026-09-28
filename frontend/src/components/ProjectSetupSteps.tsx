@@ -45,7 +45,7 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     <div hidden={step !== 1}><OnboardingModelSetup onStatus={setApiSaved} onBusy={setModelBusy} /></div>
     {step === 2 ? <div className="space-y-4">
       <p className="text-sm leading-6 text-slate-400">添加研究背景、目标、已有方法和不能改动的部分。代码可放入上方项目文件夹，README.md 会自动读取；背景资料也可以稍后补充。</p>
-      <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传背景 Markdown<input aria-label="上传背景 Markdown" type="file" accept=".md,text/markdown" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">保存到本项目的 context/ 文件夹，同名文件不会覆盖。文档作为背景参考，不替代你的操作指令。</span></label>
+      {project.project_type === "folder" ? <label className="block rounded-lg border border-dashed border-indigo-400/40 p-4 text-sm">上传背景 Markdown<input aria-label="上传背景 Markdown" type="file" accept=".md,text/markdown" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /><span className="mt-3 block text-xs leading-5 text-slate-400">保存到本项目的 context/ 文件夹，同名文件不会覆盖。文档作为背景参考，不替代你的操作指令。</span></label> : <p className="text-sm text-slate-400">此项目的背景资料由项目包管理，可在项目资料中查看。</p>}
       {uploading ? <p role="status" className="text-sm">正在上传…</p> : null}
       {message ? <p role="status" className="text-sm text-emerald-200">{message}</p> : null}
       {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
@@ -53,7 +53,7 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     </div> : null}
     {step === 3 ? <div className="space-y-4 text-sm leading-6">
       <p className="text-slate-400">{apiSaved ? "已保存模型配置。" : "API 可稍后在模型连接设置中配置。"}你可以开始整理代码和资料，或继续填写研究目标。</p>
-      <p className="text-slate-400">关闭后，仍可从此项目的「项目资料」继续配置。</p>
+      <p className="text-slate-400">关闭后，仍可从此项目的「项目配置」继续操作。</p>
       <p className="text-xs text-amber-200">当前可保存研究任务，完整研究启动尚未开放。</p>
     </div> : null}
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-mars-border pt-4">
