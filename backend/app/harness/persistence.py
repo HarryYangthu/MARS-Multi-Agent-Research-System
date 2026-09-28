@@ -22,13 +22,13 @@ _LOCKS_GUARD = threading.Lock()
 
 
 @contextmanager
-def path_lock(path: Path) -> Iterator[None]:
+def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     """Serialize a logical transaction, including across worker processes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     key = str(path.resolve())
     with _LOCKS_GUARD:
         lock = _LOCKS.setdefault(key, FileLock(key))
-    with lock:
+    with lock.acquire(timeout=timeout):
         yield
 
 

@@ -10,7 +10,9 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import re
+from statistics import mean
 from typing import Any
 
 from loguru import logger
@@ -20,6 +22,10 @@ from app.bridge.agent_progress import build_agent_progress_sink
 from app.bridge.commander_agent import load_feedback_context_for_agent
 from app.bridge.node_key import parse_node_key
 from app.bridge.task_runtime import admit_handoffs, bind_task
+from app.bridge.research_run_service import load_run_research_contract
+from app.bridge.research_stage_runtime import (
+    BoundResearchStage, load_bound_research_stage, record_research_stage_result, research_stage_dispatch,
+)
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.runtime.task_contract import FailureEnvelope, ResultEnvelope
 from app.harness.execution_intent import (
@@ -27,6 +33,7 @@ from app.harness.execution_intent import (
     wants_execution_sweep,
 )
 from app.harness.llm.provider_base import LLMCompletionError
+from app.harness.llm.accounting import RunModelBudget
 from app.harness.schema.frontmatter_parser import parse as parse_fm
 from app.settings import get_settings
 from app.storage.data_source_store import selection_summary
@@ -43,6 +50,38 @@ async def run_agent_node(
     registry: AgentRegistry | None = None,
     resume_invocation: str | None = None,
     predecessor_task_ids: list[str] | None = None,
+) -> None:
+    """Use the same runner, with sealed SQL ownership for contract-backed work."""
+    from app.harness.runtime.state_journal import StateJournal
+    authority = StateJournal.from_authority(run.root, run_id=run.run_id)
+    saved_request = authority.read().get("request", {}) if authority is not None else {}
+    saved_extra = saved_request.get("extra", {}) if isinstance(saved_request, dict) else {}
+    if not isinstance(saved_extra, dict):
+        raise ValueError("Agent request authority has invalid options")
+    if load_run_research_contract(run, saved_extra if authority is not None else None) is None:
+        await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
+            resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
+        return
+    if revision_reason:
+        raise ValueError("Contract revisions require a new bound graph attempt; legacy revision dispatch is unavailable")
+    selected = registry if registry is not None else get_registry()
+    stage = load_bound_research_stage(run, node_key, agent=selected.get(parse_node_key(node_key).stage))
+    if predecessor_task_ids is not None and predecessor_task_ids != stage.task.predecessor_task_ids:
+        raise ValueError("Caller dependencies differ from the authoritative stage")
+    with research_stage_dispatch(stage, resume_invocation=resume_invocation):
+        await _execute_agent_node(run, node_key, bus=bus, registry=selected, research_stage=stage)
+
+
+async def _execute_agent_node(
+    run: RunHandle,
+    node_key: str,
+    *,
+    bus: Any | None = None,
+    revision_reason: str = "",
+    registry: AgentRegistry | None = None,
+    resume_invocation: str | None = None,
+    predecessor_task_ids: list[str] | None = None,
+    research_stage: BoundResearchStage | None = None,
 ) -> None:
     """Default NodeRunner: look the agent up by key, draft, validate, persist.
 
@@ -69,7 +108,8 @@ async def run_agent_node(
         if dir_name != stage:
             continue
         if (
-            attempt == 1
+            research_stage is None
+            and attempt == 1
             and not revision_reason
             and resume_invocation is None
             and (run.subdir(stage) / f"{stem}.v1.md").exists()
@@ -83,13 +123,18 @@ async def run_agent_node(
         return
 
     # Build a RunRequest from on-disk state.
-    user_request = ""
+    user_request = research_stage.task.goal if research_stage is not None else ""
     user_request_path = run.subdir("input") / "user_request.md"
-    if user_request_path.exists():
+    if research_stage is None and user_request_path.exists():
         user_request = user_request_path.read_text(encoding="utf-8")
 
-    upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
-    admit_handoffs(run, node_key, supplied_context=upstream)
+    if research_stage is None:
+        upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+        admit_handoffs(run, node_key, supplied_context=upstream)
+    else:
+        upstream, feedback_context = dict(research_stage.upstream), {}
+        from app.bridge.research_stage_runtime import validate_bound_handoffs
+        validate_bound_handoffs(research_stage)
     if revision_reason:
         run.write_event(
             "agent_events",
@@ -114,7 +159,9 @@ async def run_agent_node(
     debate_path = run.subdir(stage) / transcript_name
     debate_path.parent.mkdir(parents=True, exist_ok=True)
 
-    request_extra = _load_run_request_extra(run)
+    # Mutable legacy request options cannot override the sealed context, choose
+    # skills, or change model/execution behavior for contract-backed stages.
+    request_extra = _load_run_request_extra(run) if research_stage is None else {}
     skill_selection = request_extra.get("selected_skills_by_agent", {})
     if not isinstance(skill_selection, dict):
         raise ValueError("selected_skills_by_agent must be an object")
@@ -122,7 +169,7 @@ async def run_agent_node(
     if not isinstance(selected_skills, list) or any(not isinstance(name, str) for name in selected_skills):
         raise ValueError("selected skills must be explicit names")
     request_extra["skills"] = selected_skills
-    task = bind_task(run, node_key, goal=user_request, upstream=upstream,
+    task = research_stage.task if research_stage is not None else bind_task(run, node_key, goal=user_request, upstream=upstream,
                     output_schema=str(agent.output_schema), resume_invocation=resume_invocation,
                     predecessor_task_ids=predecessor_task_ids)
     request_extra.update(task.model_dump(include={"task_id", "parent_task_id", "node_id", "invocation_id", "parent_invocation_id"}))
@@ -153,6 +200,10 @@ async def run_agent_node(
     try:
         context = await agent.build_context(request)
 
+        if revision_reason and resume_invocation is None:
+            failure_phase = "resource_revision"
+            RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
+
         failure_phase = "draft"
         run_loop = getattr(agent, "run_loop", None)
         if callable(run_loop):
@@ -161,11 +212,11 @@ async def run_agent_node(
             artifact = await agent.draft(request, context)
     except Exception as exc:
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
-            code="agent_execution_failed", message=str(exc) or type(exc).__name__, outcome_known=False,
+            code="agent_execution_failed", message=("Contract Agent execution failed; inspect its native receipts"
+                if research_stage is not None else str(exc) or type(exc).__name__), outcome_known=False,
             evidence_refs=[f"agent_traces/{stage}/{task.invocation_id}"])
-        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-                    ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
-                                   status="failed", failure=failure).model_dump())
+        _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+                                   status="failed", failure=failure))
         _write_agent_failure_diagnostic(
             run=run,
             node_key=node_key,
@@ -187,15 +238,13 @@ async def run_agent_node(
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
             code="output_schema_invalid", message=str(validation.first_error()),
             evidence_refs=[target.relative_to(run.root).as_posix()])
-        atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-            ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="invalid",
-                           failure=failure).model_dump())
+        _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
+                           status="invalid", failure=failure))
         raise ArtifactValidationError(validation)
     ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
-    atomic_json(run.root / "input/task_results" / (task.invocation_id + ".json"),
-        ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
+    _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
             artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
-            artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()).model_dump())
+            artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()))
 
     logger.info("agent {} wrote {}", node_key, ref.path.relative_to(run.root))
     try:
@@ -281,6 +330,13 @@ async def run_agent_node(
 
     # Long-term Memory writes happen only after HITL/auto approval. Drafts stay
     # in the run directory and review queue until promoted to *.approved.md.
+
+
+def _save_stage_result(run: RunHandle, stage: BoundResearchStage | None, result: ResultEnvelope) -> None:
+    if stage is not None:
+        record_research_stage_result(stage, result)
+    else:
+        atomic_json(run.root / "input/task_results" / (result.invocation_id + ".json"), result.model_dump())
 
 
 def _write_agent_failure_diagnostic(
@@ -520,107 +576,63 @@ def _summarize_execution_batch(*, batch: dict[str, Any], source_ref: str) -> str
 
 
 def _summarize_execution_metrics(*, rows: list[Any], source_ref: str) -> str:
+    """Summarize finite stored values without inventing metric direction or success.
+
+    The file alone does not define comparison policy. Keep source row identities
+    so callers can inspect receipts before making acceptance or ranking claims.
+    """
     metric_rows: list[dict[str, Any]] = []
-    for item in rows:
+    numeric: dict[str, list[float]] = {}
+    ignored_values = 0
+    for index, item in enumerate(rows):
         if not isinstance(item, dict):
             continue
         metrics = item.get("metrics")
         if not isinstance(metrics, dict):
             continue
-        metric_rows.append(
-            {
-                "run_id": item.get("run_id", ""),
-                "metrics": metrics,
-                "duration_seconds": item.get("duration_seconds"),
-            }
-        )
-    numeric: dict[str, list[float]] = {}
-    for item in metric_rows:
-        metrics = item["metrics"]
-        if not isinstance(metrics, dict):
-            continue
+        finite: dict[str, float] = {}
         for key, value in metrics.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                ignored_values += 1
+                continue
             try:
                 number = float(value)
-            except (TypeError, ValueError):
+            except OverflowError:
+                ignored_values += 1
                 continue
+            if not math.isfinite(number):
+                ignored_values += 1
+                continue
+            finite[str(key)] = number
             numeric.setdefault(str(key), []).append(number)
+        run_id = item.get("run_id")
+        metric_rows.append({"source_row": index, "run_id": run_id if isinstance(run_id, str) else "",
+                            "metrics": finite})
 
     lines = [
         "# Actual execution metrics",
         f"source: {source_ref}",
-        "This is measured post-run evidence. Do not describe the batch as unexecuted if this section is present.",
+        "These are stored post-run metric records, not an execution plan. Verify job status and provenance in the original receipts.",
+        "Metric direction, units, targets and comparison protocol must come from this task's approved contract; no ranking or goal decision is inferred here.",
         f"- rows: {len(metric_rows)}",
+        f"- omitted_non_numeric_or_non_finite_values: {ignored_values}",
     ]
     for key in sorted(numeric):
         values = numeric[key]
         if not values:
             continue
-        mean = sum(values) / len(values)
         lines.append(
-            f"- {key}: min={min(values):.6g}, max={max(values):.6g}, mean={mean:.6g}"
+            f"- {key}: min={min(values):.6g}, max={max(values):.6g}, mean={mean(values):.6g}, count={len(values)}"
         )
-
-    best_res = _best_metric_row(metric_rows, metric="RES", lower_is_better=True)
-    if best_res is not None:
-        lines.append(
-            "- best_RES: run_id={run_id}, RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
-                run_id=best_res.get("run_id", ""),
-                res=_metric_value(best_res, "RES"),
-                loss=_metric_value(best_res, "loss"),
-                pim=_metric_value(best_res, "PIM"),
-                ape=_metric_value(best_res, "APE"),
-            )
-        )
-    top_rows = sorted(
-        metric_rows,
-        key=lambda item: float(_metric_value(item, "RES", default=999999.0)),
-    )[:5]
-    if top_rows:
-        lines.append("## Top rows by lower RES")
-        for item in top_rows:
-            lines.append(
-                "- {run_id}: RES={res}, loss={loss}, PIM={pim}, APE={ape}".format(
-                    run_id=item.get("run_id", ""),
-                    res=_metric_value(item, "RES"),
-                    loss=_metric_value(item, "loss"),
-                    pim=_metric_value(item, "PIM"),
-                    ape=_metric_value(item, "APE"),
-                )
-            )
+    if not numeric:
+        lines.append("- finite measurements: unavailable; no outcome can be established from these records")
+    if metric_rows:
+        lines.append("## First stored rows in source order (not ranked)")
+        for item in metric_rows[:5]:
+            lines.append("- " + json.dumps(item, ensure_ascii=False, sort_keys=True, allow_nan=False))
+        if len(metric_rows) > 5:
+            lines.append(f"- additional rows: {len(metric_rows) - 5}; inspect {source_ref} for all records")
     return "\n".join(lines)
-
-
-def _best_metric_row(
-    rows: list[dict[str, Any]],
-    *,
-    metric: str,
-    lower_is_better: bool,
-) -> dict[str, Any] | None:
-    candidates = [
-        item
-        for item in rows
-        if _metric_value(item, metric, default=None) is not None
-    ]
-    if not candidates:
-        return None
-    return sorted(
-        candidates,
-        key=lambda item: float(_metric_value(item, metric, default=0.0)),
-        reverse=not lower_is_better,
-    )[0]
-
-
-def _metric_value(
-    row: dict[str, Any],
-    metric: str,
-    *,
-    default: Any = "n/a",
-) -> Any:
-    metrics = row.get("metrics")
-    if not isinstance(metrics, dict):
-        return default
-    return metrics.get(metric, default)
 
 
 def _execution_intent_text(run: RunHandle) -> str:
@@ -665,7 +677,11 @@ async def _run_execution_batch(
 
     import json
 
+    from app.bridge.tensorboard_service import get_tensorboard_manager
+    from app.execution.tensorboard_writer import ExecutionScalars
+
     attempt = parse_node_key(node_key).attempt
+    scalars = ExecutionScalars(run.subdir("execution") / "tensorboard" / f"attempt_{attempt}")
     approved_execution_path = run.subdir("execution") / "run_log.approved.md"
     plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
     intent_text = _execution_intent_text(run)
@@ -739,6 +755,10 @@ async def _run_execution_batch(
     backend = str(execution_cfg.get("backend", "local_command") or "local_command")
     runtime_backend = get_settings().mars_execution_backend
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
+        try:
+            scalars.record(payload)
+        except Exception as exc:
+            logger.warning("TensorBoard metric write failed: {}", exc)
         if bus is not None:
             await bus.publish(channel, payload)
             # Mirror per-experiment events onto a single consolidated run channel
@@ -779,11 +799,24 @@ async def _run_execution_batch(
         for i, (name, cfg) in enumerate(abl_specs)
     ]
 
-    outcome = await run_batch(
-        specs,
-        config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
-        bus_publish=_publish,
-    )
+    display = get_tensorboard_manager()
+    try:
+        activation = await display.activate(run, attempt)
+        await _publish(f"run.{run.run_id}.execution", {"event": "execution.tensorboard_ready", **activation})
+    except Exception as exc:
+        logger.warning("TensorBoard display unavailable: {}", exc)
+        await _publish(f"run.{run.run_id}.execution", {"event": "execution.tensorboard_failed", "error": str(exc)})
+    phase = "failed"
+    try:
+        outcome = await run_batch(
+            specs,
+            config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
+            bus_publish=_publish,
+        )
+        phase = "failed" if outcome.failures else "completed"
+    finally:
+        scalars.close()
+        display.finish(run, phase)
 
     for r in outcome.results:
         write_run_log(run_root=run.root, result=r, project=run.project)

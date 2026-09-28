@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.bridge.extension_runtime import get_extension_runtime
 from app.harness.project_packs.registry import LoadedProjectPack
-from app.settings import repo_root
+from app.settings import get_settings, repo_root
 from app.harness.project_workspace import folder_project, list_folder_projects, open_folder, project_root
 from app.harness.context.folder_context import discover_folder_context
 from app.harness.agent_loop.trace import digest
@@ -27,6 +27,8 @@ class ProjectSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
     repo_path: str = ""
     repo_exists: bool = False
+    repo_read_only: bool = False
+    repo_role: str = ""
     pack_version: str | None = None
     contract_version: Literal["project_pack.v1"] | None = None
     capabilities: list[str] = Field(default_factory=list)
@@ -68,6 +70,8 @@ def _summary(project_dir: Path, name: str = "") -> ProjectSummary:
         tags=list(pj.get("tags", []) or []),
         repo_path=str(abs_path) if raw_path else "",
         repo_exists=bool(raw_path) and abs_path.exists(),
+        repo_read_only=bool(rl.get("read_only", False)),
+        repo_role=str(rl.get("repo_role", "")),
         folder_path=str(project_dir.parent) if project_dir.name == ".mars" else str(project_dir),
         project_type="folder" if project_dir.name == ".mars" else "configured",
     )
@@ -141,6 +145,23 @@ def open_project_folder(payload: OpenFolderPayload) -> ProjectSummary:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+class CodeFolderPayload(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+@router.put("/{name}/code-folder", response_model=ProjectSummary)
+def import_code_folder(name: str, payload: CodeFolderPayload) -> ProjectSummary:
+    from app.bridge.project_onboarding import bind_code_folder
+    try:
+        folder = folder_project(name)
+        if folder is None:
+            raise ValueError("请先创建或打开一个文件夹项目")
+        bind_code_folder(folder, payload.path)
+        return _summary(folder.metadata_root, folder.name)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/folders")
 def browse_project_folders(path: str = "") -> dict[str, Any]:
     root = Path(path).expanduser() if path else Path.home()
@@ -177,6 +198,26 @@ def project_context_record(name: str) -> dict[str, Any]:
                           "role": "instructions" if path.name == "AGENTS.md" else "reference"})
     return {"project": name, "folder": str(root), "files": files,
             "total_chars": sum(f["chars"] for f in files), "warnings": []}
+
+
+@router.post("/{name}/background", status_code=201)
+async def upload_project_background(name: str, request: Request,
+                                    filename: str = Query(min_length=1, max_length=240)) -> dict[str, Any]:
+    from asyncio import to_thread
+    from app.bridge.project_onboarding import save_background
+    try:
+        folder = folder_project(name)
+        if folder is None:
+            raise ValueError("请先通过打开文件夹接入项目，再上传背景资料")
+        limit = get_settings().mars_folder_context_max_chars * 4
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > limit:
+                raise HTTPException(status_code=413, detail="背景文档过大，请整理必要内容后上传")
+            data.extend(chunk)
+        return await to_thread(save_background, folder, filename, bytes(data))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{name}/auto-context")

@@ -1,25 +1,20 @@
 ---
 schema: code_spec.v1
-project: pimc
+project: "PROJECT_ID_FROM_TASK"
 agent: coding
-upstream_artifact: experiment_plan.approved.md
 target_lang: python
 baseline_compat:
-  preserved: true
-  rationale: "保持 forward(x, stream_label) 接口不变；新增 Paper_Router_v2，并与现有 Paper_Total_0327 并行保留。"
-files_changed:
-  - path: "libs/Model.py"
-    type: modified
-    risk: medium
-  - path: "tests/test_router_v2.py"
-    type: added
-    risk: low
+  preserved: false
+  rationale: "尚未检查；实际输出必须依据项目保护规则、接口和最终 diff 填写，不能从模板宣称兼容。"
+files_changed: []
 new_dependencies: []
 test_coverage:
-  unit_tests_added: 3
-  baseline_smoke_test: pass
+  unit_tests_added: 0
+  baseline_smoke_test: skipped
 ---
 
-# 代码规格
+# 代码规格格式参考
 
-正文使用中文描述补丁目标、涉及文件、兼容性保护、测试覆盖、风险等级与回滚方式。函数签名、类名、文件路径、命令和指标名保持原样。
+以上是未实施、未验证的字段结构，语言也须按实际项目填写。仅记录真实工具已落地的文件变更与实际检查；未执行的检查保持 skipped。缺少必要项目规则、源码或接口信息时明确阻断写入，不从模板补造文件、测试通过或兼容结论。
+
+正文用中文描述改动目的、允许与保护范围、实际 diff、参数接口、测试证据、必要依赖、风险和回滚方式。函数名、路径、命令等技术标识保持原样。

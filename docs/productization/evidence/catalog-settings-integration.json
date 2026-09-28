@@ -1,0 +1,37 @@
+{
+  "schema": "verification.catalog_settings_integration.v1",
+  "status": "passed",
+  "tests_passed": 3434,
+  "tests_skipped": 181,
+  "duration_seconds": 198.08,
+  "strict_mypy_files": 638,
+  "import_contracts": 4,
+  "frontend_build_id": "ff-frkrcV1rRSLgTrUJ47",
+  "source_sha256": {
+    "backend/app/bridge/research_templates.py": "143efc15ea855920cb5e0ef53832f19b2315f7d1f67972571bc42fbef3ac7371",
+    "backend/app/api/research_templates.py": "7e35017df353de707dc2d1651bd1f8557119e022cf2051891d165763bae34f88",
+    "backend/app/main.py": "e193fa6096fdceac6217d409144b2ee5e0b8fde1e6ee6ff66bebe8a01b12d1ca",
+    "backend/tests/unit/test_research_templates.py": "35528230331fe2ffa4fb3c01af2d8b0a4a0e57f3d2383c4ebd0ebfddb9ab005a",
+    "backend/app/bridge/capability_catalog_service.py": "7707e45edd2eac677bf1835432790ec6c7c18eede4217af319b1b9312ca7a8cc",
+    "backend/app/api/capabilities.py": "2d3fa2dfa6dcfece460c4fa8e1b064db0f82aa705b9747f67f3f540abdd4b743",
+    "frontend/src/components/CapabilityLibrary.tsx": "6634b88845483162ab4a3b0616237249e01ab12f8f5c0e1d95d914323bfd3836",
+    "frontend/src/lib/capabilityCatalog.ts": "32f86d37ce829908e5133746965e7bb66ec307b5bc3caf92b3d1ff49f0f7ac24",
+    "frontend/src/app/config/capabilities/page.tsx": "cfd71406f43d2948f6fb61a8b074e4f558cba0e0da41df73981d0d24116282cc",
+    "frontend/src/app/config/page.tsx": "9f0e48509764e3798bd24458d5e0a86815cac8f85d21e6fa2d31d27d299fbeea"
+  },
+  "evidence": {
+    "catalog-settings-full.log": "e5e07c37e10a2d22a3348ef614de57aa6dd72db76bef98fdda5ea10920b7cd4e",
+    "catalog-settings-full.xml": "950dd9f54115b74ea06949fa9fea31261e6c993b5080048fbfc290f86648cd5c",
+    "catalog-settings-full.mypy.log": "7b229dedd2827c8d51dab830da3148cfa4212cd6b0e1f7e09b03ebeab0373f14",
+    "catalog-settings-imports.log": "71ee7ae90b3aca75b211625e6bd9ccd52d19706616f10f41c5c56b548a69cf4c",
+    "catalog-settings-source-start.json": "dde3129e992753455288d10574ce1b266deabf13a8d6df6db7ffcd79f0126935"
+  },
+  "boundaries": [
+    "181 external/platform/legacy checkpoints skipped, not successful execution",
+    "Template copy/save and passive capability UI do not start managed research",
+    "No packaging, upgrade or release matrix conclusion"
+  ],
+  "ci_confirmed_before_this_commit": {
+    "ccf0a54": "Core compatibility CI and Windows native CPU launcher passed"
+  }
+}

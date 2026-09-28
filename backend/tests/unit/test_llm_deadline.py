@@ -16,6 +16,7 @@ from app.agents.debate.debate_runner import DebateMode, run_debate
 from app.bridge.commander import Commander
 from app.bridge.commander_session import CommanderSession
 from app.bridge.orchestrator import Orchestrator
+from app.harness.llm.accounting import run_resource_scope
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.llm.provider_base import LLMConfig, llm_call_deadline_seconds
 from app.storage.run_store import RunStore
@@ -60,7 +61,7 @@ async def test_actual_unavailable_endpoint_terminates_without_a_successful_answe
             store = RunStore(tmp_path / "runs")
             commander = Commander(orchestrator=Orchestrator(run_store=store), agent_config=config)
             session = CommanderSession(conv_id="deadline", project="pimc")
-            with pytest.raises(APIConnectionError):
+            with run_resource_scope(tmp_path / "commander"), pytest.raises(APIConnectionError):
                 await asyncio.wait_for(commander.handle_user_message(session, "Actual transport failure"), timeout=10)
             assert not [m for m in session.messages if m.role in {"assistant", "tool"}]
         else:

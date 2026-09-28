@@ -7,6 +7,7 @@ from multiprocessing.connection import Connection
 import os
 from pathlib import Path
 import socket
+import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
@@ -111,6 +112,56 @@ def test_policy_drift_and_persisted_policy_tampering_fail_closed(tmp_path: Path)
         owner.reserve(_messages(), _config(), {})
 
 
+def test_explicit_revision_adopts_policy_and_renews_time_without_refunding_usage(tmp_path: Path) -> None:
+    owner = RunModelBudget(tmp_path, configuration=_policy())
+    reservation = owner.reserve(_messages(), _config(), {"invocation_id": "old"})
+    owner.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    original = json.loads(owner.path.read_text())
+    original["started_at"] = time.time() - 3600
+    owner.path.write_text(json.dumps(original))
+    with pytest.raises(ResourceBudgetError, match="elapsed-time"):
+        owner.reserve(_messages(), _config(), {})
+
+    updated = RunModelBudget(tmp_path, configuration=_policy(max_model_requests=None))
+    updated.begin_revision(invocation_id="new", reason="Explicit user retry")
+    after = json.loads(owner.path.read_text())
+    assert after["requests"] == original["requests"]
+    assert after["started_at"] == original["started_at"]
+    assert after["revision_started_at"] > after["started_at"]
+    assert after["revisions"][0]["previous_configuration"] == original["configuration"]
+    assert after["configuration"] == updated.configuration
+    updated.begin_revision(invocation_id="new", reason="Explicit user retry")
+    assert json.loads(owner.path.read_text()) == after
+    next_request = updated.reserve(_messages(), _config(), {"invocation_id": "new"})
+    updated.settle(next_request, usage=None, complete=False, outcome="cancelled")
+    with pytest.raises(ResourceBudgetError, match="immutable"):
+        updated.begin_revision(invocation_id="new", reason="Changed reason")
+    with pytest.raises(ResourceBudgetError, match="fresh invocation"):
+        updated.begin_revision(invocation_id="old", reason="Cannot reuse old call")
+
+
+@pytest.mark.parametrize("limit,error", [("max_total_tokens", "total-token"), ("max_model_requests", "model-request")])
+def test_revision_keeps_aggregate_hard_limits(tmp_path: Path, limit: str, error: str) -> None:
+    budget = RunModelBudget(tmp_path, configuration=_policy())
+    reservation = budget.reserve(_messages(), _config(), {})
+    budget.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    changed = RunModelBudget(tmp_path, configuration=_policy(**{limit: reservation.tokens if limit == "max_total_tokens" else 1}))
+    changed.begin_revision(invocation_id="fresh", reason="Explicit retry")
+    with pytest.raises(ResourceBudgetError, match=error):
+        changed.reserve(_messages(), _config(), {})
+
+
+def test_revision_cannot_replace_policy_while_a_model_request_is_active(tmp_path: Path) -> None:
+    owner = RunModelBudget(tmp_path, configuration=_policy())
+    reservation = owner.reserve(_messages(), _config(), {})
+    updated = RunModelBudget(tmp_path, configuration=_policy(max_model_requests=None))
+    before = owner.path.read_bytes()
+    with pytest.raises(ResourceBudgetError, match="active"):
+        updated.begin_revision(invocation_id="new", reason="Explicit retry")
+    assert owner.path.read_bytes() == before
+    owner.settle(reservation, usage=None, complete=False, outcome="cancelled")
+
+
 def test_configuration_is_an_immutable_snapshot(tmp_path: Path) -> None:
     supplied = _policy(max_model_requests=1)
     budget = RunModelBudget(tmp_path, configuration=supplied)
@@ -159,9 +210,15 @@ def test_only_explicit_request_null_is_unlimited(tmp_path: Path, key: str, value
         RunModelBudget(tmp_path, configuration=missing)
 
 
-def test_actual_resource_configuration_has_no_request_count_ceiling(tmp_path: Path) -> None:
+def test_actual_resource_configuration_has_finite_product_limits(tmp_path: Path) -> None:
     budget = RunModelBudget(tmp_path)
-    assert budget.configuration["limits"]["max_model_requests"] is None
+    limits = budget.configuration["limits"]
+    assert limits["max_model_requests"] == 60
+    assert limits["max_total_tokens"] == 1_128_000
+    assert limits["max_parallel_model_calls"] == 2
+    assert limits["max_elapsed_seconds"] == 5_400
+    assert budget.configuration["currency"] == "CNY"
+    assert limits["max_cost"] is None  # Prices are unknown, not zero.
 
 
 def test_crashed_request_requires_explicit_reconciliation_without_refunding_unknown_usage(tmp_path: Path) -> None:
@@ -181,6 +238,8 @@ def test_crashed_request_requires_explicit_reconciliation_without_refunding_unkn
     with pytest.raises(ResourceReconciliationRequired, match=request_id):
         fresh.reserve(_messages(), _config(), {})
     assert fresh.recover_abandoned() == (request_id,)
+    with pytest.raises(ResourceReconciliationRequired, match="reconciliation"):
+        fresh.begin_revision(invocation_id="new", reason="A retry cannot erase unknown outcomes")
     fresh.reconcile_abandoned(request_id, actor="test-operator", reason="Owner exited; response remains unknown",
                               evidence_refs=("resources/model_budget.v1.json",))
     # Same explicit reconciliation is idempotent; it does not refund or resend.

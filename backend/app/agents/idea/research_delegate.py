@@ -307,10 +307,38 @@ class ResearchSession:
     def research_tool_context(self, *, run_id: str, project: str, root: Path) -> ToolContext:
         """Use the same validated effective child tools at dispatch as in its prompt."""
         scope = None
-        if self.config.tools != get_agent_config("idea_research").tools:
-            scope = self.registry.scope_for_read_tools(self.config.name, self.config.tools)
+        tools = self.runtime_tools()
+        if tools != get_agent_config("idea_research").tools:
+            scope = self.registry.scope_for_read_tools(self.config.name, tools)
         return ToolContext(run_id=run_id, project=project, agent="idea_research",
                            extra={"run_root": str(root)}, configured_read_scope=scope)
+
+    def runtime_tools(self) -> tuple[str, ...]:
+        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        if self.context.metadata.get("runtime_policy", {}).get("version") == 3 and tool_config("context.read_material").enabled:
+            tools = tuple(dict.fromkeys((*tools, "context.read_material")))
+        return tools
+
+    def runtime_context_metadata(self) -> dict[str, Any]:
+        from dataclasses import asdict
+        from app.harness.context.runtime_pack import Material, message_key, reference_message
+        policy = self.context.metadata.get("runtime_policy", {})
+        if policy.get("version") != 3:
+            return {}
+        return {"runtime_policy": policy, "materials": {
+            message_key(reference_message("background", item["source"], item["text"])):
+                asdict(Material("background", item["source"], False))
+            for item in self.context.metadata.get("references", [])}}
+
+    def supplied_context(self, refs: list[str]) -> dict[str, str]:
+        supplied = {ref: self.context.upstream[ref] for ref in refs}
+        if self.context.metadata.get("runtime_policy", {}).get("version") == 3:
+            for item in self.context.metadata.get("references", []):
+                key = "project reference: " + item["source"]
+                if key in supplied:
+                    raise ValueError("project reference collides with delegated context")
+                supplied[key] = item["text"]
+        return supplied
 
     def author_messages(self, args: dict[str, Any], *, refs: list[str], minimum: int,
                         policy: AgentLoopPolicy) -> list[Message]:
@@ -381,6 +409,10 @@ class ResearchSession:
         if self.failures:
             messages.append(Message("user", "[untrusted prior failed delegation receipts; not accepted findings]\n"
                                     + json.dumps(self._recovery_context(), ensure_ascii=False)))
+        if self.context.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_pack import reference_message
+            messages.extend(reference_message("background", item["source"], item["text"])
+                            for item in self.context.metadata.get("references", []))
         messages.extend(unit_messages(self.research_unit, reviewing=False))
         return messages
 
@@ -413,12 +445,12 @@ class ResearchSession:
         target = root / ROOT / identifier
         target.mkdir(parents=True, exist_ok=False)
         trace = root / "agent_traces" / "idea_research" / identifier
-        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        tools = self.runtime_tools()
         if TOOL in tools:
             raise ValueError("researcher cannot recursively delegate")
         messages = self.author_messages(args, refs=refs, minimum=minimum, policy=policy)
         review_context = {"task": self.request.user_request, "project": self.context.project,
-                          "supplied_context": {ref: self.context.upstream[ref] for ref in refs}}
+                          "supplied_context": self.supplied_context(refs)}
         plan_request = ({"review_mode": review_mode, "review_context": review_context}
                         if review_mode in ("per_insight_then_whole", "per_insight_collect_then_whole")
                         or self.research_unit is not None else {})
@@ -482,13 +514,13 @@ class ResearchSession:
                 registry=self.registry, tool_context=self.research_tool_context(run_id=tool_context.run_id,
                     project=tool_context.project, root=root), tools=tools, policy=policy,
                 trace_root=trace, validate=validate, final_schema=research_submission_schema(), progress_sink=progress,
-                correlation=child_correlation,
+                correlation=child_correlation, context_metadata=self.runtime_context_metadata(),
                 reflection_rubric=RESEARCH_REVIEW_RUBRIC,
                 review_messages=research_review_messages(task=self.request.user_request, project=self.context.project, gap=args,
-                    supplied_context={ref: self.context.upstream[ref] for ref in refs}, research_unit=self.research_unit),
+                    supplied_context=self.supplied_context(refs), research_unit=self.research_unit),
                 review_plan_factory=(partial(build_research_review_plan, task=self.request.user_request,
                     project=self.context.project, gap=args, min_sources=minimum,
-                    supplied_context={ref: self.context.upstream[ref] for ref in refs}, contract_id=plan_contract)
+                    supplied_context=self.supplied_context(refs), contract_id=plan_contract)
                     if plan_contract is not None else None),
                 review_plan_contract_id=plan_contract,
                 required_review_tools=("search.fetch_sources",),

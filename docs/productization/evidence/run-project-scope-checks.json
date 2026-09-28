@@ -1,0 +1,53 @@
+{
+  "schema": "verification.run-project-scope.v1",
+  "date": "2026-09-28",
+  "full_pytest_before_final_context_guard": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "178",
+    "tests": "3326",
+    "time": "161.472",
+    "timestamp": "2026-09-28T04:24:11.007009+08:00",
+    "hostname": "HarrydeMacBook-Air.local"
+  },
+  "full_strict_mypy_source_files": 617,
+  "final_targeted_pytest": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "142",
+    "time": "7.150",
+    "timestamp": "2026-09-28T04:28:05.573988+08:00",
+    "hostname": "HarrydeMacBook-Air.local"
+  },
+  "final_strict_mypy_files": 10,
+  "source_fingerprints": {
+    "backend/app/agents/base.py": "6efedefa165e822d6bfb1a60a8174e402f9c0bbf6b2f2f6a8f62f4f6c4ec6f04",
+    "backend/app/bridge/research_project_scope.py": "fffe8a3f669325f3ee1c6a76cb08b664cd58059a409c64b196e5eafc17a85ba5",
+    "backend/app/harness/gates/baseline_compatibility.py": "a342061090f79a3427104fd039b45130fb3de3008202c660f0b6da8d982f873c",
+    "backend/app/harness/project_workspace.py": "88d651c3ecab7cc4fe56a039727d86630beb99fd03746d55020c8183ee2ab19a",
+    "backend/app/harness/runtime/project_scope.py": "3901fe1e532d002cac3e50f9a0be3783e044ba24cda8184a600f525bf8a914df",
+    "backend/app/harness/tools/code/__init__.py": "958f26907df9f6df9ac827a822ed778bd00e7060b7c1846a90136270c90c8e68",
+    "backend/app/harness/tools/project_repo.py": "eceae3f005d291ead495a408c1774da142b3a57126596fbe9046eb5102b8810a",
+    "backend/app/harness/llm/research_accounting.py": "db846e4ebfa2b453b490177b1f4b966c92a231047bdbdcefb011cb52dee505d8",
+    "backend/tests/unit/test_run_project_scope.py": "60d61a19ee5daa21f0b3b2603b5d1b3a9ac6fd75969433afbb40a60eec4faa44",
+    "backend/tests/unit/test_research_model_accounting.py": "02d7c8ba17d33812d43f857ca05e394a982ac02b41fb62fd0948e40b56067b72"
+  },
+  "log_sha256": {
+    "scope-budget-full.xml": "721f74c1fc4ee48e2074f7777135dc4f6a205ff121ed02d5b2bcdbf4e8b2c61f",
+    "scope-budget-full.log": "54382b9d3d0ca5cb9ef9649773d796824e0a064880eb5426fbad7852517dfe52",
+    "scope-budget-mypy.log": "cdcff164a8911e25890a2d2e495082878ea19b50a14735a25669226851c69e56",
+    "scope-parent-final.xml": "07303470b899032a8f5d1faa41727abe55c7e4a934c8bb5114167fd86cc1b627",
+    "scope-parent-final.log": "ea00a3bc20061f3e1451afe7a511de601c578a7c8543a3ac101e0884a38051e5",
+    "scope-parent-final-mypy.log": "14fdf673bd175fe32ef42df34666481bb15e465313f7dbef32d0aea2ba76a26e"
+  },
+  "remaining_boundaries": [
+    "Full contract start remains blocked",
+    "Commands and data access not granted",
+    "OS sandbox not provided",
+    "Owner candidate final acceptance must invoke verify_candidate_scope"
+  ],
+  "real_provider_or_service_substitutes": false
+}

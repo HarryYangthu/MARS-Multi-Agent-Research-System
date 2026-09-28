@@ -13,6 +13,7 @@ from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 
 class WritingAgent(BaseAgent):
     name = "writing"
+    project_knowledge_enabled = True
     output_schema = "report.v1"
     agent_brief = (
         "你负责把完整研究链路汇总成研究报告。用 knowledge.run_archive 回顾执行结果、"

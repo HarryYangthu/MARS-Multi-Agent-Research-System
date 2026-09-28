@@ -17,6 +17,37 @@ from app.settings import get_settings, repo_root
 _LOCK = threading.RLock()
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
+AGENTS_TEMPLATE = (
+    "# 项目约定\n\n"
+    "这是系统生成的填写说明，尚未包含已确认的项目规则。本文件可选。\n\n"
+    "由谁填写：项目负责人或代码仓维护者确定规则；AI 可以代拟，确认后再使用。\n\n"
+    "何时填写：首次让 Agent 修改代码或启动仿真前，补充已有的长期约束；之后可随时更新，新任务读取更新后的内容。\n\n"
+    "写什么：不能改动的基线文件、允许写入的目录、必须保留的接口、真实的仿真启动方式和代码规范。只写实际适用的规则，不必全部填写。\n\n"
+    "请将这些填写说明替换为已确认的规则；没有额外约束时可以保留本模板。\n\n"
+    "本次研究目标在对话中提出；项目背景统一放入 README.md，无需在此重复。\n"
+)
+_LEGACY_AGENTS_TEMPLATES = {
+    "# 项目约定\n\n请补充研究目标、术语、约束和必须保留的接口。\n",
+    "# 项目约定\n\n请补充项目约束、代码规范和必须保留的接口；本次研究目标在对话中填写。\n",
+}
+_LEGACY_README_BODIES = {
+    "在这里记录项目目的和研究对象。\n\n"
+    "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n",
+    "在这里记录研究领域、术语与已有工作；本次研究目标在配置后的对话中填写。\n\n"
+    "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n",
+}
+
+
+def is_generated_project_template(path: str, content: str) -> bool:
+    """Recognize only untouched generated text, including pre-onboarding versions."""
+    if path == "AGENTS.md":
+        return content == AGENTS_TEMPLATE or content in _LEGACY_AGENTS_TEMPLATES
+    if path == "README.md":
+        heading, separator, body = content.partition("\n\n")
+        return bool(separator and heading.startswith("# ") and "\n" not in heading
+                    and body in _LEGACY_README_BODIES)
+    return False
+
 
 @dataclass(frozen=True)
 class FolderProject:
@@ -69,6 +100,9 @@ def list_folder_projects(*, registry: Path | None = None) -> list[FolderProject]
 
 
 def folder_project(name: str, *, registry: Path | None = None) -> FolderProject | None:
+    from app.harness.runtime.project_scope import current_project_scope
+    if current_project_scope(name) is not None:
+        return None
     if not _PROJECT_ID.fullmatch(name) or name in {".", ".."}:
         raise ValueError("invalid project name")
     path = _entries(registry or registry_path()).get(name)
@@ -82,6 +116,10 @@ def folder_project(name: str, *, registry: Path | None = None) -> FolderProject 
 
 def project_root(project: str) -> Path:
     """Metadata root; the research repository itself is resolved via repo_link."""
+    from app.harness.runtime.project_scope import current_project_scope
+    scope = current_project_scope(project)
+    if scope is not None:
+        return scope.metadata_root
     folder = folder_project(project)
     if folder is not None:
         return folder.metadata_root
@@ -133,9 +171,7 @@ def open_folder(path: str, *, create: bool = False, registry: Path | None = None
                                stream, allow_unicode=True, sort_keys=False)
         if create:
             (root / "context").mkdir(exist_ok=True)
-            (root / "README.md").write_text(f"# {root.name}\n\n在这里记录项目目的和研究对象。\n\n"
-                                           "背景资料放入 context/，项目约定写入 AGENTS.md；新任务会自动加载这些 Markdown 文件。\n", encoding="utf-8")
-            (root / "AGENTS.md").write_text("# 项目约定\n\n请补充研究目标、术语、约束和必须保留的接口。\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text(AGENTS_TEMPLATE, encoding="utf-8")
         entries[project.name] = str(root)
         atomic_json(index, entries)
         return project

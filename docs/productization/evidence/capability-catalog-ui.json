@@ -1,0 +1,55 @@
+{
+  "schema": "verification.capability_catalog_ui.v1",
+  "status": "passed",
+  "build_id": "ff-frkrcV1rRSLgTrUJ47",
+  "source_sha256": {
+    "frontend/src/components/CapabilityLibrary.tsx": "6634b88845483162ab4a3b0616237249e01ab12f8f5c0e1d95d914323bfd3836",
+    "frontend/src/lib/capabilityCatalog.ts": "32f86d37ce829908e5133746965e7bb66ec307b5bc3caf92b3d1ff49f0f7ac24",
+    "frontend/src/app/config/capabilities/page.tsx": "cfd71406f43d2948f6fb61a8b074e4f558cba0e0da41df73981d0d24116282cc",
+    "frontend/src/app/config/page.tsx": "9f0e48509764e3798bd24458d5e0a86815cac8f85d21e6fa2d31d27d299fbeea",
+    "frontend/scripts/capability-catalog-smoke.ts": "caaa21ca9fb4aeffb9075a6369faf55cb18aac167449fc6bf9828540bec978c5"
+  },
+  "evidence": {
+    "capability-ui-search.png": "874d85d87d5038d042d647559feacc1e2ad2b910e125e18900e3a61b0b478a52",
+    "capability-ui-offline.png": "e825583e578cdfce81f5299bd417bd7ab2b7d5385b3497a29b6e6ffc081277f5",
+    "capability-ui-mobile-verified.png": "c6059bba98d0eaab097c8b19604dad115cd9d2ee0f13bb3f80693e31d97af0c1",
+    "capability-ui-skills-verified.txt": "2d48edf4460cc05f375b8b07a5c4eb94678d2f99e3dcd621edde667b5013f4fb",
+    "capability-ui-mcp-verified.txt": "9ec4373024b0b11e260c70ecb8b707e6e3c93fd0211dd0086787c4ca1fccb4db",
+    "capability-ui-role.txt": "e63261595a61f3da82ae6a4553bc31188b5f9b77e6b7b49293e3e5e3f793e08a",
+    "capability-ui-details.txt": "15a06d2266093e4888d7a903c51657bc9afb6d2fe1314033908a3036b3548dcc",
+    "capability-ui-mobile-layout.json": "d3683f31e072e02fa5ac43cd3dca5d77a13175b3827a3840c8317454e2df3c24",
+    "capability-ui-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capability-ui-network.txt": "8568e1cadcd95524d9cbb53257c9a89705b54e09b468091edca3485e0f527a8d",
+    "capability-ui-pure.log": "b2dcc0a7409a57c5da014cb2185c8128c3992d0ef20752950c0887919222ca9b",
+    "capability-ui-tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capability-ui-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "capability-ui-real-response.json": "6b0c54c0fb184fa54ac1a2125641bd7289241e08ad73b49dcb3f8b137182ef62"
+  },
+  "observed": {
+    "tools": 44,
+    "skills": 2,
+    "model_or_tool_probe_requests": 0,
+    "mutation_http_requests": 0,
+    "javascript_errors": 0,
+    "mobile_layout": {
+      "width": 390,
+      "scrollWidth": 390,
+      "items": 2
+    }
+  },
+  "checks": [
+    "Actual production API and browser; no replacement responses",
+    "Search, skill/MCP/role filters and advanced permission/hash disclosure",
+    "Real browser offline error and explicit refresh after reconnection",
+    "All dependencies unprobed and certifications not_run",
+    "Actual API payload accepted; seven unsupported/malformed evidence inputs rejected by pure parser"
+  ],
+  "retained_attempts": [
+    "First standalone TS compile ran from repository root without frontend Node type resolution; corrected frontend cwd passed",
+    "Empty-string browser fill did not clear controlled input; whitespace query produced verified two-skill view, earlier screenshots preserved"
+  ],
+  "boundaries": [
+    "No tool certification or execution authorization",
+    "No desktop packaging or full managed research start acceptance"
+  ]
+}

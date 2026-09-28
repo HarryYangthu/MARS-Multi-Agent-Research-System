@@ -15,6 +15,9 @@ from typing import Any
 from urllib.parse import quote
 
 from app.harness.agent_loop.trace import atomic_json
+from app.harness.llm.accounting import (
+    ResourceBudgetError, charged_model_attempts, reserved_model_attempts, validate_token_components,
+)
 from app.harness.schema.frontmatter_parser import dumps
 from app.harness.schema.validator import validate_document
 
@@ -157,10 +160,57 @@ def _collect_budgets(root: Path, warnings: list[str], *, inherited_stage: Path |
             continue
         raw = _record(path, warnings)
         requests = raw.get("requests", {})
-        rows = [{"request_id": identifier, **{key: row.get(key) for key in
-                 ("provider", "model", "status", "started_at", "finished_at", "usage_complete", "charged_tokens",
-                  "reserved_tokens", "charged_cost", "reserved_cost", "price", "usage", "correlation")}}
-                for identifier, row in requests.items() if isinstance(row, dict)] if isinstance(requests, dict) else []
+        rows: list[dict[str, Any]] = []
+        for identifier, row in requests.items() if isinstance(requests, dict) else ():
+            if not isinstance(row, dict):
+                warnings.append(f"Invalid model reservation row in {_relative(root, path)}")
+                # Keep this logical record in the unknown count instead of
+                # silently omitting it from the report's denominator.
+                row = {"max_sdk_attempts": None}
+            entry = {"request_id": identifier, **{key: row.get(key) for key in
+                     ("provider", "model", "status", "started_at", "finished_at", "usage_complete", "charged_tokens",
+                      "reserved_tokens", "charged_input_tokens", "charged_output_tokens",
+                      "reserved_input_tokens", "reserved_output_tokens", "charged_cost", "reserved_cost",
+                      "price", "usage", "correlation")}}
+            try:
+                validate_token_components(row)
+            except ResourceBudgetError:
+                warnings.append(f"Invalid token-component accounting in {_relative(root, path)}")
+                for key in ("charged_tokens", "charged_input_tokens", "charged_output_tokens"):
+                    entry[key] = None
+            try:
+                reserved = reserved_model_attempts(row)
+                charged = charged_model_attempts(row)
+            except ResourceBudgetError:
+                entry.update(reserved_attempts=None, charged_attempts=None, observed_attempts=None,
+                             attempts_complete=False, attempt_accounting="invalid")
+                warnings.append(f"Invalid model-attempt accounting in {_relative(root, path)}")
+            else:
+                observed = row.get("observed_attempts")
+                if observed is not None and (type(observed) is not int or not 0 <= observed <= reserved):
+                    observed = None
+                    warnings.append(f"Invalid observed SDK attempt count in {_relative(root, path)}")
+                complete = (row.get("attempts_complete") is True and observed is not None
+                            and observed > 0 and observed == charged)
+                if row.get("attempts_complete") is True and not complete:
+                    warnings.append(f"Incomplete SDK attempt evidence in {_relative(root, path)}")
+                entry.update(reserved_attempts=reserved, charged_attempts=charged, observed_attempts=observed,
+                             attempts_complete=complete,
+                             attempt_accounting="legacy_conservative" if "charged_attempts" not in row
+                             else "observed" if complete else "retained_reservation")
+            rows.append(entry)
+        observed_counts = [row["observed_attempts"] for row in rows if row["observed_attempts"] is not None]
+        charges_known = all(row["charged_attempts"] is not None for row in rows)
+        attempt_totals = {
+            "logical_calls": len(rows),
+            "observed_sdk_attempts": sum(observed_counts) if observed_counts or not rows else None,
+            "observed_count_complete": all(row["attempts_complete"] for row in rows),
+            "calls_with_unknown_attempt_count": sum(not row["attempts_complete"] for row in rows),
+            "charged_sdk_attempts": sum(row["charged_attempts"] for row in rows) if charges_known else None,
+            "originally_reserved_sdk_attempts": sum(row["reserved_attempts"] for row in rows) if charges_known else None,
+            "retained_unknown_sdk_attempts": sum(row["charged_attempts"] for row in rows
+                                                 if not row["attempts_complete"]) if charges_known else None,
+        }
         inherited = inherited_stage is not None and path.resolve().is_relative_to(inherited_stage)
         origin = "inherited_research" if inherited else "current_run"
         if not inherited and path.resolve().is_relative_to((root / "reused_research").resolve()):
@@ -168,7 +218,8 @@ def _collect_budgets(root: Path, warnings: list[str], *, inherited_stage: Path |
         ledgers.append({"path": _relative(root, path), "origin": origin,
                         "source_run_root": source_run_root if inherited else str(root.resolve()) if origin == "current_run" else None,
                         "limits": raw.get("configuration", {}).get("limits", {}),
-                        "requests": rows, "accounting": "Reservations and charges are quota accounting, not invoices."})
+                        "requests": rows, "attempt_accounting": attempt_totals,
+                        "accounting": "Logical calls are ledger rows; observed SDK attempts are evidence; charged/reserved attempts are quota accounting, not measured API traffic or invoices."})
     return ledgers
 
 
@@ -442,12 +493,12 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
         body.append(f"![{Path(chart).stem}]({chart})")
     body += ["## 资源预算、模型与工具调用", "冻结计算预算：\n```json\n" + json.dumps(budget, ensure_ascii=False, indent=2) + "\n```",
              "更新数表示 optimizer.step 次数，不表示 epoch 数。以下 Token 来自 trace 的实际响应 usage；失败请求未返回的用量不能视为零。",
-             "| 调用来源 | 模型请求 | 响应 | SDK 尝试 | 工具派发 | 输入 Token | 输出 Token | 总 Token |\n|---|---:|---:|---:|---:|---:|---:|---:|"]
+             "| 调用来源 | 逻辑请求事件 | 响应 | SDK 尝试事件 | 工具派发 | 输入 Token | 输出 Token | 总 Token |\n|---|---:|---:|---:|---:|---:|---:|---:|"]
     origin_labels = {"current_run": "本运行新发生", "inherited_research": "继承的历史研究", "unclassified_inherited": "未分类的历史副本"}
     for origin, values in evidence["resource_usage_by_origin"].items():
         body.append("| " + " | ".join([origin_labels[origin], *[_display(values[key]) for key in
                     ("model_requests", "model_responses", "sdk_attempts", "tool_dispatches", *TOKEN_KEYS)]]) + " |")
-    body += [f"证据总计（本运行新调用与继承历史之和）：模型请求 {usage['model_requests']}；响应 {usage['model_responses']}；SDK 尝试 {usage['sdk_attempts']}；工具派发 {usage['tool_dispatches']}。总计不能称作本运行新发送的 API 次数。",
+    body += [f"证据总计（本运行新调用与继承历史之和）：逻辑请求事件 {usage['model_requests']}；响应 {usage['model_responses']}；SDK 尝试 {usage['sdk_attempts']}；工具派发 {usage['tool_dispatches']}。总计不能称作本运行新发送的 API 次数。",
              f"证据总计的已知输入 Token：{usage['prompt_tokens']}；已知输出 Token：{usage['completion_tokens']}；已知总 Token：{usage['total_tokens']}。完整用量：{'是' if usage['usage_complete'] else '否，属于已知下界或尚无调用证据'}。",
              f"SDK 失败：{usage['sdk_failures']}；模型错误事件：{usage['model_errors']}；工具失败：{usage['tool_failures']}。这些计数不可相加为独立失败请求数。",
              f"已观测模型调用耗时合计：{usage['model_call_seconds']:.3f} 秒；已记录 worker 训练耗时：{usage['worker_training_seconds']:.3f} 秒。二者不是端到端墙钟耗时；并发、未结算调用与无计时 worker 不据此补算。",
@@ -457,11 +508,25 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
     for stage in evidence["stages"]:
         body.append("| " + " | ".join([_link(stage["receipt"]), origin_labels[stage["origin"]], *[_display(stage.get(key)) for key in ("status", "model_requests", "prompt_tokens", "completion_tokens", "tool_dispatches", "elapsed_seconds")]]) + " |")
     for ledger in evidence["model_budgets"]:
-        body.append(f"模型配额与逐请求保留记录：{_link(ledger['path'])}；来源：{origin_labels[ledger['origin']]}；共 {len(ledger['requests'])} 条，不与 trace 用量重复累加。历史账本不计为本运行新发生的配额消耗。")
+        attempt_counts = ledger["attempt_accounting"]
+        body.append(f"模型配额与逐请求保留记录：{_link(ledger['path'])}；来源：{origin_labels[ledger['origin']]}；已入账逻辑调用 {attempt_counts['logical_calls']} 条，不等于实际 API 尝试次数，也不与 trace 用量重复累加。历史账本不计为本运行新发生的配额消耗。")
+        observed_label = ("未知" if attempt_counts["observed_sdk_attempts"] is None
+                          else str(attempt_counts["observed_sdk_attempts"]) if attempt_counts["observed_count_complete"]
+                          else f"{attempt_counts['observed_sdk_attempts']}（已知下界）")
+        body.append(f"已观测 SDK 尝试：{observed_label}；尝试次数不完整的逻辑调用：{attempt_counts['calls_with_unknown_attempt_count']}。"
+                    f"配额已记账尝试：{_display(attempt_counts['charged_sdk_attempts'])}；初始预留尝试合计：{_display(attempt_counts['originally_reserved_sdk_attempts'])}；"
+                    f"其中未知调用保留尝试：{_display(attempt_counts['retained_unknown_sdk_attempts'])}。"
+                    "max_model_requests 限制 SDK 尝试配额；保留量不表示实际已发送次数。旧账本缺少观测字段时按原重试上限保留；缺少原上限时按全局最大重试上限保留。")
         body.append("冻结模型配额：\n```json\n" + json.dumps(ledger["limits"], ensure_ascii=False, indent=2) + "\n```")
-        charged = sum(row["charged_tokens"] for row in ledger["requests"] if type(row.get("charged_tokens")) is int)
+        token_totals: dict[str, int | None] = {}
+        for field in ("charged_tokens", "charged_input_tokens", "charged_output_tokens"):
+            values = [row.get(field) for row in ledger["requests"]]
+            token_totals[field] = sum(values) if all(type(value) is int and value >= 0 for value in values) else None
         unresolved = sum(row.get("usage_complete") is not True for row in ledger["requests"])
-        body.append(f"配额已记账 Token（包含未知调用保留量）：{charged}；用量不完整请求：{unresolved}。此数值不作为实际 Token 消耗。")
+        body.append(f"配额已记账 Token（包含未知调用保留量）：{_display(token_totals['charged_tokens'])}；"
+                    f"输入：{_display(token_totals['charged_input_tokens'])}；"
+                    f"计费输出：{_display(token_totals['charged_output_tokens'])}；用量不完整请求：{unresolved}。"
+                    "此数值不作为实际 Token 消耗；旧账本缺少分项时显示未知。")
     failures = [row for row in evidence["execution_attempts"] if row["status"] != "completed"]
     if failures or evidence["stage_failures"]:
         body += ["## 失败与恢复证据", "```json\n" + json.dumps({"workers": failures, "stages": evidence["stage_failures"]}, ensure_ascii=False, indent=2) + "\n```"]

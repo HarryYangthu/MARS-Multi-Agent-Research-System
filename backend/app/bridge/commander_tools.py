@@ -464,7 +464,19 @@ async def _discovery_replay(args: dict[str, Any], ctx: ToolContext) -> dict[str,
     return {"ok": True, **tools.replay(run_id)}
 
 
+async def _read_context_material(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.settings import repo_root
+    from app.harness.tools.context_material import read_material_tool
+    result = await read_material_tool(args, HarnessToolContext(ctx.session.conv_id, ctx.session.project, "commander",
+        extra={"run_root": str(repo_root() / "conversations" / ctx.session.conv_id)}))
+    return {"ok": result.ok, "output": result.output, "error": result.error}
+
+
 TOOLS: dict[str, ToolSpec] = {
+    "context.read_material": ToolSpec(name="context.read_material",
+        description="Read original run-local context material. Follow next_offset for further pages.",
+        parameters={"ref": "exact SHA256 ref from context", "char_offset": "optional character offset"},
+        handler=_read_context_material),
     "run.create": ToolSpec(
         name="run.create",
         description="Create a run without starting it; supports pipeline or single-stage entrypoints.",

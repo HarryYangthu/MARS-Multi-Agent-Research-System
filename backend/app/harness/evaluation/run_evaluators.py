@@ -21,6 +21,7 @@ from app.harness.evaluation.models import (
 from app.harness.evaluation.run_types import EvaluationRun
 from app.harness.evaluation.suites import EvaluationSuite
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
+from app.harness.runtime.state_journal import RunStateIntegrityError, StateJournal
 
 
 class RunEvaluator(Protocol):
@@ -414,22 +415,37 @@ class GateBehaviorEvaluator:
 @dataclass(frozen=True)
 class MultiAgentCollaborationEvaluator:
     id: str = "multi_agent.collaboration_quality"
-    version: int = 1
+    version: int = 2
 
     def evaluate_run(self, *, run: EvaluationRun, suite: EvaluationSuite) -> EvaluationReport:
         findings: list[EvaluationFinding] = []
         scores: dict[str, float] = {}
 
-        state = _read_json(run.root / "run_state.json")
-        states = state.get("states") if isinstance(state, dict) else None
-        if isinstance(states, dict):
-            observed_stages = {str(key) for key in states}
-        else:
-            observed_stages = {
-                str(event.get("agent"))
-                for event in _read_jsonl(run.root / "events" / "agent_events.jsonl")
-                if event.get("agent")
-            }
+        try:
+            journal = StateJournal.from_authority(run.root, run_id=run.run_id)
+            if journal is not None:
+                # Topology includes future/skipped work. Only committed state
+                # events demonstrate observed routing; JSONL can lag the outbox.
+                observed_stages = {str(event["agent"]) for event in journal.all_events()}
+                state_evidence = "run_state.sqlite3#state_events"
+            else:
+                state = _read_json(run.root / "run_state.json")
+                states = state.get("states") if isinstance(state, dict) else None
+                observed_stages = ({str(key) for key in states} if isinstance(states, dict) else {
+                    str(event.get("agent"))
+                    for event in _read_jsonl(run.root / "events" / "agent_events.jsonl")
+                    if event.get("agent")
+                })
+                state_evidence = "run_state.json"
+        except RunStateIntegrityError:
+            return _report(
+                run=run, evaluator=self.id, version=self.version, decision="warn", blocking=False,
+                scores={}, findings=[_finding(
+                    "state_evidence_unavailable", "high", "routing",
+                    "Committed state evidence is unavailable; collaboration coverage is unknown. "
+                    "JSON projections were not used as a fallback.", "run_state.sqlite3#state_events",
+                )], actions=("Repair the declared state journal before replaying collaboration evaluation.",),
+            )
         expected_stages = set(suite.expected.expected_stages)
         if not expected_stages:
             expected_stages = {
@@ -449,7 +465,7 @@ class MultiAgentCollaborationEvaluator:
                     "medium",
                     "routing",
                     f"Expected stage `{stage}` was not observed in run state or agent events.",
-                    "run_state.json",
+                    state_evidence,
                 )
             )
 

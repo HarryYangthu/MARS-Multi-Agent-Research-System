@@ -17,6 +17,13 @@ from app.storage.run_state_store import RunStateConflictError, RunStateStore
 from app.storage.run_store import RunStore
 
 
+def _pending_graph() -> RunGraph:
+    graph = RunGraph()
+    graph.add_node("idea")
+    graph.set_entrypoint("idea")
+    return graph
+
+
 def _proposal(index: int) -> str:
     return fm_dumps({"schema": "proposal.v1", "project": "pimc", "agent": "idea",
                      "research_question": "Which branch is measurable?",
@@ -90,7 +97,7 @@ def test_committed_approval_pointer_recovers_before_state_load(tmp_path: Path) -
     store.approve(first)
     assert len(list(records[0].parent.glob("*.json"))) == 1
     state = RunStateStore(run)
-    state.write(graph=RunGraph(), request={}, status="waiting_review", expected_revision=0)
+    state.write(graph=_pending_graph(), request={}, status="waiting_review", expected_revision=0)
     approved.path.unlink()  # Actual damaged pointer, while committed source/receipt survive.
     assert state.load() is not None
     assert approved.path.read_text() == first.path.read_text()
@@ -110,11 +117,11 @@ def test_corrupt_approval_source_fails_closed(tmp_path: Path) -> None:
 
 def test_state_compare_and_swap_allows_exactly_one_concurrent_writer(tmp_path: Path) -> None:
     run = RunStore(tmp_path).create(task="cas", project="pimc")
-    assert RunStateStore(run).write(graph=RunGraph(), request={}, status="created", expected_revision=0) == 1
+    assert RunStateStore(run).write(graph=_pending_graph(), request={}, status="created", expected_revision=0) == 1
 
     def update(index: int) -> str:
         try:
-            RunStateStore(run).write(graph=RunGraph(), request={"writer": index}, status="created", expected_revision=1)
+            RunStateStore(run).write(graph=_pending_graph(), request={"writer": index}, status="created", expected_revision=1)
         except RunStateConflictError:
             return "conflict"
         return "committed"

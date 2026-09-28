@@ -80,8 +80,8 @@ async def get_run_worklog(
         raise HTTPException(status_code=404, detail="run not found")
     items = _worklog_items(run=run, agent_filter=agent.strip())
     items.sort(key=lambda item: (_parse_dt(item.timestamp) or datetime.min.replace(tzinfo=timezone.utc), item.id))
-    started_at = _first_timestamp(items) or run.created_at
-    latest_at = _latest_timestamp(items) or started_at
+    started_at = _run_started_at(run)
+    latest_at = _latest_timestamp(items) or run.created_at
     elapsed = _elapsed_seconds(started_at, latest_at)
     return WorkLogView(
         run_id=run.run_id,
@@ -121,25 +121,24 @@ def _event_items(events_dir: Path) -> list[TimelineItem]:
 
 def _worklog_items(*, run: RunHandle, agent_filter: str = "") -> list[WorkLogItem]:
     items: list[WorkLogItem] = []
-    start = _run_started_at(run)
+    start = run.created_at
     evaluation_rows = _read_jsonl(run.subdir("events") / "evaluation_events.jsonl")
     review_rows = _read_jsonl(run.subdir("hitl") / "review_log.jsonl")
     timestamp_hints = _worklog_timestamp_hints(evaluation_rows=evaluation_rows, review_rows=review_rows)
 
     items.append(
         WorkLogItem(
-            id="0:run:start",
+            id="0:run:created",
             timestamp=start,
             elapsed_seconds=0.0,
             agent="",
             kind="run",
-            status="started",
-            title="收到任务，启动真实工作流",
+            status="created",
+            title="任务记录已创建",
             detail=(
-                f"entrypoint={run.entrypoint}，项目={run.project}。接下来按 UI/API/Bridge/Orchestrator "
-                "路径进入对应 Agent。"
+                f"项目={run.project}。此条仅记录任务保存；"
+                "是否启动、执行或受阻，以任务状态与后续执行记录为准。"
             ),
-            next_action="装载项目规则、任务 prompt、上下文配置和代码仓入口。",
         )
     )
 
@@ -466,6 +465,16 @@ def _websocket_worklog(
     event = str(payload.get("event") or "")
     agent = str(payload.get("agent") or payload.get("node") or "")
     timestamp = str(payload.get("timestamp") or fallback_timestamp)
+    if event == "run.started":
+        return WorkLogItem(
+            id=f"run:{index}:started",
+            timestamp=timestamp,
+            kind="run",
+            status="started",
+            title="已记录工作流启动",
+            detail="编排器已写入启动事件；该事件不表示实验完成或研究目标达成。",
+            evidence_refs=["events/websocket_events.jsonl"],
+        )
     if event == "hitl.review_required":
         artifact = str(payload.get("artifact_id") or "")
         timestamp = str(
@@ -726,7 +735,7 @@ def _run_started_at(run: RunHandle) -> str:
     for item in agent_events:
         if item.get("timestamp"):
             return str(item["timestamp"])
-    return run.created_at
+    return ""
 
 
 def _belongs_to_agent(payload: dict[str, Any], agent_filter: str) -> bool:

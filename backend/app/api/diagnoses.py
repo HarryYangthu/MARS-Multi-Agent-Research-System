@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.artifacts import _ensure_writable_run
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander_observability import build_commander_observability
 from app.harness.schema.frontmatter_parser import parse as fm_parse
@@ -222,6 +223,7 @@ async def create_self_evolution_mutation_proposal(
     run_id: str,
     payload: SelfEvolutionMutationPayload,
 ) -> dict[str, Any]:
+    _ensure_writable_run(run_id)
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -247,6 +249,7 @@ async def approve_self_evolution_mutation_proposal(
     mutation_id: str,
     payload: SelfEvolutionMutationDecisionPayload | None = None,
 ) -> SelfEvolutionMutationDecisionView:
+    _ensure_writable_run(run_id)
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -265,6 +268,7 @@ async def approve_self_evolution_mutation_proposal(
 async def evaluate_self_evolution_mutation_proposal(
     run_id: str, mutation_id: str, payload: SelfEvolutionMutationEvaluationPayload,
 ) -> dict[str, Any]:
+    _ensure_writable_run(run_id)
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -278,6 +282,7 @@ async def evaluate_self_evolution_mutation_proposal(
 async def rollback_self_evolution_mutation_proposal(
     run_id: str, mutation_id: str, payload: SelfEvolutionMutationDecisionPayload | None = None,
 ) -> SelfEvolutionMutationDecisionView:
+    _ensure_writable_run(run_id)
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -298,6 +303,7 @@ async def reject_self_evolution_mutation_proposal(
     mutation_id: str,
     payload: SelfEvolutionMutationDecisionPayload | None = None,
 ) -> SelfEvolutionMutationDecisionView:
+    _ensure_writable_run(run_id)
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -322,12 +328,12 @@ async def get_commander_observability(run_id: str) -> dict[str, Any]:
 
 @router.post("/{run_id}/feedback-loop/{diagnosis_version}/start", status_code=202)
 async def start_feedback_loop(run_id: str, diagnosis_version: str) -> dict[str, Any]:
+    _ensure_writable_run(run_id)
     orch = get_orchestrator()
     try:
         session = orch.session(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
-
     run = session.run
     path = run.subdir("diagnosis") / f"diagnosis.{diagnosis_version}.md"
     if not path.exists():

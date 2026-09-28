@@ -22,15 +22,15 @@ source_domains: [arxiv.org, export.arxiv.org, openreview.net, proceedings.neurip
 # CLI generation favors bounded visible delivery; the focused cross-model
 # reviewer retains its separately configured thinking and acceptance checks.
 research_author:
-  thinking_enabled: false
-  reasoning_effort: null
-  max_tokens: 24576
+  thinking_enabled: true
+  reasoning_effort: low
+  max_tokens: 8192
   request_timeout_seconds: 360
   max_retries: 1
 generation:
-  thinking_enabled: false
-  reasoning_effort: null
-  max_tokens: 24576
+  thinking_enabled: true
+  reasoning_effort: low
+  max_tokens: 8192
   request_timeout_seconds: 360
   max_retries: 1
 coding_loop:
@@ -44,6 +44,6 @@ coding_loop:
   max_reflections: 2
   # NativeAgentLoop counts UTF-8 bytes as a conservative token upper bound.
   # Reserve room for full source, proposal, previous code and validation repairs.
-  input_token_budget: 256000
+  input_token_budget: 48000
   observation_chars: 24000
   author_empty_completion_repair_enabled: true

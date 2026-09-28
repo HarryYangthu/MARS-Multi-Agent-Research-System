@@ -61,6 +61,8 @@ class CommanderSession:
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
     messages: list[ChatMessage] = field(default_factory=list)
+    context_version: int = 3
+    context_compaction: dict[str, Any] = field(default_factory=dict)
 
     def add(self, msg: ChatMessage) -> ChatMessage:
         msg.state = self.state.value
@@ -74,6 +76,8 @@ class CommanderSession:
 
     def to_meta(self) -> dict[str, Any]:
         return {
+            "context_version": self.context_version,
+            "context_compaction": self.context_compaction,
             "conv_id": self.conv_id,
             "project": self.project,
             "state": self.state.value,
@@ -88,6 +92,8 @@ class CommanderSession:
         }
 
     def _maybe_rollup(self) -> None:
+        if self.context_version >= 3:
+            return  # v3 retains originals; pre-call packer owns reversible compaction.
         token_estimate = sum(max(1, len(message.content) // 4) for message in self.messages)
         if len(self.messages) <= SUMMARY_TRIGGER_MESSAGES and token_estimate <= SUMMARY_TRIGGER_TOKENS:
             return
@@ -216,6 +222,8 @@ class CommanderSessionStore:
             created_at=str(meta.get("created_at", _now())),
             updated_at=str(meta.get("updated_at", _now())),
             messages=messages,
+            context_version=int(meta.get("context_version", 2)),
+            context_compaction=dict(meta.get("context_compaction", {})),
         )
 
 

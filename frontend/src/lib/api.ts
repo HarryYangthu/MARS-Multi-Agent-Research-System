@@ -1,3 +1,5 @@
+import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
+
 // Thin REST client. By default requests stay same-origin and Next rewrites
 // /api/* to the backend; NEXT_PUBLIC_BACKEND_URL remains available for
 // deployments that need a direct backend origin.
@@ -49,6 +51,13 @@ export type GraphEdge = { src: string; dst: string };
 export type RunDetail = RunSummary & {
   states: Record<string, string>;
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; entrypoints: string[] };
+  status?: string | null;
+  termination?: { type?: string; cleanup_complete?: boolean; automatic_resume?: boolean } | null;
+  read_only?: boolean;
+  read_only_reason?: string | null;
+  available_actions?: string[];
+  research_task_sha256?: string | null;
+  execution_admission?: { ready: boolean; enforced_budget_fields: string[]; blockers: { code: string; message: string; fields: string[] }[] } | null;
 };
 
 export type DataSourceProfile = {
@@ -660,7 +669,7 @@ export async function getReadiness(project?: string): Promise<Readiness> {
   if (project) {
     url.searchParams.set("project", project);
   }
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url));
 }
 
 export async function getRuntimeStatus(project?: string): Promise<RuntimeStatus> {
@@ -719,6 +728,8 @@ export type ProjectSummary = {
   tags: string[];
   repo_path: string;
   repo_exists: boolean;
+  repo_read_only?: boolean;
+  repo_role?: string;
 };
 
 export type EventEntry = {
@@ -1073,12 +1084,12 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
 }
 
 // ---------- runs ----------
-export async function listRuns(project?: string): Promise<RunSummary[]> {
+export async function listRuns(project?: string, signal?: AbortSignal): Promise<RunSummary[]> {
   const url = apiUrl(`${BASE}/api/runs`);
   if (project) {
     url.searchParams.set("project", project);
   }
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url, { signal, cache: "no-store" }));
 }
 export async function listTrashedRuns(project?: string): Promise<TrashRunSummary[]> {
   const url = apiUrl(`${BASE}/api/runs/trash`);
@@ -1088,7 +1099,7 @@ export async function listTrashedRuns(project?: string): Promise<TrashRunSummary
   return jsonOrThrow(await fetch(url));
 }
 export async function getRun(runId: string): Promise<RunDetail> {
-  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${runId}`));
 }
 export type IdeaContext = Partial<Record<
   "background" | "baseline_code" | "data_description" | "analysis_results" | "metric_definition" | "literature_notes",
@@ -1111,10 +1122,11 @@ export async function createRun(body: {
     channel_count?: number | null;
     description?: string | null;
   };
-}): Promise<RunDetail> {
+}, signal?: AbortSignal): Promise<RunDetail> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/runs`, {
+    await boundedFetch(`${BASE}/api/runs`, {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         entrypoint: "pipeline",
@@ -1125,8 +1137,8 @@ export async function createRun(body: {
     }),
   );
 }
-export async function startRun(runId: string): Promise<{ status: string }> {
-  return jsonOrThrow(await fetch(`${BASE}/api/runs/${runId}/start`, { method: "POST" }));
+export async function startRun(runId: string, signal?: AbortSignal): Promise<{ status: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/start`, { method: "POST", signal }));
 }
 
 export async function deleteRun(runId: string): Promise<TrashRunSummary> {
@@ -1158,7 +1170,7 @@ export async function uploadDataSource(params: {
   kind?: string;
   channelCount?: number | null;
   description?: string;
-}): Promise<DataSourceProfile> {
+}, signal?: AbortSignal): Promise<DataSourceProfile> {
   const url = apiUrl(`${BASE}/api/data-sources/upload`);
   url.searchParams.set("filename", params.file.name);
   url.searchParams.set("project", params.project);
@@ -1175,8 +1187,9 @@ export async function uploadDataSource(params: {
     url.searchParams.set("description", params.description);
   }
   return jsonOrThrow(
-    await fetch(url, {
+    await boundedFetch(url, {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/octet-stream" },
       body: params.file,
     }),
@@ -1816,7 +1829,7 @@ export async function updateCodingMemoryItems(
 
 // ---------- new endpoints ----------
 export async function getStats(): Promise<Stats> {
-  return jsonOrThrow(await fetch(`${BASE}/api/stats`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/stats`));
 }
 export async function listZones(): Promise<ZoneSummary[]> {
   return jsonOrThrow(await fetch(`${BASE}/api/knowledge/zones`));
@@ -1899,7 +1912,7 @@ function addKnowledgeParams(
   }
 }
 export async function listProjects(): Promise<ProjectSummary[]> {
-  return jsonOrThrow(await fetch(`${BASE}/api/projects`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects`));
 }
 export async function getProject(name: string): Promise<ProjectSummary> {
   return jsonOrThrow(await fetch(`${BASE}/api/projects/${name}`));
@@ -1948,7 +1961,7 @@ export async function getConfigSnapshot(): Promise<ConfigSnapshot> {
 }
 
 export async function getAgentLlmConfig(): Promise<AgentLlmConfigView> {
-  return jsonOrThrow(await fetch(`${BASE}/api/config/agent-llm`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/config/agent-llm`));
 }
 
 export async function updateAgentLlmConfig(params: {
@@ -1956,7 +1969,7 @@ export async function updateAgentLlmConfig(params: {
   actor?: string;
 }): Promise<AgentLlmConfigView> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/config/agent-llm`, {
+    await boundedFetch(`${BASE}/api/config/agent-llm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2125,7 +2138,7 @@ export async function getIdeaMaterialContent(runId: string, materialId: string, 
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
 }
 
-export type ProjectContextDocument = { path: string; chars: number; sha256: string; role: string };
+export type ProjectContextDocument = { path: string; chars: number; sha256: string; role: string; is_template?: boolean };
 export type ProjectAutoContext = { project: string; folder: string; total_chars: number; files: ProjectContextDocument[]; warnings: string[] };
 export type ProjectFolders = { path: string; parent: string; directories: { name: string; path: string }[]; has_more: boolean };
 
@@ -2146,4 +2159,25 @@ export async function getProjectContextDocument(project: string, path: string, s
   const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/auto-context/document`);
   url.searchParams.set("path", path);
   return jsonOrThrow(await fetch(url, { signal, cache: "no-store" }));
+}
+
+export async function uploadProjectBackground(project: string, file: File): Promise<ProjectContextDocument & { previous_path?: string }> {
+  const url = apiUrl(`${BASE}/api/projects/${encodeURIComponent(project)}/background`);
+  url.searchParams.set("filename", file.name);
+  return jsonOrThrow(await boundedFetch(url, { method: "POST", headers: { "Content-Type": "text/markdown; charset=utf-8" }, body: file }));
+}
+
+export type ModelConnectionResult = { ok: boolean; code: string; message: string; elapsed_ms: number; requested_model: string; configuration_saved: false };
+export async function importProjectCodeFolder(project: string, path: string): Promise<ProjectSummary> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/code-folder`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+  }));
+}
+
+export async function testModelConnection(params: { provider: string; model: string; base_url: string; api_key: string }, signal?: AbortSignal): Promise<ModelConnectionResult> {
+  const deadline = AbortSignal.timeout(CLIENT_POLICY.connectionTestTimeoutMs);
+  return jsonOrThrow(await fetch(`${BASE}/api/config/test-connection`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
+    signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
+  }));
 }

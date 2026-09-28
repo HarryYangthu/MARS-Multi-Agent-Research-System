@@ -22,6 +22,7 @@ from loguru import logger
 from app.harness.project_workspace import folder_project, project_root
 from app.harness.gates.gate_base import GateOutcome
 from app.harness.tools.registry import GateDecision, ToolContext
+from app.harness.runtime.project_scope import current_project_scope, validated_diff_paths
 
 GATE_ID = "baseline_compatibility"
 
@@ -126,6 +127,25 @@ def static_check(
     if tool_name not in MONITORED_TOOLS:
         return GateOutcome(gate_id=GATE_ID, triggered=False, blocking=False, requires_human=False)
 
+    scope = current_project_scope(project)
+    if scope is not None:
+        try:
+            paths = [str(args["path"])] if "path" in args else []
+            if isinstance(args.get("files"), list):
+                paths.extend(str(item.get("path", "")) if isinstance(item, dict) else str(item)
+                             for item in args["files"])
+            if args.get("diff"):
+                paths.extend(validated_diff_paths(str(args["diff"])))
+            if tool_name == "code.apply_patch" and args.get("patch_path"):
+                raise ValueError("Bound patch_path is not admitted; supply textual diff")
+            for path in paths:
+                scope.resolve_file(path, write=True)
+        except ValueError as exc:
+            return GateOutcome(gate_id=GATE_ID, triggered=True, blocking=True,
+                               requires_human=True, reason=str(exc))
+        # Only this contract's protected paths apply. Domain-specific interface
+        # rules must be supplied by its own project, never a same-name registry.
+        return GateOutcome(gate_id=GATE_ID, triggered=False, blocking=False, requires_human=False)
     repo_link = _load_repo_link(project)
     protected = list(repo_link.get("protected_paths", []) or [])
 
@@ -133,7 +153,7 @@ def static_check(
     if "path" in args:
         target_paths.append(str(args["path"]))
     if "files" in args and isinstance(args["files"], list):
-        target_paths.extend(str(f.get("path", f)) for f in args["files"])
+        target_paths.extend(str(f.get("path", "")) if isinstance(f, dict) else str(f) for f in args["files"])
 
     diff = str(args.get("diff", "")) + "\n" + str(args.get("content", ""))
     for path in _extract_diff_paths(diff):
@@ -169,7 +189,11 @@ async def gate_check(
     tool_name: str, args: dict[str, Any], ctx: ToolContext
 ) -> GateDecision:
     """Async entry point invoked by the tool registry's dispatch."""
-    outcome = static_check(project=ctx.project, tool_name=tool_name, args=args)
+    try:
+        current_project_scope(ctx.project, ctx.run_id)
+        outcome = static_check(project=ctx.project, tool_name=tool_name, args=args)
+    except ValueError as exc:
+        return GateDecision(gate_id=GATE_ID, action="block", reason=str(exc))
     if not outcome.triggered:
         return GateDecision(gate_id=GATE_ID, action="allow")
     if outcome.requires_human:

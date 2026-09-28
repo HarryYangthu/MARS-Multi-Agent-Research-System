@@ -10,11 +10,13 @@ execution:
   command_timeout_seconds: 60
   allow_real_patch_apply: true
   paper_static:
-    enabled: true
-    python: /opt/anaconda3/bin/python
-    repo_path: /Users/harry/Documents/20_paper/code
+    # Project-specific execution is opt-in. Each installation supplies its own
+    # interpreter, code and data; a developer's paths are never product defaults.
+    enabled: false
+    python: python
+    repo_path: ""
     config_path: configs/static.yaml
-    data_path: /Users/harry/Documents/20_paper/data/static/pim_16t_221110_38dBm_fr4_rnd32_1.pth
+    data_path: ""
     # Minimum real-metric smoke: loads the 333MB capture, trains one epoch, writes
     # summary.json, and maps paper_APE_db to MARS-compatible loss/RES. Increase
     # max_iters or set dry_run=false in experiment config for longer training.
@@ -38,13 +40,18 @@ execution:
   remote_gpu:
     enabled: false
     endpoint: ""               # Deprecated V2 status field; remote_job.v1 uses system OpenSSH.
-    transport: system_ssh
+    transport: system_ssh     # Explicit legacy default; choose asyncssh for pinned password/key authentication.
+    auth_method: key
+    max_output_bytes: 1048576
     protocol: remote_job.v1
     runner: app.execution.remote.runner
     # Connection values are resolved from environment variables. The YAML only
     # stores their names so credentials and machine-specific paths never land in git.
     env:
       enabled: MARS_REMOTE_ENABLED
+      transport: MARS_REMOTE_SSH_TRANSPORT
+      auth_method: MARS_REMOTE_SSH_AUTH_METHOD
+      host_key_sha256: MARS_REMOTE_SSH_HOST_KEY_SHA256
       host: MARS_REMOTE_SSH_HOST
       port: MARS_REMOTE_SSH_PORT
       user: MARS_REMOTE_SSH_USER

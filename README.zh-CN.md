@@ -1,5 +1,7 @@
 # MARS · 多 Agent 研究系统
 
+**Windows 原生 CPU 一键运行：** 双击根目录 `MARS-Windows.cmd`，首次自动安装依赖并引导配置本机 API，然后启动前后端。详见 [Windows 原生使用说明](deploy/windows-native/README.md)。
+
 > **研究型多 Agent 系统的工程底座** — 把研究问题经 5 个专门 Agent 一路推到论文初稿,
 > 全程 schema 强校验、每步 HITL 审核、完整审计可回放。
 
@@ -203,3 +205,13 @@ MIT — 见 [LICENSE](LICENSE)。
   url    = {https://github.com/HarryYangthu/MARS-Multi-Agent-Research-System}
 }
 ```
+
+### 实验台：TensorBoard
+
+首页直接内嵌 TensorBoard，支持 PIMC 历史实验和单个 MARS 运行。历史日志目录由 `configs/tensorboard.yaml` 指定，相对于项目 `repo_link.yaml` 中的代码目录；日志原地读取，不复制或修改已有实验。
+
+Execution 计划通过审核、进入真实执行时，后端自动启动对应运行的 TensorBoard；打开的 MARS 页面会切到该运行的实验台，每次执行只自动跳转一次。仅生成执行计划或打开实验台不会启动训练。页面启用 TensorBoard 原生的 30 秒自动刷新，也可手动重新加载。
+
+展示服务仅绑定本机，通过 `/api/tensorboard/view/` 同源转发；前端保持目录 URL 的尾部斜杠。后端关闭时同时回收展示进程。PIMC worker 写入真实优化器与验证指标；其他执行器镜像其实际发出的曲线和完成指标，没有数据时保持空白，不生成示例曲线。远端实验需要先把真实事件文件同步到对应 MARS 运行目录才会显示。
+
+开发验证：`pytest backend/tests/integration/test_tensorboard_display.py` 会启动真实 TensorBoard，检查日志增量刷新、实验隔离与进程回收。设置 `MARS_TEST_STATIC_REPO` 后，`test_cli_research.py::test_real_training_and_sealed_finalization_on_tensor_fixture` 还会验证真实优化器日志与 TensorBoard 数值一致；此测试不是无线实测验收。

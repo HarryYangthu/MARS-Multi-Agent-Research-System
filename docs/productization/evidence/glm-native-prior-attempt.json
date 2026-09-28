@@ -1,0 +1,26 @@
+{
+  "artifact_sha256": "87dc5695e089323daf121777e4757517e371d9d3ab8033411965b025d5068286",
+  "counts": {
+    "action_rounds": 1,
+    "model_requests": 2,
+    "model_responses": 2,
+    "observations": 1,
+    "protocol_repairs": 0,
+    "reflections": 0,
+    "sdk_attempts": 2,
+    "tool_dispatches": 1,
+    "validation_repairs": 0
+  },
+  "full_research_accepted": false,
+  "input_sha256": "c49517d4dece36e3750628f005d696402f1ace23dff35aaf757f9e2a93a72f2e",
+  "model": "glm-5.3",
+  "model_request_limit": 4,
+  "output_token_limit": 2048,
+  "provider": "zhipu",
+  "reflection_accepted": false,
+  "schema_id": "glm_native_probe_receipt.v1",
+  "scope": "code.repo_reader/native_observation_loop",
+  "status": "passed",
+  "attempt": "a",
+  "evidence_assessment": "Original transport-only check predates actual response model metadata; not evidence of provider-reported model identity. Superseded by b; retained as a prior attempt."
+}

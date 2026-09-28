@@ -1,0 +1,10 @@
+# Exact immutable false positives reviewed in docs/productization/evidence/secret-scan-review.json
+1ddbbf2b330dd3b7186f2122f84f27fc0138a301:desktop/tests/security.test.cjs:generic-api-key:77
+1ddbbf2b330dd3b7186f2122f84f27fc0138a301:docs/productization/evidence/increment-checks.json:generic-api-key:46
+1ddbbf2b330dd3b7186f2122f84f27fc0138a301:docs/productization/evidence/increment-checks.json:generic-api-key:47
+e25317dfd896fff529397e0c4a681396b9692c3d:docs/evaluation/idea_quality_20260908/api_verification_20260909.json:generic-api-key:15
+a87e6b12132fe1cb7520f5c7ce6fc5206f127147:frontend/src/features/discovery/smoke.ts:generic-api-key:26
+a87e6b12132fe1cb7520f5c7ce6fc5206f127147:frontend/src/features/discovery/smoke.ts:generic-api-key:66
+e35fffae805e4a24512c6b3c6b917476fad44cd5:.env.example:generic-api-key:4
+# Independently recomputed source SHA-256; review in evidence/onboarding-checks.json
+15cee7e227426e6c07d14a4076cbaa57589320d1:docs/productization/evidence/onboarding-checks.json:generic-api-key:31

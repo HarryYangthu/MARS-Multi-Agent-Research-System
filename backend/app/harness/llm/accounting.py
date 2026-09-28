@@ -74,6 +74,46 @@ class Reservation:
     request_id: str
     tokens: int
     cost: float | None
+    attempts: int
+
+
+def reserved_model_attempts(row: Mapping[str, Any]) -> int:
+    """Read the original conservative attempt reservation, including legacy v1."""
+    maximum = row.get("max_sdk_attempts", MAX_LLM_RETRIES + 1)
+    if type(maximum) is not int or not 1 <= maximum <= MAX_LLM_RETRIES + 1:
+        raise ResourceBudgetError("invalid model-attempt reservation record")
+    return int(maximum)
+
+
+def charged_model_attempts(row: Mapping[str, Any]) -> int:
+    """Read attempt quota charges; absent legacy charges retain the full ceiling."""
+    maximum = reserved_model_attempts(row)
+    charged = row.get("charged_attempts", maximum)
+    if (type(charged) is not int or not 1 <= charged <= maximum
+            or charged < maximum and row.get("attempts_complete") is not True):
+        raise ResourceBudgetError("invalid model-attempt reservation record")
+    return int(charged)
+
+
+def charged_token_component(row: Mapping[str, Any], component: str) -> int:
+    """Legacy rows retain their entire total in each unknown token bucket."""
+    if component not in {"input", "output"}:
+        raise ValueError("unknown token component")
+    value = row.get(f"charged_{component}_tokens", row.get("charged_tokens"))
+    if type(value) is not int or value < 0:
+        raise ResourceBudgetError("invalid token-component reservation record")
+    return int(value)
+
+
+def validate_token_components(row: Mapping[str, Any]) -> None:
+    if type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0:
+        raise ResourceBudgetError("invalid total-token reservation record")
+    for component in ("input", "output"):
+        charged_token_component(row, component)
+    present = [f"charged_{component}_tokens" in row for component in ("input", "output")]
+    if any(present) and (not all(present) or
+            charged_token_component(row, "input") + charged_token_component(row, "output") != row.get("charged_tokens")):
+        raise ResourceBudgetError("inconsistent token-component reservation record")
 
 
 class RunModelBudget:
@@ -95,6 +135,9 @@ class RunModelBudget:
                 continue
             if type(limits.get(key)) is not int or limits[key] < 1:
                 raise ValueError(f"{key} must be a positive integer")
+        for key in ("max_input_tokens", "max_billed_output_tokens"):
+            if key in limits and (type(limits[key]) is not int or limits[key] < 1):
+                raise ValueError(f"{key} must be a positive integer when configured")
         _number(limits.get("max_elapsed_seconds"), "max_elapsed_seconds", positive=True)
         if limits.get("max_cost") is not None:
             _number(limits["max_cost"], "max_cost", positive=True)
@@ -118,15 +161,65 @@ class RunModelBudget:
         if state.get("configuration_sha256") != self.configuration_hash:
             raise ResourceBudgetError("resource policy changed; reconcile the existing run before continuing")
         _number(state.get("started_at"), "resource ledger start time")
+        if "revision_started_at" in state:
+            _number(state["revision_started_at"], "resource revision start time")
         for identifier, row in state["requests"].items():
             if (not isinstance(identifier, str) or not identifier.isalnum() or not isinstance(row, dict)
                     or row.get("status") not in {"in_flight", "completed", "failed", "cancelled",
                                                 "reconciliation_required", "abandoned"}
                     or type(row.get("charged_tokens")) is not int or row["charged_tokens"] < 0):
                 raise ResourceBudgetError("invalid resource reservation record")
+            charged_model_attempts(row)
+            validate_token_components(row)
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
+
+    def begin_revision(self, *, invocation_id: str, reason: str) -> None:
+        """Record an explicit fresh execution without refunding previous usage.
+
+        Only the elapsed-time window is renewed. Request/token/cost totals still
+        include every old reservation, including cancelled or unknown usage.
+        Policy changes are archived and are never admitted during a live call.
+        """
+        if not invocation_id.replace("-", "").isalnum() or not reason.strip():
+            raise ValueError("resource revision requires an invocation ID and reason")
+        with path_lock(self.lock_path):
+            if self.path.exists():
+                raw = json.loads(self.path.read_text())
+                if not isinstance(raw, dict) or not isinstance(raw.get("configuration"), dict):
+                    raise ResourceBudgetError("invalid resource ledger; reconcile its persisted records")
+                previous = RunModelBudget(self.root, configuration=raw["configuration"])
+                state = previous._read()
+            else:
+                state = self._read()
+            revisions = state.setdefault("revisions", [])
+            for receipt in revisions:
+                if receipt["invocation_id"] == invocation_id:
+                    if (receipt["reason"] != reason or receipt["configuration_sha256"] != self.configuration_hash
+                            or state["configuration_sha256"] != self.configuration_hash):
+                        raise ResourceBudgetError("resource revision receipt is immutable")
+                    return
+            if self._mark_abandoned(state):
+                atomic_write_json(self.path, state)
+            rows = state["requests"].values()
+            if any(row["status"] == "reconciliation_required" for row in rows):
+                raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation before retry")
+            if any(row["status"] == "in_flight" for row in rows):
+                raise ResourceBudgetError("cannot start a resource revision while model calls are active")
+            if any(row.get("correlation", {}).get("invocation_id") == invocation_id for row in rows):
+                raise ResourceBudgetError("resource revision requires a fresh invocation")
+            if state["configuration"].get("currency") != self.configuration.get("currency"):
+                raise ResourceBudgetError("cannot change currency in an existing resource ledger")
+            started_at = time.time()
+            revisions.append({"invocation_id": invocation_id, "reason": reason, "started_at": started_at,
+                "previous_configuration": state["configuration"],
+                "previous_configuration_sha256": state["configuration_sha256"],
+                "previous_started_at": state.get("revision_started_at", state["started_at"]),
+                "configuration_sha256": self.configuration_hash})
+            state.update(configuration=self.configuration, configuration_sha256=self.configuration_hash,
+                         revision_started_at=started_at)
+            atomic_write_json(self.path, state)
 
     def _lease_path(self, request_id: str) -> Path:
         return self.path.parent / "requests" / f"{request_id}.lock"
@@ -188,10 +281,14 @@ class RunModelBudget:
                 correlation: Mapping[str, Any]) -> Reservation:
         if type(config.max_tokens) is not int or config.max_tokens < 1:
             raise ValueError("max_tokens must bound a positive output length")
+        if type(config.max_retries) is not int:
+            raise ValueError("max_retries must be an integer")
         attempts = min(max(config.max_retries, 0), MAX_LLM_RETRIES) + 1
         prompt_bound = len(_canonical({"messages": [m.to_wire() for m in messages],
                                       "tools": config.tools}).encode()) + 32 * (len(messages) + 1)
         reserved_tokens = (prompt_bound + config.max_tokens) * attempts
+        reserved_input = prompt_bound * attempts
+        reserved_output = config.max_tokens * attempts
         price = self.configuration.get("prices", {}).get(config.provider + "/" + config.model)
         cost: float | None = None
         if price is not None:
@@ -209,13 +306,18 @@ class RunModelBudget:
             if unresolved:
                 raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation: " + ", ".join(unresolved))
             limits = state["configuration"]["limits"]
-            if time.time() - state["started_at"] >= limits["max_elapsed_seconds"]:
+            if time.time() - state.get("revision_started_at", state["started_at"]) >= limits["max_elapsed_seconds"]:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
             rows = list(state["requests"].values())
-            if limits["max_model_requests"] is not None and len(rows) >= limits["max_model_requests"]:
-                raise ResourceBudgetError("run model-request budget exhausted")
+            if (limits["max_model_requests"] is not None
+                    and sum(charged_model_attempts(row) for row in rows) + attempts > limits["max_model_requests"]):
+                raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts")
             if sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
+            for component, key, amount in (("input", "max_input_tokens", reserved_input),
+                                           ("output", "max_billed_output_tokens", reserved_output)):
+                if key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
+                    raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
             if limits.get("max_cost") is not None:
                 if cost is None or any(row["charged_cost"] is None for row in rows):
                     raise ResourceBudgetError("monetary limit requires explicit prices for every selected model")
@@ -226,8 +328,11 @@ class RunModelBudget:
             state["requests"][identifier] = {"status": "in_flight", "started_at": time.time(),
                 "provider": config.provider, "model": config.model, "correlation": dict(correlation),
                 "reserved_tokens": reserved_tokens, "charged_tokens": reserved_tokens,
+                "reserved_input_tokens": reserved_input, "charged_input_tokens": reserved_input,
+                "reserved_output_tokens": reserved_output, "charged_output_tokens": reserved_output,
                 "reserved_cost": cost, "charged_cost": cost, "usage": None, "usage_complete": False,
-                "price": price, "max_sdk_attempts": attempts}
+                "price": price, "max_sdk_attempts": attempts, "charged_attempts": attempts,
+                "observed_attempts": None, "attempts_complete": False}
             lease_path = self._lease_path(identifier)
             lease_path.parent.mkdir(parents=True, exist_ok=True)
             lease = FileLock(lease_path, timeout=0, thread_local=False)
@@ -238,10 +343,11 @@ class RunModelBudget:
                 lease.release()
                 raise
             self._leases[identifier] = lease
-        return Reservation(identifier, reserved_tokens, cost)
+        return Reservation(identifier, reserved_tokens, cost, attempts)
 
     def settle(self, reservation: Reservation, *, usage: Any, complete: bool,
-               outcome: str) -> None:
+               outcome: str, sdk_attempts: int | None = None,
+               attempts_complete: bool = False) -> None:
         if outcome not in {"completed", "failed", "cancelled"}:
             raise ValueError("invalid model settlement outcome")
         with path_lock(self.lock_path):
@@ -251,6 +357,14 @@ class RunModelBudget:
                 raise ResourceBudgetError("model reservation already settled")
             if reservation.request_id not in self._leases:
                 raise ResourceBudgetError("model reservation belongs to another owner; use explicit reconciliation after owner loss")
+            maximum_attempts = row.get("max_sdk_attempts", MAX_LLM_RETRIES + 1)
+            if sdk_attempts is not None and (type(sdk_attempts) is not int
+                    or not 0 <= sdk_attempts <= maximum_attempts):
+                raise ValueError("observed SDK attempts exceed the reservation or are invalid")
+            attempt_count_known = bool(outcome != "cancelled" and attempts_complete
+                                       and sdk_attempts is not None and sdk_attempts > 0)
+            row.update(observed_attempts=sdk_attempts, attempts_complete=attempt_count_known,
+                       charged_attempts=sdk_attempts if attempt_count_known else maximum_attempts)
             valid = (isinstance(usage, dict)
                      and all(type(usage.get(k)) is int and usage[k] >= 0
                              for k in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -260,11 +374,18 @@ class RunModelBudget:
                        usage_complete=known)
             if known:
                 row["charged_tokens"] = usage["total_tokens"]
+                row["charged_input_tokens"] = usage["prompt_tokens"]
+                # completion_tokens includes billed reasoning for conforming
+                # providers. Any unexplained remainder stays charged as output,
+                # never silently disappears from the separate output ceiling.
+                row["charged_output_tokens"] = usage["total_tokens"] - usage["prompt_tokens"]
                 if row["price"] is not None:
                     price = row["price"]
                     row["charged_cost"] = (usage["prompt_tokens"] * price["input_per_million"]
-                        + usage["completion_tokens"] * price["output_per_million"]) / 1_000_000
-            row["reservation_exceeded"] = known and row["charged_tokens"] > row["reserved_tokens"]
+                        + row["charged_output_tokens"] * price["output_per_million"]) / 1_000_000
+            row["reservation_exceeded"] = known and (row["charged_tokens"] > row["reserved_tokens"]
+                or row["charged_input_tokens"] > row.get("reserved_input_tokens", row["reserved_tokens"])
+                or row["charged_output_tokens"] > row.get("reserved_output_tokens", row["reserved_tokens"]))
             atomic_write_json(self.path, state)
             lease = self._leases.pop(reservation.request_id, None)
             if lease is not None:
@@ -277,7 +398,17 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     root = _RUN_ROOT.get() or run_root
     if root is None:
         raise ResourceBudgetError("production model calls require a run resource scope")
-    budget = RunModelBudget(root)
+    from app.harness.llm.research_accounting import ContractModelBudget, bounded_contract_config
+    from app.harness.runtime.research_execution_scope import current_research_execution
+    scope = current_research_execution(root)
+    budget: RunModelBudget | ContractModelBudget
+    if scope is not None:
+        if not provider.budget_attempts_observable:
+            raise ResourceBudgetError("provider has no verified contract attempt accounting adapter")
+        config = bounded_contract_config(scope, config)
+        budget = ContractModelBudget(scope, endpoint=provider.base_url)
+    else:
+        budget = RunModelBudget(root)
     while True:
         try:
             reservation = budget.reserve(messages, config, correlation or {})
@@ -286,23 +417,59 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
             await asyncio.sleep(0.05)
     observer = config.attempt_observer
     unknown_attempt = False
+    started_attempts = 0
+    finished_attempts = 0
+    attempt_sequence_valid = True
 
     def observe(kind: str, data: dict[str, Any]) -> None:
-        nonlocal unknown_attempt
-        if kind == "sdk_attempt_failed":
-            unknown_attempt = True
+        nonlocal unknown_attempt, started_attempts, finished_attempts, attempt_sequence_valid
+        if isinstance(budget, ContractModelBudget):
+            budget.observe(reservation, kind, data)
+        if kind == "sdk_attempt_started":
+            number = data.get("attempt")
+            if (type(number) is not int or number != started_attempts + 1
+                    or started_attempts != finished_attempts or number > reservation.attempts):
+                attempt_sequence_valid = False
+                raise ResourceBudgetError("SDK attempt cannot exceed its reserved request budget")
+            started_attempts += 1
+        elif kind in {"sdk_attempt_succeeded", "sdk_attempt_failed"}:
+            number = data.get("attempt")
+            if (type(number) is not int or number != started_attempts
+                    or finished_attempts + 1 != started_attempts):
+                attempt_sequence_valid = False
+            else:
+                finished_attempts += 1
+            if kind == "sdk_attempt_failed":
+                unknown_attempt = True
         if observer is not None:
             observer(kind, data)
+
+    def attempts_are_known() -> bool:
+        return attempt_sequence_valid and started_attempts > 0 and started_attempts == finished_attempts
 
     # Config objects may be shared across concurrent roles; never mutate their observers.
     from dataclasses import replace
     actual = replace(config, attempt_observer=observe)
     try:
-        result = await provider.complete(messages, actual)
+        if scope is None:
+            result = await provider.complete(messages, actual)
+        else:
+            from app.harness.llm.provider_base import llm_call_deadline_seconds
+            remaining = scope.ledger.snapshot().activity_remaining_us / 1_000_000
+            async with asyncio.timeout(min(remaining, llm_call_deadline_seconds(actual))):
+                result = await provider.complete(messages, actual)
+        if isinstance(budget, ContractModelBudget):
+            budget.record_response_identity(reservation, result)
     except BaseException as exc:
+        if isinstance(budget, ContractModelBudget):
+            budget.record_failure_identity(reservation, getattr(exc, "model_identity", None))
         budget.settle(reservation, usage=getattr(exc, "usage", None), complete=False,
-                      outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed")
+                      outcome="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                      sdk_attempts=started_attempts, attempts_complete=attempts_are_known())
         raise
     budget.settle(reservation, usage=result.raw.get("usage"), complete=not unknown_attempt,
-                  outcome="completed")
+                  outcome="completed", sdk_attempts=started_attempts,
+                  attempts_complete=attempts_are_known())
+    if scope is not None and scope.ledger.snapshot().reservation_overrun:
+        raise ResourceBudgetError("actual model usage exceeded the reserved contract bounds")
     return result

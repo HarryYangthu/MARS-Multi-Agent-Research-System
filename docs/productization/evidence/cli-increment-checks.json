@@ -1,0 +1,93 @@
+{
+  "schema_id": "productization_cli_increment_checks.v1",
+  "base_commit": "e0114c32ef140a868bd90c7fd360f9e303b01aa9",
+  "source_fingerprints": [
+    {
+      "path": "backend/app/cli.py",
+      "sha256": "bedc3a8af67142a29285a184bcccb6f9366d46c2274da950ddfb6ddead02ccfb"
+    },
+    {
+      "path": "backend/app/cli_runtime_client.py",
+      "sha256": "88f32614b1f3429e494d6ed6c23184277474523b2479cfda563086567cd2feaa"
+    },
+    {
+      "path": "backend/tests/unit/test_cli_runtime_client.py",
+      "sha256": "efb145960916c3d68b2d029253907a342d34a35e16ada07e00c204de6c3321ad"
+    },
+    {
+      "path": "configs/cli_runtime.yaml",
+      "sha256": "ed7a007ea46d5b9f6d411a4fe3b21c3c07f709574513d60114b1813ecfe68059"
+    },
+    {
+      "path": "scripts/release/runtime_assets.txt",
+      "sha256": "dbba0a520c84762a639e0dba6b39012ce512974f544b1468c50bcc068dac6058"
+    },
+    {
+      "path": "scripts/release/v30_tree_allowlist.txt",
+      "sha256": "017d272d8335e36640d0399ac6e53f8c5e3442829750b2b6cb1389da81e128b1"
+    }
+  ],
+  "pytest": {
+    "scope": "shared HTTP client, actual CLI subprocesses, project contract, literal release manifest and legacy CLI regressions",
+    "passed": 292,
+    "skipped": 7,
+    "failed": 0,
+    "errors": 0,
+    "duration_seconds": 14.148
+  },
+  "mypy": "Success: no issues found in 599 source files",
+  "import_contracts": {
+    "kept": 4,
+    "broken": 0
+  },
+  "desktop_tests": {
+    "passed": 14,
+    "failed": 0
+  },
+  "independent_reviews": {
+    "client_tests_passed": 54,
+    "cli_subprocess_tests_passed": 8
+  },
+  "prior_commit_ci": {
+    "commit": "e0114c32ef140a868bd90c7fd360f9e303b01aa9",
+    "core_compatibility": {
+      "run_id": 36343442404,
+      "conclusion": "success"
+    },
+    "windows_native_cpu": {
+      "run_id": 36343442443,
+      "conclusion": "success"
+    }
+  },
+  "logs": [
+    {
+      "path": "mars-productization-cli-regression.log",
+      "sha256": "0a9920da636f0e07c5e8382a16ad05b223664e26b66de2472f50e39d7902498b"
+    },
+    {
+      "path": "mars-productization-cli-regression.xml",
+      "sha256": "beb5c483e4d11bde83f5291042c8c83a654928a05323183ef4196a12a5d2e191"
+    },
+    {
+      "path": "mars-productization-cli-mypy.log",
+      "sha256": "fc40a9fd8f77be70c2dd8172e81de768bc4effb8f6e52a562f573ffbde24397b"
+    },
+    {
+      "path": "mars-productization-cli-imports.log",
+      "sha256": "9d05697a398ab4bfd078390b6aaf15f4af43833e794104be1ab92d1972a785f9"
+    },
+    {
+      "path": "mars-productization-cli-desktop-assets.log",
+      "sha256": "f93a653a8b45961720e586e7c3936ff7d98d79f35a0f94516426f52ae11c07f2"
+    }
+  ],
+  "boundaries": [
+    "No model calls or substituted research success in these tests.",
+    "Human-authored seed enters the actual review lifecycle.",
+    "Successful interrupted-model resume needs external real checkpoint evidence.",
+    "Contract prepare does not create or start research.",
+    "CLI does not own a second research loop.",
+    "Standalone CLI identity handoff from the desktop is not implemented."
+  ],
+  "full_product_accepted": false
+}

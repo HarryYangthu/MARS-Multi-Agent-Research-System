@@ -82,3 +82,6 @@ htmlcov/
 /release-evidence*/
 /workspace/runtime_e2e_regression_*/
 /workspace/runtime_e2e_public_*/
+
+# Windows native managed runtimes, local credentials reports and service state.
+/local/windows/

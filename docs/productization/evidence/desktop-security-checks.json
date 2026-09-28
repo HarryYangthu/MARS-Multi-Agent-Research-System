@@ -1,0 +1,50 @@
+{
+  "scope": "Pure request validation and real local HTTP/WebSocket boundary listeners, not MARS service or research substitutes.",
+  "attempts": [
+    {
+      "attempt": 1,
+      "command": "npm test --prefix desktop",
+      "status": "failed",
+      "cause": "Removing raw header pairs before populating Node headersDistinct caused its lazy getter to read past the shortened array.",
+      "note": "Stopped the owned test process after diagnosing the open connection."
+    },
+    {
+      "attempt": 2,
+      "command": "node --test --test-timeout=5000 desktop/tests/security.test.cjs",
+      "status": "failed",
+      "cause": "Removing raw header pairs before populating Node headersDistinct caused its lazy getter to read past the shortened array.",
+      "note": "Diagnostic run reproduced the failure; stopped its owned process."
+    },
+    {
+      "attempt": 3,
+      "command": "node --test --test-reporter=tap --test-force-exit --test-name-pattern='frontend authorization' desktop/tests/security.test.cjs",
+      "status": "failed",
+      "cause": "Removing raw header pairs before populating Node headersDistinct caused its lazy getter to read past the shortened array.",
+      "exitCode": 1
+    },
+    {
+      "attempt": 4,
+      "command": "node --test --test-reporter=tap --test-force-exit --test-name-pattern='frontend authorization' desktop/tests/security.test.cjs",
+      "status": "passed",
+      "passed": 1,
+      "repair": "Populate and clear distinct-header cache before shortening raw pairs; remove normalized and raw credentials before Next handling."
+    },
+    {
+      "attempt": 5,
+      "command": "npm test --prefix desktop",
+      "status": "passed",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "attempt": 6,
+      "command": "npm test --prefix desktop",
+      "status": "passed",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "note": "Final suite also rejects uppercase service prefixes. Includes HTTP/WebSocket socket routing, ordinary encoded IDs/query preservation and normalized/raw/distinct credential removal."
+    }
+  ]
+}

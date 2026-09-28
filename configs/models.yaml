@@ -25,3 +25,11 @@ providers:
   zhipu:
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
+
+# One short real request, no automatic retry or research dispatch.
+connection_test:
+  timeout_seconds: 30
+  close_timeout_seconds: 2
+  max_request_bytes: 16384
+  max_tokens: 512
+  prompt: "Reply with only OK to confirm the API connection."

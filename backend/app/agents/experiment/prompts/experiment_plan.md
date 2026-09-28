@@ -1,38 +1,16 @@
-# Experiment Plan Prompt (pimc)
+# Experiment Plan Prompt
 
-你在为 **PIMC**(FDD Massive MIMO under beam/layer switching 下的无源互调消除)设计实验。
-被测对象是 **memory-polynomial canceller + router**:消除双载波 odd-order PIM,
-3 阶交调落在 2f1−f2 / 2f2−f1。先读 proposal 的 hypothesis / 证据 / 风险,再产出
-`experiment_plan.v1`(YAML frontmatter + markdown body),供 Coding / Execution Agent 直接消费。
+依据当前项目合同、项目规则、已批准 proposal 与真实上游证据，产出 `experiment_plan.v1`（YAML frontmatter + Markdown body）。领域对象、数据格式、接口、参数和验收门限必须注明来源；其他项目的样例与历史经验不能自动成为本次约束。
 
 ## 输出重点
 
-- **hypothesis_id**:引用 proposal 里的假设 id,一份 plan 只证伪一条主假设。
-- **变量矩阵 / ablations**:只用仿真器真正消费的旋钮(见下),其余写进 body 但不进 ablation grid。
-- **指标与阈值**(方向不能写反):
-  - `RES`(residual power ratio, dB,**越低越好**):门限 `RES <= -26 dB`(batch 取 mean)。
-    参考值:`-29 dB ≈ 噪声底`(好),`-20 dB` = 大量 memory effects 未消(差)。
-  - `loss`(残差功率比,linear):门限 `loss <= 0.04`(取 max)。
-  - 辅助:`PIM_suppression_dB = -RES`(越高越好)、`APE`(残差相位误差,度)。
-  - 禁止把 RES 描述成"越高越好"。
-- **最小消融**:先一条 falsifiable 主轴(通常是 `expert_count` → canceller memory taps),
-  再扩 grid。真实 PIM memory ≈ 12 taps,taps 不足必然 RES 偏高。若用户明确要求
-  “一组/1组/一个实验”, `ablations` 只给一组代表性配置,不要自动扩成 16 组。
-- **预算**:GPU / CPU / mock。CPU mock 用 `projects/pimc/data_gen.py` 合成双载波数据,
-  ~30k complex points,单 ablation 亚秒级。
-- **baseline 兼容检查**:实验不得要求改 `Paper_Total_0327` / `forward(x, stream_label)`;
-  ablation 只读 `baseline/`、`production_interface/` 作参考(Gate 5 保护)。
+- `hypothesis_id` 对应已批准 proposal 中的一条可证伪主假设。说明自变量、控制变量、因变量与对照方案。
+- `ablations` 只使用已选执行入口实际支持的参数，写明来源和 seed。先设计最小实验；数量服从用户要求与任务预算，不自行扩展扫描。
+- 从本次合同或已批准方案读取指标名称、单位、方向、目标、容差及汇总方式。不从指标名称猜测方向，不补默认门限；目标达成必须依据约定的对照和评测口径。
+- 核对真实代码、数据、训练/验证/测试划分、执行命令、环境及预算。固定比较协议，模型选择不得读取保留测试集；缺少必要信息时明确阻断受影响的实验，列出缺口及所需证据，不生成可执行结论。
+- 从项目规则读取允许修改范围、受保护 baseline 与接口约束。实验不得要求绕过保护或改写评测程序。
+- 历史结果仅在代码、数据划分、配置、环境、seed、预算及证据完整匹配时才可建议复用；同名 run 或相同 seed 不足以证明可复用。
 
-## 仿真器真正消费的旋钮(其余写了也不生效)
+## 反馈与证据
 
-- `expert_count` → canceller **memory taps**(越多 RES 越低/越好;真实 memory ≈ 12)。
-- `order` ∈ {1,3,5,7,9}(奇数,自动取奇);hard routing 会再加阶。
-- `router_type` ∈ {`soft`, `hard-topk` / `hard-top2`}。
-- `snr_db`、`learning_rate`。
-
-## 自愈衔接
-
-RES 未过门多半是 **ablation 欠配**(memory 太浅)。本 plan 要让首轮就能暴露这点
-(grid 里要同时含浅 taps 与深 taps),以便 Commander 在 `max_iterations=2` 内
-默认回退到 **Experiment**(`default_target=experiment`)加深 sweep 即可清门,
-而不必动 coding。
+计划不是执行收据。资源缺失须明确失败或阻断，不返回成功样例，也不擅自更换数据或设备。指标未达目标时，将可能原因写为待验证假设；仅凭指标差不能断言代码缺陷、参数不足或某种修改必然改善。后续目标、重试和迭代次数服从当前任务配置与审批。

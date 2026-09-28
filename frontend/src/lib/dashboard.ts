@@ -36,6 +36,10 @@ export function useRuntimeSnapshot(project: string, refreshMs = 4000): RuntimeSn
     let alive = true;
 
     const refresh = async (): Promise<void> => {
+      if (!project) {
+        if (alive) { setReadiness(null); setStats(null); setLoading(false); }
+        return;
+      }
       try {
         const [nextStats, nextReadiness] = await Promise.all([
           getStats(),

@@ -1,0 +1,30 @@
+schema: mars.desktop-build.v1
+product_name: MARS Local Test
+bundle_identifier: org.mars.local-test
+platform: darwin
+arch: arm64
+python_version: '3.11'
+minimum_macos: '13.0'
+shell_files:
+  - desktop/config.yaml
+  - desktop/bundle.yaml
+  - desktop/src/main.cjs
+  - desktop/src/backend-runner.py
+  - desktop/src/frontend-runner.cjs
+  - desktop/src/gateway.cjs
+  - desktop/src/lifecycle.cjs
+  - desktop/src/runtime-assets.cjs
+  - desktop/src/security.cjs
+  - desktop/src/packaged-runtime.cjs
+runtime_source_prefixes:
+  - backend/app/
+  - configs/
+  - templates/
+  - projects/synthetic_regression/
+  - scripts/evaluators/
+frontend_build_exclusions:
+  - cache
+  - standalone
+  - types
+  - diagnostics
+  - trace

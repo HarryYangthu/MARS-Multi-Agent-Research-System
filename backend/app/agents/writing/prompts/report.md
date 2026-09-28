@@ -1,22 +1,13 @@
 # Report Prompt
 
-生成 `report.v1` 时，读取 proposal、experiment plan、code spec、run log 和 HITL 记录，
-把这条 **dual-carrier PIM cancellation**（memory-polynomial canceller + router）研究链路
-写成可审阅、可复现的报告。
+读取当前项目合同、项目规则、proposal、experiment plan、code spec、真实 execution 记录和 HITL 记录，产出 `report.v1`（YAML frontmatter + Markdown body）。
 
-输出重点：
+## 输出重点
 
-- **摘要**：本轮试图把 PIM 残余压到什么水平（用 RES dB，**越低越好**），是否过 gate
-  （batch mean RES ≤ -26 dB，loss ≤ 0.04）。一句话给出最优 ablation 与对应 RES。
-- **方法**：memory-polynomial canceller 拟合奇数阶 Volterra（order ∈ {1,3,5,7,9}）；
-  router（soft / hard-topk）如何按 stream 路由；canceller memory taps 与真实 PIM
-  memory（≈ 12 taps）的关系。
-- **实验设置**：fs=184.32 MHz、f1=30 / f2=38 MHz、~30720 复点、snr_db、learning_rate；
-  ablation 矩阵（`expert_count` → memory taps、`order`、`router_type`）与 seed。
-- **结果和失败分析**：逐 ablation 列 RES（dB）/ PIM suppression（dB，= -RES）/ APE（度）/ loss；
-  指出哪些过 gate、哪些因 memory taps 太浅留下残余 memory effects。**禁止把 RES 写成越高越好，
-  禁止夸大抵消量。**
-- **局限性**：合成信号 vs 真实 PIM、CPU 实跑 vs 全 7 层训练、未覆盖的 order/router 组合。
-- **下一步**：若本轮触发 self-heal，说明回退到哪个 Agent（通常 Experiment 加深 sweep）及其依据。
-- 全文严格引用 chain_refs；区分已验证结果 / 失败结果 / 仍未验证假设；面向研究合作者与导师。
-
+- 摘要说明研究目标、实际完成范围及目标是否达到。完成流程与达到目标分开；缺少必要信息时明确阻断对应结论，并列出证据缺口。
+- 方法与实验设置来自实际代码、数据、配置和上游产物，说明对照、划分、seed、预算、实现版本及所用环境。不能照搬其他项目的方法、数据格式或默认常数。
+- 逐实验报告真实指标、单位、方向、目标、容差和汇总方式。只有这些定义和比较协议明确且一致时才能排名或判断达标；方向未知时只列测量，不猜“最佳”。
+- 区分待执行计划与运行结果。`execution_phase=planned`、批准文件、schema 校验、退出码或可见面板均不能替代真实测量与作业收据。
+- 全文使用 `chain_refs` 指向实际产物、run/attempt/job、日志和测量来源。摘要统计不能替代逐项证据，也不能掩盖失败、无效或缺失结果。
+- 归因只写证据支持的范围；区分已验证结果、负结果、无效实验和待验证假设。单次 seed 或小规模运行不能自动推广。
+- 如实说明 baseline 保护、数据使用边界、人工决定、失败与迭代记录，以及下一步所需验证。不得承诺某种参数或实现改动必然改善。

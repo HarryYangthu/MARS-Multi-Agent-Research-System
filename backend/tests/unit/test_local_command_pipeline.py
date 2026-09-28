@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import yaml
@@ -13,6 +13,15 @@ import yaml
 from app.execution.batch_runner import BatchConfig, run_batch
 from app.execution.simulation_runner import JobSpec, run_one
 from app.settings import reset_settings_cache
+from app.bridge.tensorboard_service import shutdown_tensorboard
+
+
+@pytest.fixture(autouse=True)
+async def close_execution_views() -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await shutdown_tensorboard()
 
 
 @pytest.fixture

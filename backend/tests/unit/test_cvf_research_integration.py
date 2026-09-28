@@ -101,7 +101,12 @@ def test_new_metadata_source_never_accepts_an_unarchived_claim() -> None:
 
 
 @pytest.mark.asyncio
-async def test_service_v4_passes_effective_child_scope_through_the_actual_research_session(tmp_path: Path) -> None:
+@pytest.mark.parametrize("context_version", [2, 3])
+async def test_service_v4_passes_effective_child_scope_through_the_actual_research_session(
+    tmp_path: Path, context_version: int,
+) -> None:
+    from app.harness.context.runtime_policy import freeze_policy
+    freeze_policy(tmp_path, legacy_resume=context_version == 2)
     profile = resolve_idea_profile("experimental_research_pro_per_insight_v4")
     assert profile is not None
     service = ServiceIdeaAgent(profile=profile)
@@ -112,7 +117,10 @@ async def test_service_v4_passes_effective_child_scope_through_the_actual_resear
     session = request.runtime["idea_research_session"]
     scope_context = session.research_tool_context(run_id="component-contract", project="pimc", root=tmp_path)
     assert scope_context.agent == "idea_research"
-    assert scope_context.configured_read_scope.tools == profile.child.tools
+    expected_tools = profile.child.tools + (("context.read_material",) if context_version == 3 else ())
+    assert scope_context.configured_read_scope is not None
+    assert scope_context.configured_read_scope.tools == expected_tools
+    assert session.runtime_tools() == expected_tools
     assert scope_context.extra == {"run_root": str(tmp_path)}
     # Real registry calls with intentionally invalid arguments. A successful
     # permission check reaches schema rejection without invoking the network tool.
@@ -126,12 +134,19 @@ async def test_service_v4_passes_effective_child_scope_through_the_actual_resear
     spec = registry.spec("search.cvf_search")
     assert spec is not None and not _allowed_for_agent(spec.name, "idea_research", spec)
     baseline = ServiceIdeaAgent(profile=resolve_idea_profile("experimental_research_pro_per_insight_v3"))
+    freeze_policy(tmp_path / "baseline", legacy_resume=context_version == 2)
     baseline_request = RunRequest(project="pimc", user_request="Read the supplied project constraints.",
                                  extra={"run_root": str(tmp_path / "baseline")})
     baseline_context = await baseline.build_context(baseline_request)
     baseline.loop_registry(baseline_request, baseline_context)
     old_session = baseline_request.runtime["idea_research_session"]
-    assert old_session.research_tool_context(run_id="legacy", project="pimc", root=tmp_path).configured_read_scope is None
+    baseline_scope = old_session.research_tool_context(run_id="legacy", project="pimc", root=tmp_path / "baseline").configured_read_scope
+    if context_version == 2:
+        assert baseline_scope is None
+    else:
+        assert baseline_scope is not None
+        assert baseline_scope.tools == (*old_session.config.tools, "context.read_material")
+        assert "context.read_material" in baseline_scope.tools
 
 
 def test_a_constructed_scope_cannot_cross_agents_or_authorize_writes() -> None:

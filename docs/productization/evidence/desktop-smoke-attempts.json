@@ -1,0 +1,332 @@
+[
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:25:16.575Z",
+    "services": {
+      "backend": {
+        "pid": 55220,
+        "port": 53697,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 55238,
+        "port": 53702
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:53696"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayRejected": true,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 370
+      },
+      "ownedServicesExited": true
+    },
+    "stoppedAt": "2026-09-27T18:25:21.304Z",
+    "exitCode": 0,
+    "evidenceAssessment": "Initial source-production startup smoke passed; narrower checks and older shell than final candidate.",
+    "attempt": "a",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17"
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:25:51.248Z",
+    "services": {
+      "backend": {
+        "pid": 55503,
+        "port": 53789,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 55513,
+        "port": 53792
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:53788"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "ownedServicesExited": true
+    },
+    "error": "Desktop startup failed; verify the configured Python runtime, runtime assets, and production frontend build.",
+    "stoppedAt": "2026-09-27T18:25:52.631Z",
+    "exitCode": 1,
+    "evidenceAssessment": "Verification failed: assertion expected 403 for backend while authenticated-session middleware correctly returned 401. Fixed assertion; no acceptance claimed for this run.",
+    "attempt": "b",
+    "screenshotSha256": null
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:26:11.242Z",
+    "services": {
+      "backend": {
+        "pid": 55753,
+        "port": 53837,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 55779,
+        "port": 53845
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:53836"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true
+    },
+    "evidenceAssessment": "Verification failed: transient macOS process-group EPERM interrupted cleanup receipt finalization. Owned PIDs were checked absent; missing finalized receipt does not count as pass. Error handling and polling fixed.",
+    "attempt": "c",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17"
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:27:27.614Z",
+    "services": {
+      "backend": {
+        "pid": 56469,
+        "port": 53994,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 56518,
+        "port": 54000
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:53993"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 370
+      },
+      "rendererApiStatus": 200,
+      "rendererWebSocket": true,
+      "ownedServicesExited": true
+    },
+    "stage": "ready",
+    "frontendBuildId": "Q0HIGgTRiOENRlFbRvR6e",
+    "shellSha256": "7174e5281a851943a8a8d28b42d52d285217a6388c1cbd741b3039b8037303c6",
+    "stoppedAt": "2026-09-27T18:27:32.870Z",
+    "exitCode": 0,
+    "evidenceAssessment": "Expanded source-production smoke passed after fixes; older frontend build than final candidate.",
+    "attempt": "d",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17"
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:29:31.701Z",
+    "services": {
+      "backend": {
+        "pid": 57432,
+        "port": 54259,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 57435,
+        "port": 54268
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:54257"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 370
+      },
+      "rendererApiStatus": 200,
+      "rendererWebSocket": true,
+      "ownedServicesExited": true
+    },
+    "stage": "ready",
+    "frontendBuildId": "CBgrP4a2MxiZhv7EnkQLh",
+    "shellSha256": "33664b58d49df956a50e3fdf2a581fd21933c9d8b8276e7ef0bad51ec3052673",
+    "stoppedAt": "2026-09-27T18:29:37.036Z",
+    "exitCode": 0,
+    "evidenceAssessment": "Final source-production smoke and concurrent second-instance check passed on the current frontend build. No installer or research-flow acceptance implied.",
+    "attempt": "e",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17"
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:33:58.405Z",
+    "services": {
+      "backend": {
+        "pid": 59986,
+        "port": 55077,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 59993,
+        "port": 55094
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:55076"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 370
+      },
+      "rendererApiStatus": 200,
+      "rendererWebSocket": true,
+      "ownedServicesExited": true,
+      "ownedServicePidsAbsentAfterExit": true
+    },
+    "stage": "ready",
+    "frontendBuildId": "CBgrP4a2MxiZhv7EnkQLh",
+    "shellSha256": "33664b58d49df956a50e3fdf2a581fd21933c9d8b8276e7ef0bad51ec3052673",
+    "stoppedAt": "2026-09-27T18:34:03.258Z",
+    "exitCode": 0,
+    "attempt": "f",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17",
+    "evidenceAssessment": "Initial header/path hardening smoke passed. A separate security unit test then exposed Node distinct-header cache handling; this run is superseded by attempt g after that fix."
+  },
+  {
+    "mode": "source-production-spike",
+    "platform": "darwin",
+    "arch": "arm64",
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T18:35:26.455Z",
+    "services": {
+      "backend": {
+        "pid": 61302,
+        "port": 55577,
+        "health": {
+          "status": "ok",
+          "service": "mars-backend",
+          "version": "3.0.0-dev",
+          "distribution": "v30-core"
+        }
+      },
+      "frontend": {
+        "pid": 61373,
+        "port": 55595
+      },
+      "gateway": {
+        "origin": "http://127.0.0.1:55576"
+      }
+    },
+    "checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 370
+      },
+      "rendererApiStatus": 200,
+      "rendererWebSocket": true,
+      "ownedServicesExited": true,
+      "ownedServicePidsAbsentAfterExit": true
+    },
+    "stage": "ready",
+    "frontendBuildId": "CBgrP4a2MxiZhv7EnkQLh",
+    "shellSha256": "33664b58d49df956a50e3fdf2a581fd21933c9d8b8276e7ef0bad51ec3052673",
+    "stoppedAt": "2026-09-27T18:35:31.670Z",
+    "exitCode": 0,
+    "attempt": "g",
+    "screenshotSha256": "d269d5d860d8ef3985bffa92579180d39389670929aeda1e310fd0921b748a17",
+    "evidenceAssessment": "Final source-production smoke passed after token consumption and HTTP/WebSocket path hardening, using the unchanged recorded production build and a fresh application data directory. No installer or research-flow acceptance implied.",
+    "runtimeSourceSha256": {
+      "backend-runner.py": "398890a7be991b5d1587578fc9827f74a698dd4cf2422bed10e7c1794b1f09b3",
+      "frontend-runner.cjs": "32c723002556770cc05e68f5085dca2749f491e3d8c46016ef9e090504cf9523",
+      "gateway.cjs": "2bed38523ccba8ea7b7606c3b48776a5506f0e8c904d18af9e861b0b92598ef3",
+      "lifecycle.cjs": "a666fcb4d8092d96a38410c79af659636c6575db8f1e55e49ec3895ce4ac9c4a",
+      "main.cjs": "33664b58d49df956a50e3fdf2a581fd21933c9d8b8276e7ef0bad51ec3052673",
+      "runtime-assets.cjs": "077abc2ddbf83ccf9d4bf5ca311dc36ff0d56a13a75187c06eac3e4c44e143cc",
+      "security.cjs": "aab98925251895aeaba4d9b185be37288709816a79698140765335b53f44f9ae"
+    }
+  }
+]

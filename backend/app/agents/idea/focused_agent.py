@@ -16,6 +16,7 @@ from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.delivery import delivery_errors
 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, research_schema, validate_review_mode
 from app.agents.idea.parameter_schema import parameter_budget_schema
+from app.agents.idea.focused_runtime import bind_focused_snapshot
 from app.agents.idea.runtime_profile import public_agent_configuration
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import get_agent_config, select_provider
@@ -114,14 +115,10 @@ class FocusedIdeaAgent(IdeaAgent):
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         root = Path(str(request.extra["run_root"]))
-        path = root / "input/idea_focused.v1.json"
-        if path.exists():
-            if json.loads(path.read_text()) != self._snapshot:
-                raise ValueError("focused Idea configuration changed; start a new run")
-        else:
-            if request.extra.get("resume_invocation") or any((root / "agent_traces").glob("*/*/checkpoint.json")):
-                raise ValueError("cannot change a historical run to focused Idea")
-            atomic_json(path, self._snapshot)
+        bind_focused_snapshot(root, self._snapshot,
+            invocation=request.extra.get("invocation_id") or request.runtime.get("invocation_id"),
+            resume=request.extra.get("resume_invocation"),
+            revision_reason=str(request.extra.get("revision_reason", "")))
         requirements = request.extra.get("idea_requirements", {})
         if requirements.get("require_research_dossier"):
             raise ValueError("full delegated research dossier requires the explicit legacy research profile")
@@ -218,6 +215,10 @@ class FocusedIdeaAgent(IdeaAgent):
             Message("user", "项目背景与约束：\n" + context.project),
             Message("user", "本次显式要求：\n" + json.dumps(request.extra.get("idea_requirements", {}), ensure_ascii=False))]
         messages += [Message("user", "输入资料 " + label + ":\n" + content) for label, content in context.upstream.items()]
+        if context.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_pack import reference_message
+            messages.extend(reference_message("background", item["source"], item["text"])
+                            for item in context.metadata.get("references", []))
         return messages
 
     def reflection_rubric(self) -> str:

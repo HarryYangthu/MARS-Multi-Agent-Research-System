@@ -1,5 +1,6 @@
 """Pure candidate-bound review transitions; no provider or tool substitute."""
 from dataclasses import asdict, replace
+from typing import Any
 import pytest
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
@@ -34,7 +35,7 @@ def test_empty_or_unbounded_review_is_rejected(issues: list[str]) -> None:
 
 
 def test_unlimited_requests_allow_review_without_resetting_reflections() -> None:
-    state = {"candidate": "human-authored document", "pending": None,
+    state: dict[str, Any] = {"candidate": "human-authored document", "pending": None,
              "counts": {"reflections": 1, "model_requests": 1000}, "review_issues": []}
     review = ExternalReview(digest(state["candidate"]), "human reviewer", ("correct this definition",))
     policy = AgentLoopPolicy(mode="reflection", max_model_calls=None, max_reflections=2)

@@ -120,3 +120,23 @@ context_engineering:
         - {order: 8, layer: 运行时动态上下文, content: "events、trace、tool audit、attempt ledger", storage: ["runs/<run_id>/context/agents/commander/raw/", "runs/<run_id>/diagnosis/"], required: 条件装, risk: 事件流过长, strategy: "Pack current blockers/latest attempts;trace Offloading", packing_position: runtime}
         - {order: 9, layer: 下一步决策上下文, content: 给哪个 Agent、修什么、带哪些约束, storage: ["runs/<run_id>/context/agents/commander/decision/", "runs/<run_id>/feedback/", "runs/<run_id>/events/"], required: 必装, risk: 决策受旧状态干扰, strategy: "Pack 最新状态;旧 attempt Quarantine", packing_position: decision}
         - {order: 10, layer: 最终打包, content: 生成调度/诊断/迭代指令, storage: ["runs/<run_id>/context/agents/commander/manifests/", "runs/<run_id>/context/agents/commander/packed/"], required: 必装, risk: 上下文冲突, strategy: 按蓝图顺序 Packing, packing_position: final messages}
+
+# Runtime v3 is frozen per run. Shares are borrowing targets, never truncation caps.
+runtime_context:
+  version: 3
+  trigger_percent: 80
+  target_percent: 65
+  safety_margin: 2048
+  input_budget: 48000
+  excerpt_chars: 800
+  read_chars: 6000
+  index_files: 120
+  optional_sections: [Background, Background information, Literature review, 背景, 研究背景, 相关工作]
+  profiles:
+    default: {shares: [15, 15, 50, 20], code_focus: 'Read only task-relevant interfaces and implementation; never preload the repository.'}
+    commander: {shares: [15, 5, 55, 25], code_focus: 'Use repository metadata and stage results. Read source only to resolve a concrete task-routing conflict.'}
+    idea: {shares: [15, 15, 50, 20], code_focus: 'Read baseline model interfaces, core forward operations and relevant signal-processing configuration. State unknowns; do not infer unseen implementation.'}
+    experiment: {shares: [15, 15, 50, 20], code_focus: 'Read data splitting, preprocessing, metrics, seed, training budget and stopping configuration needed by this experiment.'}
+    coding: {shares: [15, 30, 40, 15], code_focus: 'Read target functions, direct dependencies, callers and relevant tests. Expand incrementally when dependencies require it; preserve baseline write protection.'}
+    execution: {shares: [15, 10, 50, 25], code_focus: 'Read entrypoints, effective configuration, dependencies and output contracts. Follow error call chains only when debugging.'}
+    writing: {shares: [15, 5, 60, 20], code_focus: 'Use verified methods and actual results. Read source only to verify a specific implementation claim.'}

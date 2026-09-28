@@ -1,34 +1,41 @@
 import Link from "next/link";
+import { TopBar } from "@/components/TopBar";
 
 const CONFIG_SECTIONS = [
   {
+    href: "/config/capabilities",
+    title: "研究能力",
+    description: "查看工具、技能规则与 MCP 的实际注册、权限和验证状态。",
+    badge: "能力目录",
+  },
+  {
     href: "/config/agents",
-    title: "Agent 模型与 Key",
-    description: "配置每个 Agent 的 provider、模型、温度、token 上限和本地 API key。",
-    badge: ".env.local",
+    title: "模型连接",
+    description: "配置研究所用的模型、服务地址和凭据，查看连接检查结果。",
+    badge: "连接设置",
   },
   {
     href: "/config/yaml",
     title: "YAML 高级编辑",
     description: "查看和编辑 configs/*.yaml，保留校验、Diff 和 audit 记录。",
-    badge: "audit",
+    badge: "高级",
   },
 ];
 
 export default function ConfigIndexPage(): JSX.Element {
   return (
-    <main className="min-h-screen bg-mars-bg p-6 text-slate-100">
+    <div className="min-h-screen bg-mars-bg"><TopBar /><main className="p-6 text-slate-100">
       <div className="mx-auto max-w-5xl">
         <div className="mb-6">
           <Link
-            href="/"
+            href="/projects"
             className="mb-4 inline-flex rounded border border-mars-border bg-mars-panel2 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-mars-subtle hover:text-white"
           >
-            ← 返回实验台
+            ← 返回项目
           </Link>
-          <h1 className="text-2xl font-semibold">配置</h1>
+          <h1 className="text-2xl font-semibold">设置</h1>
           <p className="mt-2 text-sm text-slate-500">
-            这里是配置入口；具体配置放在子页面里，避免和实验运行工作台混在一起。
+            配置模型连接；内部参数与变更记录在高级设置中查看。
           </p>
         </div>
 
@@ -54,6 +61,6 @@ export default function ConfigIndexPage(): JSX.Element {
           ))}
         </div>
       </div>
-    </main>
+    </main></div>
   );
 }

@@ -1,0 +1,99 @@
+{
+  "schema_id": "verification.contract_results_recovery.v1",
+  "full_regression": {
+    "passed": 3273,
+    "skipped": 181,
+    "duration_seconds": 182.95,
+    "scope": "Full backend and synthetic tests before final catalog lock hardlink guard; excludes subsequent scope restoration and CLI follow-up development",
+    "xml": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-full.xml",
+      "sha256": "45ffe39c6744f47d1a6f5faaa7e3294f3eb41626e50b9581eeb01b73b026d082"
+    },
+    "counts": {
+      "tests": "3454",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "181",
+      "time": "182.794"
+    },
+    "log": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-full.log",
+      "sha256": "44ec85faf0f023fa31bf07788b73bc872a99a66bc4e997bfd854bf8dfb9acf35"
+    }
+  },
+  "full_strict_mypy": {
+    "source_files": 628,
+    "log": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-mypy.log",
+      "sha256": "8a1f667cda808809a244ac566ba83981dea63589360ababde834f8cd9aece632"
+    }
+  },
+  "dependency_contracts": {
+    "kept": 4,
+    "broken": 0,
+    "log": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-imports.log",
+      "sha256": "42719da163c9ebb1add84336e6d0ecc82c6e574aa3291191c62d0beaef4b13e9"
+    }
+  },
+  "final_targeted_regression": {
+    "passed": 91,
+    "duration_seconds": 9.4,
+    "scope": "Creation with final lock guard, research admission, SQL results usage and pure CPU diagnostic checks",
+    "counts": {
+      "tests": "91",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "9.273"
+    },
+    "xml": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-final.xml",
+      "sha256": "173a9bfa0a98d6aa4a0c739232753720eefa59c304e81a26555a24ee2f76ade4"
+    },
+    "log": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-final.log",
+      "sha256": "fc7b9d8e522f941041c1c3831e6cb43f80774aa241bb60a9f6cb6b304b3929a9"
+    }
+  },
+  "final_strict_mypy": {
+    "source_files": 6,
+    "log": {
+      "path": "release-evidence/productization/20260928/contract-results-recovery-final-mypy.log",
+      "sha256": "ab35ee42183d4d6d3ba483825ab037d18a5a15622d03be01d82220b1564851ff"
+    }
+  },
+  "creation_guard_regression": {
+    "passed": 28,
+    "log": {
+      "path": "release-evidence/productization/20260928/creation-final.pytest.log",
+      "sha256": "c7c6e4a01597d3b94e0c9e29bcb9030abb8eb626a0a8da5036f1cd5218937351"
+    },
+    "strict_log": {
+      "path": "release-evidence/productization/20260928/creation-final.mypy.log",
+      "sha256": "f9b031e5c45aa702cd4fef028d465551cb20a2c4698e0913c7b00766b20ac4d8"
+    }
+  },
+  "selected_final_source_sha256": {
+    "backend/app/storage/research_creation_store.py": "c12080ac2a16ffee74522b7d5ff6a574218e3392855df34f941b0fcdecc8512c",
+    "backend/app/bridge/research_run_service.py": "790d8d246beff94ce3342382cdc4a8c1423e5117f73d31f8a6b011db25653d01",
+    "backend/app/api/research_contracts.py": "b795127bf747e71e016bda7f02e6b62569dfc77cb1602bf278636a93ec1e559e",
+    "backend/app/bridge/orchestrator.py": "4c2cf7ecb2ade84399ed1c398e85d0ce08e01e7274b6f658339f93bc7a07a636",
+    "backend/app/bridge/research_results_usage.py": "e35aace8b506a5213365a3dd05218329189814c4ef58af336624779bc723ba1f",
+    "backend/app/bridge/results_service.py": "f4cf4e4a6038aceadbb0ba99cd346afaf8a11ac396ce2fc2f2d924897566a59a",
+    "backend/tests/unit/test_research_creation.py": "3cb36782edd10741dc86f9fc71accafc6562782aa59c8d298ee65b6e3113e388",
+    "backend/tests/unit/test_research_results_usage.py": "e56ad9c38c18f5d3820a7bbaff52705144bdb2e2e3783a650c4d61c8cfee035e",
+    "scripts/verify_contract_cpu_loop.py": "f07c7925371d43245f2f373f3645ebe3077a88b965547673ba565c25160db9fd",
+    "frontend/src/components/RunResultsPanel.tsx": "3975573e1be5f33f6dabbab85b972c71c14a864c38e43fdf3a5708591dde718f",
+    "frontend/src/lib/results.ts": "60ede3a0bd58e482ed6976421edfb1f8eacbd38e9adaec64836bfaf3df726646"
+  },
+  "ui_receipt": "research-save-reconciliation-ui.json",
+  "real_model_cpu_receipt": "contract-cpu-real.json",
+  "boundaries": [
+    "No full managed research start or stage recovery admitted",
+    "Skipped cases are not successful integration coverage",
+    "Actual browser restart check preceded final initialization-lock guard; final guard has independent real hardlink regression",
+    "628-file strict and full suite precede subsequent scope/CLI changes",
+    "No invoice or verified price source; cost remains unknown"
+  ]
+}

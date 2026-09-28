@@ -408,6 +408,10 @@ class IdeaAgent(BaseAgent):
                     Message("user", "Project constraints:\n" + context.project)]
         messages.extend(Message("user", "[untrusted supplied context:" + key + "]\n" + value)
                         for key, value in context.upstream.items())
+        if context.metadata.get("runtime_policy", {}).get("version") == 3:
+            from app.harness.context.runtime_pack import reference_message
+            messages.extend(reference_message("background", item["source"], item["text"])
+                            for item in context.metadata.get("references", []))
         return messages
 
     def reflection_rubric(self) -> str:

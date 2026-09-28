@@ -1,0 +1,97 @@
+{
+  "schema": "verification.contract_results_browser.v1",
+  "status": "passed",
+  "run_id": "2026-09-27T2049_contract_cpu_loop_diagnostic",
+  "frontend_build_id": "PbeDgd66I0IkpDFeGZhzf",
+  "frontend_url": "http://127.0.0.1:3012/results/2026-09-27T2049_contract_cpu_loop_diagnostic",
+  "backend_mode": "development_real_only_without_model_credentials",
+  "run_relocated": false,
+  "saved_run_file_bytes_unchanged": 125,
+  "run_files_added_or_deleted": false,
+  "only_modified_mtime": [
+    ".state-artifacts.lock"
+  ],
+  "sqlite_changed": false,
+  "ui_observed": {
+    "sdk_attempts": 4,
+    "input_tokens": 5395,
+    "billed_output_tokens": 1117,
+    "charged_tool_executions": 3,
+    "cost_display": "unknown",
+    "verified_jobs": 6,
+    "outcome": "unknown"
+  },
+  "existing_export_get": {
+    "status": 200,
+    "bytes": 14741,
+    "sha256": "3e59e7b03f76478f3eb7586641a65e228eb667a39fd66d79d7cbd813bd494b29",
+    "manifest_payloads_verified": 8
+  },
+  "new_export_post_attempted": false,
+  "offline": {
+    "scheme": "file",
+    "browser_network_offline": true,
+    "reload_verified": true,
+    "report_rendered": true,
+    "relative_results_json_link_clicked": true,
+    "relative_links": 8,
+    "all_payload_hashes_verified": true,
+    "independent_rerun_verified": false
+  },
+  "tool_failure_retained": "open with --allow-file-access then snapshot without that flag reset session to about:blank; keeping flag consistent fixed actual DOM",
+  "new_model_calls": 0,
+  "new_job_submissions": 0,
+  "electron_gateway_download_verified_this_turn": false,
+  "evidence_root": "release-evidence/productization/20260928/contract-results-ui",
+  "artifacts": [
+    {
+      "path": "online-full.png",
+      "sha256": "def85d8268697f8be8560337178f7d02b00426549b2ff2206ca1e320bed9d3d6",
+      "bytes": 337262
+    },
+    {
+      "path": "offline-report.png",
+      "sha256": "7b52c54700bbf5c3125f36dcb05af8c482379e3f863c57f6099f5673e12d2f49",
+      "bytes": 696134
+    },
+    {
+      "path": "online-page.txt",
+      "sha256": "3696a008e0c530d739f6037af556fc75b7fbfe71a04e3eae2342d4482f1b69dc",
+      "bytes": 3475
+    },
+    {
+      "path": "offline-report-dom.txt",
+      "sha256": "c2a5f1bfa694376546aef2f47060259d3e219f4bca90b4c8d70a2998247a0138",
+      "bytes": 5913
+    },
+    {
+      "path": "online-network.txt",
+      "sha256": "266ca6e8243c2ea775b1e8dff7066a7b12c54b9af501cb80db7cc4ec19680a6f",
+      "bytes": 5989
+    },
+    {
+      "path": "existing-results-downloaded.zip",
+      "sha256": "3e59e7b03f76478f3eb7586641a65e228eb667a39fd66d79d7cbd813bd494b29",
+      "bytes": 14741
+    }
+  ],
+  "browser_javascript_errors": [],
+  "nonblocking_http_failures": [
+    {
+      "path": "/favicon.ico",
+      "status": 404
+    }
+  ],
+  "restoration": {
+    "backend_original_runtime_restored": true,
+    "backend_health_status": "ok",
+    "frontend_not_rebuilt_or_restarted": true,
+    "own_browser_sessions_closed": true
+  },
+  "boundaries": [
+    "Read-only H rendering and existing-export GET through production Next rewrite; export-creation POST was not invoked.",
+    "Electron gateway download was not reverified in this batch.",
+    "Separate earlier disk audit checked 152 evidence files bytes and mtime unchanged; this UI batch checked 125 files inside the original run, with only the existing empty state-artifacts lock mtime changing.",
+    "File report reloaded with browser networking disabled; this is offline review, not independent experiment reproduction."
+  ]
+}

@@ -18,7 +18,7 @@ def test_export_reads_committed_tree_and_allowlist_not_dirty_workspace(
     (repo / "routes" / "[id].txt").write_text("route\n", encoding="utf-8")
     (repo / "safe.txt").write_text("committed public text\n", encoding="utf-8")
     (repo / "allowlist.txt").write_text(
-        "allowlist.txt\nroutes/**\nsafe.txt\n",
+        "allowlist.txt\nroutes/[id].txt\nsafe.txt\n",
         encoding="utf-8",
     )
     commit = _commit(repo, "safe")
@@ -87,7 +87,7 @@ def test_absolute_user_path_binary_internal_doc_and_docker_context_block(
     repo = _repository(tmp_path)
     (repo / "docs").mkdir()
     (repo / "allowlist.txt").write_text(
-        "allowlist.txt\nDockerfile\nconfig.txt\ndocs/**\nmodel.pdf\n",
+        "allowlist.txt\nDockerfile\nconfig.txt\ndocs/implementation_report.md\nmodel.pdf\n",
         encoding="utf-8",
     )
     (repo / "Dockerfile").write_text("FROM scratch\nCOPY . /app\n", encoding="utf-8")
@@ -153,6 +153,18 @@ def test_archive_symlink_and_missing_gitleaks_fail_closed(tmp_path: Path, monkey
 
     assert audit.decision == "blocked"
     assert any(finding.rule == "gitleaks" for finding in audit.findings)
+    # A development-only missing-scanner exception must never produce a
+    # distributable archive. Git remains real; no scanner success is forged.
+    with pytest.raises(ReleaseGateError, match="successful gitleaks scan"):
+        audit_release(
+            repo=repo_two,
+            treeish=second_commit,
+            allowlist_path="allowlist.txt",
+            scan_history=False,
+            gitleaks_required=False,
+            materialize=tmp_path / "must-not-exist.tar.gz",
+        )
+    assert not (tmp_path / "must-not-exist.tar.gz").exists()
 
 
 def _repository(root: Path) -> Path:

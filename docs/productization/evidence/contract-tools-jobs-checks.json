@@ -1,0 +1,41 @@
+{
+  "schema": "verification.contract_tools_jobs.v1",
+  "status": "passed",
+  "tests": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "291",
+    "time": "31.009",
+    "timestamp": "2026-09-28T04:43:19.399044+08:00"
+  },
+  "strict_mypy_files": 13,
+  "independent_job_review_cases": 4,
+  "agent_job_related_tests": 225,
+  "agent_tool_related_tests": 100,
+  "prior_commit_ci": {
+    "sha": "30818f4463d83af959c5b33be669f1c13f7eb5bc",
+    "core_run_id": 36348202062,
+    "core_conclusion": "success",
+    "windows_launcher_run_id": 36348202043,
+    "windows_launcher_conclusion": "success"
+  },
+  "source_sha256": {
+    "backend/app/harness/runtime/research_budget_ledger.py": "e13914afeeb5963a43bb32dd00f9b18071a3afa1fe73947f4ef6cf064e34af15",
+    "backend/app/harness/tools/research_accounting.py": "d8167fbbb1f0020dd037fba0bde961d3598c2973eb942cefdab3b5593b009566",
+    "backend/app/harness/tools/registry.py": "55a2dd7da6ba2a2b4aeda6f3f87d66c6287381701149f81dbe4eeec695d8b5a9",
+    "backend/app/bridge/research_job_service.py": "5100cce674a9cda5204b307788c5043c4f0eb6a6e5e18b316102fae1fc1c832e",
+    "backend/app/execution/local/runner.py": "c3f21491f9e80f37a35240cb71e05f04f23caa3be927401165c0baa202086bb1",
+    "backend/app/execution/local/worker.py": "da42201cbba970f938c434567fdf8eed4fdc351cb4a44344b0fa33cf9a62beae",
+    "configs/research_jobs.yaml": "2f2016a7911718009cadeb793dacebdd18c95d99f90468675beee344701dfaf2"
+  },
+  "logs": {
+    "contract-tools-jobs-parent.xml": "6363de660fa9ea600ee2d94a0aadbdab50980782d8b1460c8d3e7999fedd701c",
+    "contract-tools-jobs-parent.log": "9a6e56de58c8abd9fa7076c16ed58e12c1f08e38671f3b1ad4c951439a7d1cbd",
+    "contract-tools-jobs-parent-mypy.log": "8f3f4c0ebcb835e848682f2c6610a1bf32c86a993bdb626d9ff36e3a49408398"
+  },
+  "full_research_start_enabled": false,
+  "os_sandbox_certified": false,
+  "gpu_verified": false
+}

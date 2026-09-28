@@ -1,0 +1,74 @@
+{
+  "scope": "onboarding increment, not full research acceptance",
+  "tests": {
+    "passed": 26,
+    "seconds": 4.43,
+    "kind": "actual temporary files and FastAPI requests"
+  },
+  "mypy_source_files": 644,
+  "import_contracts": 4,
+  "frontend_build_id": "iA0ITo8CLqL1C3_hdmaRX",
+  "initial_browser_build_id": "MxE7_dRnQ4XBEWwYGnboD",
+  "browser_checks": [
+    "missing API Key refused",
+    "actual folder picker accepted isolated directory",
+    "actual UTF-8 Markdown uploaded, disk bytes matched",
+    "preview displayed original content",
+    "same filename upload returned 409 without overwrite",
+    "code and Markdown paths carried into new research form",
+    "390px viewport: document width 375px, no horizontal overflow",
+    "original user project selection restored"
+  ],
+  "later_change": "Ignore upload UI responses when user switches to a different project; rebuilt and rechecked affected flow",
+  "model_calls": 0,
+  "real_credentials_entered": false,
+  "source_sha256": [
+    {
+      "path": "backend/app/bridge/project_onboarding.py",
+      "sha256": "09916346f3cbcf89da7ad4e5c5c46d7990273eb5810ced7b1352d6f41fad5c6e"
+    },
+    {
+      "path": "backend/app/api/projects.py",
+      "sha256": "fabf8b1d3025a196a9191dfbb53877bec38486bbf3eb676c2fdef969b4cf6cbb"
+    },
+    {
+      "path": "frontend/src/components/GettingStarted.tsx",
+      "sha256": "6fd04741f2b073444e7183ee71fb5d26fbae3b7e6626f50fc258416ead599ba6"
+    },
+    {
+      "path": "frontend/src/components/OnboardingModelSetup.tsx",
+      "sha256": "41215f8fdd26fe1c8cede7ea9b3beba16148a6b7609ccbabb51dce5ba802c590"
+    },
+    {
+      "path": "frontend/src/components/NewResearchWizard.tsx",
+      "sha256": "3efd74834e99516a2b5eb4a3af43c574e817563dd0ff362caf5f292ff7f55ca7"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "sha256": "6d415ab9d9aa77747d64b429a252ec5389fbb8c483d60f3610805fd2ae1c49af"
+    },
+    {
+      "path": "frontend/src/app/projects/page.tsx",
+      "sha256": "55e4c643a5e3744a7b6a45b102c27c6c410d572627caf794cb1758de251a3b77"
+    },
+    {
+      "path": "frontend/src/app/onboarding/page.tsx",
+      "sha256": "e8b411cd3ca7b71a59c27552fbacd6c615cde0499caefefb9437535f6511e7cb"
+    }
+  ],
+  "log_sha256": {
+    "release-evidence/productization/20260928/onboarding-tests.log": "eac33e36f811bc46f79f9673969d5eb48f9e13d26f7e1f3812148a3297b77f64",
+    "release-evidence/productization/20260928/onboarding-mypy.log": "60b90905dbbeb07b8390609c83d8a357ed57c76231efc874d6e26027c3fd629d",
+    "release-evidence/productization/20260928/onboarding-imports.log": "e2289494e7445ab6c3b0ce26f22f495a5785ab31a3875fc3c8d3b79bf2fde8cf",
+    "release-evidence/productization/20260928/onboarding-final-build.log": "f2236e7f7b05d40ed551f1ba7f1d2400b7e05b0a22026145adc6214e561d0996"
+  },
+  "limits": [
+    "API configuration saved is not connection verified",
+    "full research start remains blocked"
+  ],
+  "secret_scan_review": {
+    "rule": "generic-api-key",
+    "finding": "15cee7e227426e6c07d14a4076cbaa57589320d1:docs/productization/evidence/onboarding-checks.json:generic-api-key:31",
+    "classification": "Verified source-file SHA-256, independently recomputed; not a credential. Exact historical fingerprint only."
+  }
+}

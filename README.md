@@ -1,5 +1,7 @@
 # MARS - Multi-Agent Research System
 
+**Windows 原生 CPU 一键运行：** 双击根目录 `MARS-Windows.cmd`，首次自动安装依赖并引导配置本机 API，然后启动前后端。详见 [Windows 原生使用说明](deploy/windows-native/README.md)。
+
 ![version](https://img.shields.io/badge/release-Mars_V2.0-coral)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![next](https://img.shields.io/badge/next.js-15-black)

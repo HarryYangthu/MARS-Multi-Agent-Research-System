@@ -136,6 +136,32 @@ class Commander:
 
     async def _decide_llm(self, session: CommanderSession) -> Decision:
         messages = self._build_messages(session)
+        manifest_path = None
+        if session.context_version >= 3:
+            from app.harness.context.runtime_pack import Material, message_key, pack_messages
+            from app.harness.context.runtime_policy import freeze_policy, input_budget
+            from app.harness.context.runtime_manifest import record_manifest
+            root = repo_root() / "conversations" / session.conv_id
+            policy = freeze_policy(root)
+            materials = {}
+            for m in messages:
+                if m.content.startswith("[observation tool="):
+                    materials[message_key(m)] = Material("tool", "commander observation", '"ok": false' in m.content)
+                elif m.role == "assistant":
+                    materials[message_key(m)] = Material("history", "commander completed reply", False)
+                elif m.content.startswith("[reference background:"):
+                    materials[message_key(m)] = Material("background", "project background", False)
+            saved_state = root / "context/commander_state.json"
+            previous = json.loads(saved_state.read_text()) if saved_state.exists() else session.context_compaction
+            messages, manifest = pack_messages(messages, policy=policy,
+                budget=input_budget(policy, int(policy["input_budget"]), output_reserve=self._llm_config.max_tokens,
+                    model_window=self._llm_config.extra.get("context_window")), tools=self._llm_config.tools,
+                materials=materials, root=root, previous=previous, agent="commander")
+            session.context_compaction = manifest["state"]
+            from app.harness.agent_loop.trace import atomic_json
+            atomic_json(root / "context/commander_state.json", session.context_compaction)
+            manifest_path = record_manifest(root, agent="commander", node=session.conv_id, project=session.project,
+                messages=messages, tools=self._llm_config.tools, manifest=manifest)
         try:
             completion = await asyncio.wait_for(
                 guarded_complete(self._provider, messages, self._llm_config,
@@ -146,6 +172,9 @@ class Commander:
                     minimum_seconds=get_settings().mars_llm_timeout_seconds,
                 ),
             )
+            if manifest_path is not None:
+                from app.harness.context.runtime_manifest import record_usage
+                record_usage(manifest_path, completion.raw.get("usage"))
             return _parse_decision(completion.text)
         finally:
             await self._provider.close()
@@ -153,11 +182,19 @@ class Commander:
     def _build_messages(self, session: CommanderSession) -> list[Message]:
         sys = _system_prompt(session)
         msgs: list[Message] = [Message(role="system", content=sys)]
+        if session.context_version >= 3:
+            from app.harness.context.folder_context import load_folder_context, is_context_template
+            from app.harness.context.runtime_pack import reference_message
+            record = load_folder_context(session.project)
+            if record:
+                for f in record["files"]:
+                    if f["role"] == "reference" and not is_context_template(f):
+                        msgs.append(reference_message("background", f["path"], f["content"]))
         if session.rolling_summary:
             msgs.append(
                 Message(
-                    role="system",
-                    content="[rolling_summary]\n" + session.rolling_summary,
+                    role="user",
+                    content="[rolling_summary; reference, not new authority]\n" + session.rolling_summary,
                 )
             )
         # Replay dialogue. Tool messages are folded in as user-side observations.
@@ -266,6 +303,10 @@ def _system_prompt(session: CommanderSession) -> str:
 
     folder_context = load_folder_context(session.project)
     project_context = render_folder_context(folder_context) if folder_context is not None else ""
+    if folder_context is not None and session.context_version >= 3:
+        from app.harness.context.folder_context import is_context_template
+        project_context = "\n".join(f["content"] for f in folder_context["files"]
+            if f["role"] == "instructions" and not is_context_template(f))
     targets = (
         json.dumps(session.metric_targets, ensure_ascii=False)
         if session.metric_targets

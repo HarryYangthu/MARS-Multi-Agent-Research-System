@@ -12,7 +12,9 @@ import { IdeaProposalDetails } from "@/components/IdeaProposalDetails";
 import { IdeaRunMaterials } from "@/components/IdeaRunMaterials";
 import { AgentContextPanel } from "@/components/AgentContextPanel";
 import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
+import { TensorBoardPanel } from "@/components/TensorBoardPanel";
 import { ReportsPanel } from "@/components/ReportsPanel";
+import { RunControlBar } from "@/components/RunControlBar";
 import { SidebarToggleButton } from "@/components/SidebarToggleButton";
 import { TimelinePanel } from "@/components/TimelinePanel";
 import {
@@ -43,11 +45,9 @@ import {
   getWorkspaceTree,
   getSelfEvolutionLevers,
   getTrace,
-  executionPlotUrl,
   listArtifactEvaluations,
   listDiagnoses,
   listEpisodeMemory,
-  listExecutionPlots,
   listFeedbackPackets,
   listMemoryCandidates,
   listRunToolCalls,
@@ -87,7 +87,6 @@ import {
   type EvaluationPolicyDecision,
   type EvaluationReportItem,
   type EvaluationScorecard,
-  type ExecutionPlot,
   type FeedbackLoopStartResult,
   type FeedbackPacketView,
   type McpAdapterStatus,
@@ -717,7 +716,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   }
 
   async function saveArtifactEdits(): Promise<ArtifactView | null> {
-    if (!artifact || editing === null) return null;
+    if (!artifact || editing === null || run?.read_only) return null;
     // Accept both body-only editing (default UI) and full markdown documents.
     const m = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/.exec(editing);
     const body = m ? m[2] : editing;
@@ -936,7 +935,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   const firstWaitingReviewAgent = firstStageInState(run?.states, "waiting_review");
   const activeAgentIsWaitingReview = activeAgentState === "waiting_review";
   const reviewTargetAgent = activeAgentIsWaitingReview ? activeAgent : firstWaitingReviewAgent;
-  const canReviewCurrentAgent = Boolean(artifact && activeAgentIsWaitingReview);
+  const canReviewCurrentAgent = Boolean(artifact && activeAgentIsWaitingReview && !run?.read_only);
   const reviewActionHint = canReviewCurrentAgent
     ? "当前产物可以审核。"
     : reviewTargetAgent && reviewTargetAgent !== activeAgent
@@ -961,7 +960,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       {!primarySidebarCollapsed ? (
       <aside className="border-r border-mars-border bg-mars-panel/60 p-4">
         <div className="flex items-center justify-between gap-2">
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-300">
+          <Link href="/lab" className="text-xs text-slate-500 hover:text-slate-300">
             &larr; 实验台
           </Link>
           <div className="flex items-center gap-2">
@@ -1047,7 +1046,8 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       </aside>
       ) : null}
 
-      <section className="flex flex-col">
+      <section className="flex min-h-0 min-w-0 flex-col">
+        <RunControlBar key={runId} runId={runId} run={run} onChange={setRun} />
         {(() => {
           const isWaiting =
             activeAgentIsWaitingReview &&
@@ -1180,7 +1180,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
                 <div className={`shrink-0 gap-2 ${isContextView || isWorkspaceView || isTimelineView || isReportsView ? "hidden" : "flex"}`}>
                   <button
                     onClick={save}
-                    disabled={!artifact}
+                    disabled={!artifact || run?.read_only}
                     className="rounded border border-mars-border px-3 py-1.5 text-sm hover:bg-mars-panel disabled:opacity-50"
                   >
                     {t("run.editor.save")}
@@ -1299,7 +1299,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
           ) : (
             <>
               {activeAgent === "execution" ? (
-                <ExecutionLivePanel runId={runId} />
+                <TensorBoardPanel project={run?.project ?? "pimc"} runId={runId} />
               ) : null}
               {artifact ? (
                 <>
@@ -3552,6 +3552,7 @@ function AgentWorkbench({
               agent={agent}
               state={state}
               artifact={artifact}
+              readOnly={Boolean(run?.read_only)}
               onOpenTimeline={onOpenTimeline}
               onOpenArtifact={() => setSelectedPath(artifactFileName)}
             />
@@ -3646,7 +3647,7 @@ function AgentWorkbench({
           </div>
           <WorkbenchProcessPanel
             state={state}
-            copy={copy}
+            copy={run?.read_only ? { ...copy, handoff: "只读记录；启动与继续条件见任务控制区。" } : copy}
             evaluation={evaluation}
             activityRows={activityRows}
             warnings={warnings}
@@ -4269,6 +4270,7 @@ function WorkbenchWorkLogPanel({
   agent,
   state,
   artifact,
+  readOnly,
   onOpenArtifact,
   onOpenTimeline,
 }: {
@@ -4279,13 +4281,14 @@ function WorkbenchWorkLogPanel({
   agent: string;
   state: string;
   artifact: ArtifactView | null;
+  readOnly: boolean;
   onOpenArtifact: () => void;
   onOpenTimeline: () => void;
 }): JSX.Element {
   const items = workLog?.items ?? [];
   const latest = items.at(-1);
   const elapsed = workLog?.elapsed_seconds ?? latest?.elapsed_seconds ?? null;
-  const nextAction = latest?.next_action || agentNextAction(agent, state, artifact);
+  const nextAction = readOnly ? "查看任务控制区的只读或受阻原因；当前不能批准、编辑或继续研究。" : latest?.next_action || agentNextAction(agent, state, artifact);
   const contextCount = items.filter((item) => item.kind === "context").length;
   const toolCount = items.filter((item) => item.kind === "tool").length;
   const feedbackCount = items.filter((item) => item.kind === "human_feedback" || item.kind === "revision").length;
@@ -7863,191 +7866,6 @@ function TraceRow({ span }: { span: TraceSpan }): JSX.Element {
         </div>
       </div>
       <span className="text-right font-mono text-slate-500">{duration}ms</span>
-    </div>
-  );
-}
-
-// ----------------------- Execution live curves panel -----------------------
-
-type Curve = { experiment_id: string; metric: string; values: number[] };
-
-function ExecutionLivePanel({ runId }: { runId: string }): JSX.Element {
-  const { t } = useI18n();
-  const [curves, setCurves] = useState<Curve[]>([]);
-  const [plots, setPlots] = useState<ExecutionPlot[]>([]);
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-
-  useEffect(() => {
-    let alive = true;
-    const refresh = async (): Promise<void> => {
-      try {
-        const [names, nextPlots] = await Promise.all([
-          fetch(`${base}/api/execution/${runId}/curves`).then((r) => r.json()),
-          listExecutionPlots(runId).catch(() => []),
-        ]);
-        if (!alive) return;
-        setPlots(nextPlots);
-        if (!Array.isArray(names) || names.length === 0) {
-          setCurves([]);
-          return;
-        }
-        const fetched = await Promise.all(
-          (names as string[]).map((n) => fetch(`${base}/api/execution/${runId}/curves/${n}`).then((r) => r.json())),
-        );
-        if (alive) setCurves(fetched as Curve[]);
-      } catch {
-        /* ignore */
-      }
-    };
-    void refresh();
-    const iv = setInterval(refresh, 1500);
-    return () => {
-      alive = false;
-      clearInterval(iv);
-    };
-  }, [runId, base]);
-
-  const orderedPlots = [...plots].sort((a, b) => a.experiment_id.localeCompare(b.experiment_id));
-  const orderedCurves = [...curves].sort((a, b) => a.experiment_id.localeCompare(b.experiment_id));
-  const featuredPlot = orderedPlots[0] ?? null;
-  const featuredCurve = featuredPlot ? null : (orderedCurves[0] ?? null);
-  const foldedCount = Math.max(0, (featuredPlot ? orderedPlots.length : orderedCurves.length) - 1);
-  const recentPlots = [...orderedPlots]
-    .filter((plot) => plot.filename !== featuredPlot?.filename)
-    .sort((a, b) => b.updated_at - a.updated_at)
-    .slice(0, 4);
-
-  return (
-    <section className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
-      <header className="mb-2 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-rose-100">{t("execution.live.title")}</h3>
-          <p className="mt-0.5 text-[11px] text-slate-500">{t("execution.live.focus")}</p>
-        </div>
-        <Link
-          href={`/runs/${runId}/multi`}
-          className="text-[11px] text-mars-accent hover:underline"
-        >
-          {t("execution.live.gotoMulti")}
-        </Link>
-      </header>
-      {featuredPlot ? (
-        <LivePlotCard plot={featuredPlot} />
-      ) : featuredCurve ? (
-        <MiniCurve curve={featuredCurve} featured />
-      ) : (
-        <p className="text-[11px] text-slate-500">{t("execution.live.empty")}</p>
-      )}
-      {foldedCount > 0 ? (
-        <div className="mt-3 rounded border border-mars-border bg-mars-bg/40 px-3 py-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[11px] text-slate-400">
-              {t("execution.live.folded")} · {foldedCount}
-            </span>
-            <span className="text-[10px] text-slate-500">{t("execution.live.foldedHint")}</span>
-          </div>
-          {recentPlots.length > 0 ? (
-            <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-2">
-              {recentPlots.map((plot) => (
-                <div
-                  key={plot.filename}
-                  className="flex min-w-0 items-center justify-between gap-2 rounded bg-mars-panel/70 px-2 py-1"
-                >
-                  <span className="truncate font-mono text-[10px] text-slate-300">{plot.experiment_id}</span>
-                  <span className="shrink-0 text-[10px] text-slate-500">
-                    {t("execution.live.updated")} {new Date(plot.updated_at * 1000).toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function LivePlotCard({
-  plot,
-  compact = false,
-}: {
-  plot: ExecutionPlot;
-  compact?: boolean;
-}): JSX.Element {
-  const [failed, setFailed] = useState(false);
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    setFailed(false);
-    setRetry(0);
-  }, [plot.filename, plot.updated_at]);
-  useEffect(() => {
-    if (!failed) return;
-    const timeout = window.setTimeout(() => {
-      setRetry((value) => value + 1);
-      setFailed(false);
-    }, 1800);
-    return () => window.clearTimeout(timeout);
-  }, [failed]);
-  const src = `${executionPlotUrl(plot)}&retry=${retry}`;
-  return (
-    <figure className="overflow-hidden rounded border border-mars-border bg-mars-bg/60">
-      <div className="flex items-center justify-between border-b border-mars-border px-2 py-1">
-        <figcaption className="truncate text-[10px] text-slate-300">
-          {plot.experiment_id}
-        </figcaption>
-        <span className="font-mono text-[9px] text-slate-500">
-          {plot.metric} · {new Date(plot.updated_at * 1000).toLocaleTimeString()}
-        </span>
-      </div>
-      {failed ? (
-        <div
-          className={`flex items-center justify-center bg-mars-bg/70 text-[10px] text-slate-500 ${
-            compact ? "min-h-32" : "min-h-44"
-          }`}
-        >
-          图片正在生成，稍后自动重试…
-        </div>
-      ) : (
-        <img
-          src={src}
-          alt={`${plot.experiment_id} live ${plot.metric} plot`}
-          className={`w-full bg-white object-contain ${compact ? "max-h-56" : "max-h-72"}`}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          onLoad={() => setFailed(false)}
-        />
-      )}
-    </figure>
-  );
-}
-
-function MiniCurve({ curve, featured = false }: { curve: Curve; featured?: boolean }): JSX.Element {
-  const max = Math.max(...curve.values, 0.0001);
-  const min = Math.min(...curve.values, 0);
-  const range = max - min || 1;
-  const w = 200;
-  const h = featured ? 110 : 70;
-  const path = curve.values
-    .map((v, i) => {
-      const x = (i / Math.max(1, curve.values.length - 1)) * w;
-      const y = h - ((v - min) / range) * h;
-      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <div className={`rounded bg-mars-bg/60 p-2 ${featured ? "border border-mars-border" : ""}`}>
-      <div className="flex items-center justify-between">
-        <span className="truncate text-[10px] text-slate-300">{curve.experiment_id}</span>
-        <span className="text-[9px] text-slate-500">{curve.metric}</span>
-      </div>
-      <svg viewBox={`0 0 ${w} ${h}`} className={`mt-1 w-full ${featured ? "h-36" : "h-16"}`}>
-        <path d={path} fill="none" stroke="#f43f5e" strokeWidth={1.4} />
-      </svg>
-      <div className="flex justify-between text-[9px] text-slate-500">
-        <span>{min.toFixed(3)}</span>
-        <span>n={curve.values.length}</span>
-        <span>{max.toFixed(3)}</span>
-      </div>
     </div>
   );
 }

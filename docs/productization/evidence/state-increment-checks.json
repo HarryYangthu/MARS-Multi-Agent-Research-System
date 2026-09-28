@@ -1,0 +1,187 @@
+{
+  "schema_id": "productization_state_increment_checks.v1",
+  "base_commit": "a0fd86419f23d93aa912f504bbbbeed715ee54d8",
+  "source_fingerprints": [
+    {
+      "path": "backend/app/agents/coding/agent.py",
+      "sha256": "c2761cb7fa38c07a2e058340574ef074cba64d5c9325af7f2ecb7b47d36aa9ea"
+    },
+    {
+      "path": "backend/app/agents/coding/docs/working_principles.md",
+      "sha256": "0064d0a5d9c8ae526b8ac52ce8c59925fc05d6a134fcf9d336afa1f667674a5c"
+    },
+    {
+      "path": "backend/app/agents/coding/prompts/code_spec.md",
+      "sha256": "2674b933b24a7c4badedde91e4c5b91bb5f61543e268de692afe4595d778b6ee"
+    },
+    {
+      "path": "backend/app/agents/execution/agent.py",
+      "sha256": "e012e22d4e25aae39ab4ebc0ee3281cbbb496190798baad37dd97db3c58ff429"
+    },
+    {
+      "path": "backend/app/agents/execution/docs/working_principles.md",
+      "sha256": "481a2ac10669a2cb3834e90f3680dd5500cf66edb7040e2be43046ba47178556"
+    },
+    {
+      "path": "backend/app/agents/execution/prompts/run_log.md",
+      "sha256": "b4bf773af3e4c5280872e2b243dea6473c69a10c34630938f51be20ba10deda4"
+    },
+    {
+      "path": "backend/app/agents/experiment/agent.py",
+      "sha256": "a09b8db97701bc9f2927f5f2cfed3046cb21465e322f7e2be2b7e88843cad595"
+    },
+    {
+      "path": "backend/app/agents/experiment/docs/working_principles.md",
+      "sha256": "592a1102b8e127b26bca321eaa3ea217a6cc3bf96e04ab86b13f0972497bac50"
+    },
+    {
+      "path": "backend/app/agents/experiment/prompts/experiment_plan.md",
+      "sha256": "2e463c3d2c4a06d476e3f4d7b716bf7195ce461d2e169267355279ae50161b8a"
+    },
+    {
+      "path": "backend/app/agents/writing/agent.py",
+      "sha256": "676fd2a8dce8dec7cca8f3dc5b5bc01c717b2a01cc6d9eaf3beb6cfcf09c8531"
+    },
+    {
+      "path": "backend/app/agents/writing/docs/working_principles.md",
+      "sha256": "76423a4f26f79cb83894a2d49e53d275ff8a6a02133ca63ac2eda393d231fdff"
+    },
+    {
+      "path": "backend/app/agents/writing/prompts/report.md",
+      "sha256": "6cabad8729801cfc48ee4421a22dfde4af50b6d201fb506c027de70279e482a7"
+    },
+    {
+      "path": "backend/app/api/artifacts.py",
+      "sha256": "5e20ff284c085f12e2f70cc94dff9e6e4fa4881a7d145432f9f6a24d52c98a1d"
+    },
+    {
+      "path": "backend/app/api/diagnoses.py",
+      "sha256": "da9425a7f0ffbe145e3ced473b0090edcae88d87ad4d19d1ceaa06f331ca22ea"
+    },
+    {
+      "path": "backend/app/api/runs.py",
+      "sha256": "61db969584a3376ab99e1ee88511f0860c623fbd6d548e43aa1ba9e4588d3c6e"
+    },
+    {
+      "path": "backend/app/bridge/agent_runner.py",
+      "sha256": "563ac3212105e9ba054347ea019239a096d7ac72e7bd1a7f87613630966cef33"
+    },
+    {
+      "path": "backend/app/bridge/cli_research_report.py",
+      "sha256": "6e34ae25a6743e08bf560fd17b6e46953ef7c361de6f2cf95c5b4e4ed0fd21b6"
+    },
+    {
+      "path": "backend/app/bridge/orchestrator.py",
+      "sha256": "ca54b1fa707dbd4f561577075deedf93f63578e31b9dc3f1d265ba7dd781f04c"
+    },
+    {
+      "path": "backend/app/harness/evaluation/run_evaluators.py",
+      "sha256": "0b2607c975503adcf8719b66e0d00ba6433421ac45f59851430b0305fcabe3b6"
+    },
+    {
+      "path": "backend/app/harness/llm/accounting.py",
+      "sha256": "458b3c5f4cf9348c1288a9e9e215fff3f5892711957e6a6749dad9857ef408ca"
+    },
+    {
+      "path": "backend/app/harness/runtime/state_journal.py",
+      "sha256": "a4d23828138c0050ea4365dfc62c3eb5a0b15cd8477241222163893739a58187"
+    },
+    {
+      "path": "backend/app/storage/run_state_store.py",
+      "sha256": "a0f98902e4a7decbe7801424a35473a969eda21e361c1e66646d4a754bfcda54"
+    },
+    {
+      "path": "backend/tests/unit/bridge/test_orchestrator_readonly_history.py",
+      "sha256": "cdb956fb474baef99fc6d1a4d10aa0fe3790ccd26eb7bb9e1a50bb0f247ea67f"
+    },
+    {
+      "path": "backend/tests/unit/test_collaboration_state_journal.py",
+      "sha256": "868b18d31f381964fdb2548d10851165a22aa75c35637bf1e365e99145800d10"
+    },
+    {
+      "path": "backend/tests/unit/test_generic_pipeline_resources.py",
+      "sha256": "bfe7e8f89a76ec4471ec5425936b90f722afa544528be48192f050f6c3be4582"
+    },
+    {
+      "path": "backend/tests/unit/test_model_token_components.py",
+      "sha256": "790b847342211bae6fefd1ed1719fa42f59399affee2096f9c6518d88186a6d6"
+    },
+    {
+      "path": "backend/tests/unit/test_owned_stop_storage_failure.py",
+      "sha256": "644eb62d14334a6ced1303a1a3fd20dc58a999ea95dbb9ccd156846f0f43e0df"
+    },
+    {
+      "path": "backend/tests/unit/test_state_journal.py",
+      "sha256": "66911e1f0ad3735602312eedf1e450812d10948fbc3d552094a2bce93185c4ae"
+    },
+    {
+      "path": "backend/tests/unit/test_storage_transactions.py",
+      "sha256": "79786854093af117ded82c937706966fe4f2a37c099ac147a723ab1e32e67c7b"
+    },
+    {
+      "path": "projects/pimc/context/public_context.md",
+      "sha256": "af558b5f43aa53496b51c0de5f0e01ae69a724def4a0cc760c1a9c92a888c904"
+    },
+    {
+      "path": "scripts/release/v30_tree_allowlist.txt",
+      "sha256": "a547c034e6d6587a8c2257e06904a917061a17ae33fbe8a9d8808363d5b15ba8"
+    },
+    {
+      "path": "templates/artifacts/code_spec.v1.md",
+      "sha256": "3b556aa7a0378a12ac0064b4cb0df569df131685957df8bcb995ef0e1737f3b8"
+    },
+    {
+      "path": "templates/artifacts/experiment_plan.v1.md",
+      "sha256": "07a3e398b5512e43b1fdac04552967f6c1d780ecdc159a49f364145c99c73ccd"
+    },
+    {
+      "path": "templates/artifacts/report.v1.md",
+      "sha256": "5e0b9e78ef3ffcf40250797757fc2a2f70196a1be5f7ac0305a6feabc85a3102"
+    },
+    {
+      "path": "templates/artifacts/run_log.v1.md",
+      "sha256": "59acac070595c8b653f86396d2d55c71e980cdb486e448f86b923b2c063daac4"
+    }
+  ],
+  "environment": {
+    "python": "3.9.6",
+    "platform": "macOS-26.5.2-arm64-arm-64bit"
+  },
+  "pytest": {
+    "command": "python -m pytest backend/tests projects/synthetic_regression/tests --ignore=backend/tests/unit/test_cli_runtime_client.py -o addopts= -ra -q",
+    "passed": 2798,
+    "skipped": 178,
+    "failed": 0,
+    "errors": 0,
+    "duration_seconds": 119.75
+  },
+  "mypy": "Success: no issues found in 597 source files",
+  "import_contracts": {
+    "kept": 4,
+    "broken": 0
+  },
+  "logs": [
+    {
+      "path": "mars-productization-safety-regression.log",
+      "sha256": "e417d35e8c3e08e983691dc4d27ae7adb861f54000e7ce634a1022afd983207d"
+    },
+    {
+      "path": "mars-productization-safety-regression.xml",
+      "sha256": "68f9134b79dd85c6d46017ab9df18dea53661637d2dcffb92f046646d354cebc"
+    },
+    {
+      "path": "mars-productization-safety-mypy.log",
+      "sha256": "8f50f64f4d10e24c5ffa6706320a46139227a0d8e5ce5a0e8d3e027bee357a9f"
+    },
+    {
+      "path": "mars-productization-safety-imports.log",
+      "sha256": "857353e6b0418d4c2f5ecc7365cd1d61b7750d42e4cd89f65cbe20eff24afca7"
+    }
+  ],
+  "real_model_receipt": "glm-native-split-budget-probe.json",
+  "uncommitted_parallel_work_excluded": [
+    "backend/app/cli_runtime_client.py",
+    "backend/tests/unit/test_cli_runtime_client.py"
+  ],
+  "full_product_accepted": false
+}

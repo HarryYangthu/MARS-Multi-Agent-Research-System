@@ -1,0 +1,71 @@
+{
+  "changed_paths": [
+    "candidate.py"
+  ],
+  "experiment_executed": false,
+  "failure_type": null,
+  "full_research_acceptance": false,
+  "invocation_id": "d9a74b2dd524415b80757f897182fce4",
+  "product_admission_ready": false,
+  "result": {
+    "artifact_ref": "coding/code_spec.v1.md",
+    "artifact_sha256": "806976dd190cf66d09e4619648c3839096955e2c8a02ec7443907ae17a840ef7",
+    "failure": null,
+    "invocation_id": "d9a74b2dd524415b80757f897182fce4",
+    "schema_id": "task.result.v1",
+    "schema_valid": true,
+    "status": "awaiting_review",
+    "task_id": "2026-09-28T0226_bound_coding_diagnostic:coding"
+  },
+  "run_id": "2026-09-28T0226_bound_coding_diagnostic",
+  "source_unchanged": true,
+  "sources_unchanged": true,
+  "unknown_reservations": [],
+  "used": {
+    "automatic_iterations": 0,
+    "billed_output_tokens": 1212,
+    "debate_rounds": 0,
+    "deep_read_papers": 0,
+    "gpu_us": 0,
+    "implemented_candidates": 1,
+    "input_tokens": 15242,
+    "model_cost_micro_cny": null,
+    "model_requests": 4,
+    "proposal_candidates": 0,
+    "search_candidates": 0,
+    "tool_executions": 2,
+    "training_process_us": 0
+  },
+  "schema": "verification.bound_coding_stage.v1",
+  "status": "passed",
+  "source_fingerprints": {
+    "backend/app/agents/base.py": "6efedefa165e822d6bfb1a60a8174e402f9c0bbf6b2f2f6a8f62f4f6c4ec6f04",
+    "backend/app/agents/coding/agent.py": "c2761cb7fa38c07a2e058340574ef074cba64d5c9325af7f2ecb7b47d36aa9ea",
+    "backend/app/bridge/agent_runner.py": "947ea9392c0e2a5dfaaa74b43cd9d89e8efd00241b2522930645f0a2e405d7b8",
+    "backend/app/bridge/research_scope_recovery.py": "dc60055354105b1fb66921a2f3425f7a74158671515ede4a743967df2c032ebf",
+    "backend/app/bridge/research_stage_runtime.py": "c853f6f3a89c034c0cd77a94cfdca305bcf3bb508482c2eb9335a435a2c36c18",
+    "backend/app/bridge/research_stage_service.py": "dfacdcbd54f187772bc4e2d56b6010798751d2b83c787e993600966ab2ff8bb0",
+    "backend/app/harness/agent_loop/executor.py": "36b905a15974a6af69810f194b75fa13b406dcc3835f56fb0f98daec5aabe0d0",
+    "backend/app/harness/llm/research_accounting.py": "db846e4ebfa2b453b490177b1f4b966c92a231047bdbdcefb011cb52dee505d8",
+    "backend/app/harness/tools/research_accounting.py": "d8167fbbb1f0020dd037fba0bde961d3598c2973eb942cefdab3b5593b009566",
+    "configs/agents.yaml": "8e24481f955e03dadfb9b33686182ee85266f2a7046d2688269e553a43441c1a",
+    "configs/models.yaml": "ceb74815a4d1450c54273d02c1e9cbdd0208eb85264484e0086e6b3dcc4825e4",
+    "configs/tools.yaml": "72a0467b366f3e1e21f15e24613d302ca71c63384b564f18c9e84146bb56479a",
+    "scripts/verify_bound_coding_stage.py": "35d3fd61c00b606b95f17ba0e0d37c9570465f1ce9d637bb01c76a2e8f9b89a9"
+  },
+  "actual_models": [
+    "glm-5.3"
+  ],
+  "previous_attempt": {
+    "run_id": "2026-09-28T0225_bound_coding_diagnostic",
+    "status": "failed",
+    "model_requests": 0,
+    "cause": "native observation history missing; rejected by compatibility validation before provider request"
+  },
+  "raw_receipt_sha256": "eddacb4f5c9d0bf56be4f4f2ca0c348848925d76a9331db595c9a51cd30494a4",
+  "limitations": [
+    "One developer-owned Coding node only; no product start, full research DAG or checkpoint continuation",
+    "No scientific or training execution in this check",
+    "Model costs unknown; not a precise currency ceiling proof"
+  ]
+}

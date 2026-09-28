@@ -1,0 +1,181 @@
+{
+  "schema": "mars.local-macos-evidence.v1",
+  "date": "2026-09-28",
+  "host": {
+    "macos": "26.5.2",
+    "architecture": "arm64"
+  },
+  "release": false,
+  "artifact_kind": "self-contained-app-local-ad-hoc-test",
+  "source": {
+    "source_revision": "42849d949dd9b0b1622699b041eaaa2ebb81c294",
+    "overlay_source_files": {
+      "backend/app/harness/tools/execution/local_command.py": "39d348750c3404bb15d836e50dc6d90eb194e5cf181589f5653f1bf31488f596",
+      "backend/app/bridge/results_service.py": "cb4cad8c2ac3e07beb0341b5dd54e69e501fe0c4107f21b20006fecb9bc90036",
+      "backend/app/execution/local/__init__.py": "dbd86942a94902e399031517bcb4f368e6645951537ecf3abb95c7eab0d11211",
+      "backend/app/execution/local/runner.py": "8cfc4512c36b0bb1b77965c82419467315b8a66c5b56967b6642a306ef84a2da",
+      "backend/app/execution/local/worker.py": "3fa9a29eb9e9b8c2d9284c7c21ecd9b3ae520b8bec2be9e7753d5c0e0547c58d",
+      "desktop/bundle.yaml": "9946040a5e0f83dd202aa5993ced584c177be5d01847ac0cac0517714ac4f9ea",
+      "desktop/src/main.cjs": "f621475c664c36747d91be6e818e2f2189f34f67c2122e3655c016c02b5b124a",
+      "desktop/src/packaged-runtime.cjs": "440bf2abdf77900fdabc82f778d2606945b09d693bb8be0011fc43724bd3701b"
+    },
+    "pinned_source_revisions": {
+      "backend/app/harness/runtime/state_journal.py": "42849d9"
+    },
+    "locked_inputs": {
+      "pyproject.toml": "6dd8aab564b4a84052753f46cc02dde3c8228e3f6baaf372376d7b5629f6ab84",
+      "uv.lock": "086f5da2a1cffe8aa900f9d716e36f0cb6747e2c069297168f38b3cbab6894dd",
+      "desktop/package.json": "8bee7bcb93c360dd39195f9f8951a4a41495dee939876e9cbe9386b22840868a",
+      "desktop/package-lock.json": "7161b2373112801e5a34dbbd49630def4b57efc0bf5fb972fa0765f7c742d1f7",
+      "desktop/bundle.yaml": "9946040a5e0f83dd202aa5993ced584c177be5d01847ac0cac0517714ac4f9ea",
+      "frontend/package.json": "0f4d534bc02484713f430c3a3fefdb7cad6589023cb568e6dcd1e87657519de6",
+      "frontend/package-lock.json": "dc4c032a558e55e5924c273d81e4f69b0b07a221caa917671c42acfe3665f8a6"
+    },
+    "frontend_build_id": "MKXVnryUMEMAN19IR_r6s",
+    "python_requirements_sha256": "4bb28b303235646a139d0dbc75fd04da338eec65ada41a7debf284f53d4f7546"
+  },
+  "source_file_count": 456,
+  "source_inventory_sha256": "212bfebb81f631374166722c67b69b6ea4052676515a6a803f552121a0a27629",
+  "bundle_inventory_sha256": "01cbcbf0b79d9419c8402036ca2dac1d512f4564ea42e3bb09a63a6ab27ee63f",
+  "build_verification": {
+    "schema": "mars.bundle-verification.v1",
+    "exact_inventory": true,
+    "entries": 35682,
+    "macho_count": 119,
+    "ad_hoc_signature_valid": true,
+    "individual_native_signatures_valid": true,
+    "static_native_loads_resolved": true,
+    "developer_id_signed": false,
+    "notarized": false
+  },
+  "build_method": {
+    "schema": "mars.frozen-bundle-refinalization.v1",
+    "source_candidate": "d",
+    "source_manifest_sha256": "d5666ad1c29b3da82c0fe387ac7895e8cedc7786142bd456d0bf34070d2718c3",
+    "same_frozen_source": true,
+    "change": "Individual native Mach-O ad-hoc signing, then outer bundle sealing"
+  },
+  "smoke": {
+    "schema": "mars.packaged-smoke.v1",
+    "packaged": true,
+    "relocated_path_with_spaces": true,
+    "gui_nested_os_sandbox_tested": false,
+    "service_developer_directory_reads_denied": true,
+    "denied_root_count": 5,
+    "runtime_isolation": {
+      "schema": "mars.runtime-isolation.v1",
+      "real_backend_health": true,
+      "real_api_status": 200,
+      "real_frontend_status": 200,
+      "frontend_path": "/projects",
+      "python": {
+        "version": "3.11.15",
+        "all_origins_in_bundle": true,
+        "module_count": 7
+      },
+      "node": "24.21.0",
+      "node_and_next_in_bundle": true,
+      "owned_services_exited": true,
+      "research_execution_verified": false
+    },
+    "developer_python_override_ignored": true,
+    "unrelated_listener_alive": true,
+    "inventory_unchanged": true,
+    "actual_checks": {
+      "authenticatedGatewayHealth": true,
+      "unauthenticatedGatewayStatus": 403,
+      "unauthenticatedBackendStatus": 401,
+      "unauthenticatedFrontendStatus": 403,
+      "crossOriginGatewayStatus": 403,
+      "windowLoaded": true,
+      "renderer": {
+        "title": "MARS · 多 Agent 研究系统",
+        "nodeAvailable": false,
+        "bodyTextLength": 292
+      },
+      "rendererApiStatus": 200,
+      "rendererWebSocket": true,
+      "ownedServicesExited": true
+    },
+    "developer_id_signed": false,
+    "notarized": false,
+    "research_execution_verified": false
+  },
+  "lifecycle": {
+    "mode": "packaged-local-test",
+    "packaged": true,
+    "electron": "44.4.5",
+    "startedAt": "2026-09-27T20:12:47.128Z",
+    "stoppedAt": "2026-09-27T20:12:53.191Z",
+    "exitCode": 0,
+    "frontendBuildId": "MKXVnryUMEMAN19IR_r6s",
+    "shellSha256": "f621475c664c36747d91be6e818e2f2189f34f67c2122e3655c016c02b5b124a"
+  },
+  "screenshot_sha256": "df789509b74ed45045c987539cb314f9c81b958c5261efbdf8bfa08e1916772d",
+  "verification_scripts_sha256": {
+    "scripts/desktop/build_macos.py": "e25c44abf12743073de2ab827756545e8c2120b2223965c17e813f9a13b4c915",
+    "scripts/desktop/runtime_probe.cjs": "42b8eddcb563527666abc7e12f2ff9862f6418ccdfb720b8b5c2d8cc4ff5e9e4",
+    "scripts/desktop/smoke_macos.py": "60b38dcdbef3e21b90142a26669d303545a81744b1c73f9cddfcb5c0eeba6a2e",
+    "scripts/desktop/verify_bundle.py": "7eec679d710e907bbe4a009aa6966486e6c8145e95dac622481df7fec8b0792d"
+  },
+  "checks": {
+    "desktop_node_tests_passed": 17,
+    "real_inventory_and_clang_tests_passed": 10,
+    "strict_mypy_files_passed": 4
+  },
+  "attempts": [
+    {
+      "id": "build-a",
+      "outcome": "failed",
+      "reason": "copied standalone prefix retained PEP 668 marker; original prefix untouched"
+    },
+    {
+      "id": "build-b",
+      "outcome": "failed-then-local-inspection",
+      "reason": "otool interpreted GPU helper basename as archive-member syntax; fixed neutral-byte inspection"
+    },
+    {
+      "id": "smoke-b",
+      "outcome": "failed",
+      "reason": "Electron executable name caused isPackaged=false; external GUI sandbox conflicted with Chromium sandbox; no services started"
+    },
+    {
+      "id": "smoke-b2",
+      "outcome": "failed",
+      "reason": "exact source allowlist lacked desktop_session middleware; real Python import failed"
+    },
+    {
+      "id": "build-c",
+      "outcome": "static-only-not-startup-acceptance",
+      "reason": "source snapshot still lacked middleware; independent real clang repro exposed unvalidated LC_RPATH"
+    },
+    {
+      "id": "smoke-d",
+      "outcome": "failed",
+      "reason": "modified Pillow native library retained invalid signature; real Python killed by OS; added individual native signing and verification"
+    },
+    {
+      "id": "smoke-e",
+      "outcome": "gui-passed-service-check-failed",
+      "reason": "service test expected HTTP200 at root, but actual product redirects root to /projects with307"
+    },
+    {
+      "id": "smoke-f",
+      "outcome": "passed",
+      "reason": "same finalized e app; actual /projects HTTP200, GUI and service read-denial checks all passed"
+    }
+  ],
+  "not_verified": [
+    "Developer ID",
+    "notarization",
+    "installer lifecycle",
+    "Windows",
+    "Intel Mac",
+    "macOS13 execution",
+    "all dynamic dlopen paths",
+    "whole-GUI outer OS read-denial sandbox",
+    "provider/model/tool research execution",
+    "GPU or remote experiment",
+    "new research budget ledger after frozen source"
+  ]
+}

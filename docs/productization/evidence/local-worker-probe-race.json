@@ -1,0 +1,23 @@
+{
+  "schema": "development_validation.v1",
+  "scope": "Serialize real detached-worker ownership acquisition with status probes",
+  "ci_observation": {
+    "commit": "b71007c110247a16268b4bf50c7c1e6f58b7180b",
+    "workflow_run": 36368669136,
+    "job": 108760122020,
+    "failure": "test_unknown_then_valid_terminal_receipt_closes_activity_without_refund: real CPU command published no receipt within 12 seconds",
+    "causal_limit": "CI did not retain worker internals; the matching startup race was independently reproduced, not observed directly in that CI process."
+  },
+  "regression": {
+    "test": "test_status_probe_cannot_be_mistaken_for_a_live_worker",
+    "before_fix": "failed: imported real supervisor exited while a status-probe transaction held control.lock and worker.lock",
+    "after_fix": "passed: workers waited for the probe, one actual CPU command executed, valid terminal measurement receipt persisted",
+    "uses_execution_doubles": false,
+    "timeouts_increased": false
+  },
+  "checks": {
+    "pytest": "64 passed in 22.72s; test_local_durable_runner.py, test_research_job_service.py, test_research_job_control.py",
+    "strict_mypy": "2 source files passed"
+  },
+  "limitations": ["Local POSIX CPU supervisor regression only", "Not full research, SSH/GPU or release acceptance"]
+}

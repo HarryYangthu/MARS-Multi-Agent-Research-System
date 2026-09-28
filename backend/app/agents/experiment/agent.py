@@ -6,6 +6,7 @@ from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 
 class ExperimentAgent(BaseAgent):
     name = "experiment"
+    project_knowledge_enabled = True
     output_schema = "experiment_plan.v1"
     agent_brief = (
         "你负责把假设转化为可执行的实验方案。先用 knowledge.baseline_match 检查是否有"

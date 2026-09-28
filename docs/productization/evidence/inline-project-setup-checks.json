@@ -1,0 +1,22 @@
+{
+  "date": "2026-09-28",
+  "related_tests_passed": 26,
+  "typescript": "passed",
+  "targeted_eslint": "passed",
+  "production_build": "passed",
+  "targeted_strict_mypy": "passed",
+  "browser": {
+    "entry": "/projects → 新建项目",
+    "created_folder": true,
+    "automatic_api_step": true,
+    "background_upload_bytes_match": true,
+    "completed_in_same_dialog": true,
+    "resumed_same_project": true,
+    "console_errors": 0,
+    "prior_project_restored": "test2"
+  },
+  "independent_onboarding_entry_removed": true,
+  "legacy_onboarding_route": "redirect /projects",
+  "new_model_calls": 0,
+  "research_started": false
+}

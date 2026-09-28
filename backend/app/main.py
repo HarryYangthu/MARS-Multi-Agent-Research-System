@@ -20,6 +20,7 @@ from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
 from app.api import artifacts as artifacts_api
 from app.api import chat as chat_api
+from app.api import capabilities as capabilities_api
 from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
@@ -28,12 +29,17 @@ from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
 from app.api import execution as execution_api
+from app.api import tensorboard as tensorboard_api
+from app.bridge.tensorboard_service import shutdown_tensorboard
 from app.api import knowledge as knowledge_api
 from app.api import projects as projects_api
 from app.api import readiness as readiness_api
 from app.api import reports as reports_api
+from app.api import results as results_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
+from app.api import research_contracts as research_contracts_api
+from app.api import research_templates as research_templates_api
 from app.api import stats as stats_api
 from app.api import system as system_api
 from app.api import templates as templates_api
@@ -43,6 +49,7 @@ from app.api import traces as traces_api
 from app.api import websocket as ws_api
 from app.api.dependencies import get_event_bus, get_run_store, shutdown_owned_runs
 from app.api.llm_errors import llm_error_response
+from app.api.desktop_session import DesktopSessionMiddleware
 from app.bridge.agent_registry import get_registry
 from app.bridge.candidate_workspace import SecureCandidateWorkspacePreparer
 from app.bridge.commander_tools import configure_discovery_commander_tools
@@ -83,6 +90,7 @@ async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await shutdown_owned_runs()
+        await shutdown_tensorboard()
 
 
 def create_app() -> FastAPI:
@@ -128,6 +136,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    desktop_token = settings.mars_desktop_session_token.get_secret_value()
+    if desktop_token:
+        app.add_middleware(
+            DesktopSessionMiddleware, token=desktop_token, origins=tuple(cors_origins)
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -143,6 +156,9 @@ def create_app() -> FastAPI:
         return {"message": "MARS V0 backend. See /docs for API spec."}
 
     app.include_router(runs_api.router)
+    app.include_router(research_contracts_api.router)
+    app.include_router(research_templates_api.router)
+    app.include_router(capabilities_api.router)
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(diagnoses_api.router)
@@ -153,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_api.router)
     app.include_router(traces_api.router)
     app.include_router(execution_api.router)
+    app.include_router(tensorboard_api.router)
     app.include_router(knowledge_api.router)
     app.include_router(templates_api.router)
     app.include_router(tools_api.router)
@@ -162,6 +179,7 @@ def create_app() -> FastAPI:
     app.include_router(runtime_api.router)
     app.include_router(config_api.router)
     app.include_router(reports_api.router)
+    app.include_router(results_api.router)
     app.include_router(events_api.router)
     app.include_router(stats_api.router)
     app.include_router(system_api.router)

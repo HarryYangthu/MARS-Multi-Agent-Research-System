@@ -1,0 +1,48 @@
+name: Windows native CPU launcher
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'deploy/windows-native/**'
+      - 'configs/windows_native.yaml'
+      - 'uv.lock'
+      - 'pyproject.toml'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/windows-native.yml'
+
+jobs:
+  native-cpu:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell 5.1 contracts
+        shell: powershell
+        run: .\deploy\windows-native\Test-NativeScripts.ps1
+      - name: PowerShell 7 contracts
+        shell: pwsh
+        run: .\deploy\windows-native\Test-NativeScripts.ps1
+      - name: Real native dependency installation
+        shell: powershell
+        run: .\deploy\windows-native\Mars.ps1 -Action Install
+      - name: Real frontend and backend startup without a model call
+        shell: powershell
+        run: |
+          .\deploy\windows-native\Mars.ps1 -Action Start -NoBrowser -SkipConfigure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $health = Invoke-RestMethod http://127.0.0.1:8010/health
+          if ($health.service -ne 'mars-backend') { throw 'Wrong backend' }
+          Invoke-RestMethod http://127.0.0.1:3001/api/system/version
+      - name: Stop owned services
+        if: always()
+        shell: powershell
+        run: .\deploy\windows-native\Mars.ps1 -Action Stop
+      - name: Preserve startup logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-logs
+          path: local/windows/logs/

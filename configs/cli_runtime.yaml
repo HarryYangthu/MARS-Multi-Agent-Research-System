@@ -1,0 +1,3 @@
+schema_id: cli_runtime.v1
+timeout_seconds: 15.0
+max_response_bytes: 1048576

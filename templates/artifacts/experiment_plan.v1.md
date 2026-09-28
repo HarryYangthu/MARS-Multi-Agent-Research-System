@@ -1,28 +1,26 @@
 ---
 schema: experiment_plan.v1
-project: pimc
+project: "PROJECT_ID_FROM_TASK"
 agent: experiment
-upstream_artifact: idea_proposal.approved.md
 variables:
-  independent: ["expert_count", "router_type"]
-  controlled: ["batch_size", "epochs"]
-  dependent: ["RES", "PIM", "APE"]
+  independent: ["PARAMETER_FROM_APPROVED_HYPOTHESIS"]
+  controlled: []
+  dependent: ["METRIC_FROM_PROJECT_CONTRACT"]
 metrics:
-  primary: "RES"
-  secondary: ["PIM", "APE", "param_count"]
+  primary: "METRIC_FROM_PROJECT_CONTRACT"
+  secondary: []
 baseline_ref:
   matched_run_id: null
   match_score: null
-  reuse_decision: rerun
+  reuse_decision: null
 ablations:
-  - name: "expert_count_4"
-    config: { expert_count: 4 }
-  - name: "expert_count_16"
-    config: { expert_count: 16 }
-estimated_runs: 8
-estimated_gpu_hours: 24
+  - name: "REPLACE_WITH_APPROVED_EXPERIMENT"
+    config: {}
+estimated_runs: 1
 ---
 
-# 实验计划
+# 实验计划格式参考
 
-本计划用于描述假设验证策略、实验变量、消融组合、基线复用决策与资源估算。正文必须使用中文说明实验目的、变量控制方式、指标判定标准、风险与预期结果；技术标识如 schema、metric、文件路径和模型名保持原样。
+以上名称、空配置和数量仅说明字段结构，不是任务参数或可执行计划。实际输出必须替换为当前项目、已批准假设与真实执行入口支持的配置，核对实验数量与预算。缺少必要信息时明确阻断，不沿用占位值。
+
+正文用中文说明假设、对照、数据划分、自变量/控制变量、指标单位与方向、目标与容差、汇总方式、保护范围及预算依据。未明确的资源估算不填入数字；技术标识保持原样。计划不证明实验已执行或达到目标。

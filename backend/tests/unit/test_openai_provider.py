@@ -134,3 +134,79 @@ def test_stream_assembly_requires_final_marker_and_preserves_only_public_content
         with pytest.raises(LLMCompletionError) as caught:
             state.completion(provider="zhipu", model="parser")
         assert caught.value.reason["code"] == ("output_truncated" if finish == "length" else "incomplete_stream")
+
+
+@pytest.mark.parametrize("reported,model,status", [
+    ("returned-model-revision", "returned-model-revision", "consistent"),
+    (None, "", "missing"), ("", "", "missing"),
+    ("not a bounded identifier\nprivate-marker", "", "invalid"),
+])
+def test_envelope_model_identity_comes_only_from_response_fields(reported: str | None, model: str, status: str) -> None:
+    # Manually authored SDK records are pure parser data, not a provider double.
+    data = {"id": "identity-parser", "object": "chat.completion", "created": 0,
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "parser input"}}]}
+    envelope = ChatCompletion.model_validate({**data, "model": reported or "temporary-required-field"})
+    if reported is None:
+        delattr(envelope, "model")
+    else:
+        envelope.model = reported
+    provider = OpenAIProvider(api_key="parser-input-not-a-credential")
+    result = provider._completion_from_response(envelope, LLMConfig(provider="openai", model="requested-alias"))
+    assert result.model == model
+    assert result.raw["requested_model"] == "requested-alias"
+    assert result.raw["response_models"] == ([model] if model else [])
+    assert result.raw["response_model_status"] == status
+    assert "private-marker" not in repr(result)
+    assert provider._client is None
+
+
+@pytest.mark.parametrize("reported,status,model", [
+    (["response-v1", "response-v1"], "consistent", "response-v1"),
+    (["response-v1", "response-v2"], "inconsistent", ""),
+    ([None, None], "missing", ""),
+    (["response-v1", None], "partial", "response-v1"),
+    (["response-v1", "invalid\nprivate-marker"], "invalid", ""),
+])
+def test_stream_model_identity_records_conflict_missing_and_invalid_chunks(
+    reported: list[str | None], status: str, model: str,
+) -> None:
+    state = VisibleStreamAccumulator()
+    for index, identity in enumerate(reported):
+        chunk = ChatCompletionChunk.model_validate({
+            "id": "identity-parser", "object": "chat.completion.chunk", "created": 0,
+            "model": identity or "temporary-required-field",
+            "choices": [{"index": 0, "finish_reason": "stop" if index == len(reported) - 1 else None,
+                         "delta": {"content": "authored parser input", "reasoning_content": "private-reasoning-marker"}}],
+        })
+        if identity is None:
+            delattr(chunk, "model")
+        state.add(chunk)
+    result = state.completion(provider="zhipu", model="requested-alias")
+    assert result.model == model
+    assert result.raw["requested_model"] == "requested-alias"
+    assert result.raw["response_model_status"] == status
+    assert result.raw["response_model_missing_fields"] == reported.count(None)
+    assert result.raw["response_models"] == sorted({value for value in reported if value and "\n" not in value})
+    assert "private-marker" not in repr(result) and "private-reasoning-marker" not in repr(state)
+
+
+def test_rejected_response_and_stream_preserve_response_identity_without_private_fields() -> None:
+    envelope = ChatCompletion.model_validate({
+        "id": "identity-parser", "object": "chat.completion", "created": 0, "model": "returned-model",
+        "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+    })
+    provider = OpenAIProvider(api_key="parser-input-not-a-credential")
+    with pytest.raises(LLMCompletionError) as error:
+        provider._completion_from_response(envelope, LLMConfig(provider="openai", model="requested-alias"))
+    assert error.value.model_identity["requested_model"] == "requested-alias"
+    assert error.value.model_identity["response_models"] == ["returned-model"]
+    assert error.value.model_identity["response_model_status"] == "consistent"
+    state = VisibleStreamAccumulator()
+    state.add(ChatCompletionChunk.model_validate({
+        "id": "identity-parser", "object": "chat.completion.chunk", "created": 0, "model": "returned-model",
+        "choices": [{"index": 0, "finish_reason": "length", "delta": {"content": "partial parser input"}}],
+    }))
+    with pytest.raises(LLMCompletionError) as truncated:
+        state.completion(provider="zhipu", model="requested-alias")
+    assert truncated.value.model_identity["response_models"] == ["returned-model"]
+    assert truncated.value.model_identity["requested_model"] == "requested-alias"

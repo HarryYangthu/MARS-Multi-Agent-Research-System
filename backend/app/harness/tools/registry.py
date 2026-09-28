@@ -56,6 +56,7 @@ class ToolContext:
     dry_run: bool = False
     approval_mode: str = "auto"
     configured_read_scope: ConfiguredReadToolScope | None = None
+    supplemental_read_scope: ConfiguredReadToolScope | None = None
 
 
 @dataclass
@@ -232,17 +233,26 @@ class ToolRegistry:
     async def dispatch(
         self, tool_name: str, args: dict[str, Any], ctx: ToolContext
     ) -> ToolResult:
+        from app.harness.tools.research_accounting import bind_context, digest, execute_tool, prepare_tool
+        try:
+            ctx, execution, project_scope = bind_context(ctx)
+            audit_args = {"arguments_sha256": digest(args)} if execution is not None else args
+        except (ValueError, OSError, TypeError) as exc:
+            return ToolResult(ok=False, status="contract_tool_blocked",
+                              error="tool scope preflight failed: " + type(exc).__name__,
+                              metadata={"handler_started": False, "budget_reserved": False})
+        plan = None
         call_id = uuid.uuid4().hex
         started_at = _now()
         started = time.perf_counter()
-        span = _start_tool_span(call_id=call_id, tool_name=tool_name, args=args, ctx=ctx)
+        span = _start_tool_span(call_id=call_id, tool_name=tool_name, args=audit_args, ctx=ctx)
         _record_tool_event(
             kind="tool.started",
             call_id=call_id,
             tool_name=tool_name,
-            args=args,
+            args=audit_args,
             ctx=ctx,
-            payload={"args": args},
+            payload={"args": audit_args},
         )
         result: ToolResult
         if tool_name not in self._tools:
@@ -251,7 +261,7 @@ class ToolRegistry:
                 error=f"unknown tool '{tool_name}'",
                 status="unknown_tool",
             )
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
 
         spec = self._specs[tool_name]
@@ -261,24 +271,41 @@ class ToolRegistry:
                 error=f"tool '{tool_name}' is disabled by configs/tools.yaml",
                 status="disabled",
             )
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
 
-        if not _allowed_for_agent(tool_name, ctx.agent, spec, configured_scope=ctx.configured_read_scope):
+        read_scope = ctx.configured_read_scope
+        if read_scope is None and ctx.supplemental_read_scope is not None and tool_name in ctx.supplemental_read_scope.tools:
+            read_scope = ctx.supplemental_read_scope
+        if not _allowed_for_agent(tool_name, ctx.agent, spec, configured_scope=read_scope):
             result = ToolResult(
                 ok=False,
                 error=f"tool '{tool_name}' is not allowed for agent '{ctx.agent}'",
                 status="not_allowed",
             )
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
 
         public_args = {key: value for key, value in args.items() if key != "_approval_id"}
         schema_error = _validate_args(public_args, spec.input_schema)
         if schema_error is not None:
-            result = ToolResult(ok=False, error=schema_error, status="error")
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            result = ToolResult(ok=False, error=("contract tool arguments failed schema validation"
+                if execution is not None else schema_error), status="error")
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
+
+        if execution is not None:
+            assert project_scope is not None
+            try:
+                plan = prepare_tool(execution, project_scope, tool_name, args, ctx, self._tools[tool_name])
+                args = plan.args
+                audit_args = {"arguments_sha256": digest(args), "operation_fingerprint": plan.fingerprint}
+            except (ValueError, OSError, KeyError, TypeError) as exc:
+                result = ToolResult(ok=False, status="contract_tool_blocked",
+                    error="contract tool adapter preflight failed: " + type(exc).__name__,
+                    metadata={"handler_started": False, "budget_reserved": False})
+                _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
+                return result
 
         approval_reason = _approval_required_reason(tool_name, args, ctx, spec)
         if approval_reason:
@@ -296,7 +323,7 @@ class ToolRegistry:
                 call_id=call_id,
                 reason=approval_reason,
             )
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             return result
 
         # ★ Gate 5 (and any future gate hooks) run here, before the tool fn.
@@ -317,7 +344,7 @@ class ToolRegistry:
                     call_id=call_id,
                     reason=decision.reason,
                 )
-                _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+                _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
                 return result
             if decision.action == "block":
                 logger.warning(
@@ -330,15 +357,19 @@ class ToolRegistry:
                     blocked_by_gate=decision.gate_id,
                     status="blocked",
                 )
-                _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+                _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
                 return result
         try:
             from app.harness.tools.process_runtime import require_process_backend
             require_process_backend(spec.policy.process_backend, require_isolation=spec.policy.require_isolation)
-            result = await asyncio.wait_for(
-                self._tools[tool_name](args, ctx),
-                timeout=spec.policy.timeout_seconds,
-            )
+            if plan is not None:
+                result = await execute_tool(plan, self._tools[tool_name], ctx, spec.output_schema,
+                                            spec.policy.timeout_seconds)
+            else:
+                result = await asyncio.wait_for(
+                    self._tools[tool_name](args, ctx),
+                    timeout=spec.policy.timeout_seconds,
+                )
             if result.status is None:
                 result.status = "success" if result.ok else "error"
             if result.status == "requires_approval":
@@ -355,12 +386,16 @@ class ToolRegistry:
                     result.output = None
         except asyncio.CancelledError:
             result = ToolResult(ok=False, error="tool execution cancelled", status="cancelled")
-            _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             raise
         except Exception as exc:
-            logger.exception("tool '{}' raised", tool_name)
-            result = ToolResult(ok=False, error=str(exc), status="error")
-        _finalize_and_record(tool_name, args, ctx, result, started, started_at, call_id, span)
+            if execution is not None:
+                result = ToolResult(ok=False, error="contract tool refused: " + type(exc).__name__,
+                                    status="contract_tool_blocked")
+            else:
+                logger.exception("tool '{}' raised", tool_name)
+                result = ToolResult(ok=False, error=str(exc), status="error")
+        _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
         return result
 
 
@@ -468,6 +503,8 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     reg.register("knowledge.run_archive", run_archive_tool)
     reg.register("knowledge.ingest_document", ingest_document_tool)
     # code.*
+    from app.harness.tools.context_material import read_material_tool
+    reg.register("context.read_material", read_material_tool)
     reg.register("code.repo_reader", repo_reader_tool)
     reg.register("code.patch_generator", patch_generator_tool)
     reg.register("code.apply_patch", apply_patch_tool)

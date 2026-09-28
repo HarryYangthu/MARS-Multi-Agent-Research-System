@@ -31,6 +31,11 @@ def get_orchestrator() -> Orchestrator:
     return _orchestrator
 
 
+def existing_orchestrator() -> Orchestrator | None:
+    """Inspect process ownership without creating a store or recovering a run."""
+    return _orchestrator
+
+
 async def shutdown_owned_runs() -> None:
     """Do not instantiate/recover an orchestrator just to shut the app down."""
     if _orchestrator is not None:

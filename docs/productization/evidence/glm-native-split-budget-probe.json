@@ -1,0 +1,117 @@
+{
+  "actual_response_models": [
+    "glm-5.3"
+  ],
+  "artifact_sha256": "1bac7a0068a3671cd68a486cd1e2bb51935894b5a1aaec9a0a5a62d66267a7f2",
+  "cost_status": "unknown_no_verified_price_table",
+  "counts": {
+    "action_rounds": 1,
+    "model_requests": 2,
+    "model_responses": 2,
+    "observations": 1,
+    "protocol_repairs": 0,
+    "reflections": 0,
+    "sdk_attempts": 2,
+    "tool_dispatches": 1,
+    "validation_repairs": 0
+  },
+  "finished_at": "2026-09-27T18:55:48.102153+00:00",
+  "full_research_accepted": false,
+  "input_sha256": "3c42d1808d9c043777ac4aece1fb25139fef71bc55a8f11192acd3fdccaedad0",
+  "model": "glm-5.3",
+  "model_cost_cny": null,
+  "model_request_limit": 4,
+  "output_token_limit": 2048,
+  "provider": "zhipu",
+  "reflection_accepted": false,
+  "requested_models": [
+    "glm-5.3"
+  ],
+  "response_model_identity_complete": true,
+  "response_model_matches_requested": true,
+  "response_model_statuses": [
+    "consistent"
+  ],
+  "schema_id": "glm_native_probe_receipt.v1",
+  "scope": "code.repo_reader/native_observation_loop",
+  "source_fingerprints": {
+    "backend/app/harness/agent_loop/executor.py": "36b905a15974a6af69810f194b75fa13b406dcc3835f56fb0f98daec5aabe0d0",
+    "backend/app/harness/llm/accounting.py": "66121d98b39b3a7acf7157f9b2007f08247eb2fc59eaa6d495fbbfa51e6ed9a8",
+    "backend/app/harness/llm/model_capabilities.py": "16b12757dd19def2cbde1893da91c50a2e254290e503ef2581b9185a9b1e6349",
+    "backend/app/harness/llm/openai_provider.py": "63f080943cf55b11abeb40efd456796e4d7c3c08ff9bf084b6791ecd09305551",
+    "backend/app/harness/llm/provider_base.py": "d3c034878132498c420571923fd9afd6738abb4f9060548ab736b4a3c1d419f0",
+    "configs/agents.yaml": "0c6ee65123bd97e55ac6dc70540ecee59611e9bc227526784439caca8df231d2",
+    "configs/resources.yaml": "5e010c17b52a78b34a3402ff844115c4ab4f6ca6ca75af0eac563c3630eeb2ca",
+    "scripts/verify_glm_native.py": "a4feb2b21efb8548df9126e680e996699999d5c00111a10bec273bb7dc2f1362"
+  },
+  "started_at": "2026-09-27T18:55:38.333504+00:00",
+  "status": "passed",
+  "transport_status": "passed",
+  "usage": {
+    "completion_tokens": 253,
+    "prompt_tokens": 1653,
+    "total_tokens": 1906
+  },
+  "usage_complete": true,
+  "evidence_location": "runs/glm-native-productization-20260928-c (local ignored runtime directory)",
+  "scope_note": "Native transport and split-ledger settlement only; no full research claim. Source fingerprints identify the exact probe code.",
+  "source_after_probe_note": "A later validator guard additionally rejects malformed total-token records; this probe used valid real provider usage. Its original fingerprints remain unchanged.",
+  "ledger_entries": [
+    {
+      "provider": "zhipu",
+      "model": "glm-5.3",
+      "status": "completed",
+      "charged_input_tokens": 661,
+      "charged_output_tokens": 16,
+      "charged_tokens": 677,
+      "usage_complete": true,
+      "charged_attempts": 1,
+      "observed_attempts": 1
+    },
+    {
+      "provider": "zhipu",
+      "model": "glm-5.3",
+      "status": "completed",
+      "charged_input_tokens": 992,
+      "charged_output_tokens": 237,
+      "charged_tokens": 1229,
+      "usage_complete": true,
+      "charged_attempts": 1,
+      "observed_attempts": 1
+    }
+  ],
+  "evidence_files": [
+    {
+      "path": "result.md",
+      "sha256": "1bac7a0068a3671cd68a486cd1e2bb51935894b5a1aaec9a0a5a62d66267a7f2"
+    },
+    {
+      "path": "receipt.json",
+      "sha256": "9877a59ab151cfb922dd2ba396f76a868b624ae80bd6d03cacfb1b23193e2856"
+    },
+    {
+      "path": "trace/checkpoint.json",
+      "sha256": "13641880dd1766ad4e483b98479bdf40481576df68b8cd054241bfd3ade9e51f"
+    },
+    {
+      "path": "trace/events.jsonl",
+      "sha256": "49a286eae9181f0098de7edda5d10701d9d67c3b4eef8e4b2d072740d551803c"
+    },
+    {
+      "path": "trace/facts.json",
+      "sha256": "98cfe38fa31583f840846e99f9c68bd436ce4c19b3db919f9bffd88f4b0d149f"
+    },
+    {
+      "path": "trace/tools/0001.json",
+      "sha256": "b4b9f6a50025b792898bd2ad17c10816dd64961b5e37a3a35c0ad9dc2807ccf8"
+    },
+    {
+      "path": "input/baseline.py",
+      "sha256": "3c42d1808d9c043777ac4aece1fb25139fef71bc55a8f11192acd3fdccaedad0"
+    },
+    {
+      "path": "resources/model_budget.v1.json",
+      "sha256": "323d2e62c0a27b772680d7c03617497b44c5697e574122eb9eb3077f581f8580"
+    }
+  ]
+}

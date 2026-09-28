@@ -22,6 +22,10 @@ from app.harness.persistence import atomic_write_json, atomic_write_text
 from app.harness.tools.config import load_execution_config, tool_config
 from app.harness.tools.process_runtime import communicate_process, start_process
 
+LOCAL_COMMAND_CONTROL_FILES = frozenset({
+    "result.json", "job.json", "execution_receipt.json", "stdout.log", "stderr.log",
+    "submission.json", "state.json", "stop.json", "worker.lock", "control.lock",
+})
 
 @dataclass(frozen=True)
 class LocalCommandJob:
@@ -117,7 +121,7 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
         source = root / relative
         if (relative.is_absolute() or ".." in relative.parts or source.is_symlink()
                 or not source.resolve().is_relative_to(root) or not source.is_file()
-                or source.name in {"result.json", "job.json", "execution_receipt.json", "stdout.log", "stderr.log"}):
+                or source.name in LOCAL_COMMAND_CONTROL_FILES):
             raise ValueError("evidence must identify an actual measurement file inside this attempt")
         artifacts.append({"kind": "measurement_evidence", "path": str(source), "sha256": _file_hash(source),
                           "bytes": source.stat().st_size})

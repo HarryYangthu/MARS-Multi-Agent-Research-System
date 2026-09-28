@@ -1,0 +1,36 @@
+{
+  "schema": "verification.research_scope_recovery.v1",
+  "status": "passed",
+  "tests": {
+    "new": 26,
+    "new_and_existing": 88,
+    "duration_seconds": 3.14
+  },
+  "strict_mypy_files": 2,
+  "source_sha256": {
+    "backend/app/bridge/research_scope_recovery.py": "3a4a5858121cc6ee61a42fca38395ec993e260a6547db56dc99c463152b9bc66",
+    "backend/tests/unit/test_research_scope_recovery.py": "e07685670fe867d065e0f01694df2a04292518081d2c6137866146fa762de344"
+  },
+  "evidence": {
+    "scope-recovery-first.log": "d1e7b4b61f05abfad82c2dc4fa075aa40bcf40c0e5e7bba8b67a43cfff8403dd",
+    "scope-recovery-final.xml": "76dc25fb256b2b8a3e7f19332be8cceae3a61572f8ce7be5fc5de870cadff5c8",
+    "scope-recovery-final.log": "a7ff8707ba96788c8b1e506cb0af8557509c1c1838f0558539e25fdd7e78dc18",
+    "scope-recovery-mypy.log": "f9b031e5c45aa702cd4fef028d465551cb20a2c4698e0913c7b00766b20ac4d8",
+    "scope-recovery-independent.log": "bb4842d333a9ca8b6129e518670854d8fb4f029c6cd95c3c8bc5eacf9b10f673",
+    "scope-recovery-independent-failures.log": "a54bded0786feff2850ff764fc6947cf5c304ec964064846cad77613392a423e",
+    "mars-review-scope-recovery.py": "730e553481f7f9a8ddf3d932faf5e038037bfa2a55451099484decda80735054",
+    "mars-review-scope-recovery-failures.py": "582aab542f2a8d851943eccdd4ef20be733f8cb19d6941f44b815e8c3998bb69"
+  },
+  "independent_checks": [
+    "Same-content external hardlinks to snapshot payload and manifest now rejected",
+    "Relocated run reconstructs candidate paths without reading original source",
+    "Actual failed Git operation preserves one tool charge and two unknown reservations without read-side mutation",
+    "Actual SQLite INSERT abort leaves no sealed row, preserves ledger and prevents restoration"
+  ],
+  "boundaries": [
+    "No start admission or scheduling change",
+    "No new model/experiment calls",
+    "Scope permissions only; not full stage/task/experiment recovery",
+    "Existing application migration compatibility not implied"
+  ]
+}

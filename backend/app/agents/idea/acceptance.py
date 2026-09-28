@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.idea.delivery import delivery_errors
+from app.agents.idea.focused_runtime import load_focused_snapshot
 from app.agents.idea.protocol import protocol_errors
 from app.agents.idea.research import evidence_inventory, material_errors
 from app.harness.agent_loop.trace import atomic_json, audit_trace, digest
@@ -207,14 +208,14 @@ def inspect_native_idea_run(run: RunHandle, proposal: Path | None) -> dict[str, 
                     material_failures.append("Research assessment requires an accepted model review of this candidate.")
             if record.get("research_contract") in {"idea.research_context.v1", "idea.research_context.v2"}:
                 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, verify_review_trace
-                snapshot_path = run.root / "input/idea_focused.v1.json"
-                if not snapshot_path.is_file() or digest(_json(snapshot_path)) != record.get("runtime_profile_sha256"):
-                    material_failures.append("Focused validation is not bound to its runtime profile")
-                else:
-                    try:
-                        verify_review_trace(path.parent, _json(snapshot_path))
-                    except (OSError, ValueError, KeyError) as exc:
-                        material_failures.append("Independent model review evidence failed: " + str(exc))
+                try:
+                    configuration = load_focused_snapshot(run.root, path.parent.name)
+                    if digest(configuration) != record.get("runtime_profile_sha256"):
+                        material_failures.append("Focused validation is not bound to its runtime profile")
+                    else:
+                        verify_review_trace(path.parent, configuration)
+                except (OSError, ValueError, KeyError) as exc:
+                    material_failures.append("Independent model review evidence failed: " + str(exc))
                 material_failures.extend(focused_research_errors(parse(text).metadata, material_observations, run.root))
                 if parse(text).metadata.get("research_context", {}).get("schema") != record["research_contract"]:
                     material_failures.append("Focused research contract differs from its validation receipt")
