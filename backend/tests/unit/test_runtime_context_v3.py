@@ -152,3 +152,13 @@ def test_explicit_model_capacity_is_validated() -> None:
     for invalid in (True, 0, '32000'):
         with pytest.raises(ValueError, match='positive integer'):
             configured_context_window(replace(config, raw={'model': {'context_window': invalid}}))
+
+
+def test_receipt_index_cannot_displace_latest_observation_protection(tmp_path: Path) -> None:
+    # A receipt index follows the actual observation. It is not a replacement
+    # for the unread source, even though both are classified as runtime history.
+    with pytest.raises(ValueError, match='protected context'):
+        pack_native(pinned=[Message('user', 'read this source')],
+            history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
+            feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
+            metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)

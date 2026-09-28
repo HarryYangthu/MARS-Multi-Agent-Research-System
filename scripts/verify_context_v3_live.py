@@ -49,7 +49,8 @@ async def verify(root: Path) -> dict[str, Any]:
     submission_schema = BaseAgent.submission_schema(agent, request)
     assert submission_schema is not None
     submission_schema["required"] += ["human_summary", "verification_nonce"]
-    submission_schema["properties"]["human_summary"] = {"type": "string", "minLength": 1}
+    submission_schema["properties"]["human_summary"] = {
+        **submission_schema["properties"].get("human_summary", {}), "type": "string", "minLength": 1}
     submission_schema["properties"]["verification_nonce"] = {"type": "string", "pattern": "^[a-f0-9]{32}$"}
     messages = agent._messages_for_context(request, context, purpose='context_diagnostic')
     policy = AgentLoopPolicy(protocol='native_tools', native_observation_history=True, mode='react',

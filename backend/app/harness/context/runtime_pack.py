@@ -111,9 +111,10 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
     descriptors = [materials.get(message_key(unit[-1]), Material('rules_task', 'host/task')) for unit in units]
     protected = [d.protected or any(m.role == 'system' for m in unit) for d, unit in zip(descriptors, units)]
     # A completed but still unprocessed latest tool exchange stays verbatim.
-    history = [i for i, d in enumerate(descriptors) if d.kind in {'history', 'tool', 'code'}]
-    if history:
-        protected[history[-1]] = True
+    for kind in ('tool', 'history', 'code'):
+        latest = [i for i, d in enumerate(descriptors) if d.kind == kind]
+        if latest:
+            protected[latest[-1]] = True
     keys = [digest([m.to_wire() for m in u]) for u in units]
     refs = [[store_material(root, m) for m in u] if root is not None else [] for u in units]
     levels: dict[str, int] = {}

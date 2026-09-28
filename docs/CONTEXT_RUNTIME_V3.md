@@ -71,3 +71,20 @@ or successful PIMC simulation. Research baselines, credentials and run originals
   diagnostic inputs, invokes the configured Idea model and registered tools, interrupts after the
   actual file read and resumes the same checkpoint. Its receipt distinguishes mechanism validation
   from scientific acceptance. Failures remain failures; they are not converted to example outputs.
+- Final targeted regression after the latest-observation fix: 213 passed, 16 skipped.
+- Real GLM-5.3 mechanism check passed: 4 model requests, 2 successful real tool dispatches,
+  1 schema correction, 3 compaction events and 4 hash-verified outgoing manifests. The run was
+  interrupted after the second tool and resumed with the same counters; total tool dispatches
+  remained 2. The final nonce matched the actual local source file. All response model identities
+  were consistent. Reported usage: 18,133 input + 1,027 output = 19,160 tokens.
+- Initial conservative input upper bound shrank from 31,427 to 18,113 against a 28,000 input
+  limit (65% target: 18,200). A later restored call at 18,755 stayed below the 80% trigger and
+  correctly avoided another compaction. These byte-based bounds are not provider token counts.
+- The live diagnostic exposed and fixed a receipt-index ordering bug: the latest tool observation
+  must stay protected independently of the latest history/receipt index. This prevents an immediate
+  readback loop caused by compacting the observation before the model can use it.
+- Earlier diagnostic attempts encountered denied readback (fixed), provider timeout, invalid final
+  format and the ordering bug above. They were not counted as successful validation. The successful
+  diagnostic uses shared BaseAgent assembly with the Idea identity, not full scientific Idea acceptance.
+  Local receipts, source inputs, actual traces and browser capture are retained under
+  `local/verification/context-runtime-v3/2026-09-29/` (ignored by Git).
