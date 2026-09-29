@@ -29,6 +29,8 @@ _BUDGET_SUFFIX = (". The next model call is included. Each dispatched tool, incl
 
 def remaining_budget_message(remaining: dict[str, int | None]) -> Message:
     explanation = ". A null model_calls value means no model-request count limit" if remaining.get("model_calls") is None else ""
+    if remaining.get("tool_calls") is None or remaining.get("validation_repairs") is None:
+        explanation += ". Null counters have no fixed quota; continue until validated completion, a real blocker, or user cancellation"
     # Preserve the historical template exactly for finite-budget trace audits.
     return Message("system", _BUDGET_PREFIX + canonical(remaining) + explanation + _BUDGET_SUFFIX)
 

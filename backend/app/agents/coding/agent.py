@@ -42,6 +42,23 @@ class CodingAgent(BaseAgent):
     def post_training_handle(self) -> PostTrainingHandle:
         return self._post_training
 
+    def execution_blocker(self, project: str) -> str:
+        if not self.loop_policy.completion_driven:
+            return ""
+        from app.harness.tools.project_repo import load_project_repo
+        repo = load_project_repo(project)
+        if repo.read_only:
+            return "编码工作副本未就绪：当前关联的是只读基线仓。请先创建并绑定可写实验副本；未调用模型。"
+        if not repo.root.is_dir():
+            return "编码工作目录不存在；未调用模型。"
+        return ""
+
+    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
+        blocker = self.execution_blocker(request.project)
+        if blocker:
+            raise ValueError(blocker)
+        return await super().run_loop(request, context)
+
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
         errors = await super().validate_candidate(request, text, observations)

@@ -202,6 +202,8 @@ coding:
   - python_research
   - c_production
   loop:
+    # Stop on validated delivery, real blockers, or explicit user cancellation.
+    completion_driven: true
     protocol: native_tools
     mode: react
     native_observation_history: true

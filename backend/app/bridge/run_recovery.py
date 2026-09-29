@@ -8,7 +8,7 @@ from typing import Any
 from app.bridge.node_key import parse_node_key
 from app.bridge.orchestrator import Orchestrator
 from app.bridge.task_runtime import resumable_task, task_contract_path
-from app.bridge.research_run_service import research_execution_admission
+from app.bridge.research_run_service import research_execution_admission, load_run_research_contract
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.accounting import (
     ResourceBudgetError, RunModelBudget, charged_model_attempts, charged_token_component,
@@ -45,6 +45,11 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     candidates = [key for key in latest.values() if states[key] in {'failed', 'running'}]
     if not candidates:
         return finish('idle', '')
+    agents = [orch.registry.get(parse_node_key(node).stage) for node in candidates]
+    legacy = load_run_research_contract(session.run, session.request.extra) is None
+    completion_driven = legacy and all(getattr(getattr(agent, 'loop_policy', None), 'completion_driven', False)
+                                       for agent in agents)
+    evidence.append({'completion_driven': completion_driven})
     # Unknown remote calls cannot be converted into a new attempt by clicking retry.
     ledger = session.run.root / 'resources/model_budget.v1.json'
     elapsed_exhausted = False
@@ -68,9 +73,20 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         if limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
-        if exhausted:
+        if exhausted and not completion_driven:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
-        elapsed_exhausted = time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds']
+        elapsed_exhausted = (not completion_driven and
+            time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
+    if legacy:
+        for agent in agents:
+            check = getattr(agent, 'execution_blocker', None)
+            if callable(check):
+                try:
+                    blocker = check(project)
+                except (OSError, ValueError) as exc:
+                    blocker = str(exc)
+                if blocker:
+                    return finish('blocked', str(blocker))
     resumable = not elapsed_exhausted
     retryable: list[str] = []
     for node in candidates:
