@@ -183,7 +183,10 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
     packed = [m for unit in units for m in unit]
     used = cost()
     if used > budget:
-        raise ContextBudgetExceeded(f'protected context exceeds input budget ({used}>{budget}); split task or raise budget; no request sent')
+        required = sum(token_upper_bound(unit) for i, unit in enumerate(units) if protected[i])
+        raise ContextBudgetExceeded(f'protected context exceeds input budget ({used}>{budget}); '
+            f'protected={required}, tool_schema={schema_size}, trigger={policy["trigger_percent"]}%, '
+            f'target={target}; compression exhausted; split task or configure a verified larger model window; no request sent')
     components: dict[str, int] = {'tools_schema': schema_size}
     segments = []
     for i, (unit, descriptor) in enumerate(zip(units, descriptors)):
@@ -196,6 +199,9 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
     manifest = {'version': 3, 'estimator': 'utf8_byte_upper_bound', 'budget': budget,
                 'before': before, 'restored': restored, 'used': used, 'target': target,
                 'trigger_percent': policy['trigger_percent'], 'triggered': triggered,
+                'target_percent': policy['target_percent'],
+                'compression_order': ['exact_duplicate', 'tool', 'history', 'code', 'background', 'upstream'],
+                'compression_method': 'reversible_excerpt_and_offload',
                 'target_reached': used <= target, 'decisions': decisions, 'segments': segments,
                 'components': components, 'profile': role_profile(policy, agent),
                 'state': {'version': 3, 'levels': levels, 'source_units': keys},

@@ -107,6 +107,26 @@ def test_completion_scope_does_not_leak_to_other_agents(tmp_path: Path) -> None:
         assert not RunModelBudget(tmp_path, configuration=policy()).completion_driven
 
 
+def test_all_roles_count_tokens_without_enforcing_aggregate_token_quota(tmp_path: Path) -> None:
+    config = policy()
+    config['limits'].update(max_model_requests=10, max_elapsed_seconds=100)
+    budget = RunModelBudget(tmp_path, configuration=config, completion_driven=False)
+    assert budget.token_mode == 'statistics_only'
+    for agent in ('idea', 'experiment', 'coding', 'execution', 'writing', 'commander'):
+        reservation = budget.reserve([Message('user', 'Real accounting, no model called')],
+            LLMConfig(provider='custom', model='ledger-only', max_tokens=32, max_retries=0), {'agent': agent})
+        budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    state = budget.recovery_snapshot()
+    assert len(state['requests']) == 6
+    assert sum(row['charged_tokens'] for row in state['requests'].values()) > 1
+    assert all(row['token_usage_mode'] == 'statistics_only' for row in state['requests'].values())
+    before = budget.path.read_bytes()
+    with pytest.raises(ResourceBudgetError, match='token'):
+        RunModelBudget(tmp_path, configuration=config, token_mode='limited').reserve(
+            [Message('user', 'legacy bounded policy')], LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
+    assert budget.path.read_bytes() == before
+
+
 @pytest.mark.asyncio
 async def test_real_connection_failure_keeps_receipt_in_completion_scope(tmp_path: Path) -> None:
     # An actual non-listening socket refuses connections; no server or provider substitute.

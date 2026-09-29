@@ -124,7 +124,7 @@ def test_unknown_model_reservation_is_not_replayed_or_refunded(tmp_path: Path) -
     assert budget.path.read_bytes() == before
 
 
-def test_budget_exhaustion_and_corrupt_ledger_block_recovery(tmp_path: Path) -> None:
+def test_token_usage_is_statistics_only_but_corrupt_ledger_blocks_recovery(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
     budget = RunModelBudget(session.run.root)
     reservation = budget.reserve([Message(role='user', content='Accounting only.')],
@@ -139,7 +139,7 @@ def test_budget_exhaustion_and_corrupt_ledger_block_recovery(tmp_path: Path) -> 
     budget.path.write_text(json.dumps(state))
     before = budget.path.read_bytes()
     view = recovery_status(orch, session.run.run_id, project='pimc')
-    assert view['status'] == 'blocked' and '预算已耗尽' in view['message']
+    assert view['status'] == 'recoverable' and view['actions']
     assert budget.path.read_bytes() == before
     budget.path.write_text('[]')
     assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'

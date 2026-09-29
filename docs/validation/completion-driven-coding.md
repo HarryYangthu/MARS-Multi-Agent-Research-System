@@ -20,3 +20,5 @@ Coding checks its effective repository before invoking the model. A read-only ba
 - The existing failed PIMC run's recovery endpoint now reports that its writable experimental copy is missing. Its 58 model rows / 58 charged attempts / 519,685 charged tokens remained byte-for-byte unchanged. No model retry, baseline modification or simulation was started.
 
 These checks establish policy/accounting and blocker behavior, not successful PIMC code generation or experiment performance. The existing task still needs a writable experimental copy before Coding can proceed.
+
+Follow-up deployment policy: cumulative token ceilings are now statistics-only for all roles, including contract-bound runs, without rewriting frozen contracts. See [token statistics and context rules](token-statistics-and-context.md). Other contract limits remain independent.

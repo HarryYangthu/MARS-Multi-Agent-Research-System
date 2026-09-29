@@ -348,7 +348,9 @@ class ResultReader:
             if value["status"] == "recorded":
                 value["source_id"] = self.source("derived_contract_resource_summary", contract.evidence_bytes())
             return value
+        from app.harness.llm.usage_policy import token_usage_mode
         result: dict[str, Any] = {"status": "missing", "model_requests": None, "input_tokens": None,
+            "token_usage_mode": token_usage_mode(),
             "billed_output_tokens": None, "cost": None, "currency": None, "usage_complete": None,
             "logical_records": None, "observed_sdk_attempts": None, "observed_attempts_complete": None,
             "charged_sdk_attempts": None, "reserved_sdk_attempts": None, "calls_with_unknown_attempt_count": None,

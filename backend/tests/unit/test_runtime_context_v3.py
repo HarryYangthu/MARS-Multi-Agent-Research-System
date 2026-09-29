@@ -16,6 +16,7 @@ from app.harness.llm.provider_base import Message, ToolCall
 
 def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     policy = load_policy()
+    assert input_budget(policy, 128000, output_reserve=8192, model_window=128000) == 117760
     messages = [Message('system', 'Never modify baseline'), Message('user', 'logs ' * 5000), Message('user', 'Current goal')]
     materials = {message_key(messages[1]): Material('history', 'completed steps', False)}
     # Use background so this is not the newest unprocessed tool exchange.
@@ -27,6 +28,8 @@ def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     packed, at = pack_messages(messages, policy=policy, budget=size * 100 // 80,
         materials=materials, root=tmp_path)
     assert at['triggered'] and at['used'] <= at['target']
+    assert at['trigger_percent'] == 80 and at['target_percent'] == 65
+    assert at['compression_method'] == 'reversible_excerpt_and_offload'
     assert packed[0] == messages[0] and packed[-1] == messages[-1]
     restored, again = pack_messages(messages, policy=policy, budget=size * 100 // 80,
         materials=materials, root=tmp_path, previous=at['state'])

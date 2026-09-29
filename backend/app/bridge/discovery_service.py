@@ -2717,6 +2717,7 @@ class DiscoveryService:
         )
         decision = evaluate_stop(
             limits=context.contract.budget,
+            token_mode=context.stores.budget.token_mode,
             usage=PolicyBudgetUsage(
                 proposals=budget.proposals,
                 llm_tokens=budget.llm_tokens,

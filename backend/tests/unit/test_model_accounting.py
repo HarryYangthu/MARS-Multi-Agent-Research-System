@@ -145,7 +145,7 @@ def test_revision_keeps_aggregate_hard_limits(tmp_path: Path, limit: str, error:
     budget = RunModelBudget(tmp_path, configuration=_policy())
     reservation = budget.reserve(_messages(), _config(), {})
     budget.settle(reservation, usage=None, complete=False, outcome="cancelled")
-    changed = RunModelBudget(tmp_path, configuration=_policy(**{limit: reservation.tokens if limit == "max_total_tokens" else 1}))
+    changed = RunModelBudget(tmp_path, configuration=_policy(**{limit: reservation.tokens if limit == "max_total_tokens" else 1}), token_mode="limited")
     changed.begin_revision(invocation_id="fresh", reason="Explicit retry")
     with pytest.raises(ResourceBudgetError, match=error):
         changed.reserve(_messages(), _config(), {})
@@ -193,7 +193,7 @@ def test_unlimited_requests_cross_old_ceiling_without_losing_ledger_rows(tmp_pat
 
 
 def test_unlimited_count_does_not_remove_token_reservations(tmp_path: Path) -> None:
-    budget = RunModelBudget(tmp_path, configuration=_policy(max_model_requests=None, max_total_tokens=1))
+    budget = RunModelBudget(tmp_path, configuration=_policy(max_model_requests=None, max_total_tokens=1), token_mode="limited")
     with pytest.raises(ResourceBudgetError, match="total-token"):
         budget.reserve(_messages(), _config(), {})
     assert not budget.path.exists()

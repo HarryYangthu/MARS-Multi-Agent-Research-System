@@ -55,10 +55,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     elapsed_exhausted = False
     if ledger.exists():
         try:
-            raw = RunModelBudget(session.run.root).recovery_snapshot()
+            model_budget = RunModelBudget(session.run.root)
+            raw = model_budget.recovery_snapshot()
         except (ResourceBudgetError, OSError, ValueError):
             return finish('blocked', '资源记录或预算配置无法校验，请先核对记录和配置。')
         evidence.append(raw)
+        evidence.append({'token_usage_mode': model_budget.token_mode})
         if any(row.get('status') in {'in_flight', 'reconciliation_required'}
                for row in raw.get('requests', {}).values()):
             return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
@@ -66,10 +68,11 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         limits = raw['configuration']['limits']
         exhausted = (limits['max_model_requests'] is not None
                      and sum(charged_model_attempts(row) for row in rows) >= limits['max_model_requests'])
-        exhausted = exhausted or sum(row['charged_tokens'] for row in rows) >= limits['max_total_tokens']
-        for component, limit in (('input', 'max_input_tokens'), ('output', 'max_billed_output_tokens')):
-            exhausted = exhausted or (limit in limits and sum(charged_token_component(row, component)
-                                      for row in rows) >= limits[limit])
+        if model_budget.token_mode == 'limited':
+            exhausted = exhausted or sum(row['charged_tokens'] for row in rows) >= limits['max_total_tokens']
+            for component, limit in (('input', 'max_input_tokens'), ('output', 'max_billed_output_tokens')):
+                exhausted = exhausted or (limit in limits and sum(charged_token_component(row, component)
+                                          for row in rows) >= limits[limit])
         if limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
