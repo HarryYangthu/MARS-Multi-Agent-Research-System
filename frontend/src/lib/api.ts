@@ -2232,3 +2232,32 @@ export async function getCodeFilePage(runId: string, project: string, path: stri
   const query = new URLSearchParams({ project, path, start: String(start), repository_token: token, version });
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-repository/file?${query}`, { signal, cache: "no-store" }));
 }
+
+export type DataPipelineParameters = {
+  source_id: string; signal_key: string; reference_key: string;
+  sample_axis: 0 | 1; channel: number; fs_mhz: number; shift_mhz: number;
+  delay_samples: number; auto_align: boolean; reference_mode: "linear" | "cubic";
+  lowpass_mhz: number | null;
+};
+export type DataPipelineJob = {
+  id: string; project: string; status: string; error: string; summary: string; shared?: boolean;
+  params: DataPipelineParameters;
+  metrics: { input_shape: number[]; output_shape: number[]; rms_before: number; rms_after: number; warnings: string[]; spectrum_samples: number } | null;
+};
+export type DataPipelineField = { key: string; shape: number[]; dtype: string };
+function pipelineUrl(project: string): string { return `${BASE}/api/projects/${encodeURIComponent(project)}/data-pipeline`; }
+export async function listDataPipelineJobs(project: string, signal?: AbortSignal): Promise<DataPipelineJob[]> {
+  return jsonOrThrow(await boundedFetch(pipelineUrl(project), { signal, cache: "no-store" }));
+}
+export async function inspectDataPipelineSource(project: string, source: string, signal?: AbortSignal): Promise<DataPipelineField[]> {
+  return jsonOrThrow(await boundedFetch(`${pipelineUrl(project)}/fields/${encodeURIComponent(source)}`, { signal }));
+}
+export async function startDataPipeline(project: string, parameters: DataPipelineParameters): Promise<DataPipelineJob> {
+  return jsonOrThrow(await boundedFetch(pipelineUrl(project), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parameters) }));
+}
+export async function dataPipelineAction(project: string, job: string, action: "analyze" | "share"): Promise<DataPipelineJob> {
+  return jsonOrThrow(await boundedFetch(`${pipelineUrl(project)}/${encodeURIComponent(job)}/${action}`, { method: "POST" }));
+}
+export function dataPipelineArtifact(project: string, job: string, name: string): string {
+  return `${pipelineUrl(project)}/${encodeURIComponent(job)}/files/${encodeURIComponent(name)}`;
+}

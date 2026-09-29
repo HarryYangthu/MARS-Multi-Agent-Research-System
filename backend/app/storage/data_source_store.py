@@ -388,15 +388,11 @@ def _inspect_torch_file(
         warnings.append("当前后端环境未安装 torch，无法解析 .pth 频谱预览。")
         return None, {"preview_key": path.name}
     try:
-        payload = torch.load(str(path), map_location="cpu", weights_only=True)
-    except TypeError:
-        payload = torch.load(str(path), map_location="cpu")
+        from app.harness.tensor_archive import read_tensor_archive
+        payload = read_tensor_archive(path)
     except Exception as exc:
-        try:
-            payload = torch.load(str(path), map_location="cpu", weights_only=False)
-        except Exception:
-            warnings.append(f"torch.load(weights_only=True) 失败：{exc}")
-            return None, {"preview_key": path.name}
+        warnings.append(f"无法安全读取 PTH；请使用数值 Tensor / NumPy 字典或转换为 NPZ：{exc}")
+        return None, {"preview_key": path.name}
     arrays = _numeric_arrays(payload)
     if not arrays:
         warnings.append(".pth 中未找到可预览的数值 tensor/array。")
@@ -494,10 +490,7 @@ def collect_arrays(value, key="root", out=None):
     return out
 
 try:
-    try:
-        payload = torch.load(path, map_location="cpu", weights_only=True)
-    except Exception:
-        payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload = torch.load(path, map_location="cpu", weights_only=True)
     entries = collect_arrays(payload)
     if not entries:
         print(json.dumps({"ok": False, "error": "no numeric tensor/array found"}))
