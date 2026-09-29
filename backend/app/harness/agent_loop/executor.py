@@ -500,9 +500,15 @@ class NativeAgentLoop:
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 # Reflection sends no tools; reserve only schemas actually sent.
                 phase_schema_budget = 0 if reviewing else tool_schema_budget
+                effective_budget = p.input_token_budget
+                if modern_context:
+                    from app.harness.context.runtime_policy import input_budget
+                    phase_cfg = phase_config()
+                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
+                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                 if unit is not None:
                     try:
-                        messages, manifest = pack_review_unit(unit, budget=p.input_token_budget,
+                        messages, manifest = pack_review_unit(unit, budget=effective_budget,
                                                               budget_context=budget_message(p, counts))
                     except ValueError as exc:
                         state["status"] = "review_evidence_unavailable"
@@ -512,10 +518,6 @@ class NativeAgentLoop:
                         break
                 elif modern_context:
                     from app.harness.context.runtime_native import pack_native
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
-                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
-                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                     phase_tools = () if reviewing else wire_tools
                     messages, manifest = pack_native(
                         pinned=(request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
@@ -541,11 +543,8 @@ class NativeAgentLoop:
                     )
                 if modern_context and unit is not None:
                     from app.harness.context.runtime_pack import pack_messages
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
                     messages, modern_manifest = pack_messages(messages, policy=runtime_policy,
-                        budget=input_budget(runtime_policy, p.input_token_budget, output_reserve=phase_cfg.max_tokens,
-                            model_window=phase_cfg.extra.get("context_window")),
+                        budget=effective_budget,
                         root=None, agent=request.tool_context.agent, readback_available=False)
                     manifest.update(modern_manifest)
                     manifest["estimated_upper_bound_tokens"] = modern_manifest["used"]
