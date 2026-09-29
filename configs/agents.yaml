@@ -26,6 +26,8 @@ commander:
   - run.create
   - run.start
   - run.status
+  - run.recovery_status
+  - run.recover
   - run.feedback_loop
   - artifact.read
   - artifact.review

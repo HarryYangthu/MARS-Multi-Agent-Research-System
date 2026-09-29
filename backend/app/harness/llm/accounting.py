@@ -177,6 +177,11 @@ class RunModelBudget:
                 _number(row["charged_cost"], "charged model cost")
         return state
 
+    def recovery_snapshot(self) -> dict[str, Any]:
+        """Validate persisted accounting without reconciling or refunding requests."""
+        with path_lock(self.lock_path):
+            return self._read()
+
     def remaining_seconds(self) -> float:
         with path_lock(self.lock_path):
             return self._remaining_seconds(self._read(), time.time())

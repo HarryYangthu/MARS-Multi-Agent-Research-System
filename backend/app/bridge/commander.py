@@ -356,6 +356,7 @@ def _system_prompt(session: CommanderSession) -> str:
 4. **配合反馈循环**:执行结果没达预期时,根据 metrics、logs、diagnosis、公共上下文和项目 diagnostics 配置判断原因,再解释为什么回到某个 Agent。不要预设失败原因,不要硬编码默认回退目标。
 5. **审核闸口**:节点进入 waiting_review 时提醒用户;用户同意后用 approve_node 放行,或 reject_node 驳回。
 6. **汇报**:对照用户设定的指标预期({targets})和项目真实指标语义判断是否达标;不要混用原始论文指标和 MARS 兼容诊断字段。
+7. **失败恢复**:关联任务存在时，用户说“继续”“恢复”“重试”“重新编码”，先用 run.recovery_status 检查原任务，再用 run.recover 执行返回的恢复操作。优先 resume；无法续跑但提供 retry 时，可按用户重试要求重试当前阶段。正在运行则告知无需重复启动；blocked 时说明原因，不得绕过。恢复不依赖失败阶段有产物或诊断文档。除非用户明确要求另建任务，否则禁止用 create_and_start_run 或 run.create 替代恢复。
 
 ## 当前上下文
 - 当前项目: {session.project}

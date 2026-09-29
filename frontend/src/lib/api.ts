@@ -2076,6 +2076,17 @@ export class ChatMessageFailure extends Error {
   constructor(message: string, public readonly messageSaved: boolean) { super(message); }
 }
 
+export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
+export type RunRecovery = { run_id: string; project: string; status: string; message: string; token: string; actions: RecoveryAction[] };
+export async function getRunRecovery(runId: string, project: string, signal?: AbortSignal): Promise<RunRecovery> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
+export async function recoverRun(runId: string, project: string, action: RecoveryAction, token: string): Promise<{ ok: boolean; status: string; message: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, ...action, token }),
+  }));
+}
+
 export async function sendChatMessage(convId: string, text: string): Promise<Conversation> {
   const response = await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
       method: "POST",

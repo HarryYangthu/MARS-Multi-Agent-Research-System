@@ -22,6 +22,39 @@ from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
+class RecoveryPayload(BaseModel):
+    project: str
+    action: Literal['resume', 'retry']
+    node: str
+    token: str = Field(min_length=1)
+
+
+@router.get('/{run_id}/recovery')
+async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.run_recovery import recovery_status
+    try:
+        return recovery_status(get_orchestrator(), run_id, project=project)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在，请打开任务详情核对。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请打开任务详情核对。') from exc
+
+
+@router.post('/{run_id}/recovery')
+async def post_recovery(run_id: str, payload: RecoveryPayload) -> dict[str, Any]:
+    from app.bridge.run_recovery import recover_run
+    try:
+        result = await recover_run(get_orchestrator(), run_id, project=payload.project,
+                                  action=payload.action, node=payload.node, token=payload.token)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请核对任务详情；没有自动重试。') from exc
+    if not result.get('ok'):
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
 class CreateRunPayload(BaseModel):
     task: str = Field(..., min_length=1)
     project: str = Field(..., min_length=1)

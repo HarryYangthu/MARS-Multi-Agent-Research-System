@@ -610,6 +610,18 @@ tools:
     mutation_level: write
     allowed_agents: [commander]
 
+  run.recovery_status:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  run.recover:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
   run.status:
     enabled: true
     bridge_only: true

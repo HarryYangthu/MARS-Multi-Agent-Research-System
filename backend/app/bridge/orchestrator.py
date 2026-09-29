@@ -308,7 +308,8 @@ class Orchestrator:
         if session.read_only or self._stopping(session) or self.owned_tasks.closing:
             return {"ok": False, "status": "not_resumable", "run_id": run_id}
         candidates = [key for key, state in session.graph.all_states().items()
-                      if state in {NodeState.RUNNING, NodeState.FAILED}]
+                      if state in {NodeState.RUNNING, NodeState.FAILED}
+                      and key == self._latest_node_for_stage(session, parse_node_key(key).stage)]
         if not candidates:
             return {"ok": False, "status": "no_interrupted_loop", "run_id": run_id,
                     "error": "use start for pending work or the review API for completed drafts"}
