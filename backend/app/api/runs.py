@@ -10,6 +10,7 @@ from app.api.dependencies import existing_orchestrator, get_orchestrator, get_ru
 from app.bridge.orchestrator import RunRequest, RunSession
 from app.bridge.idea_input_context import IdeaRequirements, validate_idea_context
 from app.bridge.run_observability import build_run_observability
+from app.bridge.research_activity import build_research_activity
 from app.bridge.research_contract_service import ResearchContractIntegrityError
 from app.bridge.research_run_service import (
     CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
@@ -19,6 +20,91 @@ from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+@router.get('/{run_id}/code-repository')
+def get_code_directory(run_id: str, project: str, path: str = '', offset: int = 0,
+                       repository_token: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, offset, repository_token, directory=True)
+
+
+@router.get('/{run_id}/code-repository/file')
+def get_code_file(run_id: str, project: str, path: str, start: int = 0,
+                  repository_token: str = '', version: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, start, repository_token, directory=False, version=version)
+
+
+def _code_repository(run_id: str, project: str, path: str, offset: int, token: str,
+                     *, directory: bool, version: str = '') -> dict[str, Any]:
+    from app.bridge.code_repository import run_code_repository
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        browser = run_code_repository(run, project=project)
+        result = (browser.directory(path, offset=offset, token=token) if directory
+                  else browser.file(path, start=offset, version=version, token=token))
+        return {'run_id': run_id, 'project': project, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail='代码文件不可读取，请刷新并核对项目配置') from exc
+
+
+@router.get('/{run_id}/code-changes')
+def get_code_changes(run_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project)
+
+
+@router.get('/{run_id}/code-changes/{change_id}')
+def get_code_change(run_id: str, change_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project, change_id)
+
+
+def _code_changes(run_id: str, project: str, change_id: str | None = None) -> dict[str, Any]:
+    from app.bridge.code_changes import code_changes
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        return code_changes(run, project=project, change_id=change_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='代码改动记录无法校验，请核对项目及记录。') from exc
+
+
+class RecoveryPayload(BaseModel):
+    project: str
+    action: Literal['resume', 'retry']
+    node: str
+    token: str = Field(min_length=1)
+
+
+@router.get('/{run_id}/recovery')
+async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.run_recovery import recovery_status
+    try:
+        return recovery_status(get_orchestrator(), run_id, project=project)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在，请打开任务详情核对。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请打开任务详情核对。') from exc
+
+
+@router.post('/{run_id}/recovery')
+async def post_recovery(run_id: str, payload: RecoveryPayload) -> dict[str, Any]:
+    from app.bridge.run_recovery import recover_run
+    try:
+        result = await recover_run(get_orchestrator(), run_id, project=payload.project,
+                                  action=payload.action, node=payload.node, token=payload.token)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请核对任务详情；没有自动重试。') from exc
+    if not result.get('ok'):
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 class CreateRunPayload(BaseModel):
@@ -375,6 +461,14 @@ async def permanently_delete_run(run_id: str) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found in trash") from exc
+
+
+@router.get("/{run_id}/activity")
+async def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return build_research_activity(run, limit=max(1, min(limit, 500)))
 
 
 @router.get("/{run_id}/observability")

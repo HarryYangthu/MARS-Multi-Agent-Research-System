@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.harness.discovery.models import BudgetLimits
+from app.harness.llm.usage_policy import TokenUsageMode
 
 
 class StopReason(str, Enum):
@@ -81,13 +82,14 @@ def evaluate_stop(
     iteration: int = 0,
     safety_violations: tuple[str, ...] = (),
     manual_stop: bool = False,
+    token_mode: TokenUsageMode = 'limited',
 ) -> StopDecision:
     cfg = policy or StopPolicy()
     if manual_stop:
         return StopDecision(True, StopReason.MANUAL, ("manual stop requested",))
     if safety_violations:
         return StopDecision(True, StopReason.SAFETY_VIOLATION, tuple(sorted(safety_violations)))
-    exhausted = _exhausted_budget(limits, usage)
+    exhausted = _exhausted_budget(limits, usage, token_mode=token_mode)
     if exhausted:
         return StopDecision(True, StopReason.BUDGET_EXHAUSTED, exhausted)
     if cfg.max_iterations is not None and iteration >= cfg.max_iterations:
@@ -105,11 +107,11 @@ def evaluate_stop(
     return StopDecision(False, StopReason.CONTINUE)
 
 
-def _exhausted_budget(limits: BudgetLimits, usage: BudgetUsage) -> tuple[str, ...]:
+def _exhausted_budget(limits: BudgetLimits, usage: BudgetUsage, *, token_mode: TokenUsageMode) -> tuple[str, ...]:
     exhausted: list[str] = []
     if usage.proposals >= limits.proposals:
         exhausted.append("proposals")
-    if limits.llm_tokens > 0 and usage.llm_tokens >= limits.llm_tokens:
+    if token_mode == 'limited' and limits.llm_tokens > 0 and usage.llm_tokens >= limits.llm_tokens:
         exhausted.append("llm_tokens")
     if limits.gpu_seconds > 0.0 and usage.gpu_seconds >= limits.gpu_seconds:
         exhausted.append("gpu_seconds")

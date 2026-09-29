@@ -42,6 +42,19 @@ def test_legacy_budget_read_is_zero_and_lazy(tmp_path: Path) -> None:
     assert not (run_root / "discovery").exists()
 
 
+def test_discovery_tokens_are_only_counted_and_survive_recovery(tmp_path: Path) -> None:
+    limits = BudgetLimits(proposals=3, llm_tokens=1)
+    ledger = BudgetLedger(tmp_path / 'run', run_id='run-1', limits=limits)
+    ledger.charge(_transaction(1))
+    assert ledger.snapshot().token_usage_mode == 'statistics_only'
+    assert ledger.snapshot().used.llm_tokens == 10
+    reopened = BudgetLedger(tmp_path / 'run', run_id='run-1', limits=limits)
+    assert reopened.recover().used.llm_tokens == 10
+    from app.harness.discovery.stopping import BudgetUsage, PatienceState, evaluate_stop
+    assert not evaluate_stop(limits=limits, usage=BudgetUsage(llm_tokens=10),
+        patience=PatienceState(), token_mode=reopened.token_mode).should_stop
+
+
 def test_budget_charge_is_idempotent_and_limits_are_frozen(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     limits = BudgetLimits(proposals=2, llm_tokens=30)

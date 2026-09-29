@@ -156,6 +156,19 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting}
 
 
+async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.run_recovery import recovery_status
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    return {'ok': True, **recovery_status(ctx.orchestrator, run_id, project=ctx.session.project)}
+
+
+async def _recover_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.run_recovery import recover_run
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    return await recover_run(ctx.orchestrator, run_id, project=ctx.session.project,
+        action=str(args.get('action', '')), node=str(args.get('node', '')), token=str(args.get('token', '')))
+
+
 async def _feedback_loop(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     run_id = str(args.get("run_id") or ctx.session.linked_run_id or "")
     diagnosis_version = str(args.get("diagnosis_version") or args.get("version") or "v1")
@@ -493,6 +506,19 @@ TOOLS: dict[str, ToolSpec] = {
         description="Start an existing run (defaults to the linked run).",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_start_run,
+    ),
+    "run.recovery_status": ToolSpec(
+        name="run.recovery_status",
+        description="Inspect checkpoint recovery and stage-retry options for the existing linked run. Read this before recovery; returns actions and a state token.",
+        parameters={"run_id": "optional; defaults to linked run"},
+        handler=_recovery_status,
+    ),
+    "run.recover": ToolSpec(
+        name="run.recover",
+        description="Explicitly recover the same run after the user asks to continue/retry. Prefer resume; otherwise use the offered retry action. Never creates a run or bypasses blocked/unknown outcomes. Do not automatically repeat this mutation.",
+        parameters={"run_id": "optional; defaults to linked run", "action": "resume|retry from recovery_status",
+                    "node": "node from recovery_status", "token": "exact token from recovery_status"},
+        handler=_recover_run,
     ),
     "run.status": ToolSpec(
         name="run.status",

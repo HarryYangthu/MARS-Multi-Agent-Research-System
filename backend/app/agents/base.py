@@ -292,7 +292,7 @@ class BaseAgent(ABC):
                 raise ValueError("Agent context does not belong to its bound project scope")
             root = _request_run_root(request)
             request.extra["run_root"] = str(root)
-            with run_resource_scope(root):
+            with run_resource_scope(root, completion_driven=self.loop_policy.completion_driven):
                 artifact = await self.draft(request, context)
             result = await self.validate_output(artifact)
             if not result.valid:

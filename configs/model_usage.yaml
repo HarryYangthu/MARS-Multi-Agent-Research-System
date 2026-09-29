@@ -1,0 +1,3 @@
+# Applies to all Agents and existing runs; historical receipts remain immutable.
+token_usage_mode: statistics_only
+# Context capacity and per-response output reservation are separate physical limits.

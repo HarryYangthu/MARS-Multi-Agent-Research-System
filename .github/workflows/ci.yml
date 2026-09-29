@@ -70,6 +70,13 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
+      - name: Research activity and code marker projection checks
+        working-directory: frontend
+        run: |
+          npx tsc --outDir .tmp/research-activity --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/research-activity-smoke.ts
+          node .tmp/research-activity/scripts/research-activity-smoke.js
+          npx tsc --outDir .tmp/code-change-markers --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/code-change-markers-smoke.ts
+          node .tmp/code-change-markers/scripts/code-change-markers-smoke.js
       - name: Production build
         working-directory: frontend
         env:

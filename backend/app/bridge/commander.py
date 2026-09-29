@@ -20,7 +20,8 @@ from typing import Any
 
 from loguru import logger
 
-from app.bridge.commander_session import ChatMessage, CommanderSession
+from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
+from app.bridge.commander_errors import conversation_failure
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -89,45 +90,78 @@ class Commander:
         self, session: CommanderSession, text: str
     ) -> list[ChatMessage]:
         """Process one user turn; returns the messages emitted this turn."""
-        session.add(ChatMessage(role="user", content=text))
-        ctx = ToolContext(
-            orchestrator=self.orchestrator,
-            session=session,
-            run_store=self.run_store,
-        )
-        emitted: list[ChatMessage] = []
+        if session.processing:
+            raise ValueError("conversation is already processing a message")
+        session.processing = True
+        try:
+            session.add(ChatMessage(role="user", content=text))
+            ctx = ToolContext(
+                orchestrator=self.orchestrator,
+                session=session,
+                run_store=self.run_store,
+            )
+            emitted: list[ChatMessage] = []
 
-        for _step in range(self.max_react_steps):
-            decision = await self._decide(session)
+            for _step in range(self.max_react_steps):
+                activity = session.begin_activity("model", "总控正在调用模型")
+                get_session_store().persist(session)
+                try:
+                    decision = await self._decide(session)
+                except asyncio.CancelledError:
+                    session.finish_activity(activity, "interrupted")
+                    raise
+                except Exception as exc:
+                    failure = conversation_failure(exc)
+                    if failure is not None:
+                        activity.title = failure[1]
+                    session.finish_activity(activity, "failed")
+                    raise
+                session.finish_activity(activity)
+                get_session_store().persist(session)
 
-            if decision.next_state:
-                self._try_transition(session, decision.next_state)
+                if decision.next_state:
+                    self._try_transition(session, decision.next_state)
 
-            if decision.reply:
-                emitted.append(session.add(ChatMessage(role="assistant", content=decision.reply)))
+                if decision.reply:
+                    emitted.append(session.add(ChatMessage(role="assistant", content=decision.reply)))
 
-            if not decision.actions:
-                break
+                if not decision.actions:
+                    break
 
-            for action in decision.actions:
-                tool = str(action.get("tool", ""))
-                args = action.get("args", {}) or {}
-                if not isinstance(args, dict):
-                    args = {}
-                result = await execute_tool(tool, args, ctx)
-                emitted.append(
-                    session.add(
-                        ChatMessage(
-                            role="tool",
-                            content=_summarize_result(tool, result),
-                            tool_name=tool,
-                            tool_args=args,
-                            tool_result=result,
+                for action in decision.actions:
+                    tool = str(action.get("tool", ""))
+                    args = action.get("args", {}) or {}
+                    if not isinstance(args, dict):
+                        args = {}
+                    activity = session.begin_activity("tool", f"总控正在执行工具 · {tool}")
+                    get_session_store().persist(session)
+                    try:
+                        result = await execute_tool(tool, args, ctx)
+                    except asyncio.CancelledError:
+                        session.finish_activity(activity, "interrupted")
+                        raise
+                    except Exception:
+                        session.finish_activity(activity, "failed")
+                        raise
+                    session.finish_activity(activity, "failed" if result.get("ok") is False else "completed")
+                    emitted.append(
+                        session.add(
+                            ChatMessage(
+                                role="tool",
+                                content=_summarize_result(tool, result),
+                                tool_name=tool,
+                                tool_args=args,
+                                tool_result=result,
+                            )
                         )
                     )
-                )
-            # loop again so the LLM can react to tool results
-        return emitted
+                    get_session_store().persist(session)
+                # loop again so the LLM can react to tool results
+            return emitted
+
+        finally:
+            session.interrupt_activities()
+            get_session_store().persist(session)
 
     # ----------------------------------------------------------- decision
 
@@ -166,6 +200,7 @@ class Commander:
             completion = await asyncio.wait_for(
                 guarded_complete(self._provider, messages, self._llm_config,
                     run_root=repo_root() / "conversations" / session.conv_id,
+                    active_model_time=True,
                     correlation={"trace_id": session.conv_id, "node_id": "commander"}),
                 timeout=llm_call_deadline_seconds(
                     self._llm_config,
@@ -321,6 +356,7 @@ def _system_prompt(session: CommanderSession) -> str:
 4. **配合反馈循环**:执行结果没达预期时,根据 metrics、logs、diagnosis、公共上下文和项目 diagnostics 配置判断原因,再解释为什么回到某个 Agent。不要预设失败原因,不要硬编码默认回退目标。
 5. **审核闸口**:节点进入 waiting_review 时提醒用户;用户同意后用 approve_node 放行,或 reject_node 驳回。
 6. **汇报**:对照用户设定的指标预期({targets})和项目真实指标语义判断是否达标;不要混用原始论文指标和 MARS 兼容诊断字段。
+7. **失败恢复**:关联任务存在时，用户说“继续”“恢复”“重试”“重新编码”，先用 run.recovery_status 检查原任务，再用 run.recover 执行返回的恢复操作。优先 resume；无法续跑但提供 retry 时，可按用户重试要求重试当前阶段。正在运行则告知无需重复启动；blocked 时说明原因，不得绕过。恢复不依赖失败阶段有产物或诊断文档。除非用户明确要求另建任务，否则禁止用 create_and_start_run 或 run.create 替代恢复。
 
 ## 当前上下文
 - 当前项目: {session.project}

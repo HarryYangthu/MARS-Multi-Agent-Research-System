@@ -46,7 +46,9 @@ def _record(read: Callable[[str], bytes], relative: str) -> dict[str, Any]:
 
 
 def _empty() -> dict[str, Any]:
+    from app.harness.llm.usage_policy import token_usage_mode
     return {"status": "invalid", "authority": "sqlite", "model_requests": None, "logical_records": None,
+        "token_usage_mode": token_usage_mode(),
         "request_count_scope": "logical_records", "observed_sdk_attempts": None,
         "observed_attempts_complete": None, "charged_sdk_attempts": None, "reserved_sdk_attempts": None,
         "calls_with_unknown_attempt_count": None, "input_tokens": None, "billed_output_tokens": None,

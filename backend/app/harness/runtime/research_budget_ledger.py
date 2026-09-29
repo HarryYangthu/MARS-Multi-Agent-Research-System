@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.harness.runtime.research_contract import ResearchBudget, ResearchTaskContract
 from app.harness.runtime.state_journal import RunStateIntegrityError, StateJournal
+from app.harness.llm.usage_policy import TOKEN_COMPONENTS, TokenUsageMode, token_usage_mode
 
 Count = Annotated[int, Field(strict=True, ge=0)]
 Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -143,6 +144,7 @@ class BudgetAdmission(_Record):
 
 class BudgetSnapshot(_Record):
     task_sha256: str
+    token_usage_mode: TokenUsageMode = 'limited'
     used: dict[str, int | None]
     limits: dict[str, int]
     known_cost_subtotal_micro_cny: int
@@ -203,7 +205,8 @@ def interval_union_us(intervals: list[tuple[int, int]]) -> int:
 
 class ResearchBudgetLedger:
     def __init__(self, journal: StateJournal, *, task_sha256: str, budget: ResearchBudget,
-                 price_reference_sha256: str | None = None) -> None:
+                 price_reference_sha256: str | None = None, token_mode: TokenUsageMode | None = None) -> None:
+        self.token_mode = token_mode or token_usage_mode()
         identity = _PolicyIdentity(task_sha256=task_sha256, price_reference_sha256=price_reference_sha256)
         self.journal = journal
         self.task_sha256 = identity.task_sha256
@@ -425,7 +428,8 @@ class BudgetTransaction:
                     cost_exact = False
             for key, value in charges.items():
                 used[key] += value
-                if (settled is not None or lower is not None) and value > spec.amounts.units().get(key, 0):
+                if ((self.ledger.token_mode == 'limited' or key not in TOKEN_COMPONENTS)
+                        and (settled is not None or lower is not None) and value > spec.amounts.units().get(key, 0)):
                     overrun = True
             if state in {"unknown", "retained"}:
                 unknown.append(spec.reservation_id)
@@ -461,6 +465,7 @@ class BudgetTransaction:
         if not cost_known:
             reported["model_cost_micro_cny"] = None
         return BudgetSnapshot(task_sha256=self.ledger.task_sha256, used=reported, limits=self.ledger.limits,
+            token_usage_mode=self.ledger.token_mode,
             known_cost_subtotal_micro_cny=used["model_cost_micro_cny"],
             cost_ceiling_enforced=self.ledger.price_reference_sha256 is not None and cost_known,
             cost_usage_exact=cost_known and cost_exact, activity_us=activity,
@@ -547,6 +552,8 @@ class BudgetTransaction:
             if snapshot.active_gpus + spec.gpus > budget.max_gpus:
                 return "gpu_allocation_limit"
         for key, amount in spec.amounts.units().items():
+            if self.ledger.token_mode == 'statistics_only' and key in TOKEN_COMPONENTS:
+                continue
             used = snapshot.known_cost_subtotal_micro_cny if key == "model_cost_micro_cny" else int(snapshot.used[key] or 0)
             if used + amount > self.ledger.limits[key]:
                 return "exhausted:" + key

@@ -14,6 +14,7 @@ class AgentLoopPolicy:
     trace: Literal["full", "metadata", "off"] = "full"
     reflection_reasoning_effort: Literal["low", "medium", "high", "max"] | None = None
     reflection_thinking_enabled: bool | None = None
+    completion_driven: bool = False
     max_model_calls: int | None = 36
     max_tool_steps: int = 18
     max_protocol_repairs: int = 4
@@ -49,7 +50,7 @@ class AgentLoopPolicy:
             raise ValueError("native_observation_history must be a boolean")
         if self.native_observation_history and self.protocol != "native_tools":
             raise ValueError("native_observation_history requires native_tools")
-        for name in ("document_revisions_enabled", "deduplicate_evidence_enabled"):
+        for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "completion_driven"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a boolean")
         if self.document_revisions_enabled and self.protocol != "native_tools":
@@ -60,7 +61,7 @@ class AgentLoopPolicy:
         for item in fields(self):
             if item.name in {"mode", "trace", "reflection_reasoning_effort", "reflection_thinking_enabled", "protocol",
                              "reflection_format_repair_enabled", "author_empty_completion_repair_enabled", "native_observation_history",
-                             "document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"}:
+                             "document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field", "completion_driven"}:
                 continue
             value = getattr(self, item.name)
             if item.name == "max_model_calls" and value is None:
@@ -76,10 +77,17 @@ class AgentLoopPolicy:
 
     def remaining_model_calls(self, used: int) -> int | None:
         """None means no count limit; usage counters still accumulate normally."""
-        return None if self.max_model_calls is None else max(0, self.max_model_calls - used)
+        return None if self.completion_driven or self.max_model_calls is None else max(0, self.max_model_calls - used)
 
     def allows_model_calls(self, used: int, required: int = 1) -> bool:
         remaining = self.remaining_model_calls(used)
+        return remaining is None or remaining >= required
+
+    def remaining_tool_calls(self, used: int) -> int | None:
+        return None if self.completion_driven else max(0, self.max_tool_steps - used)
+
+    def allows_tool_calls(self, used: int, required: int = 1) -> bool:
+        remaining = self.remaining_tool_calls(used)
         return remaining is None or remaining >= required
 
     def fingerprint_data(self) -> dict[str, Any]:
@@ -95,7 +103,7 @@ class AgentLoopPolicy:
             data.pop("author_empty_completion_repair_enabled")
         if not self.native_observation_history:
             data.pop("native_observation_history")
-        for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"):
+        for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field", "completion_driven"):
             if not data[name]:
                 data.pop(name)
         return data

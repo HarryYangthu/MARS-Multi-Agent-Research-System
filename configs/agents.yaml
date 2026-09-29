@@ -2,6 +2,7 @@ commander:
   enabled: true
   output_schema: ''
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
@@ -26,6 +27,8 @@ commander:
   - run.create
   - run.start
   - run.status
+  - run.recovery_status
+  - run.recover
   - run.feedback_loop
   - artifact.read
   - artifact.review
@@ -36,6 +39,7 @@ idea:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.7
@@ -82,7 +86,7 @@ idea:
     reflection_reasoning_effort: low
     reflection_format_repair_enabled: false
     # Includes the submission schema, supplied context and visible paper excerpts.
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
@@ -99,6 +103,7 @@ idea_research:
   enabled: true
   output_schema: research_report.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
@@ -127,7 +132,7 @@ idea_research:
     reflection_format_repair_enabled: false
     max_reflections: 2
     trace: full
-    input_token_budget: 48000
+    input_token_budget: 128000
     observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12
@@ -144,6 +149,7 @@ experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.3
@@ -161,7 +167,7 @@ experiment:
   debate:
     enabled: false
   loop:
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -172,6 +178,7 @@ coding:
   enabled: true
   output_schema: code_spec.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.1
@@ -200,10 +207,12 @@ coding:
   - python_research
   - c_production
   loop:
+    # Stop on validated delivery, real blockers, or explicit user cancellation.
+    completion_driven: true
     protocol: native_tools
     mode: react
     native_observation_history: true
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 2
     max_tool_steps: 20
   tools:
@@ -220,6 +229,7 @@ execution:
   enabled: true
   output_schema: run_log.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.1
@@ -237,7 +247,7 @@ execution:
   debate:
     enabled: false
   loop:
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 6
   tools:
@@ -247,6 +257,7 @@ writing:
   enabled: true
   output_schema: report.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.4
@@ -273,7 +284,7 @@ writing:
       model: glm-5.3
   loop:
     mode: reflection
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -286,6 +297,7 @@ idea_author:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
@@ -307,6 +319,7 @@ idea_reviewer:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.1

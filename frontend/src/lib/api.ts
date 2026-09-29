@@ -1331,7 +1331,7 @@ export async function rollbackToolCall(
 // ---------- artifacts ----------
 export async function listVersions(runId: string, agentDir: string, stem: string) {
   return jsonOrThrow<{ version: string; path: string; filename: string }[]>(
-    await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/versions`),
+    await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/versions`),
   );
 }
 export async function getArtifact(
@@ -1341,7 +1341,7 @@ export async function getArtifact(
   version: string,
 ): Promise<ArtifactView> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}`),
+    await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}`),
   );
 }
 export async function getWorkspaceFile(
@@ -1585,7 +1585,7 @@ export async function getRunObservability(
 ): Promise<RunObservabilityView> {
   const url = apiUrl(`${BASE}/api/runs/${runId}/observability`);
   url.searchParams.set("limit", String(limit));
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url));
 }
 
 export async function startFeedbackLoop(
@@ -1937,7 +1937,7 @@ export async function getRunWorkLog(
   if (agent) {
     url.searchParams.set("agent", agent);
   }
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url));
 }
 
 export async function getReportBundle(runId: string): Promise<ReportBundle> {
@@ -2047,6 +2047,8 @@ export type ChatMessageView = {
 };
 
 export type Conversation = {
+  processing?: boolean;
+  activities?: import("./researchActivity").CommanderActivity[];
   conv_id: string;
   project: string;
   state: string;
@@ -2067,17 +2069,49 @@ export async function createConversation(project = "pimc"): Promise<Conversation
 }
 
 export async function getConversation(convId: string): Promise<Conversation> {
-  return jsonOrThrow(await fetch(`${BASE}/api/chat/conversations/${convId}`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${convId}`));
+}
+
+export class ChatMessageFailure extends Error {
+  constructor(message: string, public readonly messageSaved: boolean) { super(message); }
+}
+
+export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
+export type CodeChange = { id: string; path: string; additions: number | null; deletions: number | null; change: string; status: string; source: string; timestamp: string; truncated: boolean; warning?: string };
+export type CodeChanges = { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
+export type CodeChangeDetail = CodeChange & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
+export async function getCodeChanges(runId: string, project: string, signal?: AbortSignal): Promise<CodeChanges> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
+export async function getCodeChange(runId: string, project: string, id: string, signal?: AbortSignal): Promise<CodeChangeDetail> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
+export type RunRecovery = { run_id: string; project: string; status: string; message: string; token: string; actions: RecoveryAction[] };
+export async function getRunRecovery(runId: string, project: string, signal?: AbortSignal): Promise<RunRecovery> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
+export async function recoverRun(runId: string, project: string, action: RecoveryAction, token: string): Promise<{ ok: boolean; status: string; message: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, ...action, token }),
+  }));
 }
 
 export async function sendChatMessage(convId: string, text: string): Promise<Conversation> {
-  return jsonOrThrow(
-    await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
+  const response = await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
-    }),
-  );
+    });
+  if (!response.ok) {
+    const body = await response.text();
+    let messageSaved = false;
+    try {
+      const payload: unknown = JSON.parse(body);
+      messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
+    } catch { /* Unknown delivery status requires a refresh before resending. */ }
+    throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
+  }
+  return response.json() as Promise<Conversation>;
 }
 
 export async function setConversationAutoMode(
@@ -2180,4 +2214,50 @@ export async function testModelConnection(params: { provider: string; model: str
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
     signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
   }));
+}
+
+export type RunActivityView = Pick<RunObservabilityView, "run_id" | "project" | "timeline">;
+export async function getRunActivity(runId: string): Promise<RunActivityView> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/activity`));
+}
+
+export type CodeDirectoryEntry = { path: string; name: string; kind: "directory" | "file"; size_bytes: number };
+export type CodeDirectory = { run_id: string; project: string; path: string; root_name: string; root_path: string; read_only: boolean; source: "project_current"; repository_token: string; entries: CodeDirectoryEntry[]; next_offset: number | null; total: number };
+export type CodeFilePage = { run_id: string; project: string; path: string; repository_token: string; source: "project_current"; version: string; start: number; total_lines: number; size_bytes: number; lines: string[]; next_start: number | null };
+export async function getCodeDirectory(runId: string, project: string, path: string, offset: number, token: string, signal?: AbortSignal): Promise<CodeDirectory> {
+  const query = new URLSearchParams({ project, path, offset: String(offset), repository_token: token });
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-repository?${query}`, { signal, cache: "no-store" }));
+}
+export async function getCodeFilePage(runId: string, project: string, path: string, start: number, token: string, version: string, signal?: AbortSignal): Promise<CodeFilePage> {
+  const query = new URLSearchParams({ project, path, start: String(start), repository_token: token, version });
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-repository/file?${query}`, { signal, cache: "no-store" }));
+}
+
+export type DataPipelineParameters = {
+  source_id: string; signal_key: string; reference_key: string;
+  sample_axis: 0 | 1; channel: number; fs_mhz: number; shift_mhz: number;
+  delay_samples: number; auto_align: boolean; reference_mode: "linear" | "cubic";
+  lowpass_mhz: number | null;
+};
+export type DataPipelineJob = {
+  id: string; project: string; status: string; error: string; summary: string; shared?: boolean;
+  params: DataPipelineParameters;
+  metrics: { input_shape: number[]; output_shape: number[]; rms_before: number; rms_after: number; warnings: string[]; spectrum_samples: number } | null;
+};
+export type DataPipelineField = { key: string; shape: number[]; dtype: string };
+function pipelineUrl(project: string): string { return `${BASE}/api/projects/${encodeURIComponent(project)}/data-pipeline`; }
+export async function listDataPipelineJobs(project: string, signal?: AbortSignal): Promise<DataPipelineJob[]> {
+  return jsonOrThrow(await boundedFetch(pipelineUrl(project), { signal, cache: "no-store" }));
+}
+export async function inspectDataPipelineSource(project: string, source: string, signal?: AbortSignal): Promise<DataPipelineField[]> {
+  return jsonOrThrow(await boundedFetch(`${pipelineUrl(project)}/fields/${encodeURIComponent(source)}`, { signal }));
+}
+export async function startDataPipeline(project: string, parameters: DataPipelineParameters): Promise<DataPipelineJob> {
+  return jsonOrThrow(await boundedFetch(pipelineUrl(project), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parameters) }));
+}
+export async function dataPipelineAction(project: string, job: string, action: "analyze" | "share"): Promise<DataPipelineJob> {
+  return jsonOrThrow(await boundedFetch(`${pipelineUrl(project)}/${encodeURIComponent(job)}/${action}`, { method: "POST" }));
+}
+export function dataPipelineArtifact(project: string, job: string, name: string): string {
+  return `${pipelineUrl(project)}/${encodeURIComponent(job)}/files/${encodeURIComponent(name)}`;
 }

@@ -1,6 +1,7 @@
 """Chat API — talk to the Commander (master Agent)."""
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
+from app.bridge.commander_errors import conversation_failure
 from app.bridge.commander_session import (
     ChatMessage,
     CommanderSession,
@@ -47,6 +49,8 @@ class ConversationView(BaseModel):
     auto_mode: bool
     metric_targets: dict[str, float]
     messages: list[MessageView]
+    processing: bool = False
+    activities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _msg_view(m: ChatMessage) -> MessageView:
@@ -70,6 +74,8 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         auto_mode=s.auto_mode,
         metric_targets=dict(s.metric_targets),
         messages=[_msg_view(m) for m in s.messages],
+        processing=s.processing,
+        activities=[asdict(item) for item in s.activities],
     )
 
 
@@ -98,9 +104,21 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
     session = store.get(conv_id)
     if session is None:
         raise HTTPException(status_code=404, detail="conversation not found")
+    if session.processing:
+        raise HTTPException(status_code=409, detail="conversation is already processing a message")
     commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
-    await commander.handle_user_message(session, payload.text)
-    store.persist(session)
+    try:
+        await commander.handle_user_message(session, payload.text)
+    except Exception as exc:
+        failure = conversation_failure(exc)
+        if failure is None:
+            raise
+        code, message = failure
+        raise HTTPException(status_code=409, detail={
+            'code': code, 'error': message, 'message_saved': True,
+        }) from exc
+    finally:
+        store.persist(session)
     return _conv_view(session)
 
 

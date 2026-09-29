@@ -31,7 +31,7 @@ type OwnerControl = {
   research_stop?: { status: string; run_stop_confirmed?: boolean; unconfirmed?: string[] } | null;
 };
 
-export function RunControlBar({ runId, run, onChange }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void }): JSX.Element {
+export function RunControlBar({ runId, run, onChange, showSimpleLink = true }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void; showSimpleLink?: boolean }): JSX.Element {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
@@ -96,6 +96,7 @@ export function RunControlBar({ runId, run, onChange }: { runId: string; run: Ru
   const button = "rounded border border-mars-border px-3 py-1.5 text-xs hover:bg-mars-panel2 disabled:opacity-50";
   return <section aria-label="任务控制" className="border-b border-mars-border bg-mars-panel px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3 text-sm"><Link href="/runs" className="text-slate-400 hover:text-white">← 研究任务</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div><div className="flex flex-wrap gap-2">
+      {showSimpleLink ? <Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>简洁视图</Link> : null}
       {run ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>结果与导出</Link> : null}
       {run && !run.read_only && run.status === "created" ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("start")}>启动任务</button> : null}
       {control?.available_actions.includes("stop") ? <button type="button" className={`${button} border-rose-400/50 text-rose-200`} disabled={!!busy} onClick={() => void act("stop")}>{busy === "stop" ? "正在请求停止…" : control.stopping ? "核对停止状态" : "停止任务"}</button> : null}

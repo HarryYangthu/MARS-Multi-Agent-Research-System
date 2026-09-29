@@ -102,8 +102,8 @@ class AgentLoopExecutor(Protocol):
 def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     """Expose actual remaining local resources before choosing another action."""
     remaining = {"model_calls": policy.remaining_model_calls(counts["model_requests"]),
-                 "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
-                 "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
+                 "tool_calls": policy.remaining_tool_calls(counts["tool_dispatches"]),
+                 "validation_repairs": None if policy.completion_driven else max(0, policy.max_validation_repairs - counts["validation_repairs"])}
     return remaining_budget_message(remaining)
 
 
@@ -496,13 +496,19 @@ class NativeAgentLoop:
                 if reviewing and unit is None:
                     extra.append(reflection_instruction(request.reflection_rubric, format_repair=format_repair))
                 feedback = state["feedback"]
-                if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
+                if not reviewing and not p.allows_tool_calls(counts["tool_dispatches"]):
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 # Reflection sends no tools; reserve only schemas actually sent.
                 phase_schema_budget = 0 if reviewing else tool_schema_budget
+                effective_budget = p.input_token_budget
+                if modern_context:
+                    from app.harness.context.runtime_policy import input_budget
+                    phase_cfg = phase_config()
+                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
+                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                 if unit is not None:
                     try:
-                        messages, manifest = pack_review_unit(unit, budget=p.input_token_budget,
+                        messages, manifest = pack_review_unit(unit, budget=effective_budget,
                                                               budget_context=budget_message(p, counts))
                     except ValueError as exc:
                         state["status"] = "review_evidence_unavailable"
@@ -512,10 +518,6 @@ class NativeAgentLoop:
                         break
                 elif modern_context:
                     from app.harness.context.runtime_native import pack_native
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
-                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
-                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                     phase_tools = () if reviewing else wire_tools
                     messages, manifest = pack_native(
                         pinned=(request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
@@ -541,11 +543,8 @@ class NativeAgentLoop:
                     )
                 if modern_context and unit is not None:
                     from app.harness.context.runtime_pack import pack_messages
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
                     messages, modern_manifest = pack_messages(messages, policy=runtime_policy,
-                        budget=input_budget(runtime_policy, p.input_token_budget, output_reserve=phase_cfg.max_tokens,
-                            model_window=phase_cfg.extra.get("context_window")),
+                        budget=effective_budget,
                         root=None, agent=request.tool_context.agent, readback_available=False)
                     manifest.update(modern_manifest)
                     manifest["estimated_upper_bound_tokens"] = modern_manifest["used"]
@@ -793,7 +792,7 @@ class NativeAgentLoop:
                     if errors:
                         counts["validation_repairs"] += 1
                         state["feedback"] = canonical({"validation_errors": errors})
-                        if counts["validation_repairs"] > p.max_validation_repairs:
+                        if not p.completion_driven and counts["validation_repairs"] > p.max_validation_repairs:
                             state["status"] = "validation_exhausted"
                             break
                     elif stop_at_boundary("after_validation"):
@@ -808,7 +807,7 @@ class NativeAgentLoop:
                     actions = decision.get("batch", [decision])
                     identities = [digest({"tool": a["tool"], "args": a["args"]}) for a in actions]
                     if len(actions) > 1:
-                        if (len(actions) > p.max_tool_steps - counts["tool_dispatches"] or
+                        if (not p.allows_tool_calls(counts["tool_dispatches"], len(actions)) or
                             len(identities) != len(set(identities)) or
                             any(i in state["seen"] and not state["seen"][i]["retry_allowed"] for i in identities)):
                             state["feedback"] = "Batch not executed: exceeds remaining tool budget or repeats completed/permanent-failed actions. Submit only needed actions within budget."
@@ -823,7 +822,7 @@ class NativeAgentLoop:
                         identity = digest({"tool": tool, "args": decision["args"]})
                         if tool not in request.tools:
                             state["feedback"] = f"Tool {tool} is not available for this agent."
-                        elif counts["tool_dispatches"] >= p.max_tool_steps:
+                        elif not p.allows_tool_calls(counts["tool_dispatches"]):
                             state["feedback"] = "Tool budget exhausted."
                         elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
                             state["feedback"] = "Duplicate successful/permanent-failed action rejected; use its prior Observation."
