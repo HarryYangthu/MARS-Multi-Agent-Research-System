@@ -2220,3 +2220,15 @@ export type RunActivityView = Pick<RunObservabilityView, "run_id" | "project" | 
 export async function getRunActivity(runId: string): Promise<RunActivityView> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/activity`));
 }
+
+export type CodeDirectoryEntry = { path: string; name: string; kind: "directory" | "file"; size_bytes: number };
+export type CodeDirectory = { run_id: string; project: string; path: string; root_name: string; root_path: string; read_only: boolean; source: "project_current"; repository_token: string; entries: CodeDirectoryEntry[]; next_offset: number | null; total: number };
+export type CodeFilePage = { run_id: string; project: string; path: string; repository_token: string; source: "project_current"; version: string; start: number; total_lines: number; size_bytes: number; lines: string[]; next_start: number | null };
+export async function getCodeDirectory(runId: string, project: string, path: string, offset: number, token: string, signal?: AbortSignal): Promise<CodeDirectory> {
+  const query = new URLSearchParams({ project, path, offset: String(offset), repository_token: token });
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-repository?${query}`, { signal, cache: "no-store" }));
+}
+export async function getCodeFilePage(runId: string, project: string, path: string, start: number, token: string, version: string, signal?: AbortSignal): Promise<CodeFilePage> {
+  const query = new URLSearchParams({ project, path, start: String(start), repository_token: token, version });
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-repository/file?${query}`, { signal, cache: "no-store" }));
+}

@@ -3,3 +3,7 @@ code_review:
   max_records: 300
   max_preview_lines: 2000
   context_lines: 3
+repository:
+  directory_page_size: 200
+  file_page_lines: 500
+  max_file_bytes: 8388608

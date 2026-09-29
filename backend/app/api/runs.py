@@ -22,6 +22,35 @@ from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
+@router.get('/{run_id}/code-repository')
+def get_code_directory(run_id: str, project: str, path: str = '', offset: int = 0,
+                       repository_token: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, offset, repository_token, directory=True)
+
+
+@router.get('/{run_id}/code-repository/file')
+def get_code_file(run_id: str, project: str, path: str, start: int = 0,
+                  repository_token: str = '', version: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, start, repository_token, directory=False, version=version)
+
+
+def _code_repository(run_id: str, project: str, path: str, offset: int, token: str,
+                     *, directory: bool, version: str = '') -> dict[str, Any]:
+    from app.bridge.code_repository import run_code_repository
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        browser = run_code_repository(run, project=project)
+        result = (browser.directory(path, offset=offset, token=token) if directory
+                  else browser.file(path, start=offset, version=version, token=token))
+        return {'run_id': run_id, 'project': project, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail='代码文件不可读取，请刷新并核对项目配置') from exc
+
+
 @router.get('/{run_id}/code-changes')
 def get_code_changes(run_id: str, project: str) -> dict[str, Any]:
     return _code_changes(run_id, project)
