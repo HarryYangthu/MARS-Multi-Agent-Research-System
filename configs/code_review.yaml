@@ -1,0 +1,5 @@
+code_review:
+  max_record_bytes: 2097152
+  max_records: 300
+  max_preview_lines: 2000
+  context_lines: 3

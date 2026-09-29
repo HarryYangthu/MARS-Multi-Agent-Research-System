@@ -10,6 +10,7 @@ import { agentLabel, statusLabel } from "@/lib/researchActivity";
 import { artifactBody, latestStages, reviewFocus } from "@/lib/runReview";
 import { RunControlBar } from "./RunControlBar";
 import { ActivityRow } from "./ResearchActivity";
+import { CodeChangesCard } from "./CodeChangesCard";
 
 const TITLES: Record<Stage, string> = { idea: "研究提案", experiment: "实验方案", coding: "代码方案", execution: "实验记录", writing: "研究报告" };
 const button = "rounded-lg border border-mars-border px-4 py-2 text-sm hover:bg-mars-panel disabled:opacity-40";
@@ -55,6 +56,7 @@ export function SimpleRunDetail({ runId, initialAgent }: { runId: string; initia
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><h1 className="break-words text-lg font-medium">{run.task}</h1>{run.read_only ? <span className="text-xs text-amber-300">只读记录</span> : null}</div>
         <nav aria-label="研究阶段" className="mb-8 flex flex-wrap gap-2">{stages.map(item => <button key={item.stage} onClick={() => setSelected(item.stage)} aria-pressed={item.stage === stage} className={`rounded-lg border px-3 py-2 text-xs ${item.stage === stage ? "border-indigo-400/70 bg-indigo-400/10 text-indigo-100" : "border-mars-border text-slate-400"}`}>{agentLabel(item.stage)}<span className="ml-2 opacity-70">{statusLabel(item.state)}</span></button>)}</nav>
         {stage ? <ReviewDocument key={`${runId}:${stage}`} run={run} stage={stage} state={state} stale={!!error} advanced={advanced} onChanged={refresh} onNotice={setNotice} /> : <p className="py-8 text-sm text-slate-400">暂无可展示的阶段。<Link className="ml-2 text-indigo-300" href={advanced}>查看任务详情</Link></p>}
+        {stage === "coding" ? <div className="mt-4"><CodeChangesCard key={runId} runId={runId} project={run.project} /></div> : null}
         <details className="mt-6 border-t border-mars-border pt-4" onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary className="cursor-pointer text-xs text-slate-400">处理记录</summary>{historyOpen ? <RunHistory runId={runId} /> : null}</details>
       </>}
     </div>

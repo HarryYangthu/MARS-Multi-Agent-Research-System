@@ -22,6 +22,29 @@ from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
+@router.get('/{run_id}/code-changes')
+def get_code_changes(run_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project)
+
+
+@router.get('/{run_id}/code-changes/{change_id}')
+def get_code_change(run_id: str, change_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project, change_id)
+
+
+def _code_changes(run_id: str, project: str, change_id: str | None = None) -> dict[str, Any]:
+    from app.bridge.code_changes import code_changes
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        return code_changes(run, project=project, change_id=change_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='代码改动记录无法校验，请核对项目及记录。') from exc
+
+
 class RecoveryPayload(BaseModel):
     project: str
     action: Literal['resume', 'retry']

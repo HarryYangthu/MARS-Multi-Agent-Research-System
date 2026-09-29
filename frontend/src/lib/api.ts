@@ -2077,6 +2077,15 @@ export class ChatMessageFailure extends Error {
 }
 
 export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
+export type CodeChange = { id: string; path: string; additions: number | null; deletions: number | null; change: string; status: string; source: string; timestamp: string; truncated: boolean; warning?: string };
+export type CodeChanges = { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
+export type CodeChangeDetail = CodeChange & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
+export async function getCodeChanges(runId: string, project: string, signal?: AbortSignal): Promise<CodeChanges> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
+export async function getCodeChange(runId: string, project: string, id: string, signal?: AbortSignal): Promise<CodeChangeDetail> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
+}
 export type RunRecovery = { run_id: string; project: string; status: string; message: string; token: string; actions: RecoveryAction[] };
 export async function getRunRecovery(runId: string, project: string, signal?: AbortSignal): Promise<RunRecovery> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));

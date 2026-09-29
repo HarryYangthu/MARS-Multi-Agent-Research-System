@@ -9,6 +9,7 @@ import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./Resear
 import { conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { RunRecoveryControl } from "./RunRecoveryControl";
+import { CodeChangesCard } from "./CodeChangesCard";
 
 const storageKey = (project: string): string => `mars.commander.conv.${project}`;
 function savedConversation(project: string): string | null {
@@ -131,6 +132,7 @@ export function ResearchConversation({ project, name }: { project: string; name:
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
         {processing ? <p role="status" className="text-sm text-indigo-300">{current || "正在处理本次请求…"}</p> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
+        {conversation?.linked_run_id ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
         {conversation?.linked_run_id ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
         {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}`} className="text-sm text-indigo-300 hover:underline">查看关联研究任务 →</Link> : null}
         <div ref={bottom} />
