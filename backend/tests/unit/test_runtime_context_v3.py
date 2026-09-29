@@ -162,3 +162,28 @@ def test_receipt_index_cannot_displace_latest_observation_protection(tmp_path: P
             history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
             feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
             metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)
+
+
+def test_repository_index_can_offload_while_latest_source_is_retained(tmp_path: Path) -> None:
+    index = Message('user', 'directory listing\n' * 4000)
+    code = Message('user', 'def forward(x): return x')
+    messages = [Message('system', 'Keep baseline unchanged'), index, code, Message('user', 'Improve residual')]
+    materials = {message_key(index): Material('code', 'repository index', False),
+                 message_key(code): Material('code', 'model.py', False)}
+    packed, manifest = pack_messages(messages, policy=load_policy(), budget=10000,
+                                     materials=materials, root=tmp_path)
+    assert manifest['used'] < 10000
+    assert packed[2] == code and packed[0] == messages[0] and packed[-1] == messages[-1]
+    assert read_material(tmp_path, manifest['segments'][1]['refs'][0], 0, 100000)['content'] == index.content
+    # Also applies to old manifests containing only an index and no source yet.
+    packed, manifest = pack_messages([messages[0], index, messages[-1]], policy=load_policy(),
+                                     budget=10000, materials=materials, root=tmp_path)
+    assert manifest['used'] < 10000 and not manifest['segments'][1]['protected']
+
+
+def test_observation_status_comes_from_outer_envelope() -> None:
+    from app.harness.context.runtime_native import observation_failed
+    assert not observation_failed(json.dumps({'ok': True, 'output': {'ok': False}}))
+    assert observation_failed(json.dumps({'ok': False, 'error': 'missing baseline'}))
+    assert observation_failed('invalid host envelope')
+    assert observation_failed(json.dumps({'output': 'unknown status'}))

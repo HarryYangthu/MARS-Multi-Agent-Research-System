@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
+from app.bridge.commander_errors import conversation_failure
 from app.bridge.commander_session import (
     ChatMessage,
     CommanderSession,
@@ -108,6 +109,14 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
     commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
     try:
         await commander.handle_user_message(session, payload.text)
+    except Exception as exc:
+        failure = conversation_failure(exc)
+        if failure is None:
+            raise
+        code, message = failure
+        raise HTTPException(status_code=409, detail={
+            'code': code, 'error': message, 'message_saved': True,
+        }) from exc
     finally:
         store.persist(session)
     return _conv_view(session)

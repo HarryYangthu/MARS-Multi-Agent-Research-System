@@ -2072,14 +2072,26 @@ export async function getConversation(convId: string): Promise<Conversation> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${convId}`));
 }
 
+export class ChatMessageFailure extends Error {
+  constructor(message: string, public readonly messageSaved: boolean) { super(message); }
+}
+
 export async function sendChatMessage(convId: string, text: string): Promise<Conversation> {
-  return jsonOrThrow(
-    await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
+  const response = await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
-    }),
-  );
+    });
+  if (!response.ok) {
+    const body = await response.text();
+    let messageSaved = false;
+    try {
+      const payload: unknown = JSON.parse(body);
+      messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
+    } catch { /* Unknown delivery status requires a refresh before resending. */ }
+    throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
+  }
+  return response.json() as Promise<Conversation>;
 }
 
 export async function setConversationAutoMode(

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
+import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
@@ -104,8 +104,9 @@ export function ResearchConversation({ project, name }: { project: string; name:
       if (alive.current) { setConversation(updated); setPending(null); }
     } catch (cause: unknown) {
       if (alive.current) {
-        setError(`${cause instanceof Error ? cause.message : "消息未能确认发送"}。请重新读取对话，核对后再继续。`);
-        setNeedsRefresh(true); setDraft(text);
+        const saved = cause instanceof ChatMessageFailure && cause.messageSaved;
+        setError(saved ? cause.message : `${cause instanceof Error ? cause.message : "消息未能确认发送"}。请重新读取对话，核对后再继续。`);
+        setNeedsRefresh(true); setDraft(saved ? "" : text);
       }
     } finally { sending.current = false; if (alive.current) setBusy(false); }
   }

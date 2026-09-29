@@ -117,7 +117,9 @@ def validate_token_components(row: Mapping[str, Any]) -> None:
 
 
 class RunModelBudget:
-    def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None) -> None:
+    def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None,
+                 active_model_time: bool = False) -> None:
+        self.active_model_time = active_model_time
         self.root = root.resolve()
         self.path = self.root / "resources" / "model_budget.v1.json"
         self.lock_path = self.path.with_name("." + self.path.name + ".lock")
@@ -174,6 +176,27 @@ class RunModelBudget:
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
+
+    def remaining_seconds(self) -> float:
+        with path_lock(self.lock_path):
+            return self._remaining_seconds(self._read(), time.time())
+
+    def _remaining_seconds(self, state: dict[str, Any], now: float) -> float:
+        limit = float(state['configuration']['limits']['max_elapsed_seconds'])
+        if not self.active_model_time:
+            start = _number(state.get('revision_started_at', state['started_at']), 'budget start time')
+            return max(0.0, limit - (now - start))
+        # Conversations survive overnight. Charge actual model request durations
+        # across all turns, including failed/cancelled calls, not human idle time.
+        # Legacy ledgers already contain these timestamps; no quota is reset.
+        elapsed = 0.0
+        for row in state['requests'].values():
+            start = _number(row.get('started_at'), 'request start time')
+            end = _number(row.get('finished_at', row.get('owner_lost_at', now)), 'request end time')
+            if end < start:
+                raise ResourceBudgetError('invalid request time interval')
+            elapsed += end - start
+        return max(0.0, limit - elapsed)
 
     def begin_revision(self, *, invocation_id: str, reason: str) -> None:
         """Record an explicit fresh execution without refunding previous usage.
@@ -306,8 +329,10 @@ class RunModelBudget:
             if unresolved:
                 raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation: " + ", ".join(unresolved))
             limits = state["configuration"]["limits"]
-            if time.time() - state.get("revision_started_at", state["started_at"]) >= limits["max_elapsed_seconds"]:
+            if self._remaining_seconds(state, time.time()) <= 0:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
+            if self.active_model_time:
+                state['elapsed_clock'] = 'cumulative_model_activity'
             rows = list(state["requests"].values())
             if (limits["max_model_requests"] is not None
                     and sum(charged_model_attempts(row) for row in rows) + attempts > limits["max_model_requests"]):
@@ -394,6 +419,7 @@ class RunModelBudget:
 
 async def guarded_complete(provider: LLMProvider, messages: list[Message], config: LLMConfig,
                            *, run_root: Path | None = None,
+                           active_model_time: bool = False,
                            correlation: Mapping[str, Any] | None = None) -> Completion:
     root = _RUN_ROOT.get() or run_root
     if root is None:
@@ -408,7 +434,7 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
         config = bounded_contract_config(scope, config)
         budget = ContractModelBudget(scope, endpoint=provider.base_url)
     else:
-        budget = RunModelBudget(root)
+        budget = RunModelBudget(root, active_model_time=active_model_time)
     while True:
         try:
             reservation = budget.reserve(messages, config, correlation or {})
@@ -451,7 +477,15 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     from dataclasses import replace
     actual = replace(config, attempt_observer=observe)
     try:
-        if scope is None:
+        if isinstance(budget, RunModelBudget) and active_model_time:
+            try:
+                async with asyncio.timeout(budget.remaining_seconds()):
+                    result = await provider.complete(messages, actual)
+            except TimeoutError as exc:
+                if budget.remaining_seconds() <= 0:
+                    raise ResourceBudgetError('run elapsed-time budget exhausted') from exc
+                raise
+        elif scope is None:
             result = await provider.complete(messages, actual)
         else:
             from app.harness.llm.provider_base import llm_call_deadline_seconds

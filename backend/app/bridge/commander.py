@@ -21,6 +21,7 @@ from typing import Any
 from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
+from app.bridge.commander_errors import conversation_failure
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -109,7 +110,10 @@ class Commander:
                 except asyncio.CancelledError:
                     session.finish_activity(activity, "interrupted")
                     raise
-                except Exception:
+                except Exception as exc:
+                    failure = conversation_failure(exc)
+                    if failure is not None:
+                        activity.title = failure[1]
                     session.finish_activity(activity, "failed")
                     raise
                 session.finish_activity(activity)
@@ -196,6 +200,7 @@ class Commander:
             completion = await asyncio.wait_for(
                 guarded_complete(self._provider, messages, self._llm_config,
                     run_root=repo_root() / "conversations" / session.conv_id,
+                    active_model_time=True,
                     correlation={"trace_id": session.conv_id, "node_id": "commander"}),
                 timeout=llm_call_deadline_seconds(
                     self._llm_config,

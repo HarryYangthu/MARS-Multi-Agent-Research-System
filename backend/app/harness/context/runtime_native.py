@@ -1,11 +1,23 @@
 """Native protocol adapter for the shared material packer."""
 from pathlib import Path
 from typing import Any
+import json
 
 from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.trace import canonical, digest
 from app.harness.context.runtime_pack import Material, message_key, pack_messages
 from app.harness.llm.provider_base import Message
+
+
+def observation_failed(content: str) -> bool:
+    """Only the host envelope decides status, never quoted/nested tool data."""
+    prefix = '[untrusted prior action and host Observation]\n'
+    raw = content[len(prefix):] if content.startswith(prefix) else content
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return True  # Unknown observations stay protected.
+    return not isinstance(value, dict) or value.get('ok') is not True
 
 
 def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedback: str, candidate: str,
@@ -22,7 +34,7 @@ def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedbac
         if key in pinned_keys:
             continue
         if m.role == 'tool' or m.content.startswith(('[untrusted prior action and host Observation]',)):
-            failed = '"ok":false' in m.content
+            failed = observation_failed(m.content)
             # Failures and review evidence cannot be silently removed as old history.
             materials[key] = Material('tool', 'actual tool observation', failed or bool(options.get('reviewing')))
         elif m.content.startswith(('[untrusted current candidate', '[untrusted action receipt index')):

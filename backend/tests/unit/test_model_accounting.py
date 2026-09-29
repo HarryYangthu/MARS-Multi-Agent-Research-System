@@ -301,3 +301,43 @@ async def test_real_refused_connection_keeps_conservative_reservation_in_ancesto
     assert row["charged_tokens"] == row["reserved_tokens"] and row["usage"] is None
     assert not (tmp_path / "child/resources/model_budget.v1.json").exists()
     assert attempts == ["sdk_attempt_started", "sdk_attempt_failed"]
+
+
+def test_conversation_active_clock_excludes_idle_and_preserves_legacy_usage(tmp_path: Path) -> None:
+    policy = _policy(max_elapsed_seconds=0.1)
+    legacy = RunModelBudget(tmp_path, configuration=policy)
+    reservation = legacy.reserve(_messages(), _config(), {})
+    legacy.settle(reservation, usage=None, complete=False, outcome='failed')
+    before = json.loads(legacy.path.read_text())['requests']
+    time.sleep(0.15)
+    with pytest.raises(ResourceBudgetError, match='elapsed-time'):
+        legacy.reserve(_messages(), _config(), {})
+    resumed = RunModelBudget(tmp_path, configuration=policy, active_model_time=True)
+    next_request = resumed.reserve(_messages(), _config(), {})
+    resumed.settle(next_request, usage=None, complete=False, outcome='cancelled')
+    after = json.loads(resumed.path.read_text())
+    assert after['requests'][reservation.request_id] == before[reservation.request_id]
+    assert after['elapsed_clock'] == 'cumulative_model_activity'
+    assert RunModelBudget(tmp_path, configuration=policy, active_model_time=True).remaining_seconds() > 0
+
+
+def test_conversation_active_clock_counts_failed_calls_and_enforces_quota(tmp_path: Path) -> None:
+    policy = _policy(max_elapsed_seconds=0.05)
+    budget = RunModelBudget(tmp_path, configuration=policy, active_model_time=True)
+    reservation = budget.reserve(_messages(), _config(), {})
+    time.sleep(0.07)
+    budget.settle(reservation, usage=None, complete=False, outcome='failed')
+    restored = RunModelBudget(tmp_path, configuration=policy, active_model_time=True)
+    with pytest.raises(ResourceBudgetError, match='elapsed-time'):
+        restored.reserve(_messages(), _config(), {})
+    assert restored.remaining_seconds() == 0
+
+
+def test_active_clock_does_not_refund_request_quota(tmp_path: Path) -> None:
+    policy = _policy(max_model_requests=1)
+    budget = RunModelBudget(tmp_path, configuration=policy)
+    reservation = budget.reserve(_messages(), _config(), {})
+    budget.settle(reservation, usage=None, complete=False, outcome='failed')
+    restored = RunModelBudget(tmp_path, configuration=policy, active_model_time=True)
+    with pytest.raises(ResourceBudgetError, match='model-request budget'):
+        restored.reserve(_messages(), _config(), {})
