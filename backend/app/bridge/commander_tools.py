@@ -165,8 +165,11 @@ async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, 
 async def _recover_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     from app.bridge.run_recovery import recover_run
     run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
-    return await recover_run(ctx.orchestrator, run_id, project=ctx.session.project,
+    result = await recover_run(ctx.orchestrator, run_id, project=ctx.session.project,
         action=str(args.get('action', '')), node=str(args.get('node', '')), token=str(args.get('token', '')))
+    if result.get('ok'):
+        ctx.session.linked_run_id = run_id
+    return result
 
 
 async def _feedback_loop(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:

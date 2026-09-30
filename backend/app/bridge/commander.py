@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,7 +22,7 @@ from typing import Any
 from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
-from app.bridge.commander_errors import conversation_failure
+from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -297,40 +298,80 @@ def _summarize_result(tool: str, result: dict[str, Any]) -> str:
 def _parse_decision(text: str) -> Decision:
     raw = _extract_json(text)
     if raw is None:
-        # No JSON — treat whole text as a plain reply.
-        return Decision(reply=text.strip())
-    reply = str(raw.get("reply", "")).strip()
+        raise CommanderDecisionError("expected a single decision object")
+    if not ({"reply", "actions"} & raw.keys()):
+        raise CommanderDecisionError("missing decision fields")
+    reply = raw.get("reply", "")
+    if not isinstance(reply, str):
+        raise CommanderDecisionError("reply must be a string")
     next_state = raw.get("next_state")
+    if next_state is not None and (
+        not isinstance(next_state, str) or next_state not in {state.value for state in ConversationState}
+    ):
+        raise CommanderDecisionError("invalid conversation state")
     actions_raw = raw.get("actions", [])
+    if not isinstance(actions_raw, list):
+        raise CommanderDecisionError("actions must be a list")
     actions: list[dict[str, Any]] = []
-    if isinstance(actions_raw, list):
-        for a in actions_raw:
-            if isinstance(a, dict) and a.get("tool"):
-                actions.append({"tool": str(a["tool"]), "args": a.get("args", {})})
+    for action in actions_raw:
+        if not isinstance(action, dict):
+            raise CommanderDecisionError("action must be an object")
+        tool = action.get("tool")
+        args = action.get("args", {})
+        if not isinstance(tool, str) or not tool.strip() or not isinstance(args, dict):
+            raise CommanderDecisionError("invalid action tool or arguments")
+        actions.append({"tool": tool, "args": args})
     return Decision(
-        reply=reply,
-        next_state=str(next_state) if next_state else None,
+        reply=reply.strip(),
+        next_state=next_state,
         actions=actions,
     )
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    obj: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in obj:
+            raise CommanderDecisionError("duplicate decision key")
+        obj[key] = value
+    return obj
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise CommanderDecisionError("non-finite JSON value")
+
+
+def _finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise CommanderDecisionError("non-finite JSON value")
+    return number
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
     s = text.strip()
     if s.startswith("```"):
         nl = s.find("\n")
-        if nl >= 0:
-            s = s[nl + 1 :]
-        if s.endswith("```"):
-            s = s[:-3]
-    start = s.find("{")
-    end = s.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+        if nl < 0 or s[:nl].strip().lower() not in {"```", "```json"} or not s.endswith("```"):
+            return None
+        s = s[nl + 1 : -3].strip()
+    if not s.startswith("{"):
         return None
     try:
-        obj = json.loads(s[start : end + 1])
-        return obj if isinstance(obj, dict) else None
+        decoder = json.JSONDecoder(object_pairs_hook=_unique_json_object, parse_constant=_reject_json_constant,
+                                   parse_float=_finite_json_float)
+        obj, end = decoder.raw_decode(s)
     except json.JSONDecodeError:
         return None
+    # A complete root object followed only by redundant closing delimiters is
+    # unambiguous. Never repair its contents or pick an object out of prose,
+    # multiple decisions, a wrapper array, or a truncated response.
+    suffix = s[end:]
+    if any(not char.isspace() and char not in "]}" for char in suffix):
+        return None
+    if suffix.strip():
+        logger.warning("Commander decision contained redundant closing delimiters; ignored {} characters", len(suffix.strip()))
+    return obj if isinstance(obj, dict) else None
 
 
 def _system_prompt(session: CommanderSession) -> str:

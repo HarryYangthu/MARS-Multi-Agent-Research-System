@@ -5,7 +5,7 @@ review_agent: idea_reviewer
 # Set cross_model to require different provider/model pairs again.
 review_mode: independent_session
 author:
-  # GLM-5.3 requires thinking; low effort bounds routine navigation.
+  # GLM-5.3 requires thinking and supports low, high or max effort.
   thinking_enabled: true
   reasoning_effort: low
   temperature: 0.2

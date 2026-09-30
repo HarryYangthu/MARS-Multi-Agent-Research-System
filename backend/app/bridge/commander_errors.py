@@ -3,7 +3,13 @@ from app.harness.context.runtime_pack import ContextBudgetExceeded
 from app.harness.llm.accounting import ResourceBudgetError, ResourceReconciliationRequired
 
 
+class CommanderDecisionError(ValueError):
+    """The model did not return an unambiguous executable decision."""
+
+
 def conversation_failure(exc: Exception) -> tuple[str, str] | None:
+    if isinstance(exc, CommanderDecisionError):
+        return ('invalid_commander_decision', '总控返回的指令格式不完整，这条指令未执行。对话和已有任务已保留，请重新读取对话核对进度后发送“继续”。')
     if isinstance(exc, ContextBudgetExceeded):
         return ('context_budget_exceeded', '已尝试压缩，但必须保留的任务要求、约束或当前内容仍超出上下文窗口。请拆分任务，或核对模型窗口配置后继续；累计 Token 仅统计，本次未发送模型请求。')
     if isinstance(exc, ResourceReconciliationRequired):
