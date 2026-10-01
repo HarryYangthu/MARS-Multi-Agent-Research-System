@@ -9,15 +9,20 @@ from app.harness.context.runtime_pack import Material, message_key, pack_message
 from app.harness.llm.provider_base import Message
 
 
-def observation_failed(content: str) -> bool:
-    """Only the host envelope decides status, never quoted/nested tool data."""
+def observation_envelope(content: str) -> dict[str, Any] | None:
+    """Read only the host envelope, never quoted/nested tool data."""
     prefix = '[untrusted prior action and host Observation]\n'
     raw = content[len(prefix):] if content.startswith(prefix) else content
     try:
         value = json.loads(raw)
     except (ValueError, TypeError):
-        return True  # Unknown observations stay protected.
-    return not isinstance(value, dict) or value.get('ok') is not True
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def observation_failed(content: str) -> bool:
+    value = observation_envelope(content)
+    return value is None or value.get('ok') is not True
 
 
 def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedback: str, candidate: str,
@@ -29,14 +34,19 @@ def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedbac
                                 observation_chars=max(6000, len(canonical(history))), **options)
     materials = {key: Material(**value) for key, value in metadata.get('materials', {}).items()}
     pinned_keys = {message_key(m) for m in pinned}
+    required_tools = set(options.get('required_review_tools', ()))
     for m in full:
         key = message_key(m)
         if key in pinned_keys:
             continue
         if m.role == 'tool' or m.content.startswith(('[untrusted prior action and host Observation]',)):
             failed = observation_failed(m.content)
-            # Failures and review evidence cannot be silently removed as old history.
-            materials[key] = Material('tool', 'actual tool observation', failed or bool(options.get('reviewing')))
+            envelope = observation_envelope(m.content) or {}
+            essential = envelope.get('tool') in required_tools or envelope.get('tool') == 'context.read_material'
+            # Keep the evidence needed to author and review the method, including
+            # explicit readbacks. Offloading it again causes repeated API calls.
+            materials[key] = Material('tool', 'actual tool observation',
+                                      failed or essential or bool(options.get('reviewing')))
         elif m.content.startswith(('[untrusted current candidate', '[untrusted action receipt index')):
             materials[key] = Material('history', 'active candidate and receipt index', True)
     messages, manifest = pack_messages(full, policy=policy, budget=budget, tools=tools,

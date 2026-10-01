@@ -14,6 +14,7 @@ from app.harness.agent_loop.executor import rejected_batch_feedback
 from app.harness.agent_loop.trace import digest
 from app.harness.schema.validator import _format_path, get_schema
 from app.harness.tools.search.policy import search_policy
+import pytest
 
 
 def test_nested_missing_field_reports_exact_handoff_path() -> None:
@@ -76,3 +77,31 @@ def test_rejected_batch_feedback_identifies_prior_failure_and_new_action() -> No
     assert result["prior_observations_untrusted"] == [previous]
     assert result["not_executed"] == actions
     assert result["remaining_tool_calls"] == 3
+
+
+@pytest.mark.asyncio
+async def test_required_code_observations_survive_author_context_compression(tmp_path: Path) -> None:
+    from app.harness.context.runtime_native import pack_native
+    from app.harness.context.runtime_policy import load_policy
+    from app.harness.llm.provider_base import Message
+    from app.harness.tools.code import repo_reader_tool
+    from app.harness.tools.registry import ToolContext
+
+    # Read actual local files through the production tool, without a substitute.
+    ctx = ToolContext("context-retention", "pimc", "idea", project_repo_root=str(tmp_path))
+    history = []
+    (tmp_path / "libs").mkdir()
+    for name, marker in (("first.py", "first_evidence_end"), ("second.py", "second_evidence_end")):
+        (tmp_path / "libs" / name).write_text("# literal parser input\n" * 180 + marker)
+        args = {"path": "libs/" + name}
+        result = await repo_reader_tool(args, ctx)
+        assert result.ok and not result.output["truncated"]
+        history.append({"tool": "code.repo_reader", "args": args, "ok": result.ok,
+                        "output": result.output, "error": result.error})
+    messages, manifest = pack_native(pinned=[Message("user", "Check actual file evidence")],
+        history=history, feedback="", candidate="", budget=4000, tools=(), policy=load_policy(),
+        metadata={}, root=tmp_path / "run", previous=None, agent="idea", readback_available=True,
+        native=True, native_observation_history=True, required_review_tools=("code.repo_reader",))
+    assert all(any(marker in message.content for message in messages)
+               for marker in ("first_evidence_end", "second_evidence_end"))
+    assert all(segment["compression"] == 0 for segment in manifest["segments"] if segment["kind"] == "tool")
