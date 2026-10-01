@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getRun, getRunActivity, getRunWorkLog, type RunDetail } from "@/lib/api";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { agentLabel, agentNodes, runActivities, statusLabel, type Activity } from "@/lib/researchActivity";
 
-export function useResearchActivity(runId: string | null | undefined, project: string): { run: RunDetail | null; activities: Activity[]; error: string; updated: string } {
+export function useResearchActivity(runId: string | null | undefined, project: string): { run: RunDetail | null; activities: Activity[]; error: string; updated: string; refresh: () => Promise<void> } {
   const [snapshot, setSnapshot] = useState<{ run: RunDetail; activities: Activity[]; updated: string } | null>(null);
   const [error, setError] = useState("");
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const refreshNow = useCallback(() => refreshRef.current(), []);
   useEffect(() => {
     setSnapshot(null); setError("");
     if (!runId) return;
@@ -23,12 +25,13 @@ export function useResearchActivity(runId: string | null | undefined, project: s
       } catch { if (active) setError("运行状态更新失败，正在重试；下方为最近记录。"); }
       finally { reading = false; }
     };
+    refreshRef.current = refresh;
     void refresh();
     const timer = setInterval(() => void refresh(), CLIENT_POLICY.controlRefreshMs);
-    return () => { active = false; clearInterval(timer); };
+    return () => { active = false; refreshRef.current = async () => {}; clearInterval(timer); };
   }, [runId, project]);
   const visible = snapshot && snapshot.run.run_id === runId && snapshot.run.project === project ? snapshot : null;
-  return { run: visible?.run ?? null, activities: visible?.activities ?? [], error, updated: visible?.updated ?? "" };
+  return { run: visible?.run ?? null, activities: visible?.activities ?? [], error, updated: visible?.updated ?? "", refresh: refreshNow };
 }
 
 export function ActivityRow({ activity }: { activity: Activity }): JSX.Element {

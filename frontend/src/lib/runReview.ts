@@ -1,4 +1,4 @@
-import { STAGE_ORDER, type Stage, type RunDetail } from "./api";
+import { STAGE_ORDER, type Stage, type RunDetail, type ArtifactView } from "./api";
 import { effectiveNodeState } from "./researchActivity";
 
 export function latestStages(run: RunDetail): { stage: Stage; state: string }[] {
@@ -21,4 +21,17 @@ export function reviewFocus(run: RunDetail, requested: string): Stage | null {
 }
 export function artifactBody(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
+}
+
+export function pendingReviewStage(run: RunDetail): Stage | null {
+  if (run.read_only || ["failed", "stopped", "paused", "interrupted", "cancelled", "completed", "done"].includes(run.status || "")) return null;
+  return latestStages(run).find(item => item.state === "waiting_review")?.stage ?? null;
+}
+
+// Exact content participates so replacing a pending document reopens review,
+// while polling the same document never interrupts a user's dismissal.
+export function reviewPromptIdentity(run: RunDetail, stage: Stage, artifact: ArtifactView): string {
+  const keys = Object.keys(run.states).filter(key => key === stage || key.startsWith(`${stage}_attempt_`));
+  keys.sort((a, b) => Number(a.split("_attempt_")[1] || 1) - Number(b.split("_attempt_")[1] || 1));
+  return JSON.stringify([run.run_id, keys.at(-1), artifact.version, artifact.text]);
 }
