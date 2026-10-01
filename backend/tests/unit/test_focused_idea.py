@@ -66,7 +66,7 @@ def test_actual_focused_configuration_uses_bounded_glm_review_and_no_delegation(
     assert snapshot["reviewer"]["model"]["name"] == "glm-5.3"
     assert "idea.research_delegate" not in agent.config.tools
     assert "search.fetch_sources" in agent.config.tools
-    assert agent.config.raw["loop"]["max_reflections"] == 1
+    assert agent.config.raw["loop"]["max_reflections"] == 3
     assert agent.config.raw["loop"]["max_model_calls"] == 60
     assert agent.loop_policy.max_model_calls == 60
     assert agent.config.thinking_enabled

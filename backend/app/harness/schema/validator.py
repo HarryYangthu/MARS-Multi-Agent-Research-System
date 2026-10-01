@@ -98,13 +98,14 @@ def get_schema(schema_id: str) -> dict[str, Any]:
 
 
 def _format_path(error: jsonschema.ValidationError) -> str:
-    if error.validator == "required":
-        parts = str(error.message).split("'")
-        if len(parts) >= 2 and parts[1]:
-            return f"/{parts[1]}"
-    if not error.absolute_path:
-        return "/"
-    return "/" + "/".join(str(p) for p in error.absolute_path)
+    parts = [str(p) for p in error.absolute_path]
+    if error.validator == "required" and isinstance(error.validator_value, list) and isinstance(error.instance, dict):
+        missing = [key for key in error.validator_value if key not in error.instance]
+        if missing:
+            # Each required error names one field, possibly below an array item.
+            named = str(error.message).split("'")
+            parts.append(named[1] if len(named) >= 2 and named[1] in missing else missing[0])
+    return "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in parts)
 
 
 def validate_metadata(

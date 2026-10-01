@@ -11,6 +11,7 @@ import httpx
 
 from app.harness.agent_loop.trace import atomic_json
 from app.harness.tools.registry import ToolContext, ToolResult
+from app.harness.tools.search.policy import search_policy
 from app.settings import get_settings
 
 
@@ -89,7 +90,7 @@ async def openalex_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRe
     request_hash = hashlib.sha256((receipt["requested_at"] + query).encode()).hexdigest()
     receipt_path = target / (request_hash + ".json")
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=search_policy().openalex.request_timeout_seconds, follow_redirects=False) as client:
             response = await client.get(url, params=params, headers={"User-Agent": "MARS-Research/1.0"})
             receipt["status_code"] = response.status_code
             response.raise_for_status()

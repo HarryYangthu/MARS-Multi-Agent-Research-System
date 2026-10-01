@@ -1653,7 +1653,9 @@ class Orchestrator:
         candidate = RunGraph.from_dict(deepcopy(session.graph.to_dict()))
         candidate.transition(node_key, new_state)
         # No file event, bus publication, or live-graph mutation precedes commit.
-        self._persist_state(session, status="running", graph=candidate)
+        status = ("failed" if new_state == NodeState.FAILED
+                  and NodeState.RUNNING not in candidate.all_states().values() else "running")
+        self._persist_state(session, status=status, graph=candidate)
         await self.replay_state_events(session.run.run_id)
 
     async def replay_state_events(self, run_id: str) -> int:

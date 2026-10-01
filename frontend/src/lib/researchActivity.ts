@@ -11,7 +11,7 @@ const text = (value: unknown): string => typeof value === "string" ? value : "";
 // tool arguments are deliberately excluded from this progress surface.
 export function runActivities(worklog: WorkLogView, observation: RunActivityView): Activity[] {
   const items: Activity[] = worklog.items.map(item => ({ id: `run:${worklog.run_id}:${item.id}`, timestamp: item.timestamp, agent: item.agent, title: item.title, detail: item.detail, status: item.status }));
-  const titles: Record<string, string> = { model_request: "发起模型调用", model_response: "模型已返回", model_error: "模型调用失败", context_compressed: "已压缩上下文", tool_dispatch: "调用工具", observation: "工具已返回", validation: "检查输出格式", stopped: "执行已停止", interrupted: "执行已中断", resource_budget_exhausted: "预算已耗尽" };
+  const titles: Record<string, string> = { model_request: "发起模型调用", model_response: "模型已返回", model_error: "模型调用失败", context_compressed: "已压缩上下文", tool_dispatch: "调用工具", observation: "工具已返回", validation: "检查方案格式与证据", stopped: "执行已停止", interrupted: "执行已中断", resource_budget_exhausted: "预算已耗尽" };
   for (const event of observation.timeline) {
     const source = record(event.source), payload = record(event.payload), kind = text(event.kind);
     if (source.component !== "agent_loop" || !titles[kind]) continue;

@@ -1,0 +1,7 @@
+# Bound a failed metadata request and its fallback inside the tool timeout.
+arxiv:
+  min_interval_seconds: 3
+  request_timeout_seconds: 20
+  fallback_to_openalex: true
+openalex:
+  request_timeout_seconds: 30

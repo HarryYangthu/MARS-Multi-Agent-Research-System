@@ -87,13 +87,13 @@ def focused_research_errors(metadata: dict[str, Any], observations: list[dict[st
         if source["decision"] != "use":
             continue
         source_id = source["source_id"]
-        if source_id in adopted:
-            errors.append(prefix + ": duplicate adopted document")
-        adopted.add(source_id)
         rows = readings.get(source_id, [])
         if not rows:
             errors.append(prefix + "/source_id: copy the source_id from successful full-text reading observations; abstracts alone are insufficient")
             continue
+        if source_id in adopted:
+            errors.append(prefix + ": duplicate adopted document")
+        adopted.add(source_id)
         if source["url"] not in observed_urls(rows):
             errors.append(prefix + "/url: does not belong to this read document; use its returned URL")
         for field in ("method_summary", "transfer", "limitations", "method_spec_ref"):

@@ -130,7 +130,7 @@ tools:
 
   search.arxiv_search:
     enabled: true
-    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k.
+    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Unfiltered topic searches fall back to actual OpenAlex PDF metadata on failure; source and failure receipts are explicit. After an outage the unavailable endpoint is skipped for this invocation. Exact ID/filter requests fail explicitly without relaxing their semantics; use another search tool. ID lookup cannot be combined with query, filters, sorting or top_k.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 65

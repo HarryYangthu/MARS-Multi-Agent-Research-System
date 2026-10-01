@@ -107,6 +107,24 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     return remaining_budget_message(remaining)
 
 
+def rejected_batch_feedback(actions: list[dict[str, Any]], *, seen: dict[str, Any],
+                            history: list[dict[str, Any]], policy: AgentLoopPolicy, used: int) -> str:
+    """Identify rejected actions and return their actual prior observations."""
+    identities = [digest({"tool": action["tool"], "args": action["args"]}) for action in actions]
+    prior = {digest({"tool": item["tool"], "args": item["args"]}): item for item in history}
+    completed = [identity for identity in dict.fromkeys(identities)
+                 if identity in seen and not seen[identity]["retry_allowed"]]
+    return canonical({"batch_not_executed": True,
+        "remaining_tool_calls": policy.remaining_tool_calls(used),
+        "over_budget": not policy.allows_tool_calls(used, len(actions)),
+        "duplicate_within_batch": [action for index, action in enumerate(actions) if identities[index] in identities[:index]],
+        "prior_observations_untrusted": [compact(prior[identity], policy.observation_chars) for identity in completed if identity in prior],
+        "not_executed": [{"tool": action["tool"], "args": action["args"]} for action in actions],
+        "instruction": "No action in this batch ran. Reuse the actual prior observations shown here, even if their old context was offloaded. "
+            "Use context.read_material for missing archived windows. Submit only new needed actions within budget; "
+            "do not include already completed/permanent-failed calls in the next batch."})
+
+
 def action_instructions(specs: list[dict[str, Any]], *, native: bool,
                         final_schema: dict[str, Any] | None) -> str:
     """Expose the same submission contract through either action protocol."""
@@ -810,7 +828,8 @@ class NativeAgentLoop:
                         if (not p.allows_tool_calls(counts["tool_dispatches"], len(actions)) or
                             len(identities) != len(set(identities)) or
                             any(i in state["seen"] and not state["seen"][i]["retry_allowed"] for i in identities)):
-                            state["feedback"] = "Batch not executed: exceeds remaining tool budget or repeats completed/permanent-failed actions. Submit only needed actions within budget."
+                            state["feedback"] = rejected_batch_feedback(actions, seen=state["seen"],
+                                history=state["history"], policy=p, used=counts["tool_dispatches"])
                             trace.snapshot(state)
                             continue
                         for action in actions:
@@ -825,7 +844,8 @@ class NativeAgentLoop:
                         elif not p.allows_tool_calls(counts["tool_dispatches"]):
                             state["feedback"] = "Tool budget exhausted."
                         elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
-                            state["feedback"] = "Duplicate successful/permanent-failed action rejected; use its prior Observation."
+                            state["feedback"] = rejected_batch_feedback([decision], seen=state["seen"],
+                                history=state["history"], policy=p, used=counts["tool_dispatches"])
                         else:
                             prior = state["seen"].get(identity)
                             state["pending"] = "tool"

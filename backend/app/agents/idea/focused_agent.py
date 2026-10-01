@@ -22,6 +22,7 @@ from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import parse
+from app.harness.agent_loop.stop import LoopStop, LoopStopView, StopCondition
 from app.settings import repo_root, get_settings
 
 
@@ -32,8 +33,11 @@ BRIEF = """根据项目固定知识、当前任务、真实代码和数据说明
 并查看与判断有关的实验和限制。工具返回的是阅读窗口，PDF保存成功不等于方法已读懂。
 使用 start_page/max_pages/char_offset 连续阅读，检查截断和 next_offset；公式缺失不得凭记忆补造。
 已下载资料续读时sources只需填工具返回的source_id，宿主自动还原标题和地址。CVF/NeurIPS正式论文优先使用对应官方工具的PDF地址。
-检索词保持简短，先用OpenAlex发现相关文献；CVF/NeurIPS按标题词匹配，不能把长自然语言问题当查询。
+检索词保持简短，先用OpenAlex的require_pdf=true发现能直接阅读的相关方法；无结果再扩大相邻方法范围。
+CVF/NeurIPS按标题词匹配，不能把长自然语言问题当查询。
 一个检索接口限流或不可用时切换来源，不在同一个失败接口反复改词消耗预算。
+宿主标注incomplete reference时，用context.read_material及给定ref补读已归档窗口；重新调用相同repo_reader会被拒绝。
+每个工具批次只包含新的必要动作，不能混入已经完成的调用，否则整批都不会执行。
 可以使用全文HTML，不能把摘要网页当完整方法。保留PDF供人复查；失败时优先切换已经找到的官方来源，
 复用成功下载的文件，不重复下载。工具提供 source_id、路径和版本，不要手写文件哈希或阅读收据。
 候选文献可以采用、排除、待补充，解释各自与任务的具体联系。方法是否可迁移，要结合项目代码、数据和约束判断。
@@ -62,6 +66,8 @@ research_context.schema使用idea.research_context.v2。采用PDF的method_pages
 HTML来源method_pages填空数组。完整页文本不保证公式提取正确，仍需核对公式及相关依赖。
 transfer说明如何影响本方案，method_spec_ref绑定对应设计，limitations说明迁移假设及局限。
 被排除或待补充的来源可把source_id设为空字符串，但url必须来自实际工具结果。
+未采用项只提交source_id/title/url/decision/reason，不填写空的method_summary等采用项字段。
+代码证据放在method_spec及handoff中，research_context.sources只记录实际检索文献，不能编造代码的网页地址。
 research_context不是旧的research_assessment/research_links，不生成委派报告。
 提出初稿之后，由独立评审会话复核原任务、完整方法阅读材料和候选；在宿主给定的总调用和评审预算内修订后复核。
 关键证据无法获取时明确报告缺口并停止，不把预算用尽说成调研完成。"""
@@ -112,6 +118,21 @@ class FocusedIdeaAgent(IdeaAgent):
 
     def required_review_tools(self, request: RunRequest) -> tuple[str, ...]:
         return ("search.fetch_sources", "code.repo_reader")
+
+    def loop_stop_contract_id(self, request: RunRequest) -> str:
+        return "focused-evidence-budget-v1"
+
+    def loop_stop_condition(self, request: RunRequest) -> StopCondition:
+        from app.agents.idea.focused_research import reading_sources
+
+        def stop(view: LoopStopView) -> LoopStop | None:
+            if (view.stage == "before_model" and not self.loop_policy.allows_tool_calls(view.counts["tool_dispatches"])
+                    and not reading_sources(view.observations)):
+                return LoopStop("evidence_unavailable", "正文阅读证据未取得且工具预算已用尽；保留检索记录后停止，需恢复资料获取后重试。",
+                                {"missing": ["successful_full_text_reading"], "tool_dispatches": view.counts["tool_dispatches"]})
+            return None
+
+        return stop
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         root = Path(str(request.extra["run_root"]))

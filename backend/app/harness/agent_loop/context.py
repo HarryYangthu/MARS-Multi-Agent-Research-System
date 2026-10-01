@@ -179,7 +179,7 @@ def pack_context(
     if history:
         # The full observations may be compressed/omitted, but the agent must
         # still know which actions really happened and where their receipts live.
-        ledger = [compact({k: item.get(k) for k in ("tool", "ok", "error", "reason", "raw_ref")}, 512)
+        ledger = [compact({k: item.get(k) for k in ("tool", "args", "ok", "error", "reason", "raw_ref")}, 512)
                   for item in history]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
         source_receipts = source_receipt_index(history)

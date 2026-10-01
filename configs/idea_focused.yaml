@@ -20,15 +20,16 @@ loop:
   deduplicate_evidence_enabled: true
   mode: reflection
   trace: full
-  input_token_budget: 48000
+  input_token_budget: 128000
   observation_chars: 24000
   # All child calls additionally share the run resource ledger.
   max_model_calls: 60
-  max_tool_steps: 24
+  max_tool_steps: 36
   max_protocol_repairs: 2
-  max_validation_repairs: 2
+  max_validation_repairs: 6
   author_empty_completion_repair_enabled: true
-  max_reflections: 1
+  # First review plus at most two focused revision/review rounds.
+  max_reflections: 3
   reflection_thinking_enabled: true
   reflection_reasoning_effort: low
   reflection_format_repair_enabled: false
