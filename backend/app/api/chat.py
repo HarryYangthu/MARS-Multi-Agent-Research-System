@@ -21,10 +21,16 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 class CreateConversationPayload(BaseModel):
     project: str = Field(default="pimc")
+    experiment_id: str = Field(default="", max_length=64)
 
 
 class MessagePayload(BaseModel):
     text: str = Field(..., min_length=1)
+
+
+class OpenRunConversationPayload(BaseModel):
+    project: str = Field(..., min_length=1)
+    experiment_id: str | None = Field(default=None, max_length=64)
 
 
 class AutoModePayload(BaseModel):
@@ -46,6 +52,7 @@ class ConversationView(BaseModel):
     project: str
     state: str
     linked_run_id: str | None
+    experiment_id: str = ""
     auto_mode: bool
     metric_targets: dict[str, float]
     messages: list[MessageView]
@@ -71,6 +78,7 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         project=s.project,
         state=s.state.value,
         linked_run_id=s.linked_run_id,
+        experiment_id=s.experiment_id,
         auto_mode=s.auto_mode,
         metric_targets=dict(s.metric_targets),
         messages=[_msg_view(m) for m in s.messages],
@@ -81,13 +89,34 @@ def _conv_view(s: CommanderSession) -> ConversationView:
 
 @router.post("/conversations", response_model=ConversationView)
 async def create_conversation(payload: CreateConversationPayload) -> ConversationView:
-    session = get_session_store().create(project=payload.project)
+    if payload.experiment_id:
+        from app.bridge.experiment_service import require_experiment
+        try:
+            require_experiment(payload.project, payload.experiment_id)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session = get_session_store().create(project=payload.project, experiment_id=payload.experiment_id)
     return _conv_view(session)
 
 
 @router.get("/conversations", response_model=list[dict[str, Any]])
 async def list_conversations() -> list[dict[str, Any]]:
     return [s.to_meta() for s in get_session_store().list()]
+
+
+@router.post("/runs/{run_id}/conversation", response_model=ConversationView)
+async def open_run_conversation(run_id: str, payload: OpenRunConversationPayload) -> ConversationView:
+    from app.bridge.run_conversation import open_run_conversation as open_existing
+    try:
+        session = open_existing(
+            run_id, project=payload.project, experiment_id=payload.experiment_id,
+            sessions=get_session_store(), runs=get_run_store(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _conv_view(session)
 
 
 @router.get("/conversations/{conv_id}", response_model=ConversationView)

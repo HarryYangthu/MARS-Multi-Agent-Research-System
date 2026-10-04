@@ -2053,17 +2053,18 @@ export type Conversation = {
   project: string;
   state: string;
   linked_run_id: string | null;
+  experiment_id?: string;
   auto_mode: boolean;
   metric_targets: Record<string, number>;
   messages: ChatMessageView[];
 };
 
-export async function createConversation(project = "pimc"): Promise<Conversation> {
+export async function createConversation(project = "pimc", experimentId = ""): Promise<Conversation> {
   return jsonOrThrow(
     await fetch(`${BASE}/api/chat/conversations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project }),
+      body: JSON.stringify(experimentId ? { project, experiment_id: experimentId } : { project }),
     }),
   );
 }

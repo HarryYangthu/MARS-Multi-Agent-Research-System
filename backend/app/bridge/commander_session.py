@@ -67,6 +67,7 @@ class CommanderSession:
     project: str
     state: ConversationState = ConversationState.IDLE
     linked_run_id: str | None = None
+    experiment_id: str = ""           # Project experiment this conversation belongs to
     auto_mode: bool = False           # False = semi-auto (ask before each pull-back)
     metric_targets: dict[str, float] = field(default_factory=dict)
     rolling_summary: str = ""
@@ -112,6 +113,7 @@ class CommanderSession:
             "project": self.project,
             "state": self.state.value,
             "linked_run_id": self.linked_run_id,
+            "experiment_id": self.experiment_id,
             "auto_mode": self.auto_mode,
             "metric_targets": dict(self.metric_targets),
             "rolling_summary": self.rolling_summary,
@@ -146,18 +148,24 @@ def _conversations_root() -> Path:
 class CommanderSessionStore:
     """In-memory registry with best-effort disk persistence."""
 
-    def __init__(self) -> None:
+    def __init__(self, root: Path | None = None) -> None:
         self._sessions: dict[str, CommanderSession] = {}
+        self._root = root
+
+    def _directory(self) -> Path:
+        root = self._root if self._root is not None else _conversations_root()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     # ------------------------------------------------------------- create
 
-    def create(self, *, project: str, now: datetime | None = None) -> CommanderSession:
+    def create(self, *, project: str, experiment_id: str = "", now: datetime | None = None) -> CommanderSession:
         ts = (now or datetime.now(tz=timezone.utc)).strftime("%Y-%m-%dT%H%M%S")
         conv_id = f"conv_{ts}"
         # collision guard
-        if conv_id in self._sessions or (_conversations_root() / conv_id).exists():
+        if conv_id in self._sessions or (self._directory() / conv_id).exists():
             conv_id = f"conv_{ts}_{len(self._sessions)}"
-        session = CommanderSession(conv_id=conv_id, project=project)
+        session = CommanderSession(conv_id=conv_id, project=project, experiment_id=experiment_id)
         self._sessions[conv_id] = session
         self._persist(session)
         return session
@@ -175,7 +183,7 @@ class CommanderSessionStore:
     def list(self) -> list[CommanderSession]:
         # Merge in-memory + on-disk (in-memory wins).
         out: dict[str, CommanderSession] = {}
-        root = _conversations_root()
+        root = self._directory()
         if root.exists():
             for entry in sorted(root.iterdir()):
                 if entry.is_dir() and (entry / "session.json").exists():
@@ -191,7 +199,7 @@ class CommanderSessionStore:
         self._persist(session)
 
     def _persist(self, session: CommanderSession) -> None:
-        d = _conversations_root() / session.conv_id
+        d = self._directory() / session.conv_id
         d.mkdir(parents=True, exist_ok=True)
         (d / "session.json").write_text(
             json.dumps(session.to_meta(), ensure_ascii=False, indent=2),
@@ -202,7 +210,7 @@ class CommanderSessionStore:
                 fh.write(json.dumps(m.to_dict(), ensure_ascii=False) + "\n")
 
     def _load(self, conv_id: str) -> CommanderSession | None:
-        d = _conversations_root() / conv_id
+        d = self._directory() / conv_id
         meta_path = d / "session.json"
         if not meta_path.exists():
             return None
@@ -241,6 +249,7 @@ class CommanderSessionStore:
             project=str(meta.get("project", "pimc")),
             state=state,
             linked_run_id=meta.get("linked_run_id"),
+            experiment_id=str(meta.get("experiment_id", "") or ""),
             auto_mode=bool(meta.get("auto_mode", False)),
             metric_targets={
                 str(k): float(v) for k, v in (meta.get("metric_targets") or {}).items()

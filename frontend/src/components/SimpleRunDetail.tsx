@@ -10,6 +10,7 @@ import { RunControlBar } from "./RunControlBar";
 import { ActivityRow } from "./ResearchActivity";
 import { CodeChangesCard } from "./CodeChangesCard";
 import { ArtifactReviewDocument } from "./ArtifactReviewDocument";
+import { researchRunConversationUrl } from "@/lib/runConversation";
 
 export function SimpleRunDetail({ runId, initialAgent }: { runId: string; initialAgent: string }): JSX.Element {
   const [run, setRun] = useState<RunDetail | null>(null);
@@ -41,7 +42,7 @@ export function SimpleRunDetail({ runId, initialAgent }: { runId: string; initia
   const advanced = `/runs/${encodeURIComponent(runId)}?view=advanced${stage ? `&agent=${stage}` : ""}`;
   return <main className="min-h-dvh bg-mars-bg text-slate-200">
     <header className="border-b border-mars-border px-5 py-4"><div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-4"><Link href="/runs/new" className="text-sm text-slate-400 hover:text-white">← 研究对话</Link><span className="text-sm font-medium">研究任务</span></div>
+      <div className="flex items-center gap-4">{run ? <Link href={researchRunConversationUrl(run)} className="text-sm text-indigo-300 hover:text-white">← 在主对话中查看</Link> : <span className="text-sm text-slate-500">研究对话</span>}<span className="text-sm font-medium">研究任务</span></div>
       <div className="flex items-center gap-4 text-xs text-slate-400"><Link href={`/results/${encodeURIComponent(runId)}`} className="hover:text-white">结果与导出</Link><Link href={advanced} className="hover:text-white">高级视图</Link><button onClick={() => setOperations(!operations)} aria-expanded={operations}>更多操作</button></div>
     </div></header>
     {operations ? <div className="mx-auto max-w-5xl"><RunControlBar runId={runId} run={run} onChange={setRun} showSimpleLink={false} /></div> : null}

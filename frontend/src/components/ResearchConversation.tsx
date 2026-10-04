@@ -4,26 +4,30 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useRouter } from "next/navigation";
 import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { RunRecoveryControl } from "./RunRecoveryControl";
 import { CodeChangesCard } from "./CodeChangesCard";
-import { ResearchReviewPrompt } from "./ResearchReviewPrompt";
+import { ResearchRunWorkspace } from "./ResearchRunWorkspace";
+import { openRunConversation } from "@/lib/runConversation";
 
-const storageKey = (project: string): string => `mars.commander.conv.${project}`;
-function savedConversation(project: string): string | null {
-  try { return window.localStorage.getItem(storageKey(project)); } catch { return null; }
+const storageKey = (project: string, experimentId?: string): string =>
+  experimentId ? `mars.commander.conv.${project}.exp.${experimentId}` : `mars.commander.conv.${project}`;
+function savedConversation(project: string, experimentId?: string): string | null {
+  try { return window.localStorage.getItem(storageKey(project, experimentId)); } catch { return null; }
 }
-function remember(project: string, id: string | null): void {
+function remember(project: string, id: string | null, experimentId?: string): void {
   try {
-    if (id) window.localStorage.setItem(storageKey(project), id);
-    else window.localStorage.removeItem(storageKey(project));
+    if (id) window.localStorage.setItem(storageKey(project, experimentId), id);
+    else window.localStorage.removeItem(storageKey(project, experimentId));
   } catch { /* The current conversation still works without browser storage. */ }
 }
 
-export function ResearchConversation({ project, name }: { project: string; name: string }): JSX.Element {
+export function ResearchConversation({ project, name, experimentId, initialRunId }: { project: string; name: string; experimentId?: string; initialRunId?: string }): JSX.Element {
+  const router = useRouter();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -35,7 +39,7 @@ export function ResearchConversation({ project, name }: { project: string; name:
   const sending = useRef(false);
   const alive = useRef(true);
   const bottom = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
+  const follow = useRef(!initialRunId);
   const activity = useResearchActivity(conversation?.linked_run_id, project);
   const processing = busy || conversation?.processing === true;
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
@@ -48,17 +52,19 @@ export function ResearchConversation({ project, name }: { project: string; name:
   useEffect(() => {
     alive.current = true;
     let active = true;
-    const id = savedConversation(project);
-    if (!id) { setLoading(false); return () => { alive.current = false; }; }
-    void getConversation(id).then((value) => {
+    setLoading(true);
+    const id = savedConversation(project, experimentId);
+    if (!id && !initialRunId) { setLoading(false); return () => { alive.current = false; }; }
+    void (initialRunId ? openRunConversation(initialRunId, project, experimentId) : getConversation(id!)).then((value) => {
       if (!active) return;
       if (value.project !== project) throw new Error("历史对话所属项目不匹配，请新开对话。");
       setConversation(value);
+      remember(project, value.conv_id, value.experiment_id || experimentId);
     }).catch(() => {
       if (active) { setError("暂时无法恢复历史对话，请重新读取或新开对话。"); setNeedsRefresh(true); }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; alive.current = false; };
-  }, [project]);
+  }, [project, experimentId, initialRunId]);
 
   // Read actual persisted/in-flight Commander messages, including tool receipts.
   // Polling never sends the user's message again.
@@ -80,14 +86,14 @@ export function ResearchConversation({ project, name }: { project: string; name:
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
 
   async function refresh(): Promise<void> {
-    const id = conversation?.conv_id || savedConversation(project);
+    const id = conversation?.conv_id || savedConversation(project, experimentId);
     if (sending.current) return;
-    if (!id) { setNeedsRefresh(false); setError(""); setPending(null); return; }
+    if (!id && !initialRunId) { setNeedsRefresh(false); setError(""); setPending(null); return; }
     setLoading(true);
     try {
-      const value = await getConversation(id);
+      const value = initialRunId ? await openRunConversation(initialRunId, project, experimentId) : await getConversation(id!);
       if (value.project !== project) throw new Error("对话所属项目不匹配。");
-      if (alive.current) { setConversation(value); setPending(null); setNeedsRefresh(false); setError(""); }
+      if (alive.current) { remember(project, value.conv_id, value.experiment_id || experimentId); setConversation(value); setPending(null); setNeedsRefresh(false); setError(""); }
     } catch (cause: unknown) {
       if (alive.current) setError(cause instanceof Error ? cause.message : "读取失败，请稍后重试。");
     } finally { if (alive.current) setLoading(false); }
@@ -99,8 +105,8 @@ export function ResearchConversation({ project, name }: { project: string; name:
     follow.current = true; sending.current = true; setBusy(true); setError("");
     setPending({ text, after: conversation?.messages.length ?? 0 }); setDraft("");
     try {
-      const current = conversation || await createConversation(project);
-      remember(project, current.conv_id);
+      const current = conversation || await createConversation(project, experimentId);
+      remember(project, current.conv_id, experimentId);
       if (!alive.current) return;
       setConversation(current);
       const updated = await sendChatMessage(current.conv_id, text);
@@ -121,22 +127,22 @@ export function ResearchConversation({ project, name }: { project: string; name:
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
       <div className="flex gap-3 text-xs text-slate-400">
         <Link href="/runs" className="hover:text-white">研究记录</Link>
-        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); if (initialRunId) router.replace(experimentId ? `/runs/new?experiment=${encodeURIComponent(experimentId)}` : "/runs/new"); }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
     <div className="flex min-h-[65vh] min-w-0 flex-1 flex-col lg:min-h-0">
     <div onScroll={event => { const el = event.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6">
-        {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
-        {groups.map((entry, index) => entry.kind === "message" ? <ResearchMessage key={entry.id} message={entry.message} /> : <ActivityGroup key={entry.id} activities={entry.activities} expanded={index === groups.length - 1} />)}
+        {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending && !conversation?.linked_run_id ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
+        {groups.map((entry, index) => entry.kind === "message" ? <ResearchMessage key={entry.id} message={entry.message} /> : <ActivityGroup key={entry.id} activities={entry.activities} expanded={index === groups.length - 1 && (processing || Object.values(activity.run?.states ?? {}).includes("running"))} />)}
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
         {processing ? <p role="status" className="text-sm text-indigo-300">{current || "正在处理本次请求…"}</p> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
-        {conversation?.linked_run_id ? <ResearchReviewPrompt key={`review:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
-        {conversation?.linked_run_id ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
+        {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
+        {conversation?.linked_run_id && Object.keys(activity.run?.states ?? {}).some(key => key === "coding" || key.startsWith("coding_attempt_")) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
         {conversation?.linked_run_id ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
-        {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}`} className="text-sm text-indigo-300 hover:underline">查看关联研究任务 →</Link> : null}
+        {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}?view=advanced`} className="text-xs text-slate-400 hover:text-indigo-300">查看详细运行记录 →</Link> : null}
         <div ref={bottom} />
       </div>
     </div>

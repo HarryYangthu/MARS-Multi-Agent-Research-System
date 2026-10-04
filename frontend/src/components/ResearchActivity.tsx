@@ -59,7 +59,7 @@ export function ResearchAgentPanel({ run, runId, activities, processing, current
         {latest ? <p className="mt-2 break-words text-xs leading-5 text-slate-400">{latest.title}</p> : null}
       </div>;
     })}</div>
-    {!runId ? <p className="mt-5 text-xs text-slate-500">研究启动后显示各 Agent 状态</p> : <Link href={`/runs/${encodeURIComponent(runId)}`} className="mt-5 block text-xs text-indigo-300 hover:underline">查看任务与审核 →</Link>}
+    {!runId ? <p className="mt-5 text-xs text-slate-500">研究启动后显示各 Agent 状态</p> : <Link href={`/runs/${encodeURIComponent(runId)}?view=advanced`} className="mt-5 block text-xs text-indigo-300 hover:underline">查看详细运行记录 →</Link>}
     {updated ? <p className="mt-3 text-[10px] text-slate-600">更新于 {timeLabel(updated)}</p> : null}
   </aside>;
 }
