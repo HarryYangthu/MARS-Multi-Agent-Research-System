@@ -378,6 +378,8 @@ class NativeAgentLoop:
             state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
                                                if row["kind"] == "model_error"), None)
         counts = state["counts"]
+        if p.max_active_seconds:
+            state.setdefault("active_elapsed_seconds", 0.0)
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
         if request.external_review:
             if not request.resume:
@@ -474,6 +476,15 @@ class NativeAgentLoop:
             if request.resume:
                 recover_completion(state.get("last_model_error"))
             while p.allows_model_calls(counts["model_requests"]):
+                trace.snapshot(state)
+                if p.max_active_seconds and state["active_elapsed_seconds"] >= p.max_active_seconds:
+                    state["status"] = "budget_exhausted"
+                    state["feedback"] = "Agent active-time budget exhausted; progress preserved for review."
+                    state["reflection_accepted"] = False
+                    trace.emit("stopped", {"status": state["status"], "reason": state["feedback"],
+                        "active_elapsed_seconds": state["active_elapsed_seconds"], "budgets_reset": False})
+                    trace.snapshot(state)
+                    break
                 if stop_at_boundary("before_model"):
                     break
                 reviewing = state["next_phase"] == "reflect"

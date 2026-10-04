@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import time
 
 
 def canonical(value: Any) -> str:
@@ -31,6 +32,7 @@ class LoopTrace:
         self.root.mkdir(parents=True, exist_ok=True)
         self.events = root / "events.jsonl"
         self.seq = 0
+        self._elapsed_tick = time.monotonic()
         if self.events.exists():
             if not resume:
                 raise ValueError("trace already exists; use explicit resume")
@@ -61,6 +63,12 @@ class LoopTrace:
             os.fsync(handle.fileno())
 
     def snapshot(self, state: dict[str, Any]) -> None:
+        # Only a configured active-time budget adds this field. Downtime and
+        # human review occur outside a LoopTrace instance and are not counted.
+        if "active_elapsed_seconds" in state:
+            tick = time.monotonic()
+            state["active_elapsed_seconds"] += max(0.0, tick - self._elapsed_tick)
+            self._elapsed_tick = tick
         if "review_plan_contract_id" in state:
             # A plan may advance without changing model counters. Detect the
             # facts/checkpoint write gap as well as missing response events.
@@ -69,6 +77,8 @@ class LoopTrace:
         facts.update(event_seq=self.seq, trace_mode=self.mode, resume_available=self.mode == "full")
         facts["correlation"] = self.correlation
         facts["context_metadata"] = state.get("context_metadata", {})
+        if "active_elapsed_seconds" in state:
+            facts["active_elapsed_seconds"] = state["active_elapsed_seconds"]
         atomic_json(self.root / "facts.json", facts)
         if self.mode == "full":
             atomic_json(self.root / "checkpoint.json", state)

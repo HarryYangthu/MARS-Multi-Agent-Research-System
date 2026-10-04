@@ -29,6 +29,18 @@ from app.storage.artifact_store import ArtifactStore
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 
 
+@router.get("/{run_id}/idea/literature-evidence")
+def get_literature_evidence(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.literature_evidence import literature_evidence
+    run = get_run_store().get(run_id)
+    if run is None or run.project != project:
+        raise HTTPException(status_code=404, detail="任务或项目不存在")
+    try:
+        return literature_evidence(run.root, run_id, project)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail="研究记录暂不可校验，请稍后重试。") from exc
+
+
 @router.get("/{run_id}/idea/materials", response_model=IdeaMaterialsView)
 def get_idea_materials(run_id: str) -> IdeaMaterialsView:
     run = get_run_store().get(run_id)

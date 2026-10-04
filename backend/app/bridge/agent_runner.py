@@ -465,6 +465,9 @@ def load_agent_handoff_context(
                     "Preserve unaffected content, verify the specific feedback against actual evidence, "
                     "and avoid restarting broad research without an identified gap.\n"
                     + _handoff_summary(text=current.path.read_text(), source_ref=current.path.relative_to(run.root).as_posix()))
+            else:
+                from app.bridge.idea_revision_context import failed_idea_revision_context
+                upstream.update(failed_idea_revision_context(run.root, run.project))
         upstream["human_revision_request"] = (
             "Human reviewer rejected the current draft and requested a revised "
             f"version. Feedback: {revision_reason}"

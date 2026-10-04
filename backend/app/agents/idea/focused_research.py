@@ -29,7 +29,8 @@ def research_schema(*, version: int = 1) -> dict[str, Any]:
         source["properties"]["method_pages"] = {"type": "array", "uniqueItems": True,
                                                 "items": {"type": "integer", "minimum": 1}}
         source["allOf"] = [{"if": {"properties": {"decision": {"const": "use"}}},
-                            "then": {"required": ["method_pages"]}}]
+                            "then": {"required": ["method_pages", "method_sections", "method_summary",
+                                                  "transfer", "limitations", "method_spec_ref"]}}]
     return {"type": "object", "required": ["schema", "question", "selection_principles", "sources", "stop_reason", "open_questions"],
             "properties": {"schema": {"const": f"idea.research_context.v{version}"}, "question": text,
                 "selection_principles": {**strings, "minItems": 1},
@@ -95,7 +96,8 @@ def focused_research_errors(metadata: dict[str, Any], observations: list[dict[st
             errors.append(prefix + ": duplicate adopted document")
         adopted.add(source_id)
         if source["url"] not in observed_urls(rows):
-            errors.append(prefix + "/url: does not belong to this read document; use its returned URL")
+            errors.append(prefix + "/url: does not belong to this read document; copy a returned URL: "
+                          + ", ".join(sorted(observed_urls(rows))))
         for field in ("method_summary", "transfer", "limitations", "method_spec_ref"):
             if not isinstance(source.get(field), str) or not source[field].strip():
                 errors.append(prefix + "/" + field + ": explain the actual method and its transfer")
@@ -191,6 +193,11 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
         if (state.get("candidate") == proposal_text and state.get("status") == "passed"
                 and state.get("reflection_accepted") and state.get("reviewed_candidate_sha") == digest(proposal_text)):
             configuration = load_focused_snapshot(run_root, path.parent.name)
+            if configuration.get("research_quality"):
+                from app.agents.idea.literature_quality import quality_errors
+                issues = quality_errors(metadata, state.get("history", []), run_root, configuration["research_quality"])
+                if issues:
+                    raise ValueError("focused handoff research quality failed: " + "; ".join(issues))
             review_receipt = verify_review_trace(path.parent, configuration)
             reviewed = True
     errors = focused_research_errors(metadata, observations, run_root)

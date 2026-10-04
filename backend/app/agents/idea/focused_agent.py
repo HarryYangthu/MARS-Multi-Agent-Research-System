@@ -17,6 +17,7 @@ from app.agents.idea.delivery import delivery_errors
 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, research_schema, validate_review_mode
 from app.agents.idea.parameter_schema import parameter_budget_schema
 from app.agents.idea.focused_runtime import bind_focused_snapshot
+from app.agents.idea.literature_quality import quality_errors, quality_policy, quality_schema
 from app.agents.idea.runtime_profile import public_agent_configuration
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.llm.model_registry import get_agent_config, select_provider
@@ -27,8 +28,8 @@ from app.settings import repo_root, get_settings
 
 
 BRIEF = """根据项目固定知识、当前任务、真实代码和数据说明，提出有文献依据的可尝试方案。
-先明确需要解决的信息缺口，再自主检索相近方法、直接基线和适用限制。不要按固定篇数停止，
-也不要追求全面收集。只有核心问题覆盖充分、采用的方法理解完整、剩余不确定性已说明时才形成方案。
+先明确需要解决的信息缺口，再自主检索相近方法、直接基线和适用限制。按宿主给定的调研门槛执行，
+达到数量不等于覆盖充分，不能用无关论文凑数。只有核心问题覆盖充分、方法比较完整、剩余不确定性已说明时才形成方案。
 摘要只能用于筛选。采用的核心论文必须实际读完方法步骤、关键公式、假设与依赖的附录，
 并查看与判断有关的实验和限制。工具返回的是阅读窗口，PDF保存成功不等于方法已读懂。
 使用 start_page/max_pages/char_offset 连续阅读，检查截断和 next_offset；公式缺失不得凭记忆补造。
@@ -66,7 +67,8 @@ research_context.schema使用idea.research_context.v2。采用PDF的method_pages
 HTML来源method_pages填空数组。完整页文本不保证公式提取正确，仍需核对公式及相关依赖。
 transfer说明如何影响本方案，method_spec_ref绑定对应设计，limitations说明迁移假设及局限。
 被排除或待补充的来源可把source_id设为空字符串，但url必须来自实际工具结果。
-未采用项只提交source_id/title/url/decision/reason，不填写空的method_summary等采用项字段。
+只看摘要的未采用项只提交source_id/title/url/decision/reason。完整阅读后排除的论文也要保留method_sections、method_pages、
+method_summary和limitations，才能计入完整方法阅读。排除原因必须解释与本任务的关系。
 代码证据放在method_spec及handoff中，research_context.sources只记录实际检索文献，不能编造代码的网页地址。
 research_context不是旧的research_assessment/research_links，不生成委派报告。
 提出初稿之后，由独立评审会话复核原任务、完整方法阅读材料和候选；在宿主给定的总调用和评审预算内修订后复核。
@@ -86,6 +88,7 @@ class FocusedIdeaAgent(IdeaAgent):
         original = get_agent_config(settings.get("author_agent", "idea"))
         raw = deepcopy(dict(original.raw))
         raw["loop"], raw["tools"] = settings["loop"], settings["tools"]
+        self._quality = quality_policy(settings["research_quality"], {})
         self._review_config = get_agent_config(settings["review_agent"])
         self._review_mode = validate_review_mode(
             (original.model_provider, original.model_name),
@@ -98,6 +101,7 @@ class FocusedIdeaAgent(IdeaAgent):
         super().__init__(agent_config=author)
         self._snapshot = {"schema": "idea.focused.runtime.v1", "profile_id": "focused_v1",
                           "review_mode": self._review_mode,
+                          "research_quality": self._quality,
                           "source_sha256": digest(settings), "author": public_agent_configuration(author),
                           "reviewer": public_agent_configuration(self._review_config)}
         from app.harness.tools.registry import get_registry
@@ -110,6 +114,10 @@ class FocusedIdeaAgent(IdeaAgent):
     def service_profile_snapshot(self) -> dict[str, Any]:
         return deepcopy(self._snapshot)
 
+    def _request_snapshot(self, request: RunRequest) -> dict[str, Any]:
+        return {**self.service_profile_snapshot, "research_quality": quality_policy(
+            self._quality, request.extra.get("idea_requirements", {}))}
+
     def _select_review_provider(self) -> tuple[LLMProvider, LLMConfig]:
         return select_provider(self._review_config)
 
@@ -120,12 +128,20 @@ class FocusedIdeaAgent(IdeaAgent):
         return ("search.fetch_sources", "code.repo_reader")
 
     def loop_stop_contract_id(self, request: RunRequest) -> str:
-        return "focused-evidence-budget-v1"
+        return "focused-literature-coverage-budget-v1"
 
     def loop_stop_condition(self, request: RunRequest) -> StopCondition:
         from app.agents.idea.focused_research import reading_sources
 
         def stop(view: LoopStopView) -> LoopStop | None:
+            if view.stage == "before_model" and view.candidate:
+                try:
+                    research = parse(view.candidate).metadata.get("research_context", {})
+                    if research.get("stop_status") == "evidence_gap":
+                        return LoopStop("evidence_unavailable", "调研资料不足；保留已读材料与缺口，补充资料后重试。",
+                                        {"stop_reason": research.get("stop_reason", ""), "open_questions": research.get("open_questions", [])})
+                except (ValueError, TypeError):
+                    pass
             if (view.stage == "before_model" and not self.loop_policy.allows_tool_calls(view.counts["tool_dispatches"])
                     and not reading_sources(view.observations)):
                 return LoopStop("evidence_unavailable", "正文阅读证据未取得且工具预算已用尽；保留检索记录后停止，需恢复资料获取后重试。",
@@ -136,7 +152,8 @@ class FocusedIdeaAgent(IdeaAgent):
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         root = Path(str(request.extra["run_root"]))
-        bind_focused_snapshot(root, self._snapshot,
+        snapshot = self._request_snapshot(request)
+        bind_focused_snapshot(root, snapshot,
             invocation=request.extra.get("invocation_id") or request.runtime.get("invocation_id"),
             resume=request.extra.get("resume_invocation"),
             revision_reason=str(request.extra.get("revision_reason", "")))
@@ -147,6 +164,16 @@ class FocusedIdeaAgent(IdeaAgent):
         context.task += "\n可获取正文的域名：" + get_settings().mars_web_search_allowlist
         scope = request.extra.get("scope", "method_proposal")
         context.task += "\n本次范围：" + str(scope) + "\n用户明确的约束：" + json.dumps(requirements, ensure_ascii=False)
+        policy = quality_policy(self._quality, requirements)
+        context.task += ("\n宿主调研验收门槛：" + json.dumps(policy, ensure_ascii=False)
+            + "\n流程：检索候选→按相关性筛选→完整阅读方法→比较不同方向→提出方案→独立评审。"
+            "research_context.coverage逐项记录axis/finding/source_ids/remaining_gap；"
+            "method_comparison记录direction/source_ids/mechanism/compatibility/tradeoff/decision。"
+            "source_ids必须引用真实完整阅读的论文；禁止把一篇拆成多篇或把同一机制换名当不同方向。"
+            "remaining_gap允许记录下游待验证的收益或限制；尚未做实验本身不阻止提出研究假设。"
+            "检索与阅读数量不等于最终采用数量，最终可只采用一个方向。"
+            "充分时stop_status=complete；无法取得必要证据时stop_status=evidence_gap并说明stop_reason和open_questions，宿主会停止为未完成。"
+            "不得为达到数量扩大成与任务无关的研究。")
         if requirements.get("performance_requirement"):
             context.task += ("\n将performance_requirement逐字段原样放到decision_rule.performance；"
                 "另加selection_split=validation，report_split=held_out_test，status=pending_experiment，"
@@ -162,7 +189,7 @@ class FocusedIdeaAgent(IdeaAgent):
             context.task += "\n当前交付方法提案。handoff.required_context列出baseline_code和data_description为实际执行的前置条件。"
         else:
             context.task += "\n读取实际基线代码；知识文档中的代码快照需要与当前源码核对，不能只凭仓库路径声称已读代码。"
-        context.metadata["idea_runtime_profile"] = {"profile_id": "focused_v1", "configuration_sha256": digest(self._snapshot)}
+        context.metadata["idea_runtime_profile"] = {"profile_id": "focused_v1", "configuration_sha256": digest(snapshot)}
         return context
 
     def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
@@ -172,6 +199,9 @@ class FocusedIdeaAgent(IdeaAgent):
         for field in ("method_spec", "decision_rule"):
             schema["properties"][field] = {"type": "object", "minProperties": 1}
         schema["properties"]["research_context"] = research_schema(version=2)
+        quality = quality_schema(quality_policy(self._quality, request.extra.get("idea_requirements", {})))
+        schema["properties"]["research_context"]["required"] += quality["required"]
+        schema["properties"]["research_context"]["properties"].update(quality["properties"])
         schema["properties"]["handoff"]["properties"]["scope"] = {
             "const": request.extra.get("scope", "method_proposal")}
         req = request.extra.get("idea_requirements", {})
@@ -201,6 +231,8 @@ class FocusedIdeaAgent(IdeaAgent):
             errors.append("/research_context/schema: this run requires idea.research_context.v2 with explicit method_pages")
         requirements = request.extra.get("idea_requirements", {})
         errors += focused_requirement_errors(parsed.metadata, observations, requirements)
+        policy = quality_policy(self._quality, requirements)
+        errors += quality_errors(parsed.metadata, observations, root, policy)
         input_receipt = archive_baseline_input(run_root=root, project=request.project,
             content=request.upstream_artifacts.get("baseline_code", ""), candidate_sha256=digest(text))
         if scope == "project_proposal" and input_receipt is None and not any(o.get("ok") and o.get("tool") == "code.repo_reader" for o in observations):
@@ -208,7 +240,8 @@ class FocusedIdeaAgent(IdeaAgent):
         atomic_json(root / "idea/validation" / (uuid.uuid4().hex + ".json"), {
             "schema_valid": True, "material_ready": not errors, "errors": errors, "candidate_sha256": digest(text),
             "requirements": requirements, "delivery_contract_version": "idea.handoff.v1", "body_policy": "summary_only",
-            "research_contract": "idea.research_context.v2", "runtime_profile_sha256": digest(self._snapshot),
+            "research_quality": policy,
+            "research_contract": "idea.research_context.v2", "runtime_profile_sha256": digest(self._request_snapshot(request)),
             "scope": scope, "input_evidence": [input_receipt] if input_receipt else [],
             "research_dossier_required": False, "research_assessment_required": False,
             "scientific_validated": False, "project_ready": False})
@@ -228,13 +261,17 @@ class FocusedIdeaAgent(IdeaAgent):
                 "作者可以提供有依据的反驳，应按原始依据重新判断。不要假设上一轮意见正确。"
                 "源码与论文只含实际可见窗口；exact duplicate标记指本会话已完整出现的相同文本，不等于截断。"
                 "摘要或截断前缀不足以支持完整方法时，指出缺少的章节或公式；不要求无关段落全部阅读。"
-                "不要求固定文献数量，不要求先取得实验收益，不额外要求完整实验统计设计。"
+                "按宿主调研门槛检查相关性、不同方向的实质差异、比较与任务覆盖。数量达标不能代替方法理解。"
+                "检查coverage的remaining_gap是否涉及核心方法信息缺失；待验证的实验收益本身不是调研阻断项。"
+                "可以只采用一个方向，但须对已读未采用的方法说明具体理由。不要求先取得实验收益，不额外要求完整实验统计设计。"
                 "允许提出论文未直接给出的新组合或参数化，但必须明确区分已读原方法与作者的新设计，"
                 "核对迁移依据、推导与适用条件；不能仅因参数化不是论文原实现就拒绝，也不能把脚注冒充完整方法。"
                 "重大问题给出准确字段和原文依据；次要改进写在rationale里，不无限扩大范围。"),
             Message("user", "原始研究任务：\n" + request.user_request),
             Message("user", "项目背景与约束：\n" + context.project),
             Message("user", "本次显式要求：\n" + json.dumps(request.extra.get("idea_requirements", {}), ensure_ascii=False))]
+        messages.append(Message("user", "宿主调研验收门槛：\n" + json.dumps(
+            quality_policy(self._quality, request.extra.get("idea_requirements", {})), ensure_ascii=False)))
         messages += [Message("user", "输入资料 " + label + ":\n" + content) for label, content in context.upstream.items()]
         if context.metadata.get("runtime_policy", {}).get("version") == 3:
             from app.harness.context.runtime_pack import reference_message
@@ -248,5 +285,6 @@ class FocusedIdeaAgent(IdeaAgent):
                 "Check task coverage, stopping reason, selection decisions, adaptation assumptions and implementability. "
                 "Return concrete blockers only; experiments and global novelty proof belong downstream. "
                 "Check caller performance gates and validation/test separation. Calculate claimed counterexamples "
-                "using actual operator conventions before blocking. Do not prescribe a fixed paper count. "
+                "using actual operator conventions before blocking. Enforce the supplied research quality policy; "
+                "reject irrelevant count padding and nominally renamed duplicate method directions. "
                 "An independent-session review is not experimental validation.")

@@ -37,7 +37,8 @@ def test_empty_source_ids_are_missing_evidence_not_duplicate_documents(tmp_path:
         "selection_principles": ["Use real evidence"], "sources": [source, deepcopy(source)],
         "stop_reason": "This is a validation input", "open_questions": [],}}
     for item in metadata["research_context"]["sources"]:
-        item["method_pages"] = []
+        item.update(method_pages=[], method_sections=["Unsupported method"], method_summary="No reading receipt",
+                    transfer="No evidence claimed", limitations="Missing source", method_spec_ref="/method_spec/missing")
     errors = focused_research_errors(metadata, [], tmp_path)
     assert sum("successful full-text" in error for error in errors) == 2
     assert not any("duplicate" in error for error in errors)

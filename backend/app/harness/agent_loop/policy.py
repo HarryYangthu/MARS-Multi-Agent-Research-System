@@ -16,6 +16,7 @@ class AgentLoopPolicy:
     reflection_thinking_enabled: bool | None = None
     completion_driven: bool = False
     max_model_calls: int | None = 36
+    max_active_seconds: int = 0
     max_tool_steps: int = 18
     max_protocol_repairs: int = 4
     max_validation_repairs: int = 6
@@ -93,6 +94,8 @@ class AgentLoopPolicy:
     def fingerprint_data(self) -> dict[str, Any]:
         """Keep pre-feature checkpoints compatible when repair is not enabled."""
         data = asdict(self)
+        if not self.max_active_seconds:
+            data.pop("max_active_seconds")
         if self.reflection_format_repair_enabled:
             data["reflection_format_repair_contract_version"] = 1
         else:
