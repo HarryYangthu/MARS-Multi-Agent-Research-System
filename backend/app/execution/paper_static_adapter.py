@@ -47,7 +47,10 @@ async def run_paper_static_simulation(
     log_path = logs_dir / f"{_safe_name(spec.experiment_id)}_paper_static.log"
 
     try:
-        repo_path = _resolve_path(str(cfg.get("repo_path", "")), repo_root())
+        from app.harness.tools.git_branch import current_git_branch
+        branch = current_git_branch(spec.project, spec.run_id)
+        # Host binding wins over a global adapter path or model arguments.
+        repo_path = branch.root if branch is not None else _resolve_path(str(cfg.get("repo_path", "")), repo_root())
         config_path = _resolve_path(str(cfg.get("config_path", "configs/static.yaml")), repo_path)
         data_path = _resolve_path(
             str(spec.config.get("data_path") or cfg.get("data_path", "")),

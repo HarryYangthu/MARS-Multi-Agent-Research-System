@@ -82,6 +82,16 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
     if legacy:
         for agent in agents:
+            if getattr(agent, 'name', '') == 'coding':
+                from app.bridge.research_branch import coding_workspace_blocker
+                try:
+                    blocker = coding_workspace_blocker(session.run)
+                except (OSError, ValueError) as exc:
+                    blocker = str(exc)
+                evidence.append({'coding_workspace_blocker': blocker})
+                if blocker:
+                    return finish('blocked', blocker)
+                continue
             check = getattr(agent, 'execution_blocker', None)
             if callable(check):
                 try:

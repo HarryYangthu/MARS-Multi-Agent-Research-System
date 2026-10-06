@@ -901,11 +901,13 @@ class Orchestrator:
                     _args: dict[str, Any],
                     _ctx: ToolContext,
                 ) -> dict[str, Any]:
-                    await _run_execution_batch(
-                        run=session.run,
-                        node_key=node_key,
-                        bus=session.bus,
-                    )
+                    from app.bridge.research_branch import research_branch_scope
+                    with research_branch_scope(session.run, node_key):
+                        await _run_execution_batch(
+                            run=session.run,
+                            node_key=node_key,
+                            bus=session.bus,
+                        )
                     summary_path = session.run.subdir("execution") / "batch_summary.json"
                     import json
                     summary = json.loads(summary_path.read_text(encoding="utf-8"))

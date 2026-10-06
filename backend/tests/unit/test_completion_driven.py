@@ -41,7 +41,7 @@ async def test_read_only_baseline_blocks_before_any_model_request(
         assert agent.loop_policy.completion_driven
         request = RunRequest(project=project.name, user_request='Edit code', extra={'run_root': str(tmp_path / 'run')})
         context = await agent.build_context(request)
-        with pytest.raises(ValueError, match='只读基线仓'):
+        with pytest.raises(ValueError, match='编码实验分支未就绪'):
             await agent.run_loop(request, context)
         assert not (tmp_path / 'run/resources/model_budget.v1.json').exists()
         assert code.read_text() == 'value = 1\n'

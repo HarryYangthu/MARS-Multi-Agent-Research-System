@@ -59,8 +59,10 @@ async def run_agent_node(
     if not isinstance(saved_extra, dict):
         raise ValueError("Agent request authority has invalid options")
     if load_run_research_contract(run, saved_extra if authority is not None else None) is None:
-        await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
-            resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
+        from app.bridge.research_branch import research_branch_scope
+        with research_branch_scope(run, node_key):
+            await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
+                resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
         return
     if revision_reason:
         raise ValueError("Contract revisions require a new bound graph attempt; legacy revision dispatch is unavailable")
@@ -130,6 +132,15 @@ async def _execute_agent_node(
 
     if research_stage is None:
         upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+        from app.harness.tools.git_branch import current_git_branch
+        branch = current_git_branch(run.project, run.run_id)
+        if branch is not None:
+            upstream["research_git_branch"] = (
+                f"实际代码目录：{branch.repo_path}\n当前实验分支：{branch.branch}\n"
+                f"基线分支：{branch.baseline_branch}\n基线提交：{branch.baseline_commit}\n"
+                "在现有目录的此实验分支中修改；不得切换分支、修改基线分支或 Git 控制文件。"
+                "受保护路径、接口和允许修改范围继续适用。"
+            )
         admit_handoffs(run, node_key, supplied_context=upstream)
     else:
         upstream, feedback_context = dict(research_stage.upstream), {}
@@ -196,6 +207,9 @@ async def _execute_agent_node(
         extra=request_extra,
         progress_sink=build_agent_progress_sink(run=run, node_key=node_key, bus=bus),
     )
+    if research_stage is None and branch is not None and request.progress_sink is not None:
+        await request.progress_sink({"kind": "action", "phase": "workspace",
+            "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
     failure_phase = "build_context"
     try:
         context = await agent.build_context(request)

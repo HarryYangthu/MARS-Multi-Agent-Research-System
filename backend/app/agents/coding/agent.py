@@ -48,7 +48,7 @@ class CodingAgent(BaseAgent):
         from app.harness.tools.project_repo import load_project_repo
         repo = load_project_repo(project)
         if repo.read_only:
-            return "编码工作副本未就绪：当前关联的是只读基线仓。请先创建并绑定可写实验副本；未调用模型。"
+            return "编码实验分支未就绪：请通过研究任务启动，系统会在原 Git 仓库创建并绑定任务分支；未调用模型。"
         if not repo.root.is_dir():
             return "编码工作目录不存在；未调用模型。"
         return ""

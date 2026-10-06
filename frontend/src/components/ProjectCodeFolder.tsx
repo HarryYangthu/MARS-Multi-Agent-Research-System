@@ -37,10 +37,11 @@ export function ProjectCodeFolder({ project, onBusy }: { project: ProjectSummary
 
   return <section aria-label="研究仿真基线代码仓" className="space-y-3 rounded-lg border border-mars-border p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">基线代码仓</h4><span className={`rounded px-2 py-0.5 text-xs ${readOnly ? "bg-emerald-500/10 text-emerald-200" : "bg-mars-panel text-slate-400"}`}>{readOnly ? "只读" : "未启用保护"}</span></div>
+      <div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-semibold">基线代码仓</h4><span className={`rounded px-2 py-0.5 text-xs ${readOnly ? "bg-emerald-500/10 text-emerald-200" : "bg-mars-panel text-slate-400"}`}>{readOnly ? "基线保护" : "未启用保护"}</span></div>
       {!editing ? <button type="button" className={BUTTON} onClick={() => { setEditing(true); setMessage(""); void browse(path); }}>选择文件夹</button> : null}
     </div>
     <p className="break-all text-xs text-slate-300">{codePath || "未关联"}</p>
+    <p className="text-xs leading-5 text-slate-400">编码时自动在此 Git 仓库创建实验分支，复用当前目录；原分支保留，任务重试会继续使用同一分支。</p>
     {editing ? <div className="space-y-3">
       <label className="block text-sm">仿真基线仓库文件夹<div className="mt-2 flex gap-2"><input aria-label="仿真基线仓库路径" className="min-w-0 flex-1 rounded border border-mars-border bg-mars-bg px-3 py-2" value={path} disabled={busy} onChange={(event) => setPath(event.target.value)} /><button type="button" className={BUTTON} disabled={busy} onClick={() => void browse(path)}>浏览</button></div></label>
       {folders ? <div className="rounded border border-mars-border p-3"><div className="flex items-center justify-between gap-2"><p className="break-all text-xs text-slate-400">{folders.path}</p><button type="button" className={`${BUTTON} shrink-0`} disabled={busy || folders.path === folders.parent} onClick={() => void browse(folders.parent)}>上一级</button></div><div className="mt-2 grid max-h-40 gap-1 overflow-auto sm:grid-cols-2">{folders.directories.map((folder) => <button type="button" key={folder.path} disabled={busy} className="truncate rounded p-2 text-left text-sm hover:bg-mars-panel2" onClick={() => void browse(folder.path)}>📁 {folder.name}</button>)}</div>{folders.has_more ? <p className="text-xs text-slate-400">已显示前 300 项</p> : null}</div> : null}
