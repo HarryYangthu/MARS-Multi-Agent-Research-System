@@ -62,7 +62,7 @@ def get_code_change(run_id: str, change_id: str, project: str) -> dict[str, Any]
 
 
 def _code_changes(run_id: str, project: str, change_id: str | None = None) -> dict[str, Any]:
-    from app.bridge.code_changes import code_changes
+    from app.bridge.completed_code_changes import completed_code_changes as code_changes
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail='任务不存在')
@@ -465,7 +465,7 @@ async def permanently_delete_run(run_id: str) -> None:
 
 
 @router.get("/{run_id}/activity")
-async def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
+def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")

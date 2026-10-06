@@ -7,7 +7,7 @@ import { CodeFileContent } from "./CodeFileContent";
 import { CodeChangeMarker, DirectoryChangeMarker, codeChangeColor } from "./CodeChangeMarker";
 import { directoryChangeSummaries, type DirectoryChangeSummary } from "@/lib/codeChangeMarkers";
 
-const statusLabel = (status: string): string => ({ applied: "已写入", not_applied: "未写入", proposed: "待应用", recorded: "待核对" }[status] || "待核对");
+const statusLabel = (status: string): string => ({ applied: "已核对", not_applied: "未写入", proposed: "待应用", recorded: "待核对" }[status] || "待核对");
 const message = (error: unknown): string => error instanceof Error ? error.message : "读取失败，请重试";
 
 export function CodeRepositoryPanel({ runId, project, history, initialChange }: {

@@ -63,3 +63,27 @@ def test_public_run_activity_excludes_reasoning_and_raw_model_content() -> None:
     assert projected["payload"] == {"model": "configured-model"}
     assert "private" not in str(projected)
     assert public_activity_event({**record, "kind": "reflection"}) is None
+
+
+def test_live_activity_reads_recent_persisted_events_without_loading_model_context(tmp_path: Path) -> None:
+    import json
+    from app.bridge.research_activity import build_research_activity
+    from app.storage.run_store import RunStore
+    run = RunStore(tmp_path / "runs").create(task="event-projection", project="presentation-input")
+    trace = run.root / "agent_traces/coding/authored-events"
+    trace.mkdir(parents=True)
+    # Authored projection inputs, not simulated model or tool execution.
+    rows = [
+        {"event_seq": 1, "kind": "model_request", "time": "2026-10-06T00:00:01Z", "model": "input-label", "visible": "private context"},
+        {"event_seq": 2, "kind": "reflection", "time": "2026-10-06T00:00:02Z", "content": "private reasoning"},
+        {"event_seq": 3, "kind": "model_response", "time": "2026-10-06T00:00:03Z", "model": "input-label", "visible": "private answer"},
+        {"event_seq": 4, "kind": "tool_dispatch", "time": "2026-10-06T00:00:04Z", "tool": "input-tool", "args": {"secret": "private args"}},
+    ]
+    (trace / "events.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    (trace / "facts.json").write_text("{not required for public milestones")
+    view = build_research_activity(run, limit=3)
+    assert [item["kind"] for item in view["timeline"]] == ["tool_dispatch", "model_response"]
+    assert view["timeline"][0]["event_id"] == "loop:agent_traces/coding/authored-events/events.jsonl:4"
+    assert view["timeline"][0]["payload"] == {"tool": "input-tool"}
+    assert "private" not in json.dumps(view) and "visible" not in json.dumps(view)
+    assert not build_research_activity(run, limit=0)["timeline"]

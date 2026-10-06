@@ -13,7 +13,8 @@ import { RunRecoveryControl } from "./RunRecoveryControl";
 import { CodeChangesCard } from "./CodeChangesCard";
 import { ResearchRunWorkspace } from "./ResearchRunWorkspace";
 import { openRunConversation } from "@/lib/runConversation";
-import { latestStages } from "@/lib/runReview";
+import { latestStages, pendingReviewStage } from "@/lib/runReview";
+import { showCompletedCodeChanges } from "@/lib/completedCodeChanges";
 import { validateConversationScope } from "@/lib/conversationHistory";
 import { ConversationHistoryDialog, useConversationHistory } from "./ConversationHistory";
 
@@ -164,8 +165,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
         {runProcessing && !hasRunProgress ? <ActivityGroup activities={[]} processing startedAt={activity.run?.created_at} research /> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
-        {conversation?.linked_run_id && Object.keys(activity.run?.states ?? {}).some(key => key === "coding" || key.startsWith("coding_attempt_")) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
-        {conversation?.linked_run_id ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
+        {conversation?.linked_run_id && !activity.error && !pollError && showCompletedCodeChanges(activity.run) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
+        {conversation?.linked_run_id && (!activity.run || pendingReviewStage(activity.run) === null) ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
         {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}?view=advanced`} className="text-xs text-slate-400 hover:text-indigo-300">查看详细运行记录 →</Link> : null}
         <div ref={bottom} />
       </div>
