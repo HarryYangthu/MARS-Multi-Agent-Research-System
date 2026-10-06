@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import socket
 from pathlib import Path
 from typing import Any
@@ -11,13 +10,15 @@ from typing import Any
 import pytest
 import yaml
 
-from app.harness.agent_loop.executor import budget_message
+from app.harness.agent_loop.executor import LoopInput, NativeAgentLoop, budget_message
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.llm.accounting import (
-    ModelConcurrencyBusy, ResourceBudgetError, RunModelBudget, guarded_complete, run_resource_scope,
+    ResourceBudgetError, RunModelBudget, guarded_complete, run_resource_scope,
 )
 from app.harness.llm.openai_provider import CustomEndpointProvider
 from app.harness.llm.provider_base import LLMConfig, Message
+from app.harness.schema.validator import validate_document
+from app.harness.tools.registry import ToolContext, ToolRegistry
 
 
 @pytest.mark.asyncio
@@ -73,27 +74,40 @@ def test_completion_mode_removes_local_quotas_without_resetting_counts() -> None
         AgentLoopPolicy.from_mapping({'completion_driven': 'true'})
 
 
-def test_existing_exhausted_ledger_is_retained_and_concurrency_still_enforced(tmp_path: Path) -> None:
-    budget = RunModelBudget(tmp_path, configuration=policy(), completion_driven=True)
-    original = budget.recovery_snapshot(); original['started_at'] = 0
-    budget.path.parent.mkdir(parents=True, exist_ok=True)
-    budget.path.write_text(json.dumps(original))
-    config = LLMConfig(provider='custom', model='ledger-only', max_tokens=32, max_retries=2)
-    messages = [Message(role='user', content='Caller-authored accounting input, no model is invoked.')]
-    for _ in range(65):
-        reservation = budget.reserve(messages, config, {})
-        with pytest.raises(ModelConcurrencyBusy):
-            budget.reserve(messages, config, {})
-        budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+@pytest.mark.parametrize('completion_driven', [False, True])
+def test_coding_and_execution_share_request_limit_without_reset(tmp_path: Path, completion_driven: bool) -> None:
+    configuration = policy()
+    configuration['limits'].update(max_elapsed_seconds=100)
+    messages = [Message('user', 'Accounting only; no provider invoked.')]
+    config = LLMConfig(provider='custom', model='ledger-only', max_tokens=32, max_retries=0)
+    coding = RunModelBudget(tmp_path, configuration=configuration, completion_driven=completion_driven)
+    reservation = coding.reserve(messages, config, {'agent': 'coding'})
+    coding.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = coding.path.read_bytes()
+    for mode in (False, True):
+        with pytest.raises(ResourceBudgetError, match='model-request budget'):
+            RunModelBudget(tmp_path, configuration=configuration, completion_driven=mode).reserve(
+                messages, config, {'agent': 'execution'})
+        assert coding.path.read_bytes() == before
+
+
+@pytest.mark.parametrize('limit,error', [('max_total_tokens', 'total-token'),
+    ('max_input_tokens', 'input-token'), ('max_billed_output_tokens', 'output-token'),
+    ('max_cost', 'explicit prices'), ('max_elapsed_seconds', 'elapsed-time')])
+def test_completion_mode_cannot_bypass_run_limit(tmp_path: Path, limit: str, error: str) -> None:
+    configuration = policy()
+    configuration['limits'].update(max_model_requests=10, max_total_tokens=100000,
+        max_input_tokens=100000, max_billed_output_tokens=100000, max_elapsed_seconds=100)
+    configuration['limits'][limit] = 1
+    budget = RunModelBudget(tmp_path, configuration=configuration, completion_driven=True, token_mode='limited')
     state = budget.recovery_snapshot()
-    assert state['started_at'] == 0 and len(state['requests']) == 65
-    assert sum(row['charged_attempts'] for row in state['requests'].values()) == 195
-    assert all(row['execution_mode'] == 'completion_driven' for row in state['requests'].values())
-    assert all(row['charged_tokens'] == row['reserved_tokens'] > 1 for row in state['requests'].values())
-    assert math.isinf(budget.remaining_seconds())
+    state['started_at'] = 0 if limit == 'max_elapsed_seconds' else state['started_at']
+    budget.path.parent.mkdir(parents=True, exist_ok=True)
+    budget.path.write_text(json.dumps(state))
     before = budget.path.read_bytes()
-    with pytest.raises(ResourceBudgetError):
-        RunModelBudget(tmp_path, configuration=policy(), completion_driven=False).reserve(messages, config, {})
+    with pytest.raises(ResourceBudgetError, match=error):
+        budget.reserve([Message('user', 'Quota arithmetic only')],
+            LLMConfig(provider='custom', model='ledger-only', max_tokens=32, max_retries=0), {})
     assert budget.path.read_bytes() == before
 
 
@@ -145,3 +159,39 @@ async def test_real_connection_failure_keeps_receipt_in_completion_scope(tmp_pat
     rows = list(RunModelBudget(tmp_path).recovery_snapshot()['requests'].values())
     assert len(rows) == 1 and rows[0]['execution_mode'] == 'completion_driven'
     assert rows[0]['status'] == 'failed' and rows[0]['charged_tokens'] > 0
+
+
+async def validate_run_log(text: str, observations: list[dict[str, Any]]) -> list[str]:
+    return [error.message for error in validate_document(text, expected_schema='run_log.v1').errors]
+
+
+@pytest.mark.asyncio
+async def test_native_loop_reports_budget_block_without_sending_or_refunding(tmp_path: Path) -> None:
+    budget = RunModelBudget(tmp_path)
+    limit = budget.configuration['limits']['max_model_requests']
+    assert type(limit) is int
+    for _ in range(limit):
+        reservation = budget.reserve([Message('user', 'Admission arithmetic only')],
+            LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
+        budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    with socket.socket() as unavailable:
+        unavailable.bind(('127.0.0.1', 0))
+        provider = CustomEndpointProvider(api_key='local-failure-only',
+            base_url=f'http://127.0.0.1:{unavailable.getsockname()[1]}/v1')
+        request = LoopInput(messages=[Message('user', 'Budget should stop before the provider')],
+            provider=provider, config=LLMConfig(provider='custom', model='not-called', max_tokens=8, max_retries=2),
+            registry=ToolRegistry(), tools=(), tool_context=ToolContext(run_id='quota-check', project='pimc',
+                agent='execution', extra={'run_root': str(tmp_path)}),
+            policy=AgentLoopPolicy(completion_driven=True), trace_root=tmp_path / 'trace', validate=validate_run_log)
+        try:
+            result = await asyncio.wait_for(NativeAgentLoop().run(request), 5)
+        finally:
+            await provider.close()
+    assert result.status == 'budget_exhausted' and 'model-request budget' in result.resource_error
+    assert result.counts['sdk_attempts'] == result.counts['model_responses'] == result.counts['tool_dispatches'] == 0
+    checkpoint = json.loads((tmp_path / 'trace/checkpoint.json').read_text())
+    assert checkpoint['resource_error'] == result.resource_error and checkpoint['pending'] is None
+    error = ResourceBudgetError(result.resource_error)
+    assert error.reason == {'code': 'resource_budget_blocked', 'request_sent': False}
+    assert budget.path.read_bytes() == before

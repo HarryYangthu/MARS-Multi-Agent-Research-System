@@ -4,11 +4,15 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import yaml
 
 from app.agents.idea.agent import IdeaAgent
+from app.agents.coding.agent import CodingAgent
+from app.agents.execution.agent import ExecutionAgent
+from app.agents.writing.agent import WritingAgent
 from app.bridge.agent_registry import AgentRegistry
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.run_recovery import recover_run, recovery_status
@@ -167,3 +171,34 @@ def test_commander_recovery_tools_are_configured() -> None:
     for name in ('run.recovery_status', 'run.recover'):
         assert name in TOOLS and name in agents['commander']['tools']
         assert tools['tools'][name]['enabled'] and tools['tools'][name]['bridge_only']
+
+
+@pytest.mark.parametrize('stage', ['coding', 'execution', 'writing'])
+def test_retry_reservation_and_completion_mode_use_same_budget_after_restart(
+    tmp_path: Path, stage: Literal['coding', 'execution', 'writing'],
+) -> None:
+    registry = AgentRegistry()
+    for agent_type in (CodingAgent, ExecutionAgent, WritingAgent):
+        agent = agent_type()
+        registry.register(agent.name, agent)
+    store = RunStore(tmp_path)
+    orch = Orchestrator(run_store=store, registry=registry, bus=InProcessEventBus())
+    session = orch.create_session(RunRequest(task='shared-budget-admission', project='pimc',
+                                          entrypoint=stage, standalone=True))
+    session.graph.restore_state(stage, NodeState.FAILED)
+    orch._persist_state(session, status='failed')
+    budget = RunModelBudget(session.run.root, completion_driven=True)
+    limit = budget.configuration['limits']['max_model_requests']
+    assert type(limit) is int
+    # Use real reservations/cancellations to leave one slot. No model is called.
+    for _ in range(limit - 1):
+        reservation = budget.reserve([Message('user', 'Accounting admission only')],
+            LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
+        budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    for instance in (orch, Orchestrator(run_store=store, registry=registry, bus=InProcessEventBus())):
+        view = recovery_status(instance, session.run.run_id, project='pimc')
+        assert view['status'] == 'blocked' and not view['actions']
+        assert f'已计入 {limit - 1} 次' in view['message'] and '预留 3 次' in view['message']
+        assert instance.owned_tasks.active(session.run.run_id) is None
+        assert budget.path.read_bytes() == before

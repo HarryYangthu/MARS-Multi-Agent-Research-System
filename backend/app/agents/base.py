@@ -541,6 +541,9 @@ class BaseAgent(ABC):
         request.runtime["observations"] = result.observations
         context.metadata["reflection_accepted"] = result.reflection_accepted
         if result.status != "passed":
+            if result.status == "budget_exhausted" and result.resource_error:
+                from app.harness.llm.accounting import ResourceBudgetError
+                raise ResourceBudgetError(result.resource_error)
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,
                                                          model=config.model, debate_role=debate_role))

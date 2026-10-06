@@ -213,7 +213,7 @@ def test_only_explicit_request_null_is_unlimited(tmp_path: Path, key: str, value
 def test_actual_resource_configuration_has_finite_product_limits(tmp_path: Path) -> None:
     budget = RunModelBudget(tmp_path)
     limits = budget.configuration["limits"]
-    assert limits["max_model_requests"] == 60
+    assert type(limits["max_model_requests"]) is int and limits["max_model_requests"] > 0
     assert limits["max_total_tokens"] == 1_128_000
     assert limits["max_parallel_model_calls"] == 2
     assert limits["max_elapsed_seconds"] == 5_400

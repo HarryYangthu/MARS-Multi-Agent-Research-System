@@ -41,6 +41,11 @@ jobs:
         env:
           PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
         run: pytest backend/tests projects/synthetic_regression/tests -q
+      - name: Research failure and recovery regressions
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: |
+          pytest -q backend/tests/unit/test_coding_approval.py backend/tests/unit/test_completed_code_changes.py backend/tests/unit/test_completion_driven.py backend/tests/unit/test_run_recovery.py backend/tests/unit/test_model_accounting.py backend/tests/unit/test_model_attempt_budget.py backend/tests/unit/test_loop_generation_resume.py
       - name: Strict mypy
         env:
           MYPYPATH: .:backend:posttrain/src:projects/synthetic_regression/src

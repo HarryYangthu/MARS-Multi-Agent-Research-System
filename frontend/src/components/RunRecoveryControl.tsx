@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getRunRecovery, recoverRun, type RecoveryAction, type RunRecovery } from "@/lib/api";
-import { CLIENT_POLICY, isUncertainRequestError } from "@/lib/clientPolicy";
+import { CLIENT_POLICY } from "@/lib/clientPolicy";
+import { reviewResultUncertain } from "@/lib/apiError";
 import { agentLabel } from "@/lib/researchActivity";
 
 export function RunRecoveryControl({ runId, project, disabled = false }: { runId: string; project: string; disabled?: boolean }): JSX.Element | null {
@@ -46,8 +47,10 @@ export function RunRecoveryControl({ runId, project, disabled = false }: { runId
       if (mounted.current) { setMessage(result.message); setView(null); setRevision(value => value + 1); }
     } catch (cause: unknown) {
       if (mounted.current) {
-        setMessage(isUncertainRequestError(cause) ? "连接中断，恢复请求是否生效尚未确认。请核对状态，勿重复提交。" : cause instanceof Error ? cause.message : "恢复未启动");
-        setUncertain(true);
+        const unknown = reviewResultUncertain(cause, true);
+        setMessage(unknown ? "连接中断，恢复请求是否生效尚未确认。请核对状态，勿重复提交。" : cause instanceof Error ? cause.message : "恢复未启动");
+        setUncertain(unknown);
+        if (!unknown) { setView(null); setRevision(value => value + 1); }
       }
     } finally { submitting.current = false; if (mounted.current) setBusy(false); }
   }

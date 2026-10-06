@@ -11,8 +11,9 @@ from app.bridge.task_runtime import resumable_task, task_contract_path
 from app.bridge.research_run_service import research_execution_admission, load_run_research_contract
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.accounting import (
-    ResourceBudgetError, RunModelBudget, charged_model_attempts, charged_token_component,
+    ResourceBudgetError, RunModelBudget, charged_token_component, model_request_capacity,
 )
+from app.harness.llm.provider_base import MAX_LLM_RETRIES
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
 from app.harness.runtime.task_contract import TaskEnvelope
 
@@ -47,9 +48,6 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         return finish('idle', '')
     agents = [orch.registry.get(parse_node_key(node).stage) for node in candidates]
     legacy = load_run_research_contract(session.run, session.request.extra) is None
-    completion_driven = legacy and all(getattr(getattr(agent, 'loop_policy', None), 'completion_driven', False)
-                                       for agent in agents)
-    evidence.append({'completion_driven': completion_driven})
     # Unknown remote calls cannot be converted into a new attempt by clicking retry.
     ledger = session.run.root / 'resources/model_budget.v1.json'
     elapsed_exhausted = False
@@ -66,8 +64,18 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
         rows = list(raw['requests'].values())
         limits = raw['configuration']['limits']
-        exhausted = (limits['max_model_requests'] is not None
-                     and sum(charged_model_attempts(row) for row in rows) >= limits['max_model_requests'])
+        # Do not offer retry when even the next call's SDK retries cannot fit.
+        # A completion-driven loop never exempts its Agent from the run budget.
+        capacities = [model_request_capacity(raw, getattr(getattr(agent, 'config', None),
+                       'max_retries', MAX_LLM_RETRIES)) for agent in agents]
+        evidence.append([{'used': item.used, 'limit': item.limit, 'required': item.required}
+                         for item in capacities])
+        for capacity in capacities:
+            if not capacity.available:
+                return finish('blocked', f'累计调用预算不足：已计入 {capacity.used} 次，上限 {capacity.limit} 次，'
+                    f'下一次调用需预留 {capacity.required} 次（含网络重试）。进度已保留，'
+                    '请调整并核对预算后继续；刷新和重试不会清空已有用量。')
+        exhausted = False
         if model_budget.token_mode == 'limited':
             exhausted = exhausted or sum(row['charged_tokens'] for row in rows) >= limits['max_total_tokens']
             for component, limit in (('input', 'max_input_tokens'), ('output', 'max_billed_output_tokens')):
@@ -76,9 +84,9 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         if limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
-        if exhausted and not completion_driven:
+        if exhausted:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
-        elapsed_exhausted = (not completion_driven and
+        elapsed_exhausted = (
             time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
     if legacy:
         for agent in agents:

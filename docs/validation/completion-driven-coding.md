@@ -2,6 +2,12 @@
 
 Validated locally on 2026-09-29.
 
+**2026-10-06 correction:** the aggregate-quota exemption described below was a
+defect: Coding could overrun the same ledger enforced by the next Agent. It has
+been removed. Completion-driven now controls only local loop counters; all roles
+obey run request/time/cost limits and the configured token policy. Historical
+receipts remain unchanged. See [research-flow regressions](research-flow-regressions.md).
+
 ## Behavior
 
 `coding.loop.completion_driven: true` changes Coding's stopping policy to validated delivery, a real execution blocker, or user cancellation. It removes fixed model-call, tool-dispatch and validation-repair counters. Generic run accounting no longer rejects this scoped execution because of aggregate request, token, cost or elapsed-time ceilings. Counters and actual/conservative usage receipts continue to accumulate; existing charges are never reset.

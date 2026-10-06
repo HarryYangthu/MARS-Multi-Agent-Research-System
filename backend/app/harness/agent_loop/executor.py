@@ -93,6 +93,7 @@ class LoopResult:
     counts: dict[str, int]
     trace_root: Path
     reflection_accepted: bool = False
+    resource_error: str = ""
 
 
 class AgentLoopExecutor(Protocol):
@@ -104,7 +105,11 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     remaining = {"model_calls": policy.remaining_model_calls(counts["model_requests"]),
                  "tool_calls": policy.remaining_tool_calls(counts["tool_dispatches"]),
                  "validation_repairs": None if policy.completion_driven else max(0, policy.max_validation_repairs - counts["validation_repairs"])}
-    return remaining_budget_message(remaining)
+    message = remaining_budget_message(remaining)
+    return Message(message.role, message.content +
+        "\nThese are local loop counters only. The shared run request/time/cost limits "
+        "still apply to every Agent and child task, including completion-driven loops. "
+        "Never interpret an unlimited local counter as permission to bypass the shared run budget.")
 
 
 def permits_fresh_read(policy: ToolPolicy) -> bool:
@@ -364,6 +369,7 @@ class NativeAgentLoop:
             if state["pending"] == "model":
                 state["usage_complete"] = False
             state["status"] = "running"
+            state.pop("resource_error", None)
             state["pending"] = None
         state.setdefault("review_issues", [])
         state.setdefault("validation_issues", [])
@@ -635,6 +641,7 @@ class NativeAgentLoop:
                 except ResourceBudgetError as exc:
                     state["status"] = "budget_exhausted"
                     state["pending"] = None
+                    state["resource_error"] = str(exc)
                     trace.emit("resource_budget_exhausted", {"reason": str(exc), "request_sent": False})
                     break
                 except Exception as exc:
@@ -924,4 +931,4 @@ class NativeAgentLoop:
             cfg.attempt_observer = None
             await progress("finished", status=state["status"], reason=state.get("termination", {}).get("reason", ""))
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
-                          request.trace_root, state["reflection_accepted"])
+                          request.trace_root, state["reflection_accepted"], state.get("resource_error", ""))

@@ -33,6 +33,10 @@ _RUN_ROOT: ContextVar[Path | None] = ContextVar("mars_model_budget_root", defaul
 class ResourceBudgetError(RuntimeError):
     """No model request was sent because the run's hard limit was reached."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.reason = {"code": "resource_budget_blocked", "request_sent": False}
+
 
 class ModelConcurrencyBusy(ResourceBudgetError):
     pass
@@ -97,6 +101,33 @@ def charged_model_attempts(row: Mapping[str, Any]) -> int:
             or charged < maximum and row.get("attempts_complete") is not True):
         raise ResourceBudgetError("invalid model-attempt reservation record")
     return int(charged)
+
+
+@dataclass(frozen=True)
+class ModelRequestCapacity:
+    used: int
+    limit: int | None
+    required: int
+
+    @property
+    def available(self) -> bool:
+        return self.limit is None or self.used + self.required <= self.limit
+
+    def require(self) -> None:
+        if not self.available:
+            raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts "
+                f"(used={self.used}, limit={self.limit}, required={self.required})")
+
+
+def model_request_capacity(state: Mapping[str, Any], max_retries: int) -> ModelRequestCapacity:
+    """Admission and recovery use the same worst-case SDK-attempt reservation."""
+    if type(max_retries) is not int:
+        raise ValueError("max_retries must be an integer")
+    return ModelRequestCapacity(
+        used=sum(charged_model_attempts(row) for row in state["requests"].values()),
+        limit=state["configuration"]["limits"]["max_model_requests"],
+        required=min(max(max_retries, 0), MAX_LLM_RETRIES) + 1,
+    )
 
 
 def charged_token_component(row: Mapping[str, Any], component: str) -> int:
@@ -194,8 +225,8 @@ class RunModelBudget:
             return self._remaining_seconds(self._read(), time.time())
 
     def _remaining_seconds(self, state: dict[str, Any], now: float) -> float:
-        if self.completion_driven:
-            return math.inf
+        # Completion-driven controls local loop counters only. All roles and
+        # inherited tasks obey the same durable run limits, including Coding.
         limit = float(state['configuration']['limits']['max_elapsed_seconds'])
         if not self.active_model_time:
             start = _number(state.get('revision_started_at', state['started_at']), 'budget start time')
@@ -348,21 +379,18 @@ class RunModelBudget:
             if self.active_model_time:
                 state['elapsed_clock'] = 'cumulative_model_activity'
             rows = list(state["requests"].values())
-            if not self.completion_driven:
-                if (limits["max_model_requests"] is not None
-                        and sum(charged_model_attempts(row) for row in rows) + attempts > limits["max_model_requests"]):
-                    raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts")
-                if self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
-                    raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
-                for component, key, amount in (("input", "max_input_tokens", reserved_input),
-                                               ("output", "max_billed_output_tokens", reserved_output)):
-                    if self.token_mode == 'limited' and key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
-                        raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
-                if limits.get("max_cost") is not None:
-                    if cost is None or any(row["charged_cost"] is None for row in rows):
-                        raise ResourceBudgetError("monetary limit requires explicit prices for every selected model")
-                    if sum(row["charged_cost"] for row in rows) + cost > limits["max_cost"]:
-                        raise ResourceBudgetError("run monetary reservation exceeds remaining budget")
+            model_request_capacity(state, config.max_retries).require()
+            if self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
+                raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
+            for component, key, amount in (("input", "max_input_tokens", reserved_input),
+                                           ("output", "max_billed_output_tokens", reserved_output)):
+                if self.token_mode == 'limited' and key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
+                    raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
+            if limits.get("max_cost") is not None:
+                if cost is None or any(row["charged_cost"] is None for row in rows):
+                    raise ResourceBudgetError("monetary limit requires explicit prices for every selected model")
+                if sum(row["charged_cost"] for row in rows) + cost > limits["max_cost"]:
+                    raise ResourceBudgetError("run monetary reservation exceeds remaining budget")
             if sum(row["status"] == "in_flight" for row in rows) >= limits["max_parallel_model_calls"]:
                 raise ModelConcurrencyBusy("run model concurrency slots are occupied")
             state["requests"][identifier] = {"status": "in_flight", "started_at": time.time(),
