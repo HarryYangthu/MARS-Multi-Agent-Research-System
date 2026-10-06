@@ -79,6 +79,8 @@ jobs:
           node .tmp/conversation-history/scripts/conversation-history-smoke.js
           npx tsc --outDir .tmp/review-prompt --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/review-prompt-smoke.ts
           node .tmp/review-prompt/scripts/review-prompt-smoke.js
+          npx tsc --outDir .tmp/review-submission --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/review-submission-smoke.ts
+          node .tmp/review-submission/scripts/review-submission-smoke.js
           npx tsc --outDir .tmp/literature-evidence --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/literature-evidence-smoke.ts
           node .tmp/literature-evidence/scripts/literature-evidence-smoke.js
           npx tsc --outDir .tmp/code-change-markers --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/code-change-markers-smoke.ts

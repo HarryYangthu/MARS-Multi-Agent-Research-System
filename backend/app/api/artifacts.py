@@ -337,11 +337,34 @@ def _extract_diff_paths(diff: str) -> list[str]:
 
 
 async def _apply_patch_or_raise(run_id: str, version: str) -> None:
+    from app.bridge.coding_approval import verify_written_code
+    from app.bridge.research_branch import research_branch_scope
+
     store = get_run_store()
     run = store.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     normalized = version if version.startswith("v") else f"v{version}"
+    # Native and ZCode implementations can use governed file writes instead
+    # of a patch. Re-enter the persisted run branch for both verification and
+    # legacy patch application; the project's baseline stays read-only.
+    try:
+        with research_branch_scope(run, "coding"):
+            spec = _resolve(run_id, "coding", "code_spec", normalized)
+            text = spec.read_text(encoding="utf-8")
+            if verify_written_code(run, text):
+                return
+            await _apply_unwritten_patch(run_id, normalized)
+            if not verify_written_code(run, text):
+                raise ValueError("没有可核验的实际代码改动，未批准。")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _apply_unwritten_patch(run_id: str, normalized: str) -> None:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
     patch_path = run.subdir("coding") / f"patch.{normalized}.diff"
     if not patch_path.exists():
         raise HTTPException(

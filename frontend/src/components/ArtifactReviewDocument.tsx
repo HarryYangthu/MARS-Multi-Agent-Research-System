@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getRun, getArtifact, listVersions, approveArtifact, rejectArtifact, STAGE_TO_STEM, type ArtifactView, type RunDetail, type Stage } from "@/lib/api";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
+import { reviewResultUncertain } from "@/lib/apiError";
 import { statusLabel } from "@/lib/researchActivity";
 import { artifactBody, latestStages } from "@/lib/runReview";
 import { ResearchEvidencePanel } from "./ResearchEvidencePanel";
@@ -19,6 +20,7 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
   const [artifact, setArtifact] = useState<ArtifactView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reviewError, setReviewError] = useState("");
   const [feedback, setFeedback] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
   useEffect(() => { onBusy?.(busy); }, [busy, onBusy]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    setUncertain(false); setLoading(true); setArtifact(null);
+    setUncertain(false); setReviewError(""); setLoading(true); setArtifact(null);
     let active = true, reading = false;
     const read = async (): Promise<void> => {
       if (reading || locked.current) return;
@@ -48,7 +50,8 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
   const canReview = reviewActions && state === "waiting_review" && !!artifact && !run.read_only && !stale && !error && !busy && !loading && !uncertain;
   async function review(action: "approve" | "revise"): Promise<void> {
     if (!canReview || !artifact || (action === "approve" && !artifact.valid) || locked.current || (action === "revise" && !reason.trim())) return;
-    locked.current = true; setBusy(true);
+    locked.current = true; setBusy(true); setReviewError("");
+    let submitted = false;
     try {
       const [freshRun, versions] = await Promise.all([getRun(run.run_id), listVersions(run.run_id, stage, artifact.stem)]);
       if (freshRun.read_only || latestStages(freshRun).find(item => item.stage === stage)?.state !== "waiting_review" || versions.at(-1)?.version !== artifact.version) {
@@ -56,14 +59,15 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
       }
       const current = await getArtifact(run.run_id, stage, artifact.stem, artifact.version);
       if (current.text !== artifact.text) throw new Error("文档内容已更新，请刷新后重新审核。");
+      submitted = true;
       if (action === "approve") await approveArtifact(run.run_id, stage, artifact.stem, artifact.version);
       else await rejectArtifact(run.run_id, stage, artifact.stem, reason.trim());
       onNotice(action === "approve" ? "已批准，任务状态将继续更新。" : "已提交修改意见，正在等待新版文档。");
       if (alive.current) { setFeedback(false); setUncertain(true); }
-      await onChanged();
+      try { await onChanged(); } catch { onNotice(action === "approve" ? "已批准，页面状态暂时无法更新，正在等待同步。" : "修改意见已提交，页面状态暂时无法更新，正在等待同步。"); }
       if (alive.current) onReviewed?.();
     } catch (cause: unknown) {
-      if (alive.current) { setUncertain(true); setError(cause instanceof Error ? cause.message : "操作结果待核对，请刷新任务。"); }
+      if (alive.current) { setUncertain(reviewResultUncertain(cause, submitted)); setReviewError(cause instanceof Error ? cause.message : "操作结果待核对，请核对任务状态。"); }
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   return <section aria-label={TITLES[stage]} className="overflow-clip rounded-xl border border-mars-border bg-mars-panel/20">
@@ -84,7 +88,9 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
     {stage === "idea" ? <ResearchEvidencePanel runId={run.run_id} project={run.project} version={artifact?.version ?? ""} active={state === "running"} /> : null}
     </div>
     {reviewActions && state === "waiting_review" ? <div className="sticky bottom-0 border-t border-mars-border bg-mars-panel px-5 py-4">
-      {feedback ? <form onSubmit={event => { event.preventDefault(); void review("revise"); }}><label className="text-sm" htmlFor="review-feedback">需要修改什么？</label><textarea id="review-feedback" value={reason} onChange={event => setReason(event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-mars-border bg-mars-bg p-3 text-sm" /><div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setFeedback(false)} className={button}>取消</button><button disabled={!canReview || !reason.trim()} className={`${button} bg-mars-accent text-white`}>提交修改意见</button></div></form> : <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-slate-400">{busy ? "正在提交…" : uncertain ? "操作已提交或结果待核对，请刷新查看状态。" : artifact && !artifact.valid ? "文档校验未通过" : "审核后继续下一阶段"}</span><div className="flex gap-2"><button disabled={!canReview} onClick={() => setFeedback(true)} className={button}>提出修改</button><button disabled={!canReview || !artifact?.valid} onClick={() => void review("approve")} className={`${button} border-transparent bg-mars-accent text-white`}>批准并继续</button></div></div>}
+      {reviewError ? <p role="alert" className="mb-3 text-sm text-amber-300">{reviewError}</p> : null}
+      {uncertain && !busy ? <button type="button" onClick={() => void onChanged().catch(() => onNotice("任务状态暂时无法读取，请稍后核对。"))} className={`${button} mb-3`}>核对任务状态</button> : null}
+      {feedback ? <form onSubmit={event => { event.preventDefault(); void review("revise"); }}><label className="text-sm" htmlFor="review-feedback">需要修改什么？</label><textarea id="review-feedback" value={reason} onChange={event => setReason(event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-mars-border bg-mars-bg p-3 text-sm" /><div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setFeedback(false)} className={button}>取消</button><button disabled={!canReview || !reason.trim()} className={`${button} bg-mars-accent text-white`}>提交修改意见</button></div></form> : <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-slate-400">{busy ? "正在提交…" : uncertain ? "提交结果暂未确认，正在核对；不会重复提交。" : reviewError ? "审核未完成，请根据提示处理后重试。" : artifact && !artifact.valid ? "文档校验未通过" : "审核后继续下一阶段"}</span><div className="flex gap-2"><button disabled={!canReview} onClick={() => setFeedback(true)} className={button}>提出修改</button><button disabled={!canReview || !artifact?.valid} onClick={() => void review("approve")} className={`${button} border-transparent bg-mars-accent text-white`}>批准并继续</button></div></div>}
     </div> : null}
     {!collapsed ? <div className="flex justify-end border-t border-mars-border px-5 py-3 text-xs text-slate-500"><Link href={advanced} className="hover:text-indigo-300">编辑文档与查看细节 →</Link></div> : null}
   </section>;

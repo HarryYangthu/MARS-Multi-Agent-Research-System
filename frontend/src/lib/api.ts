@@ -1,4 +1,5 @@
 import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
+import { ApiError } from "./apiError";
 
 // Thin REST client. By default requests stay same-origin and Next rewrites
 // /api/* to the backend; NEXT_PUBLIC_BACKEND_URL remains available for
@@ -1078,7 +1079,7 @@ function errorDetailText(status: number, body: string): string {
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   if (!r.ok) {
     const text = await r.text();
-    throw new Error(errorDetailText(r.status, text));
+    throw new ApiError(errorDetailText(r.status, text), r.status);
   }
   return (await r.json()) as T;
 }
@@ -1396,7 +1397,7 @@ export async function approveArtifact(
   version: string,
 ): Promise<ArtifactView> {
   return jsonOrThrow(
-    await fetch(
+    await boundedFetch(
       `${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/${version}/approve`,
       { method: "POST" },
     ),
@@ -1409,7 +1410,7 @@ export async function rejectArtifact(
   reason: string,
 ): Promise<{ status: string }> {
   return jsonOrThrow(
-    await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/reject`, {
+    await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/${stem}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason }),
