@@ -14,6 +14,8 @@ import { CodeChangesCard } from "./CodeChangesCard";
 import { ResearchRunWorkspace } from "./ResearchRunWorkspace";
 import { openRunConversation } from "@/lib/runConversation";
 import { latestStages } from "@/lib/runReview";
+import { validateConversationScope } from "@/lib/conversationHistory";
+import { ConversationHistoryDialog, useConversationHistory } from "./ConversationHistory";
 
 const storageKey = (project: string, experimentId?: string): string =>
   experimentId ? `mars.commander.conv.${project}.exp.${experimentId}` : `mars.commander.conv.${project}`;
@@ -27,7 +29,7 @@ function remember(project: string, id: string | null, experimentId?: string): vo
   } catch { /* The current conversation still works without browser storage. */ }
 }
 
-export function ResearchConversation({ project, name, experimentId, initialRunId }: { project: string; name: string; experimentId?: string; initialRunId?: string }): JSX.Element {
+export function ResearchConversation({ project, name, experimentId, initialRunId, initialConversationId }: { project: string; name: string; experimentId?: string; initialRunId?: string; initialConversationId?: string }): JSX.Element {
   const router = useRouter();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
@@ -36,6 +38,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const history = useConversationHistory();
   const [pending, setPending] = useState<{ text: string; after: number; startedAt: string } | null>(null);
   const sending = useRef(false);
   const alive = useRef(true);
@@ -61,18 +65,19 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     alive.current = true;
     let active = true;
     setLoading(true);
-    const id = savedConversation(project, experimentId);
+    const id = initialConversationId || savedConversation(project, experimentId);
     if (!id && !initialRunId) { setLoading(false); return () => { alive.current = false; }; }
-    void (initialRunId ? openRunConversation(initialRunId, project, experimentId) : getConversation(id!)).then((value) => {
+    void (initialConversationId ? getConversation(initialConversationId) : initialRunId ? openRunConversation(initialRunId, project, experimentId) : getConversation(id!)).then((value) => {
       if (!active) return;
-      if (value.project !== project) throw new Error("历史对话所属项目不匹配，请新开对话。");
+      validateConversationScope(value, project, experimentId, initialConversationId);
+      if (initialRunId && value.linked_run_id !== initialRunId) throw new Error("对话与所选研究任务不匹配。");
       setConversation(value);
       remember(project, value.conv_id, value.experiment_id || experimentId);
     }).catch(() => {
       if (active) { setError("暂时无法恢复历史对话，请重新读取或新开对话。"); setNeedsRefresh(true); }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; alive.current = false; };
-  }, [project, experimentId, initialRunId]);
+  }, [project, experimentId, initialRunId, initialConversationId]);
 
   // Read actual persisted/in-flight Commander messages, including tool receipts.
   // Polling never sends the user's message again.
@@ -94,13 +99,14 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
 
   async function refresh(): Promise<void> {
-    const id = conversation?.conv_id || savedConversation(project, experimentId);
+    const id = initialConversationId || conversation?.conv_id || savedConversation(project, experimentId);
     if (sending.current) return;
     if (!id && !initialRunId) { setNeedsRefresh(false); setError(""); setPending(null); return; }
     setLoading(true);
     try {
-      const value = initialRunId ? await openRunConversation(initialRunId, project, experimentId) : await getConversation(id!);
-      if (value.project !== project) throw new Error("对话所属项目不匹配。");
+      const value = initialConversationId ? await getConversation(initialConversationId) : initialRunId ? await openRunConversation(initialRunId, project, experimentId) : await getConversation(id!);
+      validateConversationScope(value, project, experimentId, initialConversationId);
+      if (initialRunId && value.linked_run_id !== initialRunId) throw new Error("对话与所选研究任务不匹配。");
       if (alive.current) { remember(project, value.conv_id, value.experiment_id || experimentId); setConversation(value); setPending(null); setNeedsRefresh(false); setError(""); }
     } catch (cause: unknown) {
       if (alive.current) setError(cause instanceof Error ? cause.message : "读取失败，请稍后重试。");
@@ -135,7 +141,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
       <div className="flex gap-3 text-xs text-slate-400">
         <Link href="/runs" className="hover:text-white">研究记录</Link>
-        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); if (initialRunId) router.replace(experimentId ? `/runs/new?experiment=${encodeURIComponent(experimentId)}` : "/runs/new"); }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <button type="button" disabled={busy} onClick={() => { setHistoryOpen(true); void history.refresh(); }} className="hover:text-white disabled:opacity-40">历史对话</button>
+        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); if (initialRunId || initialConversationId) { const params = new URLSearchParams({ project }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); } }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
@@ -177,6 +184,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     </div>
     <ResearchAgentPanel run={activity.run} runId={conversation?.linked_run_id} activities={activity.activities} processing={processing} current={current} error={activity.error} updated={activity.updated} />
     </div>
+    {historyOpen ? <ConversationHistoryDialog project={project} name={name} experimentId={experimentId} rows={history.rows} loading={history.loading} error={history.error} currentId={conversation?.conv_id} onClose={() => setHistoryOpen(false)} onSelect={() => {}} onRefresh={history.refresh} /> : null}
   </section>;
 }
 
