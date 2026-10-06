@@ -1,0 +1,10 @@
+# ZCode runs as an owned process. All model and project operations go through MARS.
+command: [] # Optional argv prefix, e.g. ["/opt/zcode/bin/zcode"]. Never a shell string.
+rpc_timeout_seconds: 30
+active_timeout_seconds: 900
+max_model_calls: 24
+max_tool_calls: 40
+max_validation_repairs: 2
+max_request_bytes: 8388608
+max_protocol_line_bytes: 8388608
+max_observation_chars: 24000

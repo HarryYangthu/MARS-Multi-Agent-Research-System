@@ -15,6 +15,8 @@
 
 **Local research CLI:** [Run a bounded PIMC research loop](docs/cli-research.md) with `mars doctor`, `mars research`, `mars status`, and `mars resume`. Uses real models and an external static checkout; no frontend is required. A real capture is required for experimental acceptance.
 
+**ZCode coding engine:** [Installation, governed code tools, review and recovery](docs/zcode-integration.md). Select the engine in MARS Settings; model configuration and coding review stay in MARS.
+
 <p align="center">
   <img src="docs/assets/readme/mars-hero.png" alt="MARS Mars planet hero" width="100%" />
 </p>

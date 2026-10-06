@@ -342,7 +342,7 @@ class BaseAgent(ABC):
             await provider.close()
 
     def _messages_for_context(self, request: RunRequest, context: ContextPack, *,
-                              purpose: str) -> list[Message]:
+                              purpose: str, structured_delivery: bool = False) -> list[Message]:
         schema_path = repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")
         schema = json.loads(schema_path.read_text())
         output_instruction = (
@@ -353,7 +353,7 @@ class BaseAgent(ABC):
             "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
         )
         schema_instruction = output_instruction + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
-        if self.loop_policy.protocol == "native_tools" and self.native_structured_delivery:
+        if self.loop_policy.protocol == "native_tools" and (self.native_structured_delivery or structured_delivery):
             schema_instruction = (
                 "Submit the complete candidate with mars_submit_document. Its metadata argument must match "
                 + self.output_schema + ", whose JSON Schema is supplied in that function's parameters. "
@@ -472,7 +472,9 @@ class BaseAgent(ABC):
         return None
 
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
-                             debate_role: str | None = None) -> Artifact:
+                             debate_role: str | None = None,
+                             executor: AgentLoopExecutor | None = None,
+                             structured_schema: dict[str, Any] | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext
         from app.harness.tools.config import tool_config
         from app.harness.agent_loop.review import ExternalReview
@@ -516,8 +518,8 @@ class BaseAgent(ABC):
         except Exception:
             await provider.close()
             raise
-        result = await self._executor.run(LoopInput(
-            messages=self._messages_for_context(request, context, purpose="loop"),
+        result = await (executor or self._executor).run(LoopInput(
+            messages=self._messages_for_context(request, context, purpose="loop", structured_delivery=structured_schema is not None),
             provider=provider, config=config, registry=registry,
             review_provider=review[0] if review else None, review_config=review[1] if review else None,
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
@@ -531,7 +533,7 @@ class BaseAgent(ABC):
             required_review_tools=self.required_review_tools(request),
             stop_condition=self.loop_stop_condition(request),
             stop_contract_id=self.loop_stop_contract_id(request),
-            final_schema=self.submission_schema(request),
+            final_schema=structured_schema or self.submission_schema(request),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))

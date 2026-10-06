@@ -19,6 +19,7 @@ dependencies = [
   "jsonschema>=4.21",
   "python-frontmatter>=1.1",
   "httpx>=0.27",
+  "aiohttp>=3.11,<4", # Private loopback model/MCP bridge for the ZCode process.
   "redis>=5.0",
   "chromadb>=0.5",
   "numpy>=1.26",

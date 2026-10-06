@@ -301,6 +301,25 @@ class _OpenAICompatProvider(LLMProvider):
         )
         return self._completion_from_response(resp, config)
 
+    async def complete_wire(self, payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
+        """Forward an owned external harness request under guarded_complete.
+
+        Preserve the external harness's tool/history wire format. The caller
+        must reserve the entire payload and enforce model/tools/output limits.
+        SDK retries remain disabled; attempts use the same accounting observer.
+        Credentials never leave this selected provider.
+        """
+        from openai.types.chat import ChatCompletion
+
+        client = self._get_client()
+        response = await self._request_with_retries(
+            lambda: client.post("/chat/completions", body=payload, cast_to=ChatCompletion,
+                                options={"timeout": config.request_timeout_seconds}), config=config)
+        result = response.model_dump(exclude_none=True)
+        if not isinstance(result, dict):
+            raise ValueError("Invalid upstream completion envelope")
+        return result
+
     def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
         """Pure SDK-envelope parsing; it performs no model/service execution."""
         identity = ResponseModelIdentity()

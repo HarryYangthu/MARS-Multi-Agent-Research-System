@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     mars_execution_device: Literal["cpu", "gpu"] = "cpu"
     mars_coding_backend: Literal[
         "native_llm",
+        "zcode",
         "opencode",
         "codex",
         "claude_code",

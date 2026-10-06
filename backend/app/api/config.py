@@ -6,7 +6,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +16,7 @@ from app.harness.llm.model_registry import reset_cache_for_tests
 from app.settings import env_or_local, repo_root, set_runtime_env
 
 from app.bridge.model_connection_test import ConnectionTestRequest, ConnectionTestResult, probe_policy, test_model_connection
+from app.bridge.coding_backend_service import coding_backend_status, select_coding_backend
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -124,6 +125,27 @@ class AgentLlmUpdateRow(BaseModel):
 class AgentLlmUpdatePayload(BaseModel):
     agents: list[AgentLlmUpdateRow]
     actor: str = "frontend"
+
+
+class CodingBackendPayload(BaseModel):
+    backend: Literal["zcode", "native_llm"]
+
+
+@router.get("/coding-backend")
+async def get_coding_backend() -> dict[str, Any]:
+    return coding_backend_status()
+
+
+@router.post("/coding-backend")
+async def update_coding_backend(payload: CodingBackendPayload) -> dict[str, Any]:
+    try:
+        result = select_coding_backend(payload.backend,
+            persist=lambda: _write_local_env_values({"MARS_CODING_BACKEND": payload.backend}))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _write_audit_event({"event": "coding_backend.changed", "backend": payload.backend,
+                        "timestamp": datetime.now(tz=timezone.utc).isoformat()})
+    return result
 
 
 @router.get("", response_model=ConfigSnapshot)

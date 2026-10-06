@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import socket
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.llm.openai_provider import CustomEndpointProvider, LocalVllmProvider
 from app.harness.llm.post_training_loader import PostTrainingHandle, load_handle
 from app.harness.llm.provider_base import LLMConfig, LLMProvider
-from app.settings import env_or_local, get_settings
+from app.settings import env_or_local, get_settings, repo_root
 
 
 class CodingAgent(BaseAgent):
@@ -83,8 +84,22 @@ class CodingAgent(BaseAgent):
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:
         settings = get_settings()
+        # A persisted invocation chooses its recovery engine. A default change
+        # must never reinterpret a native checkpoint as a ZCode session.
+        backend = settings.mars_coding_backend
+        invocation = request.extra.get("resume_invocation")
+        if invocation:
+            root = Path(str(request.extra["run_root"]))
+            checkpoint = root / "agent_traces/coding" / str(invocation) / "checkpoint.json"
+            data = json.loads(checkpoint.read_text())
+            backend = "zcode" if data.get("backend") == "zcode" else "native_llm"
+        if backend == "zcode":
+            from app.harness.agent_loop.zcode.executor import ZCodeLoopExecutor
+            schema = json.loads((repo_root() / "backend/app/harness/schema/schemas/code_spec.v1.json").read_text())
+            schema["properties"]["project"] = {"type": "string", "const": request.project}
+            return await self._draft_via_llm(request, context, executor=ZCodeLoopExecutor(), structured_schema=schema)
         if (
-            settings.mars_coding_backend == "opencode"
+            backend == "opencode"
         ):
             adapter = OpenCodeAdapter()
             if not adapter.is_available():

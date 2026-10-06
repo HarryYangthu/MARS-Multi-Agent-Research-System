@@ -50,6 +50,7 @@ async def start_process(
     stderr: Any = asyncio.subprocess.PIPE,
     backend: str = "local_process", require_isolation: bool = False,
     credential_env: Mapping[str, str] | None = None,
+    stream_limit: int = 65536,
 ) -> asyncio.subprocess.Process:
     """Start a private group; env and credential_env must be host-owned.
 
@@ -65,7 +66,7 @@ async def start_process(
         "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     }
     return await asyncio.create_subprocess_exec(
-        *argv, cwd=cwd, env=child_env, stdin=stdin, stdout=stdout, stderr=stderr, **options,
+        *argv, cwd=cwd, env=child_env, stdin=stdin, stdout=stdout, stderr=stderr, limit=stream_limit, **options,
     )
 
 
