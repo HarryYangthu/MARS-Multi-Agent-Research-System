@@ -9,18 +9,21 @@ import { listRuns, type RunSummary } from "@/lib/api";
 import { useProject } from "@/lib/project";
 
 function ExperimentLab(): JSX.Element {
-  const { selectedProject, setSelectedProject, projects } = useProject();
+  const { selectedProject, setSelectedProject, projects, loading: projectLoading } = useProject();
   const search = useSearchParams();
   const router = useRouter();
   const runId = search?.get("run") || "";
   const routedProject = search?.get("project") || "";
   const project = routedProject || selectedProject;
   const projectLabel = projects.find((item) => item.name === project)?.display_name || project;
-  const previousProject = useRef(project);
+  const previousProject = useRef<string | null>(null);
   useEffect(() => {
-    if (previousProject.current !== project && !routedProject && runId) router.replace("/lab");
+    // Hydrating the saved project is not a user project switch. Keep deep-linked
+    // experiments until the provider has established the initial selection.
+    if (projectLoading || !project) return;
+    if (previousProject.current !== null && previousProject.current !== project && !routedProject && runId) router.replace("/lab");
     previousProject.current = project;
-  }, [project, routedProject, runId, router]);
+  }, [project, projectLoading, routedProject, runId, router]);
   useEffect(() => {
     if (routedProject) {
       if (routedProject !== selectedProject) setSelectedProject(routedProject);
@@ -30,6 +33,7 @@ function ExperimentLab(): JSX.Element {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    if (projectLoading || !project) return;
     let alive = true;
     const refresh = async (): Promise<void> => {
       try {
@@ -40,7 +44,7 @@ function ExperimentLab(): JSX.Element {
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
     return () => { alive = false; clearInterval(timer); };
-  }, [project]);
+  }, [project, projectLoading]);
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-mars-bg">
       <TopBar />
@@ -65,7 +69,9 @@ function ExperimentLab(): JSX.Element {
           </div>
         </header>
         {error ? <p role="alert" className="text-xs text-amber-200">{error}</p> : null}
-        <div className="min-h-0 flex-1"><TensorBoardPanel key={`${project}-${runId}`} project={project} runId={runId || undefined} fullHeight /></div>
+        <div className="min-h-0 flex-1">{projectLoading || !project
+          ? <p role="status" className="p-8 text-sm text-slate-400">正在加载项目…</p>
+          : <TensorBoardPanel key={`${project}-${runId}`} project={project} runId={runId || undefined} fullHeight />}</div>
       </main>
     </div>
   );

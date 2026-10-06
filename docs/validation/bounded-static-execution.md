@@ -53,3 +53,11 @@ coding work with explicitly labelled, user-authorized handoff repairs; it does
 not claim a fresh model-driven run of every upstream stage. Writing remains
 pending, including after restart. Local evidence lives under
 `runs/simulation-acceptance/`; external research code is not included here.
+
+The results/receipt/export checks passed 69 tests against the exact published
+source, including direct read-only validation of these real five training jobs.
+The experiment lab now waits for project hydration before interpreting a project
+change or opening TensorBoard. A browser refresh must retain a deep-linked run;
+an actual user project switch must still clear a run belonging to the old project.
+The browser acceptance checks cover persisted selection, real scalar curves and
+cancellation images. No new dependencies were added.
