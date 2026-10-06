@@ -7,12 +7,13 @@ import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
 import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
-import { conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
+import { activeActivityGroups, conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { RunRecoveryControl } from "./RunRecoveryControl";
 import { CodeChangesCard } from "./CodeChangesCard";
 import { ResearchRunWorkspace } from "./ResearchRunWorkspace";
 import { openRunConversation } from "@/lib/runConversation";
+import { latestStages } from "@/lib/runReview";
 
 const storageKey = (project: string, experimentId?: string): string =>
   experimentId ? `mars.commander.conv.${project}.exp.${experimentId}` : `mars.commander.conv.${project}`;
@@ -35,7 +36,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
-  const [pending, setPending] = useState<{ text: string; after: number } | null>(null);
+  const [pending, setPending] = useState<{ text: string; after: number; startedAt: string } | null>(null);
   const sending = useRef(false);
   const alive = useRef(true);
   const bottom = useRef<HTMLDivElement>(null);
@@ -45,6 +46,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
   const entries = conversationEntries(conversation?.messages ?? [], [...publicActivities, ...activity.activities]);
   const groups = groupConversationEntries(entries);
+  const latestUser = [...(conversation?.messages ?? [])].reverse().find(message => message.role === "user");
+  const pendingSaved = pending && conversation?.messages.slice(pending.after).some(message => message.role === "user" && message.content === pending.text);
+  const commanderStartedAt = pending && !pendingSaved ? pending.startedAt : latestUser?.timestamp;
+  const liveGroups = activeActivityGroups(groups, activity.run, processing, commanderStartedAt);
+  const hasCommanderProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent === "commander"));
+  const hasRunProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent !== "commander"));
+  const runProcessing = activity.run && latestStages(activity.run).some(stage => stage.state === "running");
   const lastEntry = entries.at(-1)?.id;
   const current = [...publicActivities].reverse().find(item => item.status === "running")?.title;
 
@@ -103,7 +111,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     const text = draft.trim();
     if (!text || sending.current || conversation?.processing || loading || needsRefresh) return;
     follow.current = true; sending.current = true; setBusy(true); setError("");
-    setPending({ text, after: conversation?.messages.length ?? 0 }); setDraft("");
+    setPending({ text, after: conversation?.messages.length ?? 0, startedAt: new Date().toISOString() }); setDraft("");
     try {
       const current = conversation || await createConversation(project, experimentId);
       remember(project, current.conv_id, experimentId);
@@ -121,7 +129,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   }
 
   const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
-  const showPending = pending && !conversation?.messages.slice(pending.after).some((message) => message.role === "user" && message.content === pending.text);
+  const showPending = pending && !pendingSaved;
   return <section aria-label="研究对话" className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
@@ -135,9 +143,18 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     <div onScroll={event => { const el = event.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6">
         {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending && !conversation?.linked_run_id ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
-        {groups.map((entry, index) => entry.kind === "message" ? <ResearchMessage key={entry.id} message={entry.message} /> : <ActivityGroup key={entry.id} activities={entry.activities} expanded={index === groups.length - 1 && (processing || Object.values(activity.run?.states ?? {}).includes("running"))} />)}
+        {groups.map(entry => {
+          if (entry.kind === "message") return <ResearchMessage key={entry.id} message={entry.message} />;
+          const research = entry.activities.some(item => item.id.startsWith("run:") || item.agent !== "commander");
+          const owners = liveGroups.get(entry.id);
+          // A bounded event window can drop its first row on every poll. Keep
+          // the live component stable so timers and manual disclosure survive.
+          const key = owners ? `live:${conversation?.conv_id}:${conversation?.linked_run_id}:${owners.join(":")}` : entry.id;
+          return <ActivityGroup key={key} activities={entry.activities} processing={!!owners} startedAt={research ? activity.run?.created_at : undefined} research={research} />;
+        })}
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
-        {processing ? <p role="status" className="text-sm text-indigo-300">{current || "正在处理本次请求…"}</p> : null}
+        {processing && !hasCommanderProgress ? <ActivityGroup activities={[]} processing startedAt={commanderStartedAt} /> : null}
+        {runProcessing && !hasRunProgress ? <ActivityGroup activities={[]} processing startedAt={activity.run?.created_at} research /> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
         {conversation?.linked_run_id && Object.keys(activity.run?.states ?? {}).some(key => key === "coding" || key.startsWith("coding_attempt_")) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}

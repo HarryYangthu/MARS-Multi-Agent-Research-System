@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getRun, getRunActivity, getRunWorkLog, type RunDetail } from "@/lib/api";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
-import { agentLabel, agentNodes, runActivities, statusLabel, type Activity } from "@/lib/researchActivity";
+import { activityElapsedSeconds, activityTiming, formatActivityElapsed, agentLabel, agentNodes, runActivities, statusLabel, type Activity } from "@/lib/researchActivity";
 
 export function useResearchActivity(runId: string | null | undefined, project: string): { run: RunDetail | null; activities: Activity[]; error: string; updated: string; refresh: () => Promise<void> } {
   const [snapshot, setSnapshot] = useState<{ run: RunDetail; activities: Activity[]; updated: string } | null>(null);
@@ -64,16 +64,33 @@ export function ResearchAgentPanel({ run, runId, activities, processing, current
   </aside>;
 }
 
-export function ActivityGroup({ activities, expanded }: { activities: Activity[]; expanded: boolean }): JSX.Element {
+export function ActivityGroup({ activities, processing, startedAt, research = false }: { activities: Activity[]; processing: boolean; startedAt?: string; research?: boolean }): JSX.Element {
+  const [expanded, setExpanded] = useState(processing);
+  const [now, setNow] = useState(() => Date.now());
   const list = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const lastId = activities.at(-1)?.id;
+  const timing = useMemo(() => activityTiming(activities, startedAt), [activities, startedAt]);
+  // Only transitions reset disclosure: repeated polls must preserve a user's
+  // choice to inspect completed records or collapse an in-flight list.
+  useEffect(() => { setExpanded(processing); following.current = true; }, [processing]);
+  useEffect(() => {
+    if (!processing) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), CLIENT_POLICY.activityClockMs);
+    return () => clearInterval(timer);
+  }, [processing]);
   useEffect(() => { if (expanded && following.current && list.current) list.current.scrollTop = list.current.scrollHeight; }, [lastId, expanded]);
-  const first = activities[0];
-  const last = activities[activities.length - 1];
-  const elapsed = Math.max(0, Math.round((Date.parse(last.ended_at || last.timestamp) - Date.parse(first.timestamp)) / 1000));
-  return <details open={expanded} className="rounded-xl border border-mars-border bg-mars-panel/20 px-4 py-3">
-    <summary className="cursor-pointer text-xs text-slate-400">处理记录 · {activities.length} 项{Number.isFinite(elapsed) && elapsed > 0 ? ` · ${elapsed >= 60 ? `${Math.floor(elapsed / 60)} 分 ` : ""}${elapsed % 60} 秒` : ""}</summary>
-    <div ref={list} onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="mt-3 max-h-80 overflow-y-auto">{activities.map(activity => <ActivityRow key={activity.id} activity={activity} />)}</div>
+  const elapsed = activityElapsedSeconds(timing, processing, now);
+  return <details open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} className={`rounded-xl border bg-mars-panel/20 px-4 py-3 ${processing ? "border-indigo-400/40" : "border-mars-border"}`}>
+    <summary className="cursor-pointer text-xs text-slate-400">
+      {processing ? <span className="text-indigo-300"><span aria-hidden className="mr-2 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-300 motion-reduce:animate-none" />处理中</span> : "处理记录"}
+      {activities.length ? ` · ${activities.length} 项` : ""}
+      {elapsed !== null ? <span role="timer" aria-label={research ? "研究用时" : "处理用时"} aria-live="off"> · {research ? "研究用时" : processing ? "已用时" : "用时"} {formatActivityElapsed(elapsed)}</span> : null}
+    </summary>
+    <div ref={list} onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} aria-label="处理过程" className="mt-3 max-h-80 overflow-y-auto">
+      {activities.map(activity => <ActivityRow key={activity.id} activity={activity} />)}
+      {processing ? <p role="status" className="py-2 text-xs text-indigo-300">{activities.length ? "正在继续处理，新的进展会显示在这里…" : "正在处理本次请求，等待首条进展…"}</p> : null}
+    </div>
   </details>;
 }

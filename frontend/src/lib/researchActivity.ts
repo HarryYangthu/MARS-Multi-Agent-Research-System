@@ -49,3 +49,54 @@ export function groupConversationEntries(entries: ConversationEntry[]): Conversa
   }
   return groups;
 }
+
+// Use owner state, rather than an old request event's "running" status. A model
+// request remains in history after its response, and must not keep a clock alive.
+export function activeActivityGroups(groups: ConversationGroup[], run: RunDetail | null, commanderProcessing: boolean, commanderStartedAt?: string): Map<string, string[]> {
+  const agents = new Set<string>();
+  if (commanderProcessing) agents.add("commander");
+  if (run) {
+    const stages = new Map<string, { attempt: number; state: string }>();
+    for (const [key, state] of Object.entries(run.states)) {
+      const [stage, attemptText] = key.split("_attempt_");
+      const attempt = Number(attemptText || 1);
+      if (attempt >= (stages.get(stage)?.attempt ?? 0)) stages.set(stage, { attempt, state });
+    }
+    for (const [stage, { state }] of stages) {
+      if (effectiveNodeState(state, run.status) === "running") agents.add(stage);
+    }
+  }
+  const selected = new Map<string, string[]>();
+  const boundary = commanderStartedAt ? Date.parse(commanderStartedAt) : NaN;
+  for (const group of [...groups].reverse()) {
+    if (group.kind !== "activities") continue;
+    for (const activity of [...group.activities].reverse()) {
+      const agent = activity.agent.replace(/_attempt_\d+$/, "");
+      if (!agents.has(agent)) continue;
+      if (agent === "commander" && Number.isFinite(boundary) && Date.parse(activity.timestamp) < boundary) continue;
+      selected.set(group.id, [...(selected.get(group.id) ?? []), agent].sort());
+      agents.delete(agent);
+    }
+  }
+  return selected;
+}
+
+export type ActivityTiming = { startedAt: number | null; endedAt: number | null };
+export function activityTiming(activities: Activity[], startedAt?: string): ActivityTiming {
+  const starts = activities.map(item => Date.parse(item.timestamp)).filter(Number.isFinite);
+  const ends = activities.flatMap(item => [Date.parse(item.timestamp), Date.parse(item.ended_at || "")]).filter(Number.isFinite);
+  const persistedStart = Date.parse(startedAt || "");
+  // A task's persisted creation time survives bounded/truncated event windows.
+  return { startedAt: Number.isFinite(persistedStart) ? persistedStart : starts.length ? Math.min(...starts) : null, endedAt: ends.length ? Math.max(...ends) : null };
+}
+
+export function activityElapsedSeconds(timing: ActivityTiming, processing: boolean, now: number): number | null {
+  const end = processing ? now : timing.endedAt;
+  if (timing.startedAt === null || end === null || !Number.isFinite(end)) return null;
+  return Math.max(0, Math.floor((end - timing.startedAt) / 1000));
+}
+
+export function formatActivityElapsed(seconds: number): string {
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60), remaining = seconds % 60;
+  return `${hours ? `${hours} 小时 ` : ""}${minutes ? `${minutes} 分 ` : ""}${remaining} 秒`;
+}
