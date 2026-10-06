@@ -173,7 +173,7 @@ def test_commander_recovery_tools_are_configured() -> None:
         assert tools['tools'][name]['enabled'] and tools['tools'][name]['bridge_only']
 
 
-@pytest.mark.parametrize('stage', ['coding', 'execution', 'writing'])
+@pytest.mark.parametrize('stage', ['coding', 'writing'])
 def test_retry_reservation_and_completion_mode_use_same_budget_after_restart(
     tmp_path: Path, stage: Literal['coding', 'execution', 'writing'],
 ) -> None:
@@ -202,3 +202,22 @@ def test_retry_reservation_and_completion_mode_use_same_budget_after_restart(
         assert f'已计入 {limit - 1} 次' in view['message'] and '预留 3 次' in view['message']
         assert instance.owned_tasks.active(session.run.run_id) is None
         assert budget.path.read_bytes() == before
+
+
+def test_deterministic_execution_retry_does_not_need_a_model_reservation(tmp_path: Path) -> None:
+    registry = AgentRegistry()
+    registry.register('execution', ExecutionAgent())
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=registry)
+    session = orch.create_session(RunRequest(task='deterministic recovery', project='regression',
+        entrypoint='execution', standalone=True))
+    session.graph.restore_state('execution', NodeState.FAILED)
+    budget = RunModelBudget(session.run.root)
+    limit = budget.configuration['limits']['max_model_requests']
+    for _ in range(limit):
+        reservation = budget.reserve([Message('user', 'Accounting admission only')],
+            LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
+        budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    view = recovery_status(orch, session.run.run_id, project='regression')
+    assert view['status'] == 'recoverable' and view['actions'][0]['action'] == 'retry'
+    assert budget.path.read_bytes() == before

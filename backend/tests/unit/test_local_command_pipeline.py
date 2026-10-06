@@ -28,8 +28,9 @@ async def close_execution_views() -> AsyncIterator[None]:
 def actual_regression_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     source = tmp_path / "measure_regression.py"
     source.write_text(
-        "import json,os,pathlib\n"
+        "import json,os,pathlib,time\n"
         "request=json.loads(pathlib.Path(os.environ['MARS_JOB_REQUEST']).read_text())\n"
+        "time.sleep(request['config'].get('delay',0))\n"
         "samples=json.loads(pathlib.Path(request['config']['data_path']).read_text())\n"
         "scale=request['config']['scale']\n"
         "predictions=[scale*x for x,y in samples]\n"
@@ -43,9 +44,11 @@ def actual_regression_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     argv = [sys.executable, str(source)]
     tools_path = tmp_path / "host-tools.yaml"
-    tools_path.write_text(yaml.safe_dump({"tools": {
-        name: {"command_allowlist": [argv]} for name in ("execution.simulation_runner", "execution.batch_runner")
-    }}))
+    from app.settings import repo_root
+    tool_configuration = yaml.safe_load((repo_root() / 'configs/tools.yaml').read_text())
+    for name in ('execution.simulation_runner', 'execution.batch_runner'):
+        tool_configuration['tools'][name]['command_allowlist'] = [argv]
+    tools_path.write_text(yaml.safe_dump(tool_configuration))
     execution_path = tmp_path / "host-execution.yaml"
     execution_path.write_text(yaml.safe_dump({"execution": {"backend": "local_command", "command_timeout_seconds": 5,
         "local_commands": [{"id": "regression", "argv": argv, "required_metrics": ["mse"]}]}}))
@@ -124,3 +127,151 @@ async def test_bridge_executes_manual_approved_plan_and_preserves_seed(
     assert len(jobs) == 1 and json.loads(jobs[0].read_text())["seed"] == 0
     summary = json.loads((run.root / "execution/batch_summary.json").read_text())
     assert bool(summary["failures"]) is omit_result
+
+
+@pytest.mark.asyncio
+async def test_managed_resume_reuses_only_intact_completed_measurements(tmp_path: Path, actual_regression_command: Path) -> None:
+    root = tmp_path / 'managed'
+    spec = JobSpec(run_id='managed', experiment_id='candidate', project='regression', run_root=root,
+                   seed=0, config={'scale': 2, 'data_path': str(actual_regression_command)})
+    first = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    second = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    assert not first.failures and not second.failures
+    assert first.results[0].fingerprint_hash == second.results[0].fingerprint_hash
+    assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
+    evidence = next((root / 'execution/local_commands/candidate').glob('*/predictions.json'))
+    evidence.write_text('{}')
+    rejected = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    assert rejected.failures and not rejected.results
+    assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_job_and_unknown_state_do_not_relaunch(tmp_path: Path, actual_regression_command: Path) -> None:
+    import asyncio
+    root = tmp_path / 'deduplicate'
+    spec = JobSpec(run_id='deduplicate', experiment_id='candidate', project='regression', run_root=root,
+                   config={'scale': 2, 'data_path': str(actual_regression_command)})
+    outcomes = await asyncio.gather(*(run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1)) for _ in range(2)))
+    assert any(not row.failures for row in outcomes)
+    assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
+    journal = next((root / 'execution/jobs').glob('*.json'))
+    state = json.loads(journal.read_text())
+    state['status'] = 'running'  # Author an uncertain historical state; no success is substituted.
+    journal.write_text(json.dumps(state))
+    blocked = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    assert blocked.failures and not blocked.results
+    assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupt", [False, True])
+async def test_deterministic_execution_through_orchestrator_waits_for_user_then_runs_real_jobs(
+    tmp_path: Path, actual_regression_command: Path, interrupt: bool,
+) -> None:
+    import asyncio
+    from app.agents.execution.agent import ExecutionAgent
+    from app.bridge.agent_registry import AgentRegistry
+    from app.bridge.orchestrator import Orchestrator, RunRequest
+    from app.bridge.execution_confirmation import execution_preview, save_confirmation
+    from app.harness.schema.frontmatter_parser import dumps
+    from app.harness.runtime.state_machine import NodeState
+    from app.storage.artifact_store import ArtifactStore
+    from app.storage.run_store import RunStore
+    registry = AgentRegistry()
+    registry.register('execution', ExecutionAgent())
+    orch = Orchestrator(run_store=RunStore(tmp_path / 'flow'), registry=registry)
+    session = orch.create_session(RunRequest(task='actual numerical execution', project='regression',
+        entrypoint='execution', standalone=True, auto_approve=False))
+    rows = [{'name': f'comparison-{scale}', 'config': {'seed': 0, 'scale': scale,
+        'data_path': str(actual_regression_command), 'delay': 30 if interrupt else 0}} for scale in range(5)]
+    store = ArtifactStore(session.run)
+    plan = {'schema': 'experiment_plan.v1', 'agent': 'experiment', 'project': 'regression',
+        'variables': {'independent': ['scale'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
+        'ablations': rows, 'estimated_runs': 5}
+    code = {'schema': 'code_spec.v1', 'agent': 'coding', 'project': 'regression', 'target_lang': 'python',
+        'baseline_compat': {'preserved': True}, 'files_changed': [],
+        'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'regression'}} for row in rows]}
+    for metadata in (plan, code):
+        store.approve(store.write(text=dumps(metadata, 'Human-authored scientific input, verified by schema.')))
+    assert orch._spawn_owned(session, 'start', lambda: orch.run(session.run.run_id))
+    owner = orch.owned_tasks.active(session.run.run_id)
+    assert owner is not None
+    for _ in range(100):
+        if session.graph.state('execution') == NodeState.APPROVED or owner.done():
+            break
+        await asyncio.sleep(0.02)
+    assert session.graph.state('execution') == NodeState.APPROVED
+    assert not (session.run.root / 'execution/local_commands').exists()
+    preview = execution_preview(session.run, 'execution')
+    assert not preview['blockers'] and not preview['confirmed'] and len(preview['experiments']) == 5
+    budget = session.run.root / 'resources/model_budget.v1.json'
+    before = budget.read_bytes() if budget.exists() else b''
+    save_confirmation(session.run, 'execution', preview['token'])
+    if interrupt:
+        from app.bridge.run_recovery import recovery_status, recover_run
+        for _ in range(200):
+            if list((session.run.root / 'execution/local_commands').glob('*/*/job.json')):
+                break
+            await asyncio.sleep(0.01)
+        stopped = await orch.stop_owned_run(session.run.run_id)
+        assert stopped['termination']['cleanup_complete']
+        assert session.graph.state('execution') == NodeState.FAILED
+        original_jobs = list((session.run.root / 'execution/local_commands').glob('*/*/job.json'))
+        recovery = recovery_status(orch, session.run.run_id, project='regression')
+        assert recovery['actions'], recovery
+        assert recovery['actions'][0]['label'] == '重新核对并恢复仿真'
+        result = await recover_run(orch, session.run.run_id, project='regression', action='retry',
+                                   node='execution', token=recovery['token'])
+        assert result['ok']
+        restored = orch.owned_tasks.active(session.run.run_id)
+        assert restored is not None
+        for _ in range(100):
+            if session.graph.state('execution') == NodeState.APPROVED or restored.done():
+                break
+            await asyncio.sleep(0.02)
+        assert session.graph.state('execution') == NodeState.APPROVED
+        next_preview = execution_preview(session.run, 'execution')
+        assert not next_preview['confirmed'] and next_preview['token'] != preview['token']
+        assert list((session.run.root / 'execution/local_commands').glob('*/*/job.json')) == original_jobs
+        await orch.stop_owned_run(session.run.run_id)
+        assert (budget.read_bytes() if budget.exists() else b'') == before
+        return
+    await asyncio.wait_for(owner, timeout=20)
+    assert session.graph.state('execution') == NodeState.DONE
+    summary = json.loads((session.run.root / 'execution/batch_summary.json').read_text())
+    assert not summary['failures']
+    results = json.loads((session.run.root / 'execution/metrics.json').read_text())
+    assert len(results) == 5
+    assert next(row for row in results if row['experiment_id'] == 'comparison-2')['metrics']['mse'] == 0
+    assert (budget.read_bytes() if budget.exists() else b'') == before
+
+
+@pytest.mark.asyncio
+async def test_interrupt_kills_real_worker_and_requires_explicit_new_attempt(tmp_path: Path, actual_regression_command: Path) -> None:
+    import asyncio
+    import os
+    root = tmp_path / 'interrupt'
+    config = {'scale': 2, 'data_path': str(actual_regression_command), 'delay': 30, 'confirmation_token': 'first'}
+    spec = JobSpec(run_id='interrupt', experiment_id='candidate', project='regression', run_root=root, config=config)
+    owner = asyncio.create_task(run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1)))
+    for _ in range(100):
+        if list((root / 'execution/local_commands/candidate').glob('*/job.json')):
+            break
+        await asyncio.sleep(0.01)
+    owner.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+    state = json.loads(next((root / 'execution/jobs').glob('*.json')).read_text())
+    assert state['status'] == 'interrupted'
+    receipt = json.loads(next((root / 'execution/local_commands/candidate').glob('*/execution_receipt.json')).read_text())
+    assert receipt['status'] == 'cancelled'
+    if receipt['pid'] is not None:
+        with pytest.raises(ProcessLookupError):
+            os.kill(receipt['pid'], 0)
+    blocked = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    assert blocked.failures and len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
+    spec.config = {**config, 'delay': 0, 'confirmation_token': 'explicit-new-attempt'}
+    recovered = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
+    assert not recovered.failures and recovered.results[0].metrics['mse'] == 0
+    assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 2

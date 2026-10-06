@@ -31,6 +31,12 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
     configuration.write_text(yaml.safe_dump({'execution': {'backend': 'local_command', 'max_concurrency': 1,
         'batch_steps': 50, 'command_timeout_seconds': 5,
         'local_commands': [{'id': 'python-environment', 'argv': [sys.executable, '--version']}]}}))
+    from app.settings import repo_root
+    tool_configuration = yaml.safe_load((repo_root() / 'configs/tools.yaml').read_text())
+    tool_configuration['tools']['execution.simulation_runner']['command_allowlist'] = [[sys.executable, '--version']]
+    tool_path = tmp_path / 'tools.yaml'
+    tool_path.write_text(yaml.safe_dump(tool_configuration))
+    monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(tool_path))
     monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(configuration))
     monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
     reset_settings_cache()
@@ -173,7 +179,8 @@ async def test_owned_gate_waits_without_jobs_and_duplicate_confirmation_wakes_sa
     payload = ExecutionConfirmationPayload(project=session.run.project, token=view['token'])
     results = await asyncio.gather(*(confirm_execution_configuration(session.run.run_id, payload) for _ in range(2)))
     assert all(result['confirmed'] and result['ok'] for result in results)
-    assert orch.owned_tasks.active(session.run.run_id) is owner
+    # The gate may finish during a concurrent POST. A replacement owner is forbidden.
+    assert orch.owned_tasks.active(session.run.run_id) in (None, owner)
     await asyncio.wait_for(arrived.wait(), timeout=3)
     await owner
     assert len(list((session.run.root / 'execution/confirmations').glob('*.json'))) == 1

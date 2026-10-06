@@ -722,7 +722,8 @@ class Orchestrator:
         """
         if self._stopping(session):
             return
-        if session.request.auto_approve:
+        if session.request.auto_approve or parse_node_key(node_key).stage == "execution":
+            # Deterministic intake is validated here; configuration confirmation remains mandatory.
             if not self._auto_promote(session, node_key):
                 await self._transition(session, node_key, NodeState.FAILED)
                 return
@@ -1126,6 +1127,10 @@ class Orchestrator:
             if dir_name != stage:
                 continue
             latest = store.latest(agent_dir=dir_name, stem=stem)
+            if stage == "execution":
+                versions = [ref for ref in store.list_versions(agent_dir=dir_name, stem=stem) if ref.version != "approved"]
+                if versions:
+                    latest = versions[-1]
             if latest is None or latest.version == "approved":
                 continue
             from app.bridge.evaluation_service import build_artifact_evaluation_summary
@@ -1154,7 +1159,11 @@ class Orchestrator:
                     },
                 )
                 return False
+            from app.harness.schema.frontmatter_parser import parse as parse_execution_manifest
             approved = store.approve(latest)
+            if stage == "execution" and parse_execution_manifest(approved.path.read_text()).metadata.get("runtime_mode") == "deterministic":
+                # Intake is an operational manifest, not a new scientific finding to sediment.
+                return True
             try:
                 sediment_approved_artifact(
                     run=session.run,
@@ -1380,20 +1389,22 @@ class Orchestrator:
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
-            if (not restart_stopped or agent != "coding" or stopped_node is None
+            if (not restart_stopped or agent not in {"coding", "execution"} or stopped_node is None
                     or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
                     or stopped_node not in termination.get("interrupted_nodes", [])
                     or self.owned_tasks.active(run_id) is not None
                     or session.graph.state(stopped_node) != NodeState.FAILED):
                 return {"ok": False, "status": "stopped_run_requires_new_execution"}
             from app.bridge.research_branch import stopped_coding_retry_blocker
+            from app.execution.job_journal import stopped_execution_retry_blocker
             try:
-                blocker = stopped_coding_retry_blocker(session.run, stopped_node)
+                blocker = (stopped_coding_retry_blocker(session.run, stopped_node) if agent == "coding"
+                           else stopped_execution_retry_blocker(session.run.root))
             except (OSError, ValueError, KeyError) as exc:
                 blocker = str(exc)
             if blocker:
                 return {"ok": False, "status": "recovery_blocked", "error": blocker}
-            session.run.write_event("run_lifecycle", {"event": "run.explicit_coding_retry",
+            session.run.write_event("run_lifecycle", {"event": f"run.explicit_{agent}_retry",
                 "run_id": run_id, "node": stopped_node, "previous_termination": dict(termination),
                 "reason": reason, "automatic_resume": False, "timestamp": datetime.now(tz=timezone.utc).isoformat()})
             session.termination = None

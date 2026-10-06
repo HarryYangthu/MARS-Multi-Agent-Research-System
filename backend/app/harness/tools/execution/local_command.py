@@ -188,6 +188,7 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
         "schema": "local_command_receipt.v1", "invocation_id": invocation_id,
         "run_id": job.run_id, "experiment_id": job.experiment_id,
         "status": status, "returncode": code, "duration_seconds": duration,
+        "pid": process.pid if process is not None else None,
         "argv": list(argv), "command_files": command_files, "execution_backend": "local_process", "os_isolated": False,
         "request_sha256": request_sha256,
         "result_sha256": _file_hash(result_path) if result_path.is_file() and not result_path.is_symlink() else None,

@@ -228,22 +228,7 @@ coding:
 execution:
   enabled: true
   output_schema: run_log.v1
-  model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
-    temperature: 0.1
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
-    thinking:
-      enabled: true
-    reasoning_effort: low
-    request_timeout_seconds: 120
-    retry:
-      max_retries: 2
-      base_delay_seconds: 1
+  runtime_mode: deterministic
   debate:
     enabled: false
   loop:

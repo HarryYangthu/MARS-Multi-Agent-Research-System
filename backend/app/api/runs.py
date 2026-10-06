@@ -101,9 +101,14 @@ def _execution_configuration(run_id: str, project: str, *, include_hidden: bool 
     coding = [key for key in session.graph.nodes if parse_node_key(key).stage == 'coding']
     visible = not coding or session.graph.state(max(coding, key=lambda key: parse_node_key(key).attempt)) in {
         NodeState.DONE, NodeState.SKIPPED}
-    visible = visible and state not in {NodeState.DONE, NodeState.SKIPPED}
+    visible = visible and state != NodeState.SKIPPED
     if not visible and not include_hidden:
         return session, {'visible': False}
+    if state == NodeState.DONE:
+        from app.execution.job_journal import job_states
+        return session, {'visible': visible, 'state': state.value, 'run_id': run_id, 'project': project,
+            'node': node, 'runtime_mode': 'deterministic', 'token': '', 'launch_ready': False,
+            'can_confirm': False, 'confirmed': True, 'jobs': job_states(session.run.root)}
     try:
         view = execution_preview(session.run, node)
     except (OSError, ValueError, RuntimeError) as exc:
@@ -130,9 +135,11 @@ async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirm
     if not view.get('can_confirm'):
         raise HTTPException(status_code=409, detail='当前配置还不可启动：' + '；'.join(view.get('blockers', [])))
     try:
-        await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
+        receipt = await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
     except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail='配置未确认，请刷新并核对配置变化。') from exc
+    if not receipt['created']:
+        return {'ok': True, 'confirmed': True, 'status': 'already_confirmed', 'run_id': run_id}
     result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')
     return {**result, 'confirmed': True}
 

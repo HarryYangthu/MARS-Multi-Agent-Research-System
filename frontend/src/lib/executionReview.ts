@@ -4,10 +4,12 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
 export type ExecutionConfiguration = {
   visible: boolean; run_id: string; project: string; node: string; token: string;
   state: string; launch_ready: boolean; can_confirm: boolean; confirmed: boolean;
+  runtime_mode: "deterministic";
+  jobs: { experiment_id: string; attempt: number; status: string; updated_at: string; error?: string; metrics: Record<string, number>; duration_seconds?: number }[];
   defaults: Record<string, unknown>;
   experiments: { name: string; seed: unknown; config: Record<string, unknown>; effective?: Record<string, unknown> }[];
   source_configs: { path: string; seed: unknown; epochs: unknown }[];
-  blockers: string[]; warnings: string[]; budget: { used: number; limit: number; required: number };
+  blockers: string[]; warnings: string[]; budget: { used: number; limit: number | null; required: number };
 };
 export class ExecutionReviewError extends Error {
   constructor(message: string, readonly status: number) { super(message); }

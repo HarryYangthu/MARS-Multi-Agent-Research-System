@@ -122,7 +122,7 @@ def _check_llm_providers() -> ReadinessCheck:
     mock_requested: list[str] = []
 
     for cfg in list_agent_configs():
-        if not cfg.enabled:
+        if not cfg.enabled or cfg.raw.get("runtime_mode") == "deterministic":
             continue
         provider = cfg.model_provider
         required.add(provider)

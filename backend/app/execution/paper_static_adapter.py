@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +52,7 @@ async def run_paper_static_simulation(
         branch = current_git_branch(spec.project, spec.run_id)
         # Host binding wins over a global adapter path or model arguments.
         repo_path = branch.root if branch is not None else _resolve_path(str(cfg.get("repo_path", "")), repo_root())
-        config_path = _resolve_path(str(cfg.get("config_path", "configs/static.yaml")), repo_path)
+        config_path = approved_config_path(spec.config, cfg, repo_path)
         data_path = _resolve_path(
             str(spec.config.get("data_path") or cfg.get("data_path", "")),
             repo_path,
@@ -64,8 +65,8 @@ async def run_paper_static_simulation(
     dry_run = _bool_value(spec.config.get("dry_run", cfg.get("default_dry_run", False)))
     max_iters = _positive_int(spec.config.get("max_iters", cfg.get("default_max_iters")), max(1, steps))
     timeout = _positive_float(cfg.get("timeout_seconds"), 900.0)
-    output_root = run_root / "execution" / "paper_static" / _safe_name(spec.experiment_id)
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = run_root / "execution" / "paper_static" / _safe_name(spec.experiment_id) / uuid.uuid4().hex
+    output_root.mkdir(parents=True, exist_ok=False)
 
     validation_error = _validate_inputs(
         python=python,
@@ -255,21 +256,16 @@ async def run_paper_static_simulation(
         },
     )
 
-    fingerprint_hash = "sha256:" + hashlib.sha256(
-        json.dumps(
-            {
-                "project": spec.project,
-                "run_id": spec.run_id,
-                "experiment_id": spec.experiment_id,
-                "config": spec.config,
-                "data_path": str(data_path),
-                "summary": summary,
-                "returncode": returncode,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        ).encode("utf-8")
-    ).hexdigest()[:24]
+    from app.harness.persistence import atomic_write_json
+    receipt_path = output_root / "execution_receipt.json"
+    atomic_write_json(receipt_path, {"schema": "paper_static_receipt.v1", "run_id": spec.run_id,
+        "experiment_id": spec.experiment_id, "status": status, "returncode": returncode,
+        "config": spec.config, "config_path": str(config_path),
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(), "argv": argv,
+        "summary_path": str(summary_path) if summary_path is not None else None,
+        "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path is not None else None,
+        "log_path": str(log_path), "log_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest()})
+    fingerprint_hash = "sha256:" + hashlib.sha256(receipt_path.read_bytes()).hexdigest()
 
     if bus_publish is not None:
         await bus_publish(
@@ -320,12 +316,31 @@ def paper_static_readiness() -> dict[str, Any]:
 
 
 def _paper_static_config() -> dict[str, Any]:
-    raw = yaml.safe_load((repo_root() / "configs" / "execution.yaml").read_text(encoding="utf-8")) or {}
+    from app.harness.tools.config import load_execution_config
+    raw = load_execution_config()
     execution = raw.get("execution", {})
     if not isinstance(execution, dict):
         return {}
     cfg = execution.get("paper_static", {})
     return cfg if isinstance(cfg, dict) else {}
+
+
+def approved_config_path(config: dict[str, Any], policy: dict[str, Any], root: Path) -> Path:
+    """Use this job's approved file, never silently substitute a global template."""
+    raw = config.get("config_path")
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("编码交付缺少本组实验 config_path；请绑定已批准配置文件")
+    path = _resolve_path(raw, root)
+    if not path.is_relative_to(root.resolve()) or any(part.startswith(".") for part in Path(raw).parts):
+        raise ValueError("实验配置文件必须位于绑定代码目录中")
+    if config.get("entrypoint") != "train_static.py":
+        raise ValueError("paper_static 只支持明确交付的 train_static.py 入口")
+    # This adapter's --max-iters limits training epochs, not optimizer steps.
+    if config.get("budget_unit") != "epochs" or type(config.get("max_iters")) is not int or config["max_iters"] < 1:
+        raise ValueError("paper_static 需要明确的 epochs 预算；不得将训练步数替换为轮数")
+    if "budget_steps" in config:
+        raise ValueError("批准方案使用 steps 预算，paper_static 使用 epochs；请回到实验设计核对单位")
+    return path
 
 
 def _python_from_config(cfg: dict[str, Any]) -> str:
@@ -427,7 +442,7 @@ def _parse_epoch_line(line: str) -> dict[str, float] | None:
 def _summary_path(*, output_root: Path, done_path: Path | None) -> Path | None:
     if done_path is not None:
         candidate = done_path / "summary.json"
-        if candidate.is_file():
+        if candidate.is_file() and candidate.resolve().is_relative_to(output_root.resolve()):
             return candidate
     summaries = sorted(output_root.glob("*/summary.json"), key=lambda p: p.stat().st_mtime)
     return summaries[-1] if summaries else None

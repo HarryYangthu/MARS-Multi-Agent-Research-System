@@ -46,6 +46,9 @@ def write_metrics_json(*, run_root: Path, results: list[SimulationResult]) -> Pa
     payload = [
         {
             "run_id": f"{r.run_id}_{r.experiment_id}",
+            "experiment_id": r.experiment_id,
+            "status": r.status,
+            "is_mock": r.is_mock,
             "metrics": r.metrics,
             "fingerprint_hash": r.fingerprint_hash,
             "duration_seconds": r.duration_seconds,

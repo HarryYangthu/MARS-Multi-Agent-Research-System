@@ -94,7 +94,9 @@ POST /api/runs or Commander run.create
   -> evaluation_scorecard.json on run completion
 ```
 
-Execution has one extra phase: after the Execution artifact is approved, the bridge invokes `execution.batch_runner` through ToolRegistry so batch simulations get the same audit, trace, and policy coverage as other tools.
+Execution is a deterministic run manager. It joins the approved experiment matrix with Coding's `execution_jobs` by exact experiment name; it does not call a model, redesign experiments, trim the matrix, or consume a model-call reservation. The schema-validated intake manifest is promoted by the host, then the main chat presents a separate configuration confirmation. Explicit auto mode records a policy confirmation. Both preview and dispatch consume the same preparation function, and each queued job checks confirmation freshness before launch.
+
+The bridge invokes `execution.batch_runner` through ToolRegistry/Gate 5. Jobs persist input identity, status and actual evidence receipts. Completed jobs are reused only after evidence hashes are verified; unknown running work is never replayed. Cancellation waits for every child process to finish cleanup. An explicit interrupted-stage retry retains the original receipts and requires a new configuration confirmation. Paper-static jobs bind their own `config_path`, `entrypoint`, seed and an explicit **epochs** budget: an approved steps budget is a protocol conflict, not a conversion instruction. Result attribution remains a Commander responsibility; execution does not edit code, data, metrics or budget. See [execution manager validation](validation/execution-manager.md).
 
 ## 5. Tool Dispatch Boundary
 

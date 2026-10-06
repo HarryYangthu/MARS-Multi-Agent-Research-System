@@ -33,6 +33,18 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
 
     if orch.owned_tasks.active(run_id) is not None:
         return finish('running', '任务正在运行，无需重复恢复。')
+    if session.termination and not session.read_only and not orch.owned_tasks.closing:
+        termination = session.termination
+        nodes = termination.get('interrupted_nodes', [])
+        if (termination.get('type') == 'cancelled' and termination.get('cleanup_complete') is True
+                and len(nodes) == 1 and parse_node_key(nodes[0]).stage == 'execution'
+                and states.get(nodes[0]) == 'failed'):
+            from app.execution.job_journal import stopped_execution_retry_blocker, job_states
+            evidence.append(job_states(session.run.root))
+            blocker = stopped_execution_retry_blocker(session.run.root)
+            if not blocker:
+                result['actions'] = [{'action': 'retry', 'node': nodes[0], 'label': '重新核对并恢复仿真'}]
+                return finish('recoverable', '作业中断清理已确认；重新核对配置后开启明确的新尝试，旧收据保留。')
     if session.read_only or session.termination or orch.owned_tasks.closing:
         return finish('blocked', '此任务需要先核对停止或历史执行状态，请打开任务详情处理。')
     if research_execution_admission(session.run, session.request.extra) is not None:
@@ -47,6 +59,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     if not candidates:
         return finish('idle', '')
     agents = [orch.registry.get(parse_node_key(node).stage) for node in candidates]
+    model_agents = [agent for agent in agents if getattr(agent, "requires_model", True)]
     legacy = load_run_research_contract(session.run, session.request.extra) is None
     # Unknown remote calls cannot be converted into a new attempt by clicking retry.
     ledger = session.run.root / 'resources/model_budget.v1.json'
@@ -67,7 +80,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         # Do not offer retry when even the next call's SDK retries cannot fit.
         # A completion-driven loop never exempts its Agent from the run budget.
         capacities = [model_request_capacity(raw, getattr(getattr(agent, 'config', None),
-                       'max_retries', MAX_LLM_RETRIES)) for agent in agents]
+                       'max_retries', MAX_LLM_RETRIES)) for agent in model_agents]
         evidence.append([{'used': item.used, 'limit': item.limit, 'required': item.required}
                          for item in capacities])
         for capacity in capacities:
@@ -84,7 +97,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         if limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
-        if exhausted:
+        if exhausted and model_agents:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
         elapsed_exhausted = (
             time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
@@ -163,7 +176,8 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
         result = orch.resume_owned_run(run_id)
     else:
         result = await orch.request_artifact_revision(run_id=run_id, agent=parse_node_key(node).stage,
-            reason='用户请求在原任务中重试失败阶段；保留上游产物、既有记录及累计资源用量。')
+            reason='用户请求在原任务中重试失败阶段；保留上游产物、既有记录及累计资源用量。',
+            restart_stopped=parse_node_key(node).stage == 'execution')
     result['run_id'] = run_id
     if result.get('ok'):
         result['message'] = '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。'

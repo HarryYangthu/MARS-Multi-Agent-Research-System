@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from app.bridge.node_key import parse_node_key
@@ -40,11 +41,13 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
     intent_count = requested_experiment_count(intent_text)
     intent_wants_sweep = wants_execution_sweep(intent_text)
     plan_source = "none"
+    deterministic = False
     # Parse ablations as (name, config) so the execution backend gets supported knobs.
     abl_specs: list[tuple[str, dict[str, Any]]] = []
     if approved_execution_path.exists():
         try:
             md = parse_fm(approved_execution_path.read_text(encoding="utf-8")).metadata
+            deterministic = md.get("runtime_mode") == "deterministic"
             planned = md.get("planned_experiments", []) or []
             if isinstance(planned, list):
                 for i, item in enumerate(planned):
@@ -80,9 +83,6 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
     planned_before_intent = len(abl_specs)
     if not abl_specs:
         raise RuntimeError("no valid approved experiment configurations; execution was not started")
-    elif intent_count is not None and len(abl_specs) > intent_count:
-        abl_specs = abl_specs[:intent_count]
-        plan_source = f"{plan_source}_intent_capped"
     selected_data_source = _load_selected_data_source(run)
     if selected_data_source:
         data_path = str(selected_data_source.get("stored_path") or "")
@@ -117,10 +117,18 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
             _positive_int(paper_cfg.get("max_concurrency"), 1),
         )
         batch_steps = _positive_int(paper_cfg.get("default_max_iters"), 1)
-        experiment_limit = _positive_int(paper_cfg.get("batch_experiments"), 1)
-        abl_specs = abl_specs[:experiment_limit]
+    if deterministic and runtime_backend == "local_command":
+        for name, config in abl_specs:
+            if not config.get("command_id"):
+                raise ValueError(f"{name} 的编码交付未绑定实际 command_id；执行管理器不会猜测启动命令")
     max_concurrency = min(max_concurrency, max(1, len(abl_specs)))
 
+    names = [name for name, _ in abl_specs]
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", name) for name in names):
+        raise ValueError("批准实验名称必须是安全的文件标识")
+    normalized = {re.sub(r"[^A-Za-z0-9_-]", "_", name) for name in names}
+    if len(set(names)) != len(names) or len(normalized) != len(names):
+        raise ValueError("批准实验名称重复或输出路径冲突，不能启动")
     specs = [
         JobSpec(
             run_id=run.run_id,

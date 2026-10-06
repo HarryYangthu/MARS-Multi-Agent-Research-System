@@ -214,7 +214,7 @@ async def _execute_agent_node(
     try:
         context = await agent.build_context(request)
 
-        if revision_reason and resume_invocation is None:
+        if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
             failure_phase = "resource_revision"
             RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
 
@@ -695,7 +695,7 @@ async def _run_execution_batch(
     from app.execution.tensorboard_writer import ExecutionScalars
 
     from app.bridge.execution_confirmation import require_confirmation
-    require_confirmation(run, node_key)
+    confirmed = require_confirmation(run, node_key)
     attempt = parse_node_key(node_key).attempt
     from app.bridge.execution_batch_plan import prepare_execution
     prepared = prepare_execution(run, node_key)
@@ -710,6 +710,14 @@ async def _run_execution_batch(
     configured_max_concurrency = prepared.configured_max_concurrency
     batch_steps = prepared.batch_steps
     specs = prepared.specs
+    for spec in specs:
+        spec.config["confirmation_token"] = confirmed["token"]
+
+    async def check_inputs() -> None:
+        import asyncio
+        current = await asyncio.to_thread(require_confirmation, run, node_key)
+        if current["token"] != confirmed["token"]:
+            raise ValueError("执行输入已变化；尚未启动后续作业。")
     scalars = ExecutionScalars(run.subdir("execution") / "tensorboard" / f"attempt_{attempt}")
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
         try:
@@ -741,6 +749,7 @@ async def _run_execution_batch(
             specs,
             config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
             bus_publish=_publish,
+            check_inputs=check_inputs,
         )
         phase = "failed" if outcome.failures else "completed"
     finally:

@@ -31,6 +31,8 @@ class CodingAgent(BaseAgent):
         "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
         "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
+        "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
+        "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -72,6 +74,24 @@ class CodingAgent(BaseAgent):
             for item in observations
         ):
             errors.append("/files_changed: implement the proposed changes through the real code tools before submitting")
+        plans = []
+        for supplied in request.upstream_artifacts.values():
+            text = supplied.split("\n", 1)[1] if supplied.startswith("[upstream artifact: ") else supplied
+            if text.startswith("---\n"):
+                upstream = parse(text).metadata
+                if upstream.get("schema") == "experiment_plan.v1":
+                    plans = upstream.get("ablations", [])
+        if plans:
+            jobs = metadata.get("execution_jobs", [])
+            if not jobs:
+                errors.append("/execution_jobs: deliver explicit runtime bindings for every approved experiment")
+            elif {job["name"] for job in jobs} != {row["name"] for row in plans} or len(jobs) != len(plans):
+                errors.append("/execution_jobs: names and count must match the approved experiment matrix")
+            else:
+                for job in jobs:
+                    config = job["config"]
+                    if not (config.get("command_id") or config.get("entrypoint") and config.get("config_path")):
+                        errors.append("/execution_jobs: bind a registered command or an actual entrypoint and configuration file")
         return errors
 
     def load_post_training(

@@ -11,7 +11,7 @@ from typing import Any
 from app.bridge.execution_batch_plan import prepare_execution
 from app.bridge.node_key import parse_node_key
 from app.harness.agent_loop.trace import digest
-from app.harness.llm.accounting import RunModelBudget, model_request_capacity
+from app.harness.llm.accounting import RunModelBudget, charged_model_attempts
 from app.harness.persistence import atomic_write_json, path_lock
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.tools.config import load_execution_config
@@ -91,7 +91,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             message = '批准方案缺少明确的随机种子，请填写非负整数，不能仅写“同基线种子”。'
         elif message == 'no valid approved experiment configurations; execution was not started':
             message = '没有可用的批准实验配置，尚未启动仿真。'
-        else:
+        elif '编码交付' not in message:
             message = '实验清单或配置无法核验，请检查已批准的执行计划。'
         blockers.append('执行计划尚不可启动：' + message)
         plan = run.root / 'experiment/experiment_plan.approved.md'
@@ -138,49 +138,67 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     defaults['data_path'] = str(data.get('stored_path') or '')
     if settings.mars_execution_backend == 'paper_static':
         from app.execution.paper_static_adapter import (
-            _bool_value, _override_args, _paper_static_config, _positive_int,
-            _python_from_config, _resolve_path, _validate_inputs,
+            _bool_value, _override_args, _paper_static_config, _python_from_config,
+            _resolve_path, _validate_inputs, approved_config_path,
         )
+        import yaml
         paper = _paper_static_config()
         files['adapter_policy'] = digest(paper)
         root = branch.root if branch is not None else _resolve_path(str(paper.get('repo_path', '')), repo_root())
-        cfg_path = _resolve_path(str(paper.get('config_path', 'configs/static.yaml')), root)
-        data_path = _resolve_path(str(data.get('stored_path') or paper.get('data_path', '')), root)
         python = _python_from_config(paper)
-        defaults.update(repository=str(root), config_path=str(cfg_path), data_path=str(data_path), python=python,
-                        max_iters=paper.get('default_max_iters'), dry_run=paper.get('default_dry_run', False),
-                        timeout_seconds=paper.get('timeout_seconds'))
-        invalid = _validate_inputs(python=python, repo_path=root, config_path=cfg_path, data_path=data_path)
-        if invalid:
-            blockers.append('运行环境未就绪：' + invalid)
+        defaults.update(repository=str(root), python=python, timeout_seconds=paper.get('timeout_seconds'))
         if not bool(paper.get('enabled', True)):
             blockers.append('论文训练适配器未启用。')
-        files['adapter_config'] = _file_hash(cfg_path)
-        import yaml
-        raw_training = yaml.safe_load(cfg_path.read_text()) if cfg_path.is_file() else {}
-        training = raw_training if isinstance(raw_training, dict) else {}
-        defaults['training_epochs'] = training.get('Epoch', training.get('epochs'))
-        defaults['training_seed'] = training.get('seed')
-        if source_configs and cfg_path.name not in {Path(item['path']).name for item in source_configs}:
-            blockers.append('实际训练配置不在本轮编码的实验配置文件中，不能保证按已批准方案执行。请先绑定正确配置。')
+        if prepared is None and experiments:
+            if any('budget_steps' in item['config'] for item in experiments):
+                blockers.append('批准方案的预算单位是 steps，当前论文训练入口使用 epochs；请回到实验设计核对，不能自动换算。')
+            if any(not item['config'].get('config_path') for item in experiments):
+                blockers.append('编码交付未为每组实验绑定配置文件；请补齐 execution_jobs，执行管理器不会选用全局默认文件。')
         if prepared is not None:
             for item, spec in zip(experiments, prepared.specs, strict=True):
-                overrides = _override_args(spec.config, paper)
-                effective = {part.split('=', 1)[0]: part.split('=', 1)[1] for part in overrides if part != '--set'}
-                actual_seed = effective.get('seed', training.get('seed'))
-                iterations = _positive_int(spec.config.get('max_iters', paper.get('default_max_iters')), max(1, prepared.batch_steps))
-                item['effective'] = {'config_path': str(cfg_path), 'max_iters': iterations,
-                    'dry_run': _bool_value(spec.config.get('dry_run', paper.get('default_dry_run', False))),
-                    'seed': actual_seed, 'overrides': effective}
-                if str(actual_seed) != str(spec.seed):
-                    blockers.append(f'{spec.experiment_id} 的实际训练种子与批准方案不一致。')
-                if 'budget_steps' in spec.config and spec.config['budget_steps'] != iterations:
-                    blockers.append(f'{spec.experiment_id} 要求 {spec.config["budget_steps"]} 步，适配器实际只会运行 {iterations} 步。')
-                path = _resolve_path(str(spec.config.get('data_path') or paper.get('data_path', '')), root)
-                if not path.is_file():
-                    blockers.append(f'{spec.experiment_id} 的数据路径不可访问。')
-    elif settings.mars_execution_backend == 'local_command' and not config.get('local_commands'):
-        blockers.append('尚未配置实际启动命令。')
+                try:
+                    cfg_path = approved_config_path(spec.config, paper, root)
+                    data_path = _resolve_path(str(spec.config.get('data_path') or paper.get('data_path', '')), root)
+                    invalid = _validate_inputs(python=python, repo_path=root, config_path=cfg_path, data_path=data_path)
+                    if invalid:
+                        raise ValueError(invalid)
+                    files['config:' + spec.experiment_id] = _file_hash(cfg_path)
+                    files['entrypoint:' + spec.experiment_id] = _file_hash(root / 'train_static.py')
+                    raw = yaml.safe_load(cfg_path.read_text())
+                    if not isinstance(raw, dict):
+                        raise ValueError('配置文件必须是对象')
+                    overrides = _override_args(spec.config, paper)
+                    effective = {part.split('=', 1)[0]: part.split('=', 1)[1] for part in overrides if part != '--set'}
+                    actual_seed = effective.get('seed', raw.get('seed'))
+                    item['effective'] = {'config_path': str(cfg_path), 'entrypoint': 'train_static.py',
+                        'max_iters': spec.config['max_iters'], 'budget_unit': 'epochs',
+                        'training_epochs': raw.get('Epoch', raw.get('epochs')),
+                        'dry_run': _bool_value(spec.config.get('dry_run', paper.get('default_dry_run', False))),
+                        'seed': actual_seed, 'data_path': str(data_path), 'overrides': effective}
+                    if str(actual_seed) != str(spec.seed):
+                        blockers.append(f'{spec.experiment_id} 的实际训练种子与批准方案不一致。')
+                    if not any(row['path'] == str(cfg_path.relative_to(root)) for row in source_configs):
+                        source_configs.append({'path': str(cfg_path.relative_to(root)), 'seed': raw.get('seed'),
+                                               'epochs': raw.get('Epoch', raw.get('epochs'))})
+                except (OSError, ValueError) as exc:
+                    blockers.append(f'{spec.experiment_id}：{exc}')
+    elif settings.mars_execution_backend == 'local_command':
+        from app.harness.tools.execution.local_command import LocalCommandJob, _command
+        import shutil
+        if prepared is not None:
+            for item, spec in zip(experiments, prepared.specs, strict=True):
+                try:
+                    argv, required, timeout = _command(LocalCommandJob(run_id=run.run_id,
+                        experiment_id=spec.experiment_id, project=run.project, run_root=run.root,
+                        command_id=str(spec.config.get('command_id') or '')), 'execution.simulation_runner')
+                    if not shutil.which(argv[0]):
+                        raise ValueError('启动命令的解释器不可执行')
+                    item['effective'] = {'command_id': spec.config.get('command_id'),
+                                         'required_metrics': list(required), 'timeout_seconds': timeout}
+                except (OSError, ValueError, RuntimeError):
+                    blockers.append(f'{spec.experiment_id} 的启动命令未登记、未授权或环境不可用。')
+        elif not config.get('local_commands'):
+            blockers.append('尚未配置实际启动命令。')
     elif settings.mars_execution_backend == 'remote_gpu':
         from app.execution.remote.executor import load_remote_executor_config
         try:
@@ -195,15 +213,25 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             blockers.append('远端 GPU 连接配置未就绪，请核对 SSH、工作目录和 GPU 配置。')
     elif settings.mars_execution_backend not in {'paper_static', 'local_command', 'pim_cpu', 'remote_gpu'}:
         blockers.append('当前执行后端无法核验真实仿真配置。')
+    if settings.mars_execution_backend == 'local_command':
+        import shutil
+        for row in config.get('local_commands', []):
+            if isinstance(row, dict):
+                for index, arg in enumerate(row.get('argv', [])):
+                    if not isinstance(arg, str):
+                        continue
+                    resolved = shutil.which(arg) if index == 0 else arg
+                    if resolved and Path(resolved).is_file():
+                        source = Path(resolved).resolve()
+                        stat = source.stat()
+                        files['command:' + resolved] = (_file_hash(source) if source.suffix in {'.py', '.sh', '.js'}
+                            else digest([str(source), stat.st_size, stat.st_mtime_ns, stat.st_ino]))
     budget = RunModelBudget(run.root)
     ledger = budget.recovery_snapshot()
-    from app.harness.llm.model_registry import get_agent_config
-    capacity = model_request_capacity(ledger, get_agent_config('execution').max_retries)
-    budget_view = {'used': capacity.used, 'limit': capacity.limit, 'required': capacity.required}
+    budget_view = {'used': sum(charged_model_attempts(row) for row in ledger['requests'].values()),
+                   'limit': ledger['configuration']['limits']['max_model_requests'], 'required': 0}
     if not files['execution/run_log.approved.md']:
         blockers.append('执行计划尚未生成并审核通过；此处先展示已有配置。')
-        if not capacity.available:
-            blockers.append(f'累计模型调用已计入 {capacity.used} 次，上限 {capacity.limit} 次；生成执行计划需预留 {capacity.required} 次。')
     else:
         from app.harness.schema.validator import validate_document
         result = validate_document((run.root / 'execution/run_log.approved.md').read_text(), expected_schema='run_log.v1')
@@ -237,7 +265,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             and receipt.get('token') == token and receipt.get('actor') in {'user', 'auto_approve'})
         if not confirmed:
             raise ValueError('仿真配置确认记录无法校验')
-    return {'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
+    from app.execution.job_journal import job_states
+    return {'jobs': job_states(run.root), 'runtime_mode': 'deterministic', 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
         'confirmed': confirmed, 'defaults': defaults, 'experiments': _public_config(experiments),
         'source_configs': source_configs, 'blockers': list(dict.fromkeys(blockers)),
         'warnings': warnings, 'budget': budget_view}
@@ -257,10 +286,11 @@ def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str =
                 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
                 'actor': actor, 'confirmed_at': datetime.now(timezone.utc).isoformat(),
                 'defaults': view['defaults'], 'experiment_names': [item['name'] for item in view['experiments']]})
-        return {**view, 'confirmed': True}
+        return {**view, 'confirmed': True, 'created': not view['confirmed']}
 
 
-def require_confirmation(run: RunHandle, node_key: str) -> None:
+def require_confirmation(run: RunHandle, node_key: str) -> dict[str, Any]:
     view = execution_preview(run, node_key)
     if view['blockers'] or not view['confirmed']:
         raise ValueError('仿真配置尚未确认或已发生变化；未启动作业。')
+    return view

@@ -328,7 +328,7 @@ async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int =
         return SimulationResult(run_id=spec.run_id, experiment_id=spec.experiment_id,
             duration_seconds=outcome.duration_seconds, status=outcome.status, metrics=outcome.metrics,
             fingerprint_hash=outcome.fingerprint_hash, is_mock=False, loss_curve=outcome.loss_curve)
-    use_real = spec.project == "pimc" and spec.run_root is not None
+    use_real = spec.run_root is not None
     if use_real and backend == "paper_static":
         from app.execution.paper_static_adapter import run_paper_static_simulation
 
