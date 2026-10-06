@@ -452,6 +452,12 @@ def collect_run_results(run: RunHandle) -> dict[str, Any]:
     reader = ResultReader(run, load_results_policy())
     state, raw_state, history = reader.state()
     experiments, metrics, curves = reader.jobs()
+    from app.bridge.paper_static_results import collect_paper_jobs
+    paper_experiments, paper_metrics, paper_curves = collect_paper_jobs(reader,
+        existing_jobs=len(experiments), existing_metrics=len(metrics))
+    experiments.extend(paper_experiments)
+    metrics.extend(paper_metrics)
+    curves.extend(paper_curves)
     metrics.extend(reader.unverified_metrics(metrics))
     question: str | None = None
     hypotheses: list[str] = []

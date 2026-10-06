@@ -27,7 +27,29 @@ claim of independent final-test validation or of achieving the 2 dB target.
 
 Validation uses actual files, real Git repositories, real numerical subprocesses
 and source/schema functions; no provider or tool substitutes. The external research
-suite passed 81 checks. MARS targeted checks passed 87 tests, including the native
-submission fixture repair (required literature-quality fields are preserved).
+suite passed 81 checks. The published-source MARS regression passed 203 tests
+with one unavailable-checkpoint skip, including schema admission, approvals,
+recovery, cancellation, execution and the durable reporting boundary.
 TypeScript and strict typing are checked separately. Run results and screenshots
 are recorded locally under the original run; no report-agent output is generated.
+
+The results center now admits managed `paper_static` journals as well as local
+command receipts. It checks saved input identity, attempt identity, receipt,
+summary and log hashes, exact finite summary values, the approved budget and
+seed, and all observed update/loss pairs. It reads only bounded files inside the
+selected run and never recovers jobs, launches training, exports private logs,
+or treats receipt consistency as independent reproduction. Backend measurement
+units take precedence over legacy prose: APE here is cancellation gain in dB.
+
+The actual Test5 batch completed all five jobs at 50 optimizer updates, seed 2026
+and 19,264 parameters. All TensorBoard training/held-out scalars match the
+flushed step observations, with two measured cancellation images per job. The
+capture hash and frozen model/evaluation/data source files remain unchanged.
+Baseline RES was 23.759658938 dB, combined RES 24.224086456 dB, loss-only RES
+24.463686568 dB, scheduler-only RES 23.407894043 dB, and clip-only RES
+23.759658938 dB. Best observed reduction was 0.351764895 dB; the 2 dB primary
+goal was not met. This continuation reused existing approved research/design/
+coding work with explicitly labelled, user-authorized handoff repairs; it does
+not claim a fresh model-driven run of every upstream stage. Writing remains
+pending, including after restart. Local evidence lives under
+`runs/simulation-acceptance/`; external research code is not included here.
