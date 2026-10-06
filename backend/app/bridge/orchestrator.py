@@ -1331,6 +1331,7 @@ class Orchestrator:
         run_id: str,
         agent: str,
         reason: str,
+        restart_stopped: bool = False,
     ) -> dict[str, Any]:
         session = self.session(run_id)
         if session.read_only:
@@ -1338,7 +1339,31 @@ class Orchestrator:
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
-            return {"ok": False, "status": "stopped_run_requires_new_execution"}
+            termination = session.termination or {}
+            stopped_node = self._latest_node_for_stage(session, agent)
+            if (not restart_stopped or agent != "coding" or stopped_node is None
+                    or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
+                    or stopped_node not in termination.get("interrupted_nodes", [])
+                    or self.owned_tasks.active(run_id) is not None
+                    or session.graph.state(stopped_node) != NodeState.FAILED):
+                return {"ok": False, "status": "stopped_run_requires_new_execution"}
+            from app.bridge.research_branch import stopped_coding_retry_blocker
+            try:
+                blocker = stopped_coding_retry_blocker(session.run, stopped_node)
+            except (OSError, ValueError, KeyError) as exc:
+                blocker = str(exc)
+            if blocker:
+                return {"ok": False, "status": "recovery_blocked", "error": blocker}
+            session.run.write_event("run_lifecycle", {"event": "run.explicit_coding_retry",
+                "run_id": run_id, "node": stopped_node, "previous_termination": dict(termination),
+                "reason": reason, "automatic_resume": False, "timestamp": datetime.now(tz=timezone.utc).isoformat()})
+            session.termination = None
+            try:
+                self._persist_state(session, status="failed")
+            except Exception:
+                session.termination = termination
+                raise
+            self.owned_tasks.release_after_explicit_review(run_id)
         node_key = self._latest_node_for_stage(session, agent)
         if node_key is None:
             return {"ok": False, "error": f"stage {agent} is not in this run"}

@@ -193,6 +193,7 @@ class RunDetail(RunSummary):
 
 class RetryAgentPayload(BaseModel):
     reason: str = ""
+    restart_stopped: bool = False
 
 
 def _ensure_active_run(run_id: str) -> None:
@@ -587,6 +588,7 @@ async def retry_agent(
             run_id=run_id,
             agent=agent,
             reason=reason,
+            restart_stopped=payload.restart_stopped,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc

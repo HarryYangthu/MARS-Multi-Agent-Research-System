@@ -99,6 +99,7 @@ class ToolPolicy:
     redaction: tuple[str, ...] = ()
     process_backend: str = "local_process"
     require_isolation: bool = False
+    repeatable_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -781,6 +782,7 @@ def _spec_from_config(spec: ToolSpec) -> ToolSpec:
         redaction=cfg.redaction or spec.policy.redaction,
         process_backend=cfg.process_backend,
         require_isolation=cfg.require_isolation or spec.policy.require_isolation,
+        repeatable_read=cfg.repeatable_read or spec.policy.repeatable_read,
     )
     return ToolSpec(
         name=spec.name,

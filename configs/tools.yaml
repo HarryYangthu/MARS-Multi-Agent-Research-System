@@ -335,6 +335,7 @@ tools:
     enabled: true
     description: Read text from a project file. When truncated is true, continue with the returned next_offset as char_offset; path must remain the exact file path, without fragment or class suffix.
     mutation_level: read
+    repeatable_read: true
     allowed_agents: [idea, experiment, coding, execution, writing]
     timeout_seconds: 10
     input_schema:

@@ -21,6 +21,32 @@ def coding_workspace_blocker(run: RunHandle) -> str:
     return preflight(repo.root, run.root, run.project, run.run_id)
 
 
+def stopped_coding_retry_blocker(run: RunHandle, node_key: str) -> str:
+    """Explicit new invocation only; never replay an unknown write or job."""
+    import json
+    from app.bridge.task_runtime import task_contract_path
+    from app.harness.runtime.task_contract import TaskEnvelope
+    from app.harness.llm.accounting import RunModelBudget
+    if not receipt_path(run.root).is_file():
+        return "此任务没有已绑定的 Git 实验分支。"
+    blocker = coding_workspace_blocker(run)
+    if blocker:
+        return blocker
+    task = TaskEnvelope.model_validate_json(task_contract_path(run, node_key).read_text())
+    if (task.run_id, task.project, task.node_id, task.agent) != (run.run_id, run.project, node_key, "coding"):
+        return "编码检查点身份不匹配。"
+    checkpoint = run.root / "agent_traces/coding" / task.invocation_id / "checkpoint.json"
+    if not checkpoint.resolve().is_relative_to(run.root.resolve()):
+        return "编码检查点路径异常。"
+    state = json.loads(checkpoint.read_text())
+    if state.get("pending") == "tool" or state.get("pending_batch"):
+        return "有结果未确认的工具操作，不能重新执行编码阶段。"
+    if any(row.get("status") in {"in_flight", "reconciliation_required"}
+           for row in RunModelBudget(run.root).recovery_snapshot()["requests"].values()):
+        return "有结果未确认的模型请求，请先核对调用记录。"
+    return ""
+
+
 @contextmanager
 def research_branch_scope(run: RunHandle, node_key: str) -> Iterator[None]:
     stage = parse_node_key(node_key).stage

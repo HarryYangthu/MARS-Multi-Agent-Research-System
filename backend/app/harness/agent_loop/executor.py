@@ -25,7 +25,7 @@ from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_finge
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
-from app.harness.tools.registry import ToolContext, ToolRegistry
+from app.harness.tools.registry import ToolContext, ToolPolicy, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
 ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
@@ -105,6 +105,12 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
                  "tool_calls": policy.remaining_tool_calls(counts["tool_dispatches"]),
                  "validation_repairs": None if policy.completion_driven else max(0, policy.max_validation_repairs - counts["validation_repairs"])}
     return remaining_budget_message(remaining)
+
+
+def permits_fresh_read(policy: ToolPolicy) -> bool:
+    """Only host-configured local reads can bypass successful-call deduplication."""
+    return bool(policy.repeatable_read and policy.mutation_level == "read"
+                and not policy.network and not policy.requires_approval)
 
 
 def rejected_batch_feedback(actions: list[dict[str, Any]], *, seen: dict[str, Any],
@@ -274,11 +280,14 @@ class NativeAgentLoop:
             raise ValueError("review provider and configuration must be supplied together")
         validate_reflection_format_repair(request.review_config or request.config, p)
         specs = []
+        fresh_reads: set[str] = set()
         for name in request.tools:
             spec = request.registry.spec(name)
             if not request.registry.has(name) or spec is None or spec.bridge_only:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
+            if permits_fresh_read(spec.policy):
+                fresh_reads.add(name)
         native = p.protocol == "native_tools"
         validate_native_thinking(request.config, p)
         wire_tools = native_specs(specs, request.final_schema, allow_revisions=p.document_revisions_enabled,
@@ -838,7 +847,8 @@ class NativeAgentLoop:
                     if len(actions) > 1:
                         if (not p.allows_tool_calls(counts["tool_dispatches"], len(actions)) or
                             len(identities) != len(set(identities)) or
-                            any(i in state["seen"] and not state["seen"][i]["retry_allowed"] for i in identities)):
+                            any(i in state["seen"] and not state["seen"][i]["retry_allowed"]
+                                and action["tool"] not in fresh_reads for i, action in zip(identities, actions))):
                             state["feedback"] = rejected_batch_feedback(actions, seen=state["seen"],
                                 history=state["history"], policy=p, used=counts["tool_dispatches"])
                             trace.snapshot(state)
@@ -854,7 +864,8 @@ class NativeAgentLoop:
                             state["feedback"] = f"Tool {tool} is not available for this agent."
                         elif not p.allows_tool_calls(counts["tool_dispatches"]):
                             state["feedback"] = "Tool budget exhausted."
-                        elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
+                        elif (identity in state["seen"] and not state["seen"][identity]["retry_allowed"]
+                              and tool not in fresh_reads):
                             state["feedback"] = rejected_batch_feedback([decision], seen=state["seen"],
                                 history=state["history"], policy=p, used=counts["tool_dispatches"])
                         else:

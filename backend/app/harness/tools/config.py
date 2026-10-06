@@ -32,6 +32,7 @@ class ToolConfig:
     mcp_env: tuple[str, ...] = ()
     process_backend: str = "local_process"
     require_isolation: bool = False
+    repeatable_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ def load_tool_configs() -> dict[str, ToolConfig]:
             mcp_env=_str_tuple(cfg.get("mcp_env")),
             process_backend=str(cfg.get("process_backend") or "local_process"),
             require_isolation=bool(cfg.get("require_isolation", False)),
+            repeatable_read=bool(cfg.get("repeatable_read", False)),
         )
     return out
 

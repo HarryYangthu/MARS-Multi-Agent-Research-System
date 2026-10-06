@@ -10,11 +10,12 @@ import pytest
 import yaml
 
 from app.bridge.research_branch import coding_workspace_blocker, research_branch_scope
+from app.harness.agent_loop.executor import permits_fresh_read
 from app.harness.project_workspace import open_folder
 from app.harness.tools.code import apply_patch_tool, repo_reader_tool, rollback_patch_tool, write_file_tool
 from app.harness.tools.git_branch import GitWorkspaceError, branch_name, current_git_branch, git, receipt_path
 from app.harness.tools.project_repo import load_project_repo, resolve_allowed_path
-from app.harness.tools.registry import ToolContext
+from app.harness.tools.registry import ToolContext, ToolPolicy, get_registry
 from app.settings import reset_settings_cache
 from app.storage.run_store import RunHandle
 
@@ -107,6 +108,28 @@ async def test_retry_retains_partial_changes_on_same_branch(research: tuple[RunH
         assert (source / "main.py").read_text() == "VALUE = 9\n"
     assert receipt_path(run.root).read_bytes() == original_receipt
     assert git(source, "branch", "--show-current") == branch_name(run.project, run.run_id)
+
+
+@pytest.mark.asyncio
+async def test_repeated_local_read_observes_the_written_file(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    spec = get_registry().spec("code.repo_reader")
+    assert spec is not None and permits_fresh_read(spec.policy)
+    with research_branch_scope(run, "coding"):
+        before = await repo_reader_tool({"path": "main.py"}, ctx(run))
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 4\n"}, ctx(run))).ok
+        after = await repo_reader_tool({"path": "main.py"}, ctx(run))
+        assert before.ok and after.ok
+        assert before.output["sha256"] != after.output["sha256"]
+        assert after.output["content"] == "VALUE = 4\n"
+
+
+def test_repetition_permission_does_not_cover_writes_network_or_approvals() -> None:
+    assert not permits_fresh_read(ToolPolicy())
+    assert permits_fresh_read(ToolPolicy(repeatable_read=True))
+    assert not permits_fresh_read(ToolPolicy(repeatable_read=True, mutation_level="write"))
+    assert not permits_fresh_read(ToolPolicy(repeatable_read=True, network=True))
+    assert not permits_fresh_read(ToolPolicy(repeatable_read=True, requires_approval=True))
 
 
 def test_repository_lock_blocks_concurrent_tasks(research: tuple[RunHandle, Path]) -> None:
