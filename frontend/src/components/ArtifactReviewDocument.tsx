@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,7 +13,9 @@ import { ResearchEvidencePanel } from "./ResearchEvidencePanel";
 const TITLES: Record<Stage, string> = { idea: "研究提案", experiment: "实验方案", coding: "代码方案", execution: "实验记录", writing: "研究报告" };
 const button = "rounded-lg border border-mars-border px-4 py-2 text-sm hover:bg-mars-panel disabled:opacity-40";
 
-export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onChanged, onNotice, onArtifact, onBusy, onReviewed, expanded = false, reviewActions = true }: { run: RunDetail; stage: Stage; state: string; stale: boolean; advanced: string; onChanged: () => Promise<void>; onNotice: (message: string) => void; onArtifact?: (artifact: ArtifactView | null) => void; onBusy?: (busy: boolean) => void; onReviewed?: () => void; expanded?: boolean; reviewActions?: boolean }): JSX.Element {
+export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onChanged, onNotice, onArtifact, onBusy, onReviewed, expanded = false, reviewActions = true, initiallyCollapsed = false }: { run: RunDetail; stage: Stage; state: string; stale: boolean; advanced: string; onChanged: () => Promise<void>; onNotice: (message: string) => void; onArtifact?: (artifact: ArtifactView | null) => void; onBusy?: (busy: boolean) => void; onReviewed?: () => void; expanded?: boolean; reviewActions?: boolean; initiallyCollapsed?: boolean }): JSX.Element {
+  const [collapsed, setCollapsed] = useState(initiallyCollapsed);
+  const contentId = useId();
   const [artifact, setArtifact] = useState<ArtifactView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -65,15 +67,26 @@ export function ArtifactReviewDocument({ run, stage, state, stale, advanced, onC
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   return <section aria-label={TITLES[stage]} className="overflow-clip rounded-xl border border-mars-border bg-mars-panel/20">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-5 py-4"><h2 className="font-medium">{TITLES[stage]}</h2><span className={`text-xs ${state === "waiting_review" ? "text-amber-300" : "text-slate-400"}`}>{statusLabel(state)}</span></div>
+    <div className={`flex flex-wrap items-center justify-between gap-3 px-5 py-4 ${collapsed ? "" : "border-b border-mars-border"}`}>
+      <h2 className="font-medium">{TITLES[stage]}</h2>
+      <div className="flex items-center gap-3">
+        <span className={`text-xs ${state === "waiting_review" ? "text-amber-300" : "text-slate-400"}`}>{statusLabel(state)}</span>
+        <button type="button" aria-label={`${collapsed ? "展开" : "收起"}${TITLES[stage]}`} aria-expanded={!collapsed} aria-controls={contentId} onClick={() => setCollapsed(value => !value)} className="flex items-center gap-1.5 rounded-lg border border-mars-border px-3 py-1.5 text-xs text-slate-300 hover:bg-mars-panel focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400">
+          {collapsed ? "展开" : "收起"}
+          <svg aria-hidden="true" viewBox="0 0 16 16" className={`h-3.5 w-3.5 ${collapsed ? "" : "rotate-180"}`} fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m4 6 4 4 4-4" /></svg>
+        </button>
+      </div>
+    </div>
     {error ? <p role="alert" className="px-5 pt-4 text-sm text-amber-300">{error}</p> : null}
+    <div id={contentId} hidden={collapsed}>
     {loading ? <p className="p-8 text-sm text-slate-400">正在读取文档…</p> : artifact ? <article className="break-words px-5 py-5 text-sm leading-7 text-slate-300 sm:px-8 [&_p]:my-3 [&_h1]:mb-5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-3 [&_h2]:mt-7 [&_h2]:text-lg [&_h2]:font-medium [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:font-medium [&_ul]:list-disc [&_ol]:list-decimal [&_li]:ml-5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-mars-panel [&_pre]:p-4 [&_table]:block [&_table]:overflow-x-auto [&_td]:border [&_td]:border-mars-border [&_td]:p-2 [&_th]:border [&_th]:border-mars-border [&_th]:p-2"><ReactMarkdown remarkPlugins={[remarkGfm]}>{artifactBody(artifact.text)}</ReactMarkdown></article> : <p className="p-8 text-sm text-slate-400">{state === "running" ? "Agent 正在处理，文档生成后会显示在这里。" : state === "pending" ? "该阶段尚未开始。" : "暂无文档。"}</p>}
     {expanded && artifact ? <ProposalDetails metadata={artifact.metadata} /> : null}
     {stage === "idea" ? <ResearchEvidencePanel runId={run.run_id} project={run.project} version={artifact?.version ?? ""} active={state === "running"} /> : null}
+    </div>
     {reviewActions && state === "waiting_review" ? <div className="sticky bottom-0 border-t border-mars-border bg-mars-panel px-5 py-4">
       {feedback ? <form onSubmit={event => { event.preventDefault(); void review("revise"); }}><label className="text-sm" htmlFor="review-feedback">需要修改什么？</label><textarea id="review-feedback" value={reason} onChange={event => setReason(event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-mars-border bg-mars-bg p-3 text-sm" /><div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setFeedback(false)} className={button}>取消</button><button disabled={!canReview || !reason.trim()} className={`${button} bg-mars-accent text-white`}>提交修改意见</button></div></form> : <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-slate-400">{busy ? "正在提交…" : uncertain ? "操作已提交或结果待核对，请刷新查看状态。" : artifact && !artifact.valid ? "文档校验未通过" : "审核后继续下一阶段"}</span><div className="flex gap-2"><button disabled={!canReview} onClick={() => setFeedback(true)} className={button}>提出修改</button><button disabled={!canReview || !artifact?.valid} onClick={() => void review("approve")} className={`${button} border-transparent bg-mars-accent text-white`}>批准并继续</button></div></div>}
     </div> : null}
-    <div className="flex justify-end border-t border-mars-border px-5 py-3 text-xs text-slate-500"><Link href={advanced} className="hover:text-indigo-300">编辑文档与查看细节 →</Link></div>
+    {!collapsed ? <div className="flex justify-end border-t border-mars-border px-5 py-3 text-xs text-slate-500"><Link href={advanced} className="hover:text-indigo-300">编辑文档与查看细节 →</Link></div> : null}
   </section>;
 }
 
