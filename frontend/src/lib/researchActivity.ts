@@ -3,7 +3,7 @@ import type { ChatMessageView, RunDetail, RunActivityView, WorkLogView } from ".
 export type Activity = { id: string; timestamp: string; agent: string; title: string; detail: string; status: string; ended_at?: string | null; startsStage?: boolean };
 export type CommanderActivity = Omit<Activity, "agent" | "detail"> & { kind: string };
 export const agentLabel = (name: string): string => ({ commander: "总控", idea: "研究", idea_research: "调研", experiment: "实验设计", coding: "编码", execution: "执行", writing: "报告" }[name] || name);
-export const statusLabel = (state: string): string => ({ pending: "待开始", running: "处理中", waiting_review: "等待审核", approved: "已批准", done: "已完成", completed: "已完成", failed: "失败", error: "失败", interrupted: "已中断", paused: "已暂停", stopped: "已停止", cancelled: "已取消", skipped: "已跳过", created: "已创建", unknown: "状态未知", success: "成功", idle: "待命", rejected: "已驳回", blocked: "受阻" }[state] || state);
+export const statusLabel = (state: string): string => ({ pending: "待开始", running: "处理中", waiting_review: "等待审核", waiting_execution_confirmation: "等待核对仿真配置", approved: "已批准", done: "已完成", completed: "已完成", failed: "失败", error: "失败", interrupted: "已中断", paused: "已暂停", stopped: "已停止", cancelled: "已取消", skipped: "已跳过", created: "已创建", unknown: "状态未知", success: "成功", idle: "待命", rejected: "已驳回", blocked: "受阻" }[state] || state);
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown): string => typeof value === "string" ? value : "";
 

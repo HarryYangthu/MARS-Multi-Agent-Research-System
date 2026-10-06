@@ -886,6 +886,8 @@ class Orchestrator:
         if self._stopping(session) or session.graph.state(node_key) != NodeState.APPROVED:
             return
         if parse_node_key(node_key).stage == "execution":
+            if not await self._await_execution_confirmation(session, node_key):
+                return
             await self._transition(session, node_key, NodeState.RUNNING)
             try:
                 from app.bridge.agent_runner import _run_execution_batch, load_agent_handoff_context
@@ -944,6 +946,33 @@ class Orchestrator:
         await self._transition(session, node_key, NodeState.DONE)
         if parse_node_key(node_key).stage == "execution":
             await self._after_execution(session, node_key)
+
+    async def _await_execution_confirmation(self, session: RunSession, node_key: str) -> bool:
+        from app.bridge.execution_confirmation import confirmation_policy, execution_preview, save_confirmation
+        interval = float(confirmation_policy()['poll_interval_seconds'])
+        announced = False
+        while not self._stopping(session):
+            try:
+                view = await asyncio.to_thread(execution_preview, session.run, node_key)
+                if not view['blockers']:
+                    if view['confirmed']:
+                        return True
+                    if session.request.auto_approve:
+                        await asyncio.to_thread(save_confirmation, session.run, node_key, view['token'], actor='auto_approve')
+                        return True
+            except (OSError, ValueError, RuntimeError):
+                # A changed/unreadable input never becomes permission to launch.
+                view = {'blockers': ['仿真配置无法核验，请刷新配置核对窗口。']}
+            if not announced:
+                self._persist_state(session, status='waiting_execution_confirmation')
+                await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
+                    'event': 'execution.configuration_confirmation_required', 'node': node_key,
+                    'message': '启动仿真前，请核对实际运行环境、数据与实验参数。',
+                    'blockers': view['blockers'],
+                })
+                announced = True
+            await asyncio.sleep(interval)
+        return False
 
     def _release_review_stop(self, session: RunSession, *, agent: str, operation: Literal["approval", "revision"]) -> bool:
         """Explicit action on a durable review never replays interrupted generation."""
@@ -1015,12 +1044,22 @@ class Orchestrator:
             # The existing driver observes the ReviewSession approval event or
             # the already-written approved artifact. Never start a second one.
             return {"ok": True, "status": "approval_signalled", "run_id": run_id}
+        if agent == 'execution':
+            node = self._latest_node_for_stage(session, agent)
+            if node is None or session.graph.state(node) not in {
+                    NodeState.WAITING_REVIEW, NodeState.APPROVED, NodeState.DONE, NodeState.SKIPPED}:
+                return {'ok': False, 'status': 'not_resumable', 'run_id': run_id}
         acknowledgement: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
 
         async def resume_owned() -> None:
             try:
+                if agent == 'execution':
+                    # Confirmation and simulation can wait for minutes. HTTP
+                    # acknowledges owned scheduling, never waits for job output.
+                    acknowledgement.set_result({'ok': True, 'status': 'approval_signalled', 'run_id': run_id})
                 result = await self._resume_approved_artifact(session, agent=agent)
-                acknowledgement.set_result(result)
+                if not acknowledgement.done():
+                    acknowledgement.set_result(result)
                 if result.get("status") == "resumed" and not self._stopping(session):
                     await self.run(run_id)
             finally:

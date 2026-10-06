@@ -81,6 +81,62 @@ class RecoveryPayload(BaseModel):
     token: str = Field(min_length=1)
 
 
+class ExecutionConfirmationPayload(BaseModel):
+    project: str
+    token: str = Field(min_length=64, max_length=64, pattern='^[0-9a-f]+$')
+
+
+def _execution_configuration(run_id: str, project: str, *, include_hidden: bool = False) -> tuple[RunSession, dict[str, Any]]:
+    from app.bridge.execution_confirmation import execution_preview
+    from app.bridge.node_key import parse_node_key
+    from app.harness.runtime.state_machine import NodeState
+    session = _execution_session(run_id)
+    if session.run.project != project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目，请重新打开对应对话。')
+    nodes = [key for key in session.graph.nodes if parse_node_key(key).stage == 'execution']
+    if not nodes:
+        return session, {'visible': False}
+    node = max(nodes, key=lambda key: parse_node_key(key).attempt)
+    state = session.graph.state(node)
+    coding = [key for key in session.graph.nodes if parse_node_key(key).stage == 'coding']
+    visible = not coding or session.graph.state(max(coding, key=lambda key: parse_node_key(key).attempt)) in {
+        NodeState.DONE, NodeState.SKIPPED}
+    visible = visible and state not in {NodeState.DONE, NodeState.SKIPPED}
+    if not visible and not include_hidden:
+        return session, {'visible': False}
+    try:
+        view = execution_preview(session.run, node)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail='仿真配置无法核验，请检查项目配置与任务记录。') from exc
+    return session, {**view, 'visible': visible,
+        'state': state.value, 'launch_ready': state == NodeState.APPROVED,
+        'can_confirm': state == NodeState.APPROVED and not view['blockers'] and not session.read_only}
+
+
+@router.get('/{run_id}/execution-configuration')
+def get_execution_configuration(run_id: str, project: str) -> dict[str, Any]:
+    return _execution_configuration(run_id, project)[1]
+
+
+@router.post('/{run_id}/execution-configuration/confirm')
+async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirmationPayload) -> dict[str, Any]:
+    import asyncio
+    from app.bridge.execution_confirmation import save_confirmation
+    session, view = await asyncio.to_thread(_execution_configuration, run_id, payload.project, include_hidden=True)
+    if view.get('token') != payload.token:
+        raise HTTPException(status_code=409, detail='配置或代码已变化，请重新核对；尚未启动新的仿真。')
+    if view.get('confirmed') and view.get('state') in {'running', 'done'}:
+        return {'ok': True, 'confirmed': True, 'status': 'already_started', 'run_id': run_id}
+    if not view.get('can_confirm'):
+        raise HTTPException(status_code=409, detail='当前配置还不可启动：' + '；'.join(view.get('blockers', [])))
+    try:
+        await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail='配置未确认，请刷新并核对配置变化。') from exc
+    result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')
+    return {**result, 'confirmed': True}
+
+
 @router.get('/{run_id}/recovery')
 async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
     from app.bridge.run_recovery import recovery_status

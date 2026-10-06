@@ -6,6 +6,7 @@ import { agentLabel, statusLabel } from "@/lib/researchActivity";
 import { latestStages, pendingReviewStage, reviewFocus } from "@/lib/runReview";
 import { ArtifactReviewDocument } from "./ArtifactReviewDocument";
 import { ResearchReviewPrompt } from "./ResearchReviewPrompt";
+import { ExecutionConfigurationReview } from "./ExecutionConfigurationReview";
 
 export function ResearchRunWorkspace({ run, stale, onChanged }: { run: RunDetail | null; stale: boolean; onChanged: () => Promise<void> }): JSX.Element | null {
   const [selected, setSelected] = useState("");
@@ -27,5 +28,6 @@ export function ResearchRunWorkspace({ run, stale, onChanged }: { run: RunDetail
     {notice ? <p role="status" className="text-sm text-indigo-200">{notice}</p> : null}
     {stage ? <ArtifactReviewDocument key={`${run.run_id}:${stage}`} run={run} stage={stage} state={state} stale={stale} advanced={`/runs/${encodeURIComponent(run.run_id)}?view=advanced&agent=${stage}`} onChanged={onChanged} onNotice={setNotice} onArtifact={receiveArtifact} expanded reviewActions={false} initiallyCollapsed /> : <p className="text-sm text-slate-400">暂无阶段文档。</p>}
     <ResearchReviewPrompt run={run} artifact={pendingArtifact} stale={stale} onChanged={onChanged} />
+    <ExecutionConfigurationReview key={run.run_id} runId={run.run_id} project={run.project} stale={stale} onChanged={onChanged} />
   </section>;
 }

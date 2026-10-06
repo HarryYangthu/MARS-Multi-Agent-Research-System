@@ -110,6 +110,9 @@ async def test_bridge_executes_manual_approved_plan_and_preserves_seed(
                 "scale": 2, "data_path": str(actual_regression_command), "seed": 0, "stdout_only": omit_result}}]}
     store = ArtifactStore(run)
     store.approve(store.write(text=dumps(plan, "Manually authored test input; no Agent output is substituted.")))
+    from app.bridge.execution_confirmation import execution_preview, save_confirmation
+    preview = execution_preview(run, 'execution')
+    save_confirmation(run, 'execution', preview['token'])
     if omit_result:
         with pytest.raises(RuntimeError, match="actual execution batch failed"):
             await _run_execution_batch(run=run, node_key="execution")
