@@ -6,13 +6,14 @@ import { confirmExecutionConfiguration, ExecutionReviewError, getExecutionConfig
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
+  backend_source: "配置来源",
   repository: "代码目录", branch: "研究分支", config_path: "实际训练配置", data_path: "数据路径",
   python: "Python 环境", max_concurrency: "同时运行实验数", batch_steps: "批处理默认步数",
   max_iters: "每次训练默认迭代上限", dry_run: "仅检查环境", timeout_seconds: "单作业超时（秒）",
   host: "服务器", user: "用户名", remote_root: "远端工作目录", gpu_ids: "GPU 编号",
   training_epochs: "实际配置中的训练轮数", training_seed: "实际配置中的随机种子",
 };
-const backends: Record<string, string> = { paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真" };
+const backends: Record<string, string> = { paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真", environment: "本地启动配置", execution_config: "执行配置文件", default: "应用默认配置" };
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "未配置";
   if (typeof value === "boolean") return value ? "是" : "否";
