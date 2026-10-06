@@ -87,6 +87,13 @@ def test_dirty_initial_repo_is_not_stashed_or_switched(research: tuple[RunHandle
     assert not (run.root / "resources/model_budget.v1.json").exists()
 
 
+def test_detached_head_requires_branch_selection(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    git(source, "checkout", "--detach", "HEAD")
+    assert "游离提交状态" in coding_workspace_blocker(run)
+    assert not receipt_path(run.root).exists()
+
+
 @pytest.mark.asyncio
 async def test_retry_retains_partial_changes_on_same_branch(research: tuple[RunHandle, Path]) -> None:
     run, source = research
@@ -143,6 +150,11 @@ async def test_protection_allowlist_control_files_and_symlinks(research: tuple[R
         assert not (await apply_patch_tool({"diff": patch}, ctx(run))).ok
         wrong = ctx(run); wrong.run_id = "another_run"
         assert not (await write_file_tool({"path": "main.py", "content": "NO\n"}, wrong)).ok
+        external = source.parent / "external_rollback.json"
+        external.write_text(json.dumps({"schema": "tool_rollback.v1", "run_id": run.run_id,
+            "project": run.project, "snapshots": [{"path": "main.py", "existed": True, "content": "NO\n"}]}))
+        assert not (await rollback_patch_tool({"rollback_ref": str(external)}, ctx(run))).ok
+        assert not (await apply_patch_tool({"patch_path": str(external)}, ctx(run))).ok
     assert outside.read_text() == "PRIVATE = True\n"
     assert (source / "baseline/ref.py").read_text() == "REFERENCE = 1\n"
 

@@ -51,7 +51,7 @@ def branch_name(project: str, run_id: str) -> str:
 
 
 def _branch(root: Path) -> str:
-    value = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    value = git(root, "branch", "--show-current")
     if not value:
         raise GitWorkspaceError("代码仓处于游离提交状态，请先选择基线分支。")
     return value
@@ -60,6 +60,8 @@ def _branch(root: Path) -> str:
 def _git_root(root: Path) -> Path:
     if not root.is_dir() or root.is_symlink():
         raise GitWorkspaceError("代码目录不存在或是符号链接，请重新关联代码仓。")
+    if not (root / ".git").exists():
+        raise GitWorkspaceError("此代码目录尚未建立 Git 仓库，请先初始化并提交基线代码；不会创建实验副本。")
     if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root.resolve():
         raise GitWorkspaceError("请关联 Git 仓库根目录，不能将仓库子目录作为实验分支工程。")
     return Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))

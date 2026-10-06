@@ -192,7 +192,9 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         return ToolResult(ok=False, output=payload, error=read_only_error)
     diff = str(args.get("diff", ""))
     if not diff and args.get("patch_path"):
-        if current_project_scope(ctx.project, ctx.run_id) is not None:
+        from app.harness.tools.git_branch import current_git_branch
+        if (current_project_scope(ctx.project, ctx.run_id) is not None
+                or current_git_branch(ctx.project, ctx.run_id) is not None):
             return ToolResult(ok=False, error="Bound patches require textual diff; external patch_path is not admitted")
         patch_path = Path(str(args["patch_path"]))
         if not patch_path.is_absolute():
@@ -277,9 +279,24 @@ async def rollback_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRes
     path = Path(rollback_ref)
     if not path.is_absolute():
         path = repo_root() / rollback_ref
+    from app.harness.tools.git_branch import current_git_branch
+    branch = current_git_branch(ctx.project, ctx.run_id)
+    if branch is not None:
+        run_root = Path(str(ctx.extra.get("run_root") or repo_root() / "runs" / ctx.run_id)).resolve()
+        try:
+            relative = path.relative_to(run_root).as_posix()
+            if not relative.startswith("coding/tool_applications/"):
+                raise ValueError("Rollback must belong to this run")
+            from app.harness.runtime.project_scope import safe_scope_path
+            path = safe_scope_path(run_root, relative, must_exist=True)
+        except ValueError as exc:
+            return ToolResult(ok=False, error=str(exc))
     if not path.is_file():
         return ToolResult(ok=False, error=f"rollback snapshot not found: {rollback_ref}")
     data = json.loads(path.read_text(encoding="utf-8"))
+    if branch is not None and (not isinstance(data, dict) or data.get("schema") != "tool_rollback.v1"
+            or data.get("run_id") != ctx.run_id or data.get("project") != ctx.project):
+        return ToolResult(ok=False, error="Rollback identity does not belong to this run")
     raw_snapshots = data.get("snapshots", [])
     if not isinstance(raw_snapshots, list):
         return ToolResult(ok=False, error="rollback snapshot is malformed")
