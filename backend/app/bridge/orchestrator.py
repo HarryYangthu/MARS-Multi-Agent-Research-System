@@ -516,6 +516,9 @@ class Orchestrator:
             if session.waiting_for_feedback:
                 self._persist_state(session, status="waiting_feedback")
                 return
+            if self._stage_limit_reached(session):
+                self._persist_state(session, status="waiting_feedback")
+                return
             ready = ready_batch(graph, self.max_parallel_nodes)
             if not ready:
                 await asyncio.sleep(0)
@@ -1203,6 +1206,28 @@ class Orchestrator:
 
         return _real
 
+    def set_stage_limit(self, run_id: str, *, stop_after: str | None) -> None:
+        """Persist a user-selected boundary before acknowledging a launch."""
+        if stop_after not in (None, "execution"):
+            raise ValueError("目前支持在 execution 完成后停住")
+        session = self.session(run_id)
+        if self.owned_tasks.active(run_id) is not None or session.read_only:
+            raise ValueError("只能在启动前设置阶段边界")
+        session.request.extra = {**session.request.extra, "stop_after": stop_after}
+        self._persist_request_extra(session.run, session.request.extra)
+        self._persist_state(session, status="waiting_execution_confirmation")
+
+    @staticmethod
+    def _stage_limit_reached(session: RunSession) -> bool:
+        if session.request.extra.get("stop_after") != "execution":
+            return False
+        nodes = [key for key in session.graph.nodes if parse_node_key(key).stage == "execution"]
+        latest = max(nodes, key=lambda key: parse_node_key(key).attempt) if nodes else None
+        reached = latest is not None and session.graph.state(latest) == NodeState.DONE
+        if reached:
+            session.waiting_for_feedback = True
+        return reached
+
     async def _after_execution(self, session: RunSession, node_key: str) -> None:
         """Let the Commander/Bridge evaluate metrics after execution.
 
@@ -1211,6 +1236,11 @@ class Orchestrator:
         chain automatically so legacy e2e stays runnable; otherwise the run
         pauses at waiting_feedback until a human starts the feedback loop.
         """
+        if self._stage_limit_reached(session):
+            self._persist_state(session, status="waiting_feedback")
+            await self._publish_state(session, channel=f"run.{session.run.run_id}.execution", payload={
+                "event": "execution.stage_limit_reached", "message": "仿真已完成，按要求停在结果验收；报告阶段尚未启动。"})
+            return
         if not self.registry.has("execution"):
             self._persist_state(session, status="running")
             return

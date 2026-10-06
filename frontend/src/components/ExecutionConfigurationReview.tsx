@@ -2,18 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
-import { confirmExecutionConfiguration, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
+import { confirmExecutionConfiguration, setExecutionBoundary, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
   backend_source: "配置来源",
   repository: "代码目录", branch: "研究分支", config_path: "实际训练配置", data_path: "数据路径",
-  python: "Python 环境", max_concurrency: "同时运行实验数", batch_steps: "批处理默认步数",
-  max_iters: "每次训练默认迭代上限", dry_run: "仅检查环境", timeout_seconds: "单作业超时（秒）",
+  python: "Python 环境", max_concurrency: "同时运行实验数", batch_steps: "备用默认预算",
+  max_iters: "本组训练预算", approved_budget: "每组批准的训练预算", dry_run: "仅检查环境", timeout_seconds: "单作业超时（秒）",
   host: "服务器", user: "用户名", remote_root: "远端工作目录", gpu_ids: "GPU 编号",
+  stop_after_execution: "仿真完成后暂停", budget_unit: "训练预算单位",
   training_epochs: "实际配置中的训练轮数", training_seed: "实际配置中的随机种子",
 };
-const backends: Record<string, string> = { paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真", environment: "本地启动配置", execution_config: "执行配置文件", default: "应用默认配置" };
+const backends: Record<string, string> = { paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真", environment: "本地启动配置", execution_config: "执行配置文件", default: "应用默认配置", steps: "参数更新次数", epochs: "完整训练轮次" };
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "未配置";
   if (typeof value === "boolean") return value ? "是" : "否";
@@ -72,6 +73,12 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged 
     try { setView(await getExecutionConfiguration(runId, project)); setError(""); }
     catch (issue) { setError(issue instanceof Error ? issue.message : "配置核对失败。"); }
   }
+  async function boundary(stop: boolean): Promise<void> {
+    setBusy(true); setAcknowledged("");
+    try { setView(await setExecutionBoundary(runId, project, stop)); setError(""); }
+    catch (issue) { setError(issue instanceof Error ? issue.message : "阶段边界保存失败。"); }
+    finally { setBusy(false); }
+  }
   async function confirm(): Promise<void> {
     if (!view?.can_confirm || view.confirmed || acknowledged !== token || submitting.current || stale || error) return;
     submitting.current = true; setBusy(true); setNotice("");
@@ -122,6 +129,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged 
           {view.warnings.map(item => <p key={item} className="text-xs leading-6 text-amber-200">{item}</p>)}
         </div>
         <footer className="space-y-3 border-t border-mars-border px-5 py-4">
+          {!view.confirmed ? <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={view.defaults.stop_after_execution === true} disabled={busy || stale || Boolean(error)} onChange={event => { void boundary(event.target.checked); }} />仿真完成后暂停，暂不生成报告</label> : null}
           {!view.confirmed ? <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={acknowledged === token} disabled={busy || !view.can_confirm || stale || Boolean(error)} onChange={event => setAcknowledged(event.target.checked ? token : "")} />我已核对运行环境、数据与实验参数</label> : null}
           {notice || error ? <p role="status" className="text-xs text-amber-200">{error || notice}</p> : null}
           <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { void refresh(); }} disabled={busy && !uncertain} className="text-xs text-indigo-300 disabled:opacity-40">刷新配置</button>{uncertain ? <button type="button" onClick={retryConfirmation} disabled={uncertain !== token || !view.can_confirm || stale || Boolean(error)} className="text-xs text-indigo-200 disabled:opacity-40">重新提交本次确认</button> : null}<button type="button" onClick={() => { void confirm(); }} disabled={busy || !view.can_confirm || view.confirmed || acknowledged !== token || stale || Boolean(error)} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? uncertain ? "正在核对提交结果" : "正在确认" : view.confirmed ? "已确认" : "确认配置，启动仿真"}</button></div>

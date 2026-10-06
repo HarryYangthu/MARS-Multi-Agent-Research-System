@@ -303,3 +303,28 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
     assert git(source, 'show', 'baseline:main.py') == 'VALUE = 1'
     (source / 'main.py').write_text('VALUE = 3\n')
     assert not execution_preview(run, 'execution')['confirmed']
+
+
+def test_execution_boundary_is_durable_and_blocks_writing_dispatch(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    orch, session, _, _ = execution
+    # Real session persistence and graph states, without providers or tool doubles.
+    from app.bridge.workflow_service import build_pipeline
+    session.graph = build_pipeline('execution')
+    orch.set_stage_limit(session.run.run_id, stop_after='execution')
+    before = execution_preview(session.run, 'execution')
+    assert before['defaults']['stop_after_execution'] is True
+    assert not orch._stage_limit_reached(session)
+    session.graph.restore_state('execution', NodeState.DONE)
+    orch._persist_state(session, status='running')
+    assert orch._stage_limit_reached(session)
+    assert session.graph.state('writing') == NodeState.PENDING
+    recovered = Orchestrator(run_store=orch.run_store, registry=AgentRegistry()).session(session.run.run_id)
+    assert recovered.request.extra['stop_after'] == 'execution'
+    assert orch._stage_limit_reached(recovered)
+    assert not (session.run.root / 'writing/research_report.v1.md').exists()
+    orch.set_stage_limit(session.run.run_id, stop_after=None)
+    after = execution_preview(session.run, 'execution')
+    assert after['token'] != before['token']
+    assert after['defaults']['stop_after_execution'] is False

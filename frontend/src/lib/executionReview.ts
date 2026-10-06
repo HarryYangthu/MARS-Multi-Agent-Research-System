@@ -31,3 +31,10 @@ export function confirmExecutionConfiguration(runId: string, project: string, to
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, token }),
   });
 }
+
+export function setExecutionBoundary(runId: string, project: string, stopAfterExecution: boolean): Promise<ExecutionConfiguration> {
+  return request(`${encodeURIComponent(runId)}/execution-boundary`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project, stop_after_execution: stopAfterExecution }),
+  });
+}

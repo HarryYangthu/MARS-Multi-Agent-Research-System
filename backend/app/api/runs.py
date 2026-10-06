@@ -123,6 +123,23 @@ def get_execution_configuration(run_id: str, project: str) -> dict[str, Any]:
     return _execution_configuration(run_id, project)[1]
 
 
+class ExecutionBoundaryPayload(BaseModel):
+    project: str
+    stop_after_execution: bool
+
+
+@router.post('/{run_id}/execution-boundary')
+def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
+    session = _execution_session(run_id)
+    if session.run.project != payload.project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目。')
+    try:
+        get_orchestrator().set_stage_limit(run_id, stop_after='execution' if payload.stop_after_execution else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _execution_configuration(run_id, payload.project)[1]
+
+
 @router.post('/{run_id}/execution-configuration/confirm')
 async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirmationPayload) -> dict[str, Any]:
     import asyncio

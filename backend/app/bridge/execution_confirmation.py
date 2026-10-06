@@ -71,6 +71,13 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         'batch_steps': config['batch_steps'],
         'timeout_seconds': config['command_timeout_seconds'],
     }
+    if configured == 'paper_static':
+        paper_defaults = config.get('paper_static', {})
+        defaults['max_concurrency'] = min(int(config['max_concurrency']), int(paper_defaults.get('max_concurrency', 1)))
+        defaults['batch_steps'] = paper_defaults.get('default_max_iters', 1)
+    options = run.root / 'input/run_request_options.v1.json'
+    request_extra = json.loads(options.read_text()).get('extra', {}) if options.is_file() else {}
+    defaults['stop_after_execution'] = request_extra.get('stop_after') == 'execution'
     files: dict[str, str] = {}
     for name in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md',
                  'execution/run_log.approved.md', 'input/selected_data_source.json', 'input/run_request_options.v1.json'):
@@ -104,7 +111,9 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             message = '批准方案缺少明确的随机种子，请填写非负整数，不能仅写“同基线种子”。'
         elif message == 'no valid approved experiment configurations; execution was not started':
             message = '没有可用的批准实验配置，尚未启动仿真。'
-        elif '编码交付' not in message:
+        elif '编码交付' in message:
+            message = '编码交付与批准方案不一致，请修正配置绑定、随机种子和预算，再生成执行清单。'
+        else:
             message = '实验清单或配置无法核验，请检查已批准的执行计划。'
         blockers.append('执行计划尚不可启动：' + message)
         plan = run.root / 'experiment/experiment_plan.approved.md'
@@ -151,6 +160,15 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     source_configs.append({'path': name, 'seed': raw.get('seed'), 'epochs': raw.get('Epoch', raw.get('epochs'))})
     data = _load_selected_data_source(run)
     defaults['data_path'] = str(data.get('stored_path') or '')
+    if prepared is not None:
+        paths = {str(spec.config.get('data_path') or '') for spec in prepared.specs}
+        if len(paths) == 1:
+            defaults['data_path'] = paths.pop()
+        from app.harness.schema.experiment_contract import budget as approved_job_budget
+        budgets = {approved_job_budget(spec.config) for spec in prepared.specs
+                   if any(key in spec.config for key in ('budget_steps', 'budget_unit', 'max_iters'))}
+        if len(budgets) == 1:
+            defaults['budget_unit'], defaults['approved_budget'] = budgets.pop()
     if settings.mars_execution_backend == 'paper_static':
         from app.execution.paper_static_adapter import (
             _bool_value, _override_args, _paper_static_config, _python_from_config,
@@ -165,8 +183,6 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         if not bool(paper.get('enabled', True)):
             blockers.append('论文训练适配器未启用。')
         if prepared is None and experiments:
-            if any('budget_steps' in item['config'] for item in experiments):
-                blockers.append('批准方案的预算单位是 steps，当前论文训练入口使用 epochs；请回到实验设计核对，不能自动换算。')
             if any(not item['config'].get('config_path') for item in experiments):
                 blockers.append('编码交付未为每组实验绑定配置文件；请补齐 execution_jobs，执行管理器不会选用全局默认文件。')
         if prepared is not None:
@@ -185,8 +201,10 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     overrides = _override_args(spec.config, paper)
                     effective = {part.split('=', 1)[0]: part.split('=', 1)[1] for part in overrides if part != '--set'}
                     actual_seed = effective.get('seed', raw.get('seed'))
+                    from app.harness.schema.experiment_contract import budget as approved_budget
+                    unit, count = approved_budget(spec.config)
                     item['effective'] = {'config_path': str(cfg_path), 'entrypoint': 'train_static.py',
-                        'max_iters': spec.config['max_iters'], 'budget_unit': 'epochs',
+                        'max_iters': count, 'budget_unit': unit,
                         'training_epochs': raw.get('Epoch', raw.get('epochs')),
                         'dry_run': _bool_value(spec.config.get('dry_run', paper.get('default_dry_run', False))),
                         'seed': actual_seed, 'data_path': str(data_path), 'overrides': effective}

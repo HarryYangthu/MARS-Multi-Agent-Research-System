@@ -6,10 +6,14 @@ from pathlib import Path
 import pytest
 
 from app.harness.tools.registry import ToolContext, reset_for_tests
+from app.settings import reset_settings_cache
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_batch_cannot_fabricate_execution_artifacts(tmp_path: Path) -> None:
+async def test_unconfigured_batch_cannot_fabricate_execution_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # This is a negative local-command admission test, independent of installation backend.
+    monkeypatch.setenv("MARS_EXECUTION_BACKEND", "local_command")
+    reset_settings_cache()
     reg = reset_for_tests()
     run_root = tmp_path / "runs" / "r1"
     run_root.mkdir(parents=True)
@@ -36,6 +40,7 @@ async def test_unconfigured_batch_cannot_fabricate_execution_artifacts(tmp_path:
     assert json.loads((run_root / "execution" / "metrics.json").read_text()) == []
     assert not (run_root / "execution" / "curves").exists()
     assert (run_root / "events" / "tool_events.jsonl").is_file()
+    reset_settings_cache()
 
 
 @pytest.mark.asyncio

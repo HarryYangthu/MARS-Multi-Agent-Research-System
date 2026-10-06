@@ -8,6 +8,7 @@ standard execution result shape used by reports, diagnostics, and the workbench.
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
 import json
 import math
@@ -63,7 +64,8 @@ async def run_paper_static_simulation(
         return _failed_result(spec, started, str(exc))
 
     dry_run = _bool_value(spec.config.get("dry_run", cfg.get("default_dry_run", False)))
-    max_iters = _positive_int(spec.config.get("max_iters", cfg.get("default_max_iters")), max(1, steps))
+    from app.harness.schema.experiment_contract import budget
+    unit, max_iters = budget(spec.config)
     timeout = _positive_float(cfg.get("timeout_seconds"), 900.0)
     output_root = run_root / "execution" / "paper_static" / _safe_name(spec.experiment_id) / uuid.uuid4().hex
     output_root.mkdir(parents=True, exist_ok=False)
@@ -84,7 +86,7 @@ async def run_paper_static_simulation(
         "train_static.py",
         "--cfg",
         str(config_path),
-        "--max-iters",
+        "--max-steps" if unit == "steps" else "--max-iters",
         str(max_iters),
         "--tag",
         tag,
@@ -108,6 +110,7 @@ async def run_paper_static_simulation(
                 "data_path": str(data_path),
                 "config_path": str(config_path),
                 "max_iters": max_iters,
+                "budget_unit": unit,
                 "dry_run": dry_run,
             },
         )
@@ -141,13 +144,18 @@ async def run_paper_static_simulation(
             async for raw in process.stdout:
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 stdout_lines.append(line)
-                parsed = _parse_epoch_line(line)
+                progress = _parse_step_line(line)
+                parsed = progress or _parse_epoch_line(line)
                 if parsed is not None:
-                    step = len(loss_curve)
+                    step = int(parsed.get("optimizer_step", len(loss_curve)))
                     loss_curve.append(parsed["loss"])
-                    pim_db_curve.append(parsed["paper_PIM_db"])
-                    res_db_curve.append(parsed["paper_RES_db"])
-                    ape_db_curve.append(parsed["paper_APE_db"])
+                    if "paper_RES_db" in parsed:
+                        pim_db_curve.append(parsed["paper_PIM_db"])
+                        res_db_curve.append(parsed["paper_RES_db"])
+                        ape_db_curve.append(parsed["paper_APE_db"])
+                    from app.execution.curve_parser import write_curve
+                    write_curve(run_root=run_root, experiment_id=spec.experiment_id,
+                                metric_name="loss", values=loss_curve)
                     if bus_publish is not None:
                         await bus_publish(
                             channel,
@@ -190,7 +198,10 @@ async def run_paper_static_simulation(
     metrics = _metrics_from_summary(summary)
     if not metrics and loss_curve:
         metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
-    has_measurements = bool(metrics) and all(math.isfinite(value) for value in metrics.values())
+    has_measurements = summary_path is not None and bool(metrics) and all(math.isfinite(value) for value in metrics.values())
+    if unit == "steps" and (summary.get("optimizer_steps") != max_iters or summary.get("seed") != spec.seed):
+        has_measurements = False
+        stderr_lines.append("actual optimizer updates or seed do not match the approved protocol")
     metrics.setdefault("returncode", float(returncode))
     metrics.setdefault("dry_run", 1.0 if dry_run else 0.0)
     metrics.setdefault("max_iters", float(max_iters))
@@ -335,11 +346,15 @@ def approved_config_path(config: dict[str, Any], policy: dict[str, Any], root: P
         raise ValueError("实验配置文件必须位于绑定代码目录中")
     if config.get("entrypoint") != "train_static.py":
         raise ValueError("paper_static 只支持明确交付的 train_static.py 入口")
-    # This adapter's --max-iters limits training epochs, not optimizer steps.
-    if config.get("budget_unit") != "epochs" or type(config.get("max_iters")) is not int or config["max_iters"] < 1:
-        raise ValueError("paper_static 需要明确的 epochs 预算；不得将训练步数替换为轮数")
-    if "budget_steps" in config:
-        raise ValueError("批准方案使用 steps 预算，paper_static 使用 epochs；请回到实验设计核对单位")
+    from app.harness.schema.experiment_contract import budget
+    unit, _ = budget(config)
+    if unit == "steps":
+        tree = ast.parse((root / "train_static.py").read_text())
+        supported = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_argument" and any(isinstance(arg, ast.Constant)
+            and arg.value == "--max-steps" for arg in node.args) for node in ast.walk(tree))
+        if not supported:
+            raise ValueError("交付入口尚不支持 --max-steps，不能将训练步数换成轮数")
     return path
 
 
@@ -421,6 +436,24 @@ def _override_args(config: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
     return args
 
 
+def _parse_step_line(line: str) -> dict[str, float] | None:
+    """Only accept actual finite optimizer-update observations."""
+    if not line.startswith("mars.progress "):
+        return None
+    try:
+        row = json.loads(line.removeprefix("mars.progress "))
+        step, loss = row["optimizer_step"], row["training_loss"]
+        if type(step) is not int or step < 1 or type(loss) not in (int, float) or not math.isfinite(loss):
+            return None
+        values = {"optimizer_step": float(step), "loss": float(loss)}
+        for source, target in (("PIM", "paper_PIM_db"), ("RES", "paper_RES_db"), ("APE", "paper_APE_db")):
+            if source in row and type(row[source]) in (int, float) and math.isfinite(row[source]):
+                values[target] = float(row[source])
+        return values
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def _parse_epoch_line(line: str) -> dict[str, float] | None:
     match = _EPOCH_RE.search(line)
     if not match:
@@ -434,8 +467,9 @@ def _parse_epoch_line(line: str) -> dict[str, float] | None:
         "paper_APE_db": ape,
         "PIM": pim,
         "APE": ape,
-        "RES": -ape,
+        "RES": res,
         "loss": 10.0 ** (-ape / 10.0),
+        "cancellation_residual_ratio": 10.0 ** (-ape / 10.0),
     }
 
 
@@ -462,6 +496,11 @@ def _metrics_from_summary(summary: dict[str, Any]) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for raw_key, out_key in {
         "epochs": "epochs",
+        "optimizer_steps": "optimizer_steps",
+        "parameter_counts": "parameter_counts",
+        "seed": "seed",
+        "loss": "loss",
+        "loss_max": "loss_max",
         "PIM": "paper_PIM_db",
         "RES": "paper_RES_db",
         "APE": "paper_APE_db",
@@ -476,8 +515,10 @@ def _metrics_from_summary(summary: dict[str, Any]) -> dict[str, float]:
     if "paper_APE_db" in metrics:
         ape = metrics["paper_APE_db"]
         metrics["APE"] = ape
-        metrics["RES"] = -ape
-        metrics["loss"] = 10.0 ** (-ape / 10.0)
+        metrics["cancellation_residual_ratio"] = 10.0 ** (-ape / 10.0)
+        metrics.setdefault("loss", metrics["cancellation_residual_ratio"])
+    if "paper_RES_db" in metrics:
+        metrics["RES"] = metrics["paper_RES_db"]
     return metrics
 
 

@@ -54,7 +54,8 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                     total = int(total)
                 if type(epochs) is not int or type(total) is not int or epochs < 1 or total < 1:
                     raise ValueError('实际训练轮数无法核验')
-                if epochs * total < config['max_iters']:
+                unit, count = budget(config)
+                if unit == 'epochs' and epochs * total < count:
                     raise ValueError('配置文件在批准轮数之前结束，实际预算无法落实')
             elif backend == 'local_command':
                 from app.harness.tools.execution.local_command import LocalCommandJob, _command

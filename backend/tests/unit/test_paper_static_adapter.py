@@ -53,3 +53,28 @@ def test_paper_static_subprocess_does_not_inherit_control_plane_secrets(
     assert "PYTHONPATH" not in environment
     assert environment["MARS_LOG_LEVEL"] == "INFO"
     assert environment["MARS_RUN_ID"] == "secret-boundary"
+
+
+def test_step_observation_and_summary_preserve_actual_metric_and_axis() -> None:
+    from app.execution.paper_static_adapter import _parse_step_line, _metrics_from_summary
+    row = _parse_step_line('mars.progress {"optimizer_step": 7, "training_loss": 0.1, "PIM": 25, "RES": 16, "APE": 9}')
+    assert row is not None and row["optimizer_step"] == 7 and row["loss"] == .1
+    assert row["paper_RES_db"] == 16
+    metrics = _metrics_from_summary({"optimizer_steps": 50, "parameter_counts": 19264, "seed": 2026,
+                                    "RES": 16, "APE": 9, "loss": .1})
+    assert metrics["RES"] == 16 and metrics["paper_RES_db"] == 16
+    assert metrics["loss"] == .1 and metrics["optimizer_steps"] == 50
+    for line in ('mars.progress {"optimizer_step": true, "training_loss": 0.1}',
+                 'mars.progress {"optimizer_step": 1, "training_loss": NaN}', 'mars.progress {}'):
+        assert _parse_step_line(line) is None
+
+
+def test_steps_require_a_real_entrypoint_capability(tmp_path: Path) -> None:
+    from app.execution.paper_static_adapter import approved_config_path
+    (tmp_path / 'train_static.py').write_text('print("legacy entry")\n')
+    config = {'config_path': 'configs/one.yaml', 'entrypoint': 'train_static.py', 'budget_steps': 50}
+    with pytest.raises(ValueError, match='--max-steps'):
+        approved_config_path(config, {}, tmp_path)
+    # Pure source inspection; the authored entry is never executed as a tool double.
+    (tmp_path / 'train_static.py').write_text('parser.add_argument("--max-steps", type=int)\n')
+    assert approved_config_path(config, {}, tmp_path) == tmp_path / 'configs/one.yaml'
