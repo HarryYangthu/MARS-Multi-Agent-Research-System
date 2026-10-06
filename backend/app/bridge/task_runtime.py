@@ -50,6 +50,20 @@ def admit_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str,
     stage = parse_node_key(node_key).stage
     if stage not in {"experiment", "coding", "execution", "writing"}:
         return []
+    plan_path = run.root / 'experiment/experiment_plan.approved.md'
+    if stage in {'coding', 'execution'} and plan_path.is_file():
+        from app.harness.schema.experiment_contract import experiment_errors, document_metadata
+        plan_text = plan_path.read_text()
+        errors = experiment_errors(document_metadata(plan_text))
+        if stage == 'execution':
+            coding_path = run.root / 'coding/code_spec.approved.md'
+            if not coding_path.is_file():
+                errors.append('/coding: 缺少批准的编码交付')
+            else:
+                from app.execution.handoff_validation import coding_handoff_errors
+                errors.extend(coding_handoff_errors(plan_text, document_metadata(coding_path.read_text()), project=run.project))
+        if errors:
+            raise ValueError('上游交接未通过；请修正实验设计或编码交付：' + '；'.join(dict.fromkeys(errors)))
     handoffs: list[HandoffEnvelope] = []
     for source in sorted(run.subdir("idea").glob("*.approved.md")):
         if not source.resolve().is_relative_to(run.root.resolve()):

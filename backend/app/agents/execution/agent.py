@@ -4,6 +4,7 @@ from typing import Any
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.harness.agent_loop.trace import digest
 from app.harness.schema.frontmatter_parser import dumps, parse
+from app.harness.schema.experiment_contract import handoff_errors
 
 class ExecutionAgent(BaseAgent):
     name = "execution"
@@ -42,6 +43,7 @@ class ExecutionAgent(BaseAgent):
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
         documents: dict[str, dict[str, Any]] = {}
+        plan_text = ''
         for text in context.upstream.values():
             if text.startswith("[upstream artifact: "):
                 text = text.split("\n", 1)[1]
@@ -53,6 +55,11 @@ class ExecutionAgent(BaseAgent):
                 if metadata.get("project") != request.project or schema in documents:
                     raise ValueError("批准交付的项目身份或唯一性无法校验")
                 documents[schema] = metadata
+                if schema == 'experiment_plan.v1':
+                    plan_text = text
+        errors = handoff_errors(plan_text, documents.get('code_spec.v1', {})) if plan_text else ['缺少批准实验方案']
+        if errors:
+            raise ValueError('；'.join(errors))
         rows = documents.get("experiment_plan.v1", {}).get("ablations", [])
         if not isinstance(rows, list) or not rows:
             raise ValueError("缺少已批准实验矩阵；执行管理器不会自行设计实验")

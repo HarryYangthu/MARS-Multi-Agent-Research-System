@@ -1058,6 +1058,7 @@ function errorDetailText(status: number, body: string): string {
     if (typeof detail === "string") return `HTTP ${status}: ${detail}`;
     if (isRecord(detail)) {
       const error = typeof detail.error === "string" ? detail.error.trim() : "";
+      const explanation = typeof detail.message === "string" ? detail.message.trim() : "";
       const patchVersion =
         typeof detail.patch_version === "string" ? `patch ${detail.patch_version}: ` : "";
       const blockedByGate =
@@ -1067,7 +1068,7 @@ function errorDetailText(status: number, body: string): string {
       const command = isRecord(detail.command_result) ? detail.command_result : null;
       const stderr = typeof command?.stderr === "string" ? command.stderr.trim() : "";
       const stdout = typeof command?.stdout === "string" ? command.stdout.trim() : "";
-      const message = error || stderr || stdout || body;
+      const message = error || explanation || stderr || stdout || body;
       return `HTTP ${status}: ${patchVersion}${message}${blockedByGate}`;
     }
   } catch {

@@ -228,6 +228,28 @@ class ArtifactStore:
             result = validate_document(text)
             if not result.valid:
                 raise ArtifactValidationError(result)
+            # Approval is an admission boundary for both humans and agents. Old
+            # documents remain readable; incomplete new approvals cannot advance.
+            errors: list[str] = []
+            if result.schema_id == 'experiment_plan.v1':
+                from app.harness.schema.experiment_contract import experiment_errors
+                errors = experiment_errors(result.metadata)
+            elif result.schema_id == 'code_spec.v1':
+                plan = self.run.root / 'experiment/experiment_plan.approved.md'
+                if plan.is_file():
+                    from app.execution.handoff_validation import coding_handoff_errors
+                    errors = coding_handoff_errors(plan.read_text(), result.metadata, project=self.run.project)
+            elif result.schema_id == 'run_log.v1' and 'planned_experiments' in result.metadata:
+                plan = self.run.root / 'experiment/experiment_plan.approved.md'
+                coding = self.run.root / 'coding/code_spec.approved.md'
+                if plan.is_file() and coding.is_file():
+                    from app.harness.schema.experiment_contract import document_metadata, execution_handoff_errors
+                    errors = execution_handoff_errors(plan.read_text(), document_metadata(coding.read_text()), result.metadata)
+            if errors:
+                from app.harness.schema.validator import ValidationError
+                result.valid = False
+                result.errors.extend(ValidationError(path='/handoff', message=error) for error in errors)
+                raise ArtifactValidationError(result)
             approved_path = expected.parent / f"{ref.stem}.approved.md"
             records = self._approval_dir(ref.agent_dir, ref.stem)
             existing = sorted(records.glob("*.json")) if records.exists() else []

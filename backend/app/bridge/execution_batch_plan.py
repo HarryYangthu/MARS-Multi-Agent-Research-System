@@ -40,6 +40,13 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
     intent_text = _execution_intent_text(run)
     intent_count = requested_experiment_count(intent_text)
     intent_wants_sweep = wants_execution_sweep(intent_text)
+    coding_path = run.subdir('coding') / 'code_spec.approved.md'
+    if plan_path.is_file() and coding_path.is_file() and approved_execution_path.is_file():
+        from app.harness.schema.experiment_contract import execution_handoff_errors
+        errors = execution_handoff_errors(plan_path.read_text(), parse_fm(coding_path.read_text()).metadata,
+                                          parse_fm(approved_execution_path.read_text()).metadata)
+        if errors:
+            raise ValueError('编码交付与执行清单未通过一致性核验：' + '；'.join(errors))
     plan_source = "none"
     deterministic = False
     # Parse ablations as (name, config) so the execution backend gets supported knobs.

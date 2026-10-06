@@ -13,6 +13,10 @@
   ],
   "additionalProperties": true,
   "properties": {
+    "experiment_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "schema": {
       "const": "code_spec.v1"
     },

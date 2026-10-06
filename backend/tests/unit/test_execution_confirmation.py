@@ -70,6 +70,39 @@ def test_preview_and_execution_share_all_prepared_experiments(execution: tuple[O
     assert [(row['name'], row['seed'], row['config']) for row in view['experiments']] == [
         (spec.experiment_id, spec.seed, spec.config) for spec in plan.specs]
     assert view['defaults']['batch_steps'] == 50
+
+
+def test_confirmation_rechecks_coding_binding_after_approved_plan_changes(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.harness.schema.experiment_contract import document_hash
+    _, session, _, data = execution
+    store = ArtifactStore(session.run)
+    rows = [{'name': name, 'config': {'seed': 2026, 'budget_steps': 50, 'data_path': str(data)}}
+            for name in ('baseline', 'candidate')]
+    plan = {'schema': 'experiment_plan.v1', 'project': 'regression', 'agent': 'experiment',
+        'variables': {'independent': ['method'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
+        'ablations': rows, 'estimated_runs': 2}
+    text = dumps(plan, 'Explicit human-authored protocol.')
+    store.approve(store.write(text=text))
+    code = {'schema': 'code_spec.v1', 'project': 'regression', 'agent': 'coding', 'target_lang': 'python',
+        'baseline_compat': {'preserved': True}, 'files_changed': [], 'experiment_plan_sha256': document_hash(text),
+        'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'python-environment'}} for row in rows]}
+    store.approve(store.write(text=dumps(code, 'Host binding only; no measurements are asserted.')))
+    from app.harness.schema.frontmatter_parser import parse
+    execution_metadata = parse((session.run.root / 'execution/run_log.approved.md').read_text()).metadata
+    for job in execution_metadata['planned_experiments']:
+        job['config']['command_id'] = 'python-environment'
+    store.approve(store.write(text=dumps(execution_metadata, 'Exact executable intake of the approved protocol.')))
+    original = execution_preview(session.run, 'execution')
+    assert not original['blockers']
+    store.approve(store.write(text=dumps(plan, 'A changed approved protocol needs coding revalidation.')))
+    changed = execution_preview(session.run, 'execution')
+    assert changed['token'] != original['token']
+    assert any('experiment_plan_sha256' in error for error in changed['blockers'])
+    with pytest.raises(ValueError):
+        save_confirmation(session.run, 'execution', changed['token'])
+    assert not (session.run.root / 'execution/local_commands').exists()
     assert not (session.run.root / 'execution/confirmations').exists()
     assert not (session.run.root / 'execution/batch_summary.json').exists()
 
@@ -117,7 +150,7 @@ async def test_batch_cannot_start_without_confirmation(execution: tuple[Orchestr
         session.run.root / 'resources', session.run.root / 'resources/.model_budget.v1.json.lock'}
 
 
-def test_backend_mismatch_and_missing_approved_plan_block_launch(
+def test_explicit_backend_wins_over_yaml_and_missing_plan_still_blocks(
     execution: tuple[Orchestrator, RunSession, Path, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, session, configuration, _ = execution
@@ -125,9 +158,10 @@ def test_backend_mismatch_and_missing_approved_plan_block_launch(
     raw['execution']['backend'] = 'paper_static'
     configuration.write_text(yaml.safe_dump(raw))
     view = execution_preview(session.run, 'execution')
-    assert any('实际运行环境' in item for item in view['blockers'])
-    with pytest.raises(ValueError):
-        save_confirmation(session.run, 'execution', view['token'])
+    assert not view['blockers']
+    assert view['defaults']['runtime_backend'] == view['defaults']['configured_backend'] == 'local_command'
+    assert view['defaults']['backend_source'] == 'environment'
+    assert view['warnings']
     (session.run.root / 'execution/run_log.approved.md').unlink()
     view = execution_preview(session.run, 'execution')
     assert any('尚未生成并审核通过' in item for item in view['blockers'])

@@ -17,6 +17,7 @@ from app.execution.results import SimulationResult
 from app.settings import get_settings
 from app.harness.persistence import atomic_write_json
 from app.harness.tools.config import load_execution_config
+from app.harness.schema.experiment_contract import budget
 from app.harness.tools.process_runtime import start_process, terminate_process_tree
 
 
@@ -36,6 +37,16 @@ class JobSpec:
     template: str = "exponential_decay"
     run_root: Path | None = None
     plot_every_steps: int = 5
+
+
+def effective_job_steps(spec: JobSpec, default: int) -> int:
+    """Bind the request and resume fingerprint to the approved per-job budget."""
+    if not any(key in spec.config for key in ('budget_steps', 'budget_unit', 'max_iters')):
+        return default  # Legacy standalone tool input has no approved matrix.
+    unit, count = budget(spec.config)
+    if get_settings().mars_execution_backend == 'pim_cpu' and unit != 'steps':
+        raise ValueError('pim_cpu 只支持 steps 预算，不能把 epochs 当作训练步数')
+    return count
 
 
 def _seed_for(spec: JobSpec) -> int:
@@ -304,6 +315,7 @@ async def run_real_pim_simulation(
 
 
 async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int = 30) -> SimulationResult:
+    steps = effective_job_steps(spec, steps)
     settings = get_settings()
     backend = settings.mars_execution_backend
     if backend == "local_command":

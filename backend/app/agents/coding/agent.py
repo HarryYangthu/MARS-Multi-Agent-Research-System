@@ -33,6 +33,9 @@ class CodingAgent(BaseAgent):
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
         "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "experiment_plan_sha256 必须是所依据的完整批准实验文档的 SHA-256；"
+        "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
+        "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -62,6 +65,17 @@ class CodingAgent(BaseAgent):
             raise ValueError(blocker)
         return await super().run_loop(request, context)
 
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        from app.harness.schema.experiment_contract import document_hash, document_metadata
+        for supplied in request.upstream_artifacts.values():
+            text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied
+            if text.startswith('---\n') and document_metadata(text).get('schema') == 'experiment_plan.v1':
+                context.upstream['approved_experiment_identity'] = json.dumps({
+                    'experiment_plan_sha256': document_hash(text),
+                    'instruction': '此哈希由宿主计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
+        return context
+
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
         errors = await super().validate_candidate(request, text, observations)
@@ -80,18 +94,13 @@ class CodingAgent(BaseAgent):
             if text.startswith("---\n"):
                 upstream = parse(text).metadata
                 if upstream.get("schema") == "experiment_plan.v1":
-                    plans = upstream.get("ablations", [])
+                    plans.append(text)
         if plans:
-            jobs = metadata.get("execution_jobs", [])
-            if not jobs:
-                errors.append("/execution_jobs: deliver explicit runtime bindings for every approved experiment")
-            elif {job["name"] for job in jobs} != {row["name"] for row in plans} or len(jobs) != len(plans):
-                errors.append("/execution_jobs: names and count must match the approved experiment matrix")
+            from app.execution.handoff_validation import coding_handoff_errors
+            if len(plans) != 1:
+                errors.append('/upstream: 必须有唯一的批准实验方案')
             else:
-                for job in jobs:
-                    config = job["config"]
-                    if not (config.get("command_id") or config.get("entrypoint") and config.get("config_path")):
-                        errors.append("/execution_jobs: bind a registered command or an actual entrypoint and configuration file")
+                errors.extend(coding_handoff_errors(plans[0], metadata, project=request.project))
         return errors
 
     def load_post_training(

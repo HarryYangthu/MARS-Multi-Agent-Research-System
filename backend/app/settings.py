@@ -5,8 +5,10 @@ import os
 from pathlib import Path
 from typing import Literal, Mapping
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, PrivateAttr, TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ExecutionBackend = Literal['pim_cpu', 'paper_static', 'local_command', 'docker_command', 'remote_gpu']
 
 def resolve_runtime_root(configured: str, source_root: Path) -> Path:
     """Select an explicitly seeded desktop workspace without reading source secrets."""
@@ -28,6 +30,7 @@ LOCAL_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")
 
 
 class Settings(BaseSettings):
+    _execution_backend_source: str = PrivateAttr(default='default')
     model_config = SettingsConfigDict(
         env_file=tuple(str(path) for path in LOCAL_ENV_FILES),
         env_file_encoding="utf-8",
@@ -151,6 +154,10 @@ class Settings(BaseSettings):
         return "default"
 
     @property
+    def execution_backend_source(self) -> str:
+        return self._execution_backend_source
+
+    @property
     def cors_origins(self) -> list[str]:
         raw = self.mars_cors_origins.strip()
         if not raw or raw == "*":
@@ -181,7 +188,21 @@ _settings: Settings | None = None
 def get_settings() -> Settings:
     global _settings
     if _settings is None:
-        _settings = Settings()
+        selected = Settings()
+        if 'mars_execution_backend' in selected.model_fields_set:
+            selected._execution_backend_source = 'environment'
+        else:
+            import yaml
+            configured = env_or_local('MARS_EXECUTION_CONFIG_PATH')
+            path = Path(configured).expanduser() if configured else REPO_ROOT / 'configs/execution.yaml'
+            if not path.is_absolute():
+                path = REPO_ROOT / path
+            raw = yaml.safe_load(path.read_text()) if path.is_file() else {}
+            execution = raw.get('execution', {}) if isinstance(raw, dict) else {}
+            if isinstance(execution, dict) and execution.get('backend') is not None:
+                selected.mars_execution_backend = TypeAdapter(ExecutionBackend).validate_python(execution['backend'])
+                selected._execution_backend_source = 'execution_config'
+        _settings = selected
     return _settings
 
 

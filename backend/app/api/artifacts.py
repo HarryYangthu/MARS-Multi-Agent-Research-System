@@ -5,9 +5,11 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable, Coroutine
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.routing import APIRoute
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -24,9 +26,51 @@ from app.hitl.revision_loop import apply_human_edit
 from app.harness.tools.registry import ToolContext
 from app.harness.tools.registry import get_registry as get_tool_registry
 from app.reporting import generate_report_bundle
-from app.storage.artifact_store import ArtifactStore
+from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 
-router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
+
+class ArtifactRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original = super().get_route_handler()
+        async def checked(request: Request) -> Response:
+            try:
+                return await original(request)
+            except ArtifactValidationError as exc:
+                return JSONResponse(status_code=422, content={'detail': {
+                    'code': 'handoff_inconsistent', 'message': str(exc),
+                    'issues': [error.message for error in exc.result.errors]}})
+        return checked
+
+
+router = APIRouter(prefix="/api/artifacts", tags=["artifacts"], route_class=ArtifactRoute)
+
+
+def _ensure_current_review(run_id: str, agent: str, version: str) -> None:
+    review = get_review_registry().get(run_id, agent)
+    normalized = version if version.startswith('v') else 'v' + version
+    if review is not None and review.artifact_ref.version != normalized:
+        raise HTTPException(status_code=409, detail={
+            'code': 'stale_review', 'message': '待审核文档已更新，请刷新后审核当前版本。',
+            'current_version': review.artifact_ref.version})
+
+
+def _check_handoff_before_approval(run_id: str, agent_dir: str, stem: str, version: str) -> None:
+    if agent_dir not in {'experiment', 'coding'}:
+        return
+    from app.harness.schema.experiment_contract import experiment_errors, handoff_errors
+    metadata = fm_parse(_resolve(run_id, agent_dir, stem, version).read_text()).metadata
+    errors: list[str] = []
+    if agent_dir == 'experiment':
+        errors = experiment_errors(metadata)
+    else:
+        run = get_run_store().get(run_id)
+        if run is not None:
+            path = run.root / 'experiment/experiment_plan.approved.md'
+            if path.is_file():
+                errors = handoff_errors(path.read_text(), metadata)
+    if errors:
+        raise HTTPException(status_code=422, detail={'code': 'handoff_inconsistent',
+            'message': errors[0], 'issues': errors})
 
 
 @router.get("/{run_id}/idea/literature-evidence")
@@ -423,8 +467,12 @@ async def get_patch(run_id: str, version: str) -> PatchView:
 @router.post("/{run_id}/coding/patch/{version}/approve", response_model=ArtifactView)
 async def approve_patch(run_id: str, version: str) -> ArtifactView:
     _ensure_writable_run(run_id)
-    await _apply_patch_or_raise(run_id, version)
+    _ensure_current_review(run_id, 'coding', version)
     normalized = version if version.startswith("v") else f"v{version}"
+    review = get_review_registry().get(run_id, "coding")
+    candidate = review.artifact_ref.version if review is not None else normalized
+    _check_handoff_before_approval(run_id, 'coding', 'code_spec', candidate)
+    await _apply_patch_or_raise(run_id, version)
     review = get_review_registry().get(run_id, "coding")
     if review is not None:
         bus = get_event_bus()
@@ -615,6 +663,8 @@ async def approve_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
     _ensure_writable_run(run_id)
+    _ensure_current_review(run_id, agent_dir, version)
+    _check_handoff_before_approval(run_id, agent_dir, stem, version)
     if agent_dir == "coding":
         patch_version = _patch_version_from_artifact(run_id, stem, version)
         if patch_version is None:

@@ -78,6 +78,8 @@ def job_states(run_root: Path) -> list[dict[str, Any]]:
 
 
 async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None = None) -> SimulationResult:
+    from app.execution.simulation_runner import effective_job_steps
+    steps = effective_job_steps(spec, steps)
     if spec.run_root is None:
         return await run_one(spec, steps=steps, bus_publish=bus_publish)
     path = _path(spec)

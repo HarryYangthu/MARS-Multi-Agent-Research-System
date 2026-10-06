@@ -70,13 +70,15 @@ async def test_deterministic_intake_keeps_matrix_without_a_model_key(tmp_path: P
     from app.harness.llm.accounting import RunModelBudget
     from app.harness.llm.provider_base import LLMConfig, Message
     monkeypatch.setenv('ZHIPU_API_KEY', '')
-    rows: list[dict[str, Any]] = [{'name': f'comparison-{i}', 'config': {'seed': 0, 'scale': i}} for i in range(5)]
+    rows: list[dict[str, Any]] = [{'name': f'comparison-{i}', 'config': {'seed': 0, 'scale': i, 'budget_steps': 1}} for i in range(5)]
     plan = {'schema': 'experiment_plan.v1', 'agent': 'experiment', 'project': 'regression',
             'variables': {'independent': ['scale'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
             'ablations': rows, 'estimated_runs': 5}
     code = {'schema': 'code_spec.v1', 'agent': 'coding', 'project': 'regression', 'target_lang': 'python',
             'baseline_compat': {'preserved': True}, 'files_changed': [],
             'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'regression'}} for row in rows]}
+    from app.harness.schema.experiment_contract import document_hash
+    code['experiment_plan_sha256'] = document_hash(dumps(plan, 'Human-authored matrix.'))
     budget = RunModelBudget(tmp_path)
     for _ in range(budget.configuration['limits']['max_model_requests']):
         reservation = budget.reserve([Message('user', 'Accounting only')],
@@ -100,12 +102,16 @@ async def test_deterministic_intake_keeps_matrix_without_a_model_key(tmp_path: P
 @pytest.mark.asyncio
 async def test_intake_cannot_override_approved_parameters() -> None:
     from app.harness.schema.frontmatter_parser import dumps
+    from app.harness.schema.experiment_contract import document_hash
+    plan = dumps({'schema': 'experiment_plan.v1', 'project': 'regression', 'estimated_runs': 1,
+        'ablations': [{'name': 'candidate', 'config': {'seed': 0, 'budget_steps': 50}}]}, 'Authored input.')
     request = RunRequest(project='regression', user_request='Run unchanged', extra={'run_id': 'controls'},
         upstream_artifacts={
-            'plan': dumps({'schema': 'experiment_plan.v1', 'project': 'regression',
-                'ablations': [{'name': 'candidate', 'config': {'seed': 0}}]}, 'Authored input.'),
+            'plan': plan,
             'code': dumps({'schema': 'code_spec.v1', 'project': 'regression',
-                'execution_jobs': [{'name': 'candidate', 'config': {'seed': 42}}]}, 'Conflicting authored binding.')})
+                'experiment_plan_sha256': document_hash(plan),
+                'execution_jobs': [{'name': 'candidate', 'config': {'seed': 42, 'command_id': 'registered'}}]},
+                'Conflicting authored binding.')})
     agent = ExecutionAgent()
     with pytest.raises(ValueError, match='改写了批准参数'):
         await agent.run_loop(request, await agent.build_context(request))

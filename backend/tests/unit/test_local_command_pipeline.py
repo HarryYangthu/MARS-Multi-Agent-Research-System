@@ -67,8 +67,9 @@ async def test_main_batch_runs_actual_configurations_and_binds_measurement_recei
     tmp_path: Path, actual_regression_command: Path,
 ) -> None:
     specs = [JobSpec(run_id="real-cpu", experiment_id=f"scale-{scale}", project="regression",
-        run_root=tmp_path / "run", config={"scale": scale, "data_path": str(actual_regression_command)}) for scale in (1, 2)]
-    outcome = await run_batch(specs, config=BatchConfig(max_concurrency=2, steps=1))
+        run_root=tmp_path / "run", config={"scale": scale, "budget_steps": scale,
+        "data_path": str(actual_regression_command)}) for scale in (1, 2)]
+    outcome = await run_batch(specs, config=BatchConfig(max_concurrency=2, steps=100))
     assert not outcome.failures and len(outcome.results) == 2
     measured = {result.experiment_id: result.metrics["mse"] for result in outcome.results}
     assert measured == {"scale-1": pytest.approx(14 / 3), "scale-2": 0}
@@ -76,11 +77,30 @@ async def test_main_batch_runs_actual_configurations_and_binds_measurement_recei
         assert result.status == "completed" and not result.is_mock
         receipt_path = next((tmp_path / "run/execution/local_commands" / result.experiment_id).glob("*/execution_receipt.json"))
         receipt = json.loads(receipt_path.read_text())
+        request = json.loads((receipt_path.parent / 'job.json').read_text())
+        assert request['steps'] == request['config']['budget_steps']
         assert receipt["returncode"] == 0 and receipt["status"] == "completed"
         assert receipt["command_files"] and receipt["evidence"]
         assert result.fingerprint_hash == "sha256:" + hashlib.sha256(receipt_path.read_bytes()).hexdigest()
         evidence = receipt["evidence"][0]
         assert evidence["sha256"] == "sha256:" + hashlib.sha256(Path(evidence["path"]).read_bytes()).hexdigest()
+    # Changing only the unrelated global default must reuse the same receipts.
+    again = await run_batch(specs, config=BatchConfig(max_concurrency=2, steps=200))
+    assert not again.failures
+    assert len(list((tmp_path / 'run/execution/local_commands').glob('*/*/execution_receipt.json'))) == 2
+
+
+@pytest.mark.asyncio
+async def test_direct_command_request_uses_explicit_job_budget(
+    tmp_path: Path, actual_regression_command: Path,
+) -> None:
+    from app.harness.tools.execution.local_command import LocalCommandJob, run_local_command
+    result = await run_local_command(LocalCommandJob(run_id='direct-budget', experiment_id='exact',
+        project='regression', run_root=tmp_path / 'run', steps=100, command_id='regression',
+        config={'budget_steps': 7, 'scale': 2, 'data_path': str(actual_regression_command)}))
+    assert result.status == 'completed' and result.metrics == {'mse': 0}
+    request = next((tmp_path / 'run/execution/local_commands/exact').glob('*/job.json'))
+    assert json.loads(request.read_text())['steps'] == 7
 
 
 @pytest.mark.parametrize("fault", ["stdout_only", "wrong_id"])
@@ -183,7 +203,7 @@ async def test_deterministic_execution_through_orchestrator_waits_for_user_then_
     orch = Orchestrator(run_store=RunStore(tmp_path / 'flow'), registry=registry)
     session = orch.create_session(RunRequest(task='actual numerical execution', project='regression',
         entrypoint='execution', standalone=True, auto_approve=False))
-    rows = [{'name': f'comparison-{scale}', 'config': {'seed': 0, 'scale': scale,
+    rows = [{'name': f'comparison-{scale}', 'config': {'seed': 0, 'scale': scale, 'budget_steps': 1,
         'data_path': str(actual_regression_command), 'delay': 30 if interrupt else 0}} for scale in range(5)]
     store = ArtifactStore(session.run)
     plan = {'schema': 'experiment_plan.v1', 'agent': 'experiment', 'project': 'regression',
@@ -192,6 +212,8 @@ async def test_deterministic_execution_through_orchestrator_waits_for_user_then_
     code = {'schema': 'code_spec.v1', 'agent': 'coding', 'project': 'regression', 'target_lang': 'python',
         'baseline_compat': {'preserved': True}, 'files_changed': [],
         'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'regression'}} for row in rows]}
+    from app.harness.schema.experiment_contract import document_hash
+    code['experiment_plan_sha256'] = document_hash(dumps(plan, 'Human-authored scientific input, verified by schema.'))
     for metadata in (plan, code):
         store.approve(store.write(text=dumps(metadata, 'Human-authored scientific input, verified by schema.')))
     assert orch._spawn_owned(session, 'start', lambda: orch.run(session.run.run_id))

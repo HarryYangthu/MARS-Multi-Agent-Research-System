@@ -66,6 +66,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         'device': '远端 GPU' if settings.mars_execution_backend == 'remote_gpu' else '本地',
         'runtime_backend': settings.mars_execution_backend,
         'configured_backend': configured,
+        'backend_source': config['backend_source'],
         'max_concurrency': config['max_concurrency'],
         'batch_steps': config['batch_steps'],
         'timeout_seconds': config['command_timeout_seconds'],
@@ -74,6 +75,18 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     for name in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md',
                  'execution/run_log.approved.md', 'input/selected_data_source.json', 'input/run_request_options.v1.json'):
         files[name] = _file_hash(run.root / name)
+    if files['experiment/experiment_plan.approved.md']:
+        if not files['coding/code_spec.approved.md']:
+            blockers.append('缺少批准的编码交付，无法核验实验约定。')
+        else:
+            from app.execution.handoff_validation import coding_handoff_errors
+            try:
+                blockers.extend(coding_handoff_errors(
+                    (run.root / 'experiment/experiment_plan.approved.md').read_text(),
+                    parse((run.root / 'coding/code_spec.approved.md').read_text()).metadata,
+                    project=run.project))
+            except (OSError, ValueError, RuntimeError) as exc:
+                blockers.append('批准交接无法核验：' + str(exc))
     experiments: list[dict[str, Any]] = []
     prepared = None
     try:
@@ -104,6 +117,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                         experiments.append({'name': str(item.get('name', '')), 'seed': cfg.get('seed'), 'config': cfg})
     if configured != settings.mars_execution_backend:
         blockers.append(f'实际运行环境为 {settings.mars_execution_backend}，全局配置为 {configured}，请先统一执行配置。')
+    if config.get('declared_backend') not in (None, configured):
+        warnings.append('当前执行方式由显式环境配置统一选择；YAML 中的默认执行方式未生效。')
     branch = current_git_branch(run.project, run.run_id)
     if branch is None and receipt_path(run.root).exists():
         repo = load_project_repo(run.project)
