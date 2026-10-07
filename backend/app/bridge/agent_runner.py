@@ -489,6 +489,11 @@ def load_agent_handoff_context(
             "Human reviewer rejected the current draft and requested a revised "
             f"version. Feedback: {revision_reason}"
         )
+    if stage in {"coding", "execution"}:
+        from app.bridge.repository_handoff import attach_repository_handoff
+        attach_repository_handoff(run.project, upstream)
+        if selected_data_source and not upstream.get("data_description", "").strip():
+            upstream["data_description"] = selection_summary(selected_data_source)
     return upstream, feedback_context
 
 

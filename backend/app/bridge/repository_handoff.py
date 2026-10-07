@@ -1,0 +1,65 @@
+"""Turn an attached real repository into a typed, inspectable handoff source.
+
+Availability does not assert that a model has read or understood a file. File
+contents remain tool-mediated, and a missing repository never becomes evidence.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+from app.harness.schema.frontmatter_parser import parse
+from app.harness.runtime.project_scope import forbidden_source_path
+from app.harness.tools.project_repo import ProjectRepo, resolve_allowed_path
+
+
+def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> str:
+    """Verify concrete code references from the approved handoff on disk."""
+    if not repo.root.is_dir():
+        return ""
+    references: set[str] = set()
+    for supplied in upstream.values():
+        text = supplied.split("\n", 1)[1] if supplied.startswith("[upstream artifact: ") else supplied
+        if not text.startswith("---\n"):
+            continue
+        metadata = parse(text).metadata
+        if metadata.get("schema") != "proposal.v1" or metadata.get("project") != repo.project:
+            continue
+        for item in metadata.get("evidence_refs", []):
+            if not isinstance(item, dict) or item.get("kind") != "code":
+                continue
+            ref = item.get("ref")
+            # Mixed prose references are not file identities. Do not guess paths.
+            if isinstance(ref, str) and not any(c.isspace() for c in ref) and Path(ref).suffix:
+                references.add(ref)
+    files = []
+    for ref in sorted(references):
+        if forbidden_source_path(ref):
+            raise ValueError(f"Baseline handoff cannot reference a control or credential file: {ref}")
+        path = resolve_allowed_path(repo, ref, require_exists=True, require_text=True)
+        if not path.is_file():
+            raise ValueError(f"Baseline handoff source is not a file: {ref}")
+        files.append({"path": ref, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                      "bytes": path.stat().st_size})
+    if not files:
+        return ""
+    return json.dumps({"schema_id": "context.repository_available.v1", "project": repo.project,
+        "repo_path": str(repo.root), "files": files, "contents_loaded": False,
+        "instruction": "These actual files are available through code.repo_reader. Read the relevant contents before editing; availability is not proof of model consumption."}, ensure_ascii=False)
+
+
+def attach_repository_handoff(project: str, upstream: dict[str, str]) -> None:
+    """Preserve caller text; otherwise resolve approved refs in the bound repo."""
+    if upstream.get("baseline_code", "").strip():
+        return
+    proposals = [parse(text.split("\n", 1)[1] if text.startswith("[upstream artifact: ") else text).metadata
+                 for text in upstream.values() if text.startswith(("---\n", "[upstream artifact: "))]
+    if not any(m.get("schema") == "proposal.v1" and m.get("project") == project
+               and any(isinstance(item, dict) and item.get("kind") == "baseline_code"
+                       for item in m.get("handoff", {}).get("required_context", [])) for m in proposals):
+        return
+    from app.harness.tools.project_repo import load_project_repo
+    context = baseline_repository_context(load_project_repo(project), upstream)
+    if context:
+        upstream["baseline_code"] = context
