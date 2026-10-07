@@ -347,10 +347,13 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
     tool_name = "code.test_runner" if kind == "test" else "code.lint"
     requested = str(args.get("command_id", "")).strip()
     commands = check_commands(kind)
+    available = [{"id": cmd.id, "label": cmd.label, "argv": list(cmd.argv)} for cmd in commands]
     if requested:
         commands = tuple(cmd for cmd in commands if cmd.id == requested)
     if not commands:
-        return ToolResult(ok=False, error=f"no {kind} commands configured; not executed", output={"commands": []})
+        error = (f"unknown {kind} command_id '{requested}'; choose a configured id or omit command_id"
+                 if available and requested else f"no {kind} commands configured; not executed")
+        return ToolResult(ok=False, error=error, output={"commands": available, "executed": False})
     allowlist = tool_config(tool_name).command_allowlist
     timeout = command_timeout_seconds()
     results: list[dict[str, Any]] = []
@@ -381,12 +384,22 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
                 "label": command.label,
                 "argv": list(argv),
                 "returncode": process.returncode,
-                "stdout": stdout.decode("utf-8", errors="replace")[-4000:],
-                "stderr": stderr.decode("utf-8", errors="replace")[-4000:],
+                "stdout": _check_output_excerpt(stdout.decode("utf-8", errors="replace")),
+                "stderr": _check_output_excerpt(stderr.decode("utf-8", errors="replace")),
             }
         )
     ok = all(item["returncode"] == 0 for item in results)
     return ToolResult(ok=ok, output={"kind": kind, "results": results})
+
+
+def _check_output_excerpt(text: str, limit: int = 4000) -> str:
+    """Keep failure evidence before long warnings as well as the final summary."""
+    if len(text) <= limit:
+        return text
+    marker = "\n... [output truncated; beginning and final summary retained] ...\n"
+    remaining = limit - len(marker)
+    head = remaining // 2
+    return text[:head] + marker + text[-(remaining - head):]
 
 
 def _command_allowed(
