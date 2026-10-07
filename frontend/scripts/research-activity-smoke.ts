@@ -83,3 +83,33 @@ const beforeWindowShift = activeActivityGroups(groupConversationEntries(conversa
 const afterWindowShift = activeActivityGroups(groupConversationEntries(conversationEntries([], rows.slice(1))), codingRun, false);
 assert.deepEqual(beforeWindowShift.get("start"), afterWindowShift.get("request")); // Stable owners preserve live UI state when a window shifts.
 console.log("Live activity timing, current-stage selection and terminal-state checks passed");
+
+// A retry of the same graph node starts a new processing group. Its clock
+// excludes the earlier failed invocation and hours spent waiting for recharge.
+const rechargeWait = 4 * 3600 * 1000;
+const retried = groupConversationEntries(conversationEntries([], [
+  ...rows,
+  { ...rows[0], id: "retry-same-node", timestamp: new Date(start + rechargeWait).toISOString() },
+  { ...rows[2], id: "retry-returned", timestamp: new Date(start + rechargeWait + 15000).toISOString() },
+  { ...rows[0], id: "experiment-start", agent: "experiment", timestamp: new Date(start + rechargeWait + 30000).toISOString() },
+  { ...rows[2], id: "experiment-returned", agent: "experiment", timestamp: new Date(start + rechargeWait + 45000).toISOString() },
+]));
+assert.equal(retried.length, 3);
+for (const group of retried) {
+  assert.equal(group.kind, "activities");
+  if (group.kind !== "activities") throw new Error("Expected an activity group");
+  const seconds = activityElapsedSeconds(activityTiming(group.activities), false, start + rechargeWait + 90000);
+  assert.equal(seconds, group.id === "start" ? 20 : 15);
+}
+assert.deepEqual([...activeActivityGroups(retried, { ...run, states: { coding: "done", experiment: "running" } }, false).keys()], ["experiment-start"]);
+console.log("Retry and next-stage durations exclude prior wait time");
+
+const reviewedRows: Activity[] = [
+  ...rows,
+  { ...rows[2], id: "review-ready", timestamp: new Date(start + 25000).toISOString(), status: "waiting_review", endsStage: true },
+  { ...rows[2], id: "human-approved", timestamp: new Date(start + rechargeWait).toISOString(), status: "done", endsStage: true },
+];
+assert.equal(activityElapsedSeconds(activityTiming(reviewedRows), false, start + rechargeWait), 25);
+const terminalWorklog: WorkLogView = { ...worklog, items: [{ id: "review", timestamp: new Date(start + 25000).toISOString(), agent: "coding", title: "等待审核", detail: "", status: "waiting_review", kind: "state", elapsed_seconds: null, next_action: "", evidence_refs: [] }] };
+assert.equal(runActivities(terminalWorklog, { ...obs, timeline: [] })[0].endsStage, true);
+console.log("Processing clocks stop when the Agent enters human review");

@@ -25,12 +25,19 @@ def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> 
         if not text.startswith("---\n"):
             continue
         metadata = parse(text).metadata
-        if metadata.get("schema") != "proposal.v1" or metadata.get("project") != repo.project:
+        if metadata.get("project") != repo.project:
             continue
-        for item in metadata.get("evidence_refs", []):
-            if not isinstance(item, dict) or item.get("kind") != "code":
-                continue
-            ref = item.get("ref")
+        candidates = []
+        if metadata.get("schema") == "proposal.v1":
+            candidates = [item.get("ref") for item in metadata.get("evidence_refs", [])
+                          if isinstance(item, dict) and item.get("kind") == "code"]
+        elif metadata.get("schema") == "experiment_plan.v1":
+            # A proposal may omit optional evidence_refs. The approved plan
+            # still names the exact source configuration for its experiments.
+            # Use only that typed identity, never prose or the new output config.
+            candidates = [item["config"].get("base_config") for item in metadata.get("ablations", [])
+                          if isinstance(item, dict) and isinstance(item.get("config"), dict)]
+        for ref in candidates:
             # Mixed prose references are not file identities. Do not guess paths.
             if isinstance(ref, str) and not any(c.isspace() for c in ref) and Path(ref).suffix:
                 references.add(ref)

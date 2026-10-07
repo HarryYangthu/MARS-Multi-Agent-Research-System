@@ -54,3 +54,34 @@ def test_actual_baseline_dataset_configuration_is_described_without_loading_data
     assert context["sources"][0]["data"]["path"]
     assert set(context["sources"][0]["data"]) <= {"path", "tx_key", "rx_key", "nf_key"}
     assert 'secret' not in json.dumps(context)
+
+
+def test_approved_experiment_base_config_supplies_actual_repository_identity(tmp_path: Path) -> None:
+    path = tmp_path / "base.yaml"
+    path.write_text("lr_init: 0.0004\ndata:\n  path: data/not-loaded.pth\n")
+    plan = dumps({"schema": "experiment_plan.v1", "project": "local",
+                  "ablations": [{"config": {"base_config": path.name, "config_path": "new.yaml"}}]},
+                 "Human-authored approved plan input; the output configuration does not exist yet.")
+    upstream = {"experiment_plan.approved.md": "[upstream artifact: experiment/experiment_plan.approved.md]\n" + plan}
+    context = json.loads(baseline_repository_context(repo(tmp_path), upstream))
+    assert context["files"] == [{"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 "bytes": path.stat().st_size}]
+    assert not context["contents_loaded"]
+    assert json.loads(baseline_data_description(repo(tmp_path), upstream))["sources"][0]["config_path"] == path.name
+    assert baseline_repository_context(repo(tmp_path), {"plan": plan.replace("project: local", "project: other")}) == ""
+
+
+@pytest.mark.parametrize("source", ["missing.yaml", "../outside.yaml", ".env.yaml"])
+def test_experiment_base_config_does_not_bypass_source_checks(tmp_path: Path, source: str) -> None:
+    plan = dumps({"schema": "experiment_plan.v1", "project": "local",
+                  "ablations": [{"config": {"base_config": source}}]}, "Authored path check input.")
+    with pytest.raises(ValueError):
+        baseline_repository_context(repo(tmp_path), {"plan": plan})
+
+
+def test_new_output_config_and_prose_do_not_supply_a_baseline(tmp_path: Path) -> None:
+    (tmp_path / "new.yaml").write_text("seed: 1\n")
+    for config in [{"config_path": "new.yaml"}, {"base_config": "new.yaml plus prose"}]:
+        plan = dumps({"schema": "experiment_plan.v1", "project": "local",
+                      "ablations": [{"config": config}]}, "Authored identity check input.")
+        assert baseline_repository_context(repo(tmp_path), {"plan": plan}) == ""

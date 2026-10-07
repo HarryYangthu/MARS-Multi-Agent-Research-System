@@ -158,11 +158,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
           // A bounded event window can drop its first row on every poll. Keep
           // the live component stable so timers and manual disclosure survive.
           const key = owners ? `live:${conversation?.conv_id}:${conversation?.linked_run_id}:${owners.join(":")}` : entry.id;
-          return <ActivityGroup key={key} activities={entry.activities} processing={!!owners} startedAt={research ? activity.run?.created_at : undefined} research={research} />;
+          // Each group begins at its own stage/retry boundary. Run creation
+          // includes earlier attempts, review and service-capacity waits.
+          return <ActivityGroup key={key} activities={entry.activities} processing={!!owners} research={research} />;
         })}
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
         {processing && !hasCommanderProgress ? <ActivityGroup activities={[]} processing startedAt={commanderStartedAt} /> : null}
-        {runProcessing && !hasRunProgress ? <ActivityGroup activities={[]} processing startedAt={activity.run?.created_at} research /> : null}
+        {runProcessing && !hasRunProgress ? <ActivityGroup activities={[]} processing research /> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
         {conversation?.linked_run_id && !activity.error && !pollError && showCompletedCodeChanges(activity.run) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
