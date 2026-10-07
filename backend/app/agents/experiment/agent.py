@@ -22,6 +22,8 @@ class ExperimentAgent(BaseAgent):
         "每组 config 必须给出从证据解析的非负整数 seed；steps 预算使用正整数 budget_steps，"
         "epochs 预算使用 budget_unit=epochs 与正整数 max_iters。不得写同基线种子等占位描述，"
         "不得混用步数和轮数；estimated_runs 必须与矩阵数量一致。"
+        "cfg/config_path 只写实际文件路径，不拼接解释；解释放 role。产物文件名逐字核对源码，"
+        "不得删减 json/jsonl 等扩展名或猜测运行目录。"
     )
 
     async def validate_candidate(self, request: RunRequest, text: str,

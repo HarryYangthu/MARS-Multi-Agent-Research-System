@@ -45,13 +45,22 @@ class ArtifactRoute(APIRoute):
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"], route_class=ArtifactRoute)
 
 
-def _ensure_current_review(run_id: str, agent: str, version: str) -> None:
+def _ensure_current_review(run_id: str, agent: str, stem: str, version: str) -> None:
     review = get_review_registry().get(run_id, agent)
     normalized = version if version.startswith('v') else 'v' + version
     if review is not None and review.artifact_ref.version != normalized:
         raise HTTPException(status_code=409, detail={
             'code': 'stale_review', 'message': '待审核文档已更新，请刷新后审核当前版本。',
             'current_version': review.artifact_ref.version})
+    if review is None:
+        run = get_run_store().get(run_id)
+        if run is not None:
+            versions = ArtifactStore(run).list_versions(agent_dir=agent, stem=stem)
+            numbered = [ref for ref in versions if ref.version != 'approved']
+            if numbered and numbered[-1].version != normalized:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'stale_review', 'message': '待审核文档已更新，请刷新后审核当前版本。',
+                    'current_version': numbered[-1].version})
 
 
 def _check_handoff_before_approval(run_id: str, agent_dir: str, stem: str, version: str) -> None:
@@ -649,12 +658,20 @@ async def edit_artifact(
         base=base,
         body=payload.body,
         metadata_patch=payload.metadata_patch,
-        expected_schema=str(base.path.read_text(encoding="utf-8").split("\n")[1].split(":", 1)[1].strip()) if base.path.exists() else None,
+        expected_schema=str(fm_parse(base.path.read_text(encoding="utf-8")).metadata.get('schema', '')),
     )
     # update review session if any
     review = get_review_registry().get(run_id, agent_dir)
     if review is not None:
         review.record_edit(new_ref)
+    else:
+        # Backend restarts discard the in-memory review, not the edit audit.
+        from app.hitl.audit_log import AuditEntry, append as append_audit
+        append_audit(run.subdir('hitl') / 'review_log.jsonl', AuditEntry(
+            run_id=run_id, agent=agent_dir, action='edit', actor='user',
+            detail={'version': new_ref.version, 'path': str(new_ref.path)}))
+    from app.bridge.evaluation_service import emit_artifact_evaluation_event
+    await emit_artifact_evaluation_event(run=run, ref=new_ref, node_key=agent_dir)
     return _read_view(run_id, agent_dir, stem, new_ref.version)
 
 
@@ -663,7 +680,7 @@ async def approve_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
     _ensure_writable_run(run_id)
-    _ensure_current_review(run_id, agent_dir, version)
+    _ensure_current_review(run_id, agent_dir, stem, version)
     _check_handoff_before_approval(run_id, agent_dir, stem, version)
     if agent_dir == "coding":
         patch_version = _patch_version_from_artifact(run_id, stem, version)

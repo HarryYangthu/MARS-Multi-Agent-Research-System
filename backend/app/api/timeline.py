@@ -80,7 +80,7 @@ async def get_run_worklog(
         raise HTTPException(status_code=404, detail="run not found")
     items = _worklog_items(run=run, agent_filter=agent.strip())
     items.sort(key=lambda item: (_parse_dt(item.timestamp) or datetime.min.replace(tzinfo=timezone.utc), item.id))
-    started_at = _run_started_at(run)
+    started_at = _worklog_started_at(run, items, agent.strip())
     latest_at = _latest_timestamp(items) or run.created_at
     elapsed = _elapsed_seconds(started_at, latest_at)
     return WorkLogView(
@@ -126,21 +126,22 @@ def _worklog_items(*, run: RunHandle, agent_filter: str = "") -> list[WorkLogIte
     review_rows = _read_jsonl(run.subdir("hitl") / "review_log.jsonl")
     timestamp_hints = _worklog_timestamp_hints(evaluation_rows=evaluation_rows, review_rows=review_rows)
 
-    items.append(
-        WorkLogItem(
-            id="0:run:created",
-            timestamp=start,
-            elapsed_seconds=0.0,
-            agent="",
-            kind="run",
-            status="created",
-            title="任务记录已创建",
-            detail=(
-                f"项目={run.project}。此条仅记录任务保存；"
-                "是否启动、执行或受阻，以任务状态与后续执行记录为准。"
-            ),
+    if not agent_filter:
+        items.append(
+            WorkLogItem(
+                id="0:run:created",
+                timestamp=start,
+                elapsed_seconds=0.0,
+                agent="",
+                kind="run",
+                status="created",
+                title="任务记录已创建",
+                detail=(
+                    f"项目={run.project}。此条仅记录任务保存；"
+                    "是否启动、执行或受阻，以任务状态与后续执行记录为准。"
+                ),
+            )
         )
-    )
 
     agent_rows = _read_jsonl(run.subdir("events") / "agent_events.jsonl")
     last_agent_timestamp = start
@@ -199,7 +200,7 @@ def _worklog_items(*, run: RunHandle, agent_filter: str = "") -> list[WorkLogIte
 
     items = _deduplicate_worklog(items)
     items.sort(key=lambda item: (_parse_dt(item.timestamp) or datetime.min.replace(tzinfo=timezone.utc), item.id))
-    started_at = _first_timestamp(items) or start
+    started_at = _worklog_started_at(run, items, agent_filter)
     return [
         item.model_copy(update={"elapsed_seconds": _elapsed_seconds(started_at, item.timestamp)})
         for item in items
@@ -294,15 +295,24 @@ def _review_worklog(*, index: int, payload: dict[str, Any]) -> WorkLogItem:
     detail_dict = detail if isinstance(detail, dict) else {}
     reason = str(detail_dict.get("reason") or payload.get("reason") or "")
     agent = str(payload.get("agent") or "")
+    action = str(payload.get('action') or 'review')
+    version = str(detail_dict.get('version') or '')
+    title, detail_text, next_action = {
+        'approve': ('人工审核已批准', f'已批准产物 {version}。', '按已批准产物继续下一阶段。'),
+        'edit': ('人工编辑已保存', f'新版本 {version} 已保存并重新校验。', '检查新版本并批准，或提出修改意见。'),
+        'comment': ('收到人工评论', str(detail_dict.get('text') or '评论已记录。'), '审核当前产物；评论本身不触发返工。'),
+        'reject': ('收到人工驳回意见', reason or '用户驳回当前方案。', '按驳回意见修订并重新审核。'),
+        'regenerate': ('收到人工修改意见', reason or '用户要求重新生成方案。', '将该意见作为高优先级上下文，生成新版产物。'),
+    }.get(action, ('人工审核记录', reason or '审核操作已记录。', '检查当前产物与任务状态。'))
     return WorkLogItem(
         id=f"review:{index}:{agent}",
         timestamp=str(payload.get("timestamp") or ""),
         agent=agent,
         kind="human_feedback",
-        status=str(payload.get("action") or "review"),
-        title="收到人工驳回意见",
-        detail=reason or "用户要求重新生成方案。",
-        next_action="将该意见作为高优先级上下文，生成新版产物。",
+        status=action,
+        title=title,
+        detail=detail_text,
+        next_action=next_action,
     )
 
 
@@ -736,6 +746,15 @@ def _run_started_at(run: RunHandle) -> str:
         if item.get("timestamp"):
             return str(item["timestamp"])
     return ""
+
+
+def _worklog_started_at(run: RunHandle, items: list[WorkLogItem], agent_filter: str) -> str:
+    # An Agent starts after its upstream review, not when the whole run was made.
+    # Missing stage timestamps stay unknown rather than borrowing another stage.
+    if agent_filter:
+        return _first_timestamp([item for item in items if item.agent == agent_filter
+                                 and _parse_dt(item.timestamp) is not None])
+    return _run_started_at(run) or run.created_at
 
 
 def _belongs_to_agent(payload: dict[str, Any], agent_filter: str) -> bool:

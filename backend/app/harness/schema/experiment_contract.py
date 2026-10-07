@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import PurePath
 from typing import Any
 
 from app.harness.schema.frontmatter_parser import parse
@@ -61,6 +62,16 @@ def experiment_errors(metadata: dict[str, Any]) -> list[str]:
             names.add(name)
             paths.add(path)
         config = row['config']
+        for key in ('cfg', 'config_path'):
+            if key not in config:
+                continue
+            value = config[key]
+            if (not isinstance(value, str) or not value or value != value.strip()
+                    or any(char in value for char in '\r\n\0') or '://' in value
+                    or (PurePath(value).suffix and not re.fullmatch(r'\.[\w-]+', PurePath(value).suffix))):
+                errors.append(prefix + '/config/' + key + ': 配置文件字段必须是纯文件路径；说明放入 role，不能拼接在路径后')
+        if 'cfg' in config and 'config_path' in config and config['cfg'] != config['config_path']:
+            errors.append(prefix + '/config/config_path: 必须与 cfg 指向同一个配置文件')
         if type(config.get('seed')) is not int or config['seed'] < 0:
             errors.append(prefix + '/config/seed: 请从真实基线证据解析为非负整数，不能写“同基线种子”')
         try:
