@@ -21,15 +21,16 @@ def revision_spec() -> dict[str, Any]:
             "Revise the current candidate atomically, then validate and independently review the entire document. "
             "Call alone. Copy base_sha256 from the current candidate receipt. Operations use absolute JSON "
             "Pointers rooted at /metadata or /body. Set adds/replaces an object field or replaces an existing "
-            "array element; remove deletes an existing field/element. Parents must exist; replace whole arrays "
-            "to insert/reorder. Update all related fields, including body if human_summary changes. "
+            "array element; remove deletes an existing field/element. Append adds one supplied value at the "
+            "end of the array addressed by path (e.g. /metadata/research_context/sources). Parents must exist; "
+            "replace whole arrays to insert/reorder. Update all related fields, including body if human_summary changes. "
             "Unchanged fields are preserved exactly as data; no content is supplied by the host."),
         "parameters": {"type": "object", "additionalProperties": False,
             "required": ["base_sha256", "operations"], "properties": {
                 "base_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
                 "operations": {"type": "array", "minItems": 1, "maxItems": 64, "items": {
                     "type": "object", "additionalProperties": False, "required": ["op", "path"],
-                    "properties": {"op": {"enum": ["set", "remove"]},
+                    "properties": {"op": {"enum": ["set", "remove", "append"]},
                         "path": {"type": "string", "pattern": "^/(metadata/|body$)"}, "value": {}}}}}}}}
 
 
@@ -46,9 +47,9 @@ def apply_document_revision(candidate: str, revision: Any) -> str:
     parsed = parse(candidate)
     document = deepcopy({"metadata": parsed.metadata, "body": parsed.body})
     for operation in operations:
-        if not isinstance(operation, dict) or operation.get("op") not in {"set", "remove"}:
-            raise ValueError("revision operation must be set or remove")
-        expected = {"op", "path", "value"} if operation["op"] == "set" else {"op", "path"}
+        if not isinstance(operation, dict) or operation.get("op") not in {"set", "remove", "append"}:
+            raise ValueError("revision operation must be set, remove or append")
+        expected = {"op", "path", "value"} if operation["op"] != "remove" else {"op", "path"}
         if set(operation) != expected:
             raise ValueError("set requires a value; remove must omit value; unknown keys are forbidden")
         path = operation["path"]
@@ -76,7 +77,12 @@ def apply_document_revision(candidate: str, revision: Any) -> str:
                     raise ValueError("set cannot append to an array; replace the array")
             elif not isinstance(parent, dict):
                 raise ValueError("revision parent is not a container")
-            if operation["op"] == "set":
+            if operation["op"] == "append":
+                target = parent[key]
+                if not isinstance(target, list):
+                    raise ValueError("append path must identify an existing array")
+                target.append(deepcopy(operation["value"]))
+            elif operation["op"] == "set":
                 parent[key] = deepcopy(operation["value"])
             else:
                 del parent[key]
