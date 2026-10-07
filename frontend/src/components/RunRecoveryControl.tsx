@@ -15,6 +15,7 @@ export function RunRecoveryControl({ runId, project, disabled = false }: { runId
   const [uncertain, setUncertain] = useState(false);
   const [revision, setRevision] = useState(0);
   const submitting = useRef(false);
+  const successNotice = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -29,7 +30,10 @@ export function RunRecoveryControl({ runId, project, disabled = false }: { runId
       try {
         const value = await getRunRecovery(runId, project, controller.signal);
         if (value.project !== project || value.run_id !== runId) throw new Error("恢复记录所属任务不匹配");
-        if (!controller.signal.aborted) { setView(value); setError(""); }
+        if (!controller.signal.aborted) {
+          setView(value); setError("");
+          if (successNotice.current) { setMessage(""); successNotice.current = false; }
+        }
       } catch (cause: unknown) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "恢复状态暂时无法读取");
       } finally { reading = false; }
@@ -41,10 +45,10 @@ export function RunRecoveryControl({ runId, project, disabled = false }: { runId
 
   async function act(action: RecoveryAction): Promise<void> {
     if (!view || submitting.current || disabled || error || uncertain) return;
-    submitting.current = true; setBusy(true); setMessage("");
+    submitting.current = true; successNotice.current = false; setBusy(true); setMessage("");
     try {
       const result = await recoverRun(runId, project, action, view.token);
-      if (mounted.current) { setMessage(result.message); setView(null); setRevision(value => value + 1); }
+      if (mounted.current) { successNotice.current = true; setMessage(result.message); setView(null); setRevision(value => value + 1); }
     } catch (cause: unknown) {
       if (mounted.current) {
         const unknown = reviewResultUncertain(cause, true);

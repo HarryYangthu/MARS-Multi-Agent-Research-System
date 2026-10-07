@@ -549,6 +549,10 @@ class BaseAgent(ABC):
             if result.status == "budget_exhausted" and result.resource_error:
                 from app.harness.llm.accounting import ResourceBudgetError
                 raise ResourceBudgetError(result.resource_error)
+            from app.harness.llm.failure_hint import checkpoint_failure_hint
+            hint = checkpoint_failure_hint(trace_root, status=result.status)
+            if hint:
+                raise RuntimeError(f"{hint} evidence: {trace_root}")
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,
                                                          model=config.model, debate_role=debate_role))

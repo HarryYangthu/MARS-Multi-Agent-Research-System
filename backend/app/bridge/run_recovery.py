@@ -145,6 +145,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     return finish('blocked', str(blocker))
     resumable = not elapsed_exhausted and not stopped_draft
     retryable: list[str] = []
+    provider_hint = ''
     for node in candidates:
         path = task_contract_path(session.run, node)
         if path.exists():
@@ -160,6 +161,8 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                 if not isinstance(state, dict):
                     return finish('blocked', '检查点格式异常，请核对任务记录。')
                 evidence.append(state)
+                from app.harness.llm.failure_hint import checkpoint_failure_hint
+                provider_hint = checkpoint_failure_hint(checkpoint.parent, status=str(state.get('status', ''))) or provider_hint
                 if state.get('pending') == 'tool' or state.get('pending_batch'):
                     return finish('blocked', '存在结果未确认的工具操作，需先核对执行回执，避免重复修改或运行。')
         try:
@@ -175,6 +178,8 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         for node in retryable:
             result['actions'].append({'action': 'retry', 'node': node, 'label': '重试当前阶段'})
     if result['actions']:
+        if provider_hint:
+            return finish('recoverable', provider_hint)
         return finish('recoverable', '从检查点继续；重试会重新执行当前阶段并保留原任务记录。'
                       if resumable else '检查点不能直接续跑，可在原任务中重试失败阶段。')
     return finish('blocked', '当前检查点无法安全恢复，请打开任务详情核对执行记录。')
