@@ -106,4 +106,8 @@ def resumable_task(run: RunHandle, node_key: str) -> TaskEnvelope:
         raise ValueError("checkpoint/journal inconsistent or incomplete; reconcile before resume")
     if audit["facts"].get("fingerprint") != state.get("fingerprint"):
         raise ValueError("checkpoint/facts fingerprint mismatch")
+    if state.get("pending") == "model":
+        from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
+        if checkpoint_quota_rejection_receipt(root, state, run_root=run.root) is None:
+            raise ValueError("model_outcome_unknown: reconcile the original request; automatic replay forbidden")
     return task

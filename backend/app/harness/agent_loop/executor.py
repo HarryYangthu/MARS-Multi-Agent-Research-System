@@ -11,6 +11,7 @@ from typing import Any, Literal, Protocol
 
 from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.completion_recovery import apply_author_empty_completion_recovery, validate_author_empty_recovery_resume
+from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
@@ -363,6 +364,7 @@ class NativeAgentLoop:
                 "Historical readings carry their actual source receipts; do not repeat research without a gap. "
                 "Read current code again. The complete revised candidate still requires validation and independent review."
             )
+        rejection_receipt = None
         if request.resume:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
@@ -376,6 +378,12 @@ class NativeAgentLoop:
                 review_revision(state, request.external_review, p)
             if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
+            rejection_receipt = checkpoint_quota_rejection_receipt(request.trace_root, state,
+                run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)))
+            if rejection_receipt is not None:
+                # An explicit rejection has no unknown result to replay. Keep
+                # all request/attempt counts and unknown token usage unchanged.
+                state["pending"] = None
             validate_author_empty_recovery_resume(state, p)
             if request.review_plan_contract_id is not None:
                 validate_review_plan_resume(state, request.trace_root, contract_id=request.review_plan_contract_id)
@@ -412,6 +420,8 @@ class NativeAgentLoop:
         counts = state["counts"]
         if p.max_active_seconds:
             state.setdefault("active_elapsed_seconds", 0.0)
+        if rejection_receipt is not None:
+            trace.emit("provider_rejection_reconciled", rejection_receipt)
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
         if request.revision_seed is not None and not request.resume:
             trace.emit("revision_seeded", {"counts_inherited": False, "acceptance_inherited": False},

@@ -24,6 +24,7 @@ interfaces remain frozen. All model requests, tools, downloads and tests are rea
 | Diagnostic/config tests leaked shared configuration | Isolate and restore real config state; archive private diagnostics; 86 actual project tests passed |
 | Candidate arrays had no incremental append | Explicit model-authored atomic append, preserving hash and whole-document validation |
 | Quota failure was generic and hidden by stale recovery notice | Receipt-based 1113 explanation and fresh-status notice clearing |
+| UI offered quota recovery but the loop treated explicit rejection as unknown | Match native rejection and settled budget receipts on explicit resume; preserve draft, phase and counters |
 
 ## Evidence boundary
 
