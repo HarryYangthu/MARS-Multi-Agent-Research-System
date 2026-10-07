@@ -208,7 +208,15 @@ class _OpenAICompatProvider(LLMProvider):
                     # The terminal submission has no competing action. DeepSeek
                     # allows a named tool choice only outside thinking mode.
                     kwargs["tool_choice"] = {"type": "function", "function": {"name": function["name"]}}
-        if config.json_mode:
+        if config.json_mode and glm_thinking:
+            # Verified GLM-5.3 JSON mode removes literal `json` from string
+            # values. Keep exact output and downstream JSON/schema checks;
+            # request JSON text instead of altering the returned evidence.
+            kwargs["messages"].append({"role": "system", "content":
+                "Output exactly one valid JSON object. Do not include Markdown code fences, "
+                "preambles, or text outside the object. Preserve every character in string values, "
+                "including complete filenames ending in .json or .jsonl."})
+        elif config.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if stream:
             kwargs["stream"] = True

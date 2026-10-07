@@ -19,6 +19,8 @@ export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run:
   const identity = run && stage && artifact?.run_id === run.run_id && artifact.agent_dir === stage
     ? reviewPromptIdentity(run, stage, artifact) : "";
 
+  useEffect(() => { setNotice(""); }, [run?.run_id, run?.status, identity]);
+
   useEffect(() => {
     dialog.current?.close(); setOpened(false); setBusy(false);
   }, [stage]);

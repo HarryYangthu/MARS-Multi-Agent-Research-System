@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { confirmExecutionConfiguration, setExecutionBoundary, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
+import { executionExperimentFields } from "@/lib/executionReviewPresentation";
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
@@ -14,7 +15,7 @@ const labels: Record<string, string> = {
   stop_after_execution: "仿真完成后暂停", budget_unit: "训练预算单位",
   training_epochs: "实际配置中的训练轮数", training_seed: "实际配置中的随机种子",
 };
-const backends: Record<string, string> = { paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真", environment: "本地启动配置", execution_config: "执行配置文件", default: "应用默认配置", steps: "参数更新次数", epochs: "完整训练轮次" };
+const backends: Record<string, string> = { cpu: "CPU", paper_static: "论文训练适配器", local_command: "项目启动命令", remote_gpu: "远端 GPU", pim_cpu: "本地 PIM 仿真", environment: "本地启动配置", execution_config: "执行配置文件", default: "应用默认配置", steps: "参数更新次数", epochs: "完整训练轮次" };
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "未配置";
   if (typeof value === "boolean") return value ? "是" : "否";
@@ -122,8 +123,13 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged 
         <div className="min-h-0 space-y-5 overflow-y-auto p-5">
           {view.blockers.length ? <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4"><p className="text-sm font-medium text-amber-200">尚不能启动仿真</p><ul className="mt-2 list-disc space-y-2 pl-4 text-xs leading-6 text-amber-100/80">{view.blockers.map(item => <li key={item}>{item}</li>)}</ul></div> : null}
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">{Object.entries(view.defaults).map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-xs text-slate-500">{labels[key] || key}</dt><dd className="mt-1 break-all text-sm text-slate-200">{display(value)}</dd></div>)}</dl>
-          <section><h3 className="text-sm font-medium">实验清单</h3><div className="mt-2 divide-y divide-mars-border rounded-lg border border-mars-border">{view.experiments.map(item => <details key={item.name} className="p-3"><summary className="cursor-pointer text-xs text-slate-300">{item.name}<span className="ml-3 text-slate-500">随机种子：{display(item.seed)}</span></summary><pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6 text-slate-400">{JSON.stringify(item.effective ? { requested: item.config, actual: item.effective } : item.config, null, 2)}</pre></details>)}</div></section>
-          {view.source_configs.length ? <section><h3 className="text-sm font-medium">已编码的配置文件</h3><p className="mt-1 text-xs text-slate-500">每组实验绑定自己的配置文件；实际值在实验清单中展示。</p><ul className="mt-2 space-y-2 text-xs">{view.source_configs.map(item => <li key={item.path} className="break-all text-slate-300">{item.path}<span className="ml-3 text-slate-500">种子 {display(item.seed)} · 训练轮数 {display(item.epochs)}</span></li>)}</ul></section> : null}
+          <section><h3 className="text-sm font-medium">实验清单</h3><div className="mt-2 divide-y divide-mars-border rounded-lg border border-mars-border">{view.experiments.map(item => <article key={item.name} className="p-3">
+            <h4 className="text-xs font-medium text-slate-200">{item.name}</h4>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-2">{executionExperimentFields(item).map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-all text-xs text-slate-300">{display(value)}</dd></div>)}</dl>
+            {item.effective?.output_parent ? <p className="mt-2 text-xs text-slate-500">每次作业在此位置创建独立目录，保留配置快照、曲线和结果。</p> : null}
+            <details className="mt-3"><summary className="cursor-pointer text-xs text-indigo-300">查看配置明细</summary><pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all text-xs leading-6 text-slate-400">{JSON.stringify(item.effective ? { requested: item.config, actual: item.effective } : item.config, null, 2)}</pre></details>
+          </article>)}</div></section>
+          {view.source_configs.length ? <section><h3 className="text-sm font-medium">已编码的配置文件</h3><p className="mt-1 text-xs text-slate-500">每组实验绑定自己的配置文件；实际值在实验清单中展示。</p><ul className="mt-2 space-y-2 text-xs">{view.source_configs.map(item => <li key={item.path} className="break-all text-slate-300">{item.path}<span className="ml-3 text-slate-500">种子 {display(item.seed)}{view.defaults.budget_unit !== "steps" ? ` · 训练轮数 ${display(item.epochs)}` : ""}</span></li>)}</ul></section> : null}
           {view.jobs?.length ? <section><h3 className="text-sm font-medium">真实作业记录</h3><ul className="mt-2 space-y-2 text-xs">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.attempt}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3"><p>{job.experiment_id} · 第 {job.attempt} 次 · {({ running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" } as Record<string, string>)[job.status] || job.status}</p>{job.error ? <p className="mt-1 text-amber-200">{job.error}</p> : null}</li>)}</ul></section> : null}
           <p className="text-xs text-slate-500">累计计入预算的模型请求 {view.budget.used} / {view.budget.limit ?? "不限"} 次。执行管理器无需模型生成计划；以上历史用量不阻断确定的作业执行。</p>
           {view.warnings.map(item => <p key={item} className="text-xs leading-6 text-amber-200">{item}</p>)}

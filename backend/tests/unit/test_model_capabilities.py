@@ -13,10 +13,35 @@ from app.harness.agent_loop.context import pack_context
 from app.harness.agent_loop.executor import phase_llm_config, validate_native_thinking
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking, setup_reasoning
-from app.harness.llm.openai_provider import ZhipuProvider
+from app.harness.llm.openai_provider import OpenAIProvider, ZhipuProvider
 from app.harness.llm.provider_base import LLMConfig, Message, ToolCall
 
 TOOLS = ({"type": "function", "function": {"name": "inspect_document", "parameters": {"type": "object"}}},)
+
+
+def test_glm_json_text_preserves_wire_inputs_without_server_json_filter() -> None:
+    messages = [Message("user", "Copy execution/metrics.json and steps.jsonl")]
+    config = LLMConfig(provider="zhipu", model="glm-5.3", json_mode=True)
+    provider = ZhipuProvider(api_key="serialization-only")
+    request = provider._request_kwargs(messages, config)
+    assert "response_format" not in request
+    assert request["messages"][0]["content"] == messages[0].content
+    assert "exactly one valid JSON object" in request["messages"][-1]["content"]
+    assert ".jsonl" in request["messages"][-1]["content"]
+    assert request["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert config.json_mode is True and len(messages) == 1 and provider._client is None
+    streamed = provider._request_kwargs(messages, config, stream=True)
+    assert "response_format" not in streamed and streamed["messages"] == request["messages"]
+
+
+def test_other_models_retain_requested_json_response_format() -> None:
+    for provider, config in (
+        (OpenAIProvider(api_key="serialization-only"), LLMConfig(provider="openai", model="configured-model", json_mode=True)),
+        (ZhipuProvider(api_key="serialization-only"), LLMConfig(provider="zhipu", model="glm-5.2", json_mode=True)),
+    ):
+        request = provider._request_kwargs([], config)
+        assert request["response_format"] == {"type": "json_object"}
+        assert request["messages"] == []
 
 
 @pytest.mark.parametrize("model", ["glm-5.3", "GLM-5.3", "glm-5.3-flash"])

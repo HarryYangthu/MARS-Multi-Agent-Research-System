@@ -19,7 +19,19 @@ from app.harness.schema.validator import validate_document
 from app.settings import repo_root, reset_settings_cache
 from app.storage.run_store import RunStore
 
-AGENTS: tuple[type[BaseAgent], ...] = (ExperimentAgent, CodingAgent, ExecutionAgent, WritingAgent)
+AGENTS: tuple[type[BaseAgent], ...] = (ExperimentAgent, CodingAgent, WritingAgent)
+
+
+@pytest.mark.asyncio
+async def test_execution_intake_keeps_approved_context_without_new_research(tmp_path: Path) -> None:
+    agent = ExecutionAgent()
+    request = request_for("classification", tmp_path / "run")
+    request.upstream_artifacts["approved_plan"] = "Authored intake context input"
+    context = await agent.build_context(request)
+    assert agent.requires_model is False
+    assert context.upstream == request.upstream_artifacts
+    assert "project_knowledge" not in context.metadata
+    assert "references" not in context.metadata
 
 
 @pytest.fixture

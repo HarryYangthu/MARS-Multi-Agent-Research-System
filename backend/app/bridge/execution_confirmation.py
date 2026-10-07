@@ -54,6 +54,15 @@ def _public_config(value: Any) -> Any:
     return value
 
 
+def effective_data_summary(experiments: list[dict[str, Any]]) -> str:
+    """Summarize resolved job inputs, not an unused top-level default."""
+    paths = {str(item.get('effective', {}).get('data_path') or item.get('config', {}).get('data_path') or '')
+             for item in experiments}
+    if len(paths) == 1:
+        return paths.pop()
+    return '各组不同，详见实验清单' if paths else ''
+
+
 def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     """Read-only preview. The batch consumes the same preparation function."""
     from app.bridge.agent_runner import _load_selected_data_source
@@ -205,6 +214,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     unit, count = approved_budget(spec.config)
                     item['effective'] = {'config_path': str(cfg_path), 'entrypoint': 'train_static.py',
                         'max_iters': count, 'budget_unit': unit,
+                        'threads': effective.get('threads', raw.get('threads')),
+                        'output_parent': str(run.root / 'execution/paper_static' / spec.experiment_id),
                         'training_epochs': raw.get('Epoch', raw.get('epochs')),
                         'dry_run': _bool_value(spec.config.get('dry_run', paper.get('default_dry_run', False))),
                         'seed': actual_seed, 'data_path': str(data_path), 'overrides': effective}
@@ -246,6 +257,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             blockers.append('远端 GPU 连接配置未就绪，请核对 SSH、工作目录和 GPU 配置。')
     elif settings.mars_execution_backend not in {'paper_static', 'local_command', 'pim_cpu', 'remote_gpu'}:
         blockers.append('当前执行后端无法核验真实仿真配置。')
+    if experiments:
+        defaults['data_path'] = effective_data_summary(experiments)
     if settings.mars_execution_backend == 'local_command':
         import shutil
         for row in config.get('local_commands', []):

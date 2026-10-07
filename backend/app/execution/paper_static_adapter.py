@@ -345,7 +345,8 @@ def approved_config_path(config: dict[str, Any], policy: dict[str, Any], root: P
     if not path.is_relative_to(root.resolve()) or any(part.startswith(".") for part in Path(raw).parts):
         raise ValueError("实验配置文件必须位于绑定代码目录中")
     if config.get("entrypoint") != "train_static.py":
-        raise ValueError("paper_static 只支持明确交付的 train_static.py 入口")
+        raise ValueError("paper_static 的 entrypoint 只能填写 train_static.py（纯脚本路径，不含 python 或命令参数）；"
+                         "配置路径放在 config_path，训练预算放在 budget_steps 或 budget_unit/max_iters")
     from app.harness.schema.experiment_contract import budget
     unit, _ = budget(config)
     if unit == "steps":

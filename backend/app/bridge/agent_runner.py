@@ -417,6 +417,9 @@ def load_agent_handoff_context(
     """Load actual approved upstream documents without silently truncating them."""
     identity = parse_node_key(node_key)
     stage, attempt = identity.stage, identity.attempt
+    if stage == "writing":
+        from app.bridge.report_revision_context import report_revision_reason
+        revision_reason = report_revision_reason(run, revision_reason)
     # Pick up upstream approved artifacts as handoff.
     from app.bridge.research_context import load_research_context
 
@@ -552,6 +555,8 @@ def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
             "This PNG is the generated loss curve panel from the completed "
             "Execution Agent batch. Cite it as visual evidence when discussing convergence."
         )
+    from app.bridge.execution_evidence_handoff import execution_job_evidence
+    out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project)
     return out
 
 

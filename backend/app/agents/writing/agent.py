@@ -21,6 +21,14 @@ class WritingAgent(BaseAgent):
         "面向 phd_advisor 给出可复现、有据可依的中文报告。"
     )
 
+    async def validate_candidate(self, request: RunRequest, text: str,
+                                 observations: list[dict[str, Any]]) -> list[str]:
+        errors = await super().validate_candidate(request, text, observations)
+        if not errors and request.extra.get("run_root"):
+            from app.harness.reporting.source_refs import report_source_errors
+            errors.extend(report_source_errors(Path(str(request.extra["run_root"])), text))
+        return errors
+
     async def draft(
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:

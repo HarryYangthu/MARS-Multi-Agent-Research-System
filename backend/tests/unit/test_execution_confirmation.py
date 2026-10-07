@@ -25,6 +25,17 @@ from app.storage.artifact_store import ArtifactStore
 from app.storage.run_store import RunStore
 
 
+def test_data_summary_uses_resolved_adapter_inputs() -> None:
+    from app.bridge.execution_confirmation import effective_data_summary
+    rows = [{'config': {}, 'effective': {'data_path': '/actual/input.pth'}} for _ in range(2)]
+    assert effective_data_summary(rows) == '/actual/input.pth'
+    rows[1]['effective']['data_path'] = '/other/input.pth'
+    assert effective_data_summary(rows) == '各组不同，详见实验清单'
+    assert effective_data_summary([{'config': {'data_path': '/configured/input.pth'}}]) == '/configured/input.pth'
+    assert effective_data_summary([{'config': {}}]) == ''
+    assert effective_data_summary([]) == ''
+
+
 @pytest.fixture
 def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Orchestrator, RunSession, Path, Path]]:
     configuration = tmp_path / 'execution.yaml'
