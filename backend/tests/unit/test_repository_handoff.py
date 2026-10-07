@@ -6,6 +6,7 @@ import json
 import pytest
 
 from app.bridge.repository_handoff import baseline_repository_context
+from app.bridge.repository_handoff import baseline_data_description
 from app.harness.schema.frontmatter_parser import dumps
 from app.harness.tools.project_repo import ProjectRepo
 
@@ -42,3 +43,14 @@ def test_other_projects_and_prose_do_not_supply_code(tmp_path: Path) -> None:
     assert baseline_repository_context(repo(tmp_path), proposal("train.py", "other")) == ""
     assert baseline_repository_context(repo(tmp_path), proposal("train.py + explanation")) == ""
     assert baseline_repository_context(repo(tmp_path / "not-present"), proposal("train.py")) == ""
+
+
+def test_actual_baseline_dataset_configuration_is_described_without_loading_data(tmp_path: Path) -> None:
+    """Actual author-written config; no dataset execution result is represented."""
+    path = tmp_path / 'baseline.yaml'
+    path.write_text('data:\n  path: data/not-loaded.pth\n  tx_key: x\n  password: secret\ndata_param:\n  channels: 16\n')
+    context = json.loads(baseline_data_description(repo(tmp_path), proposal(path.name)))
+    assert context["dataset_contents_loaded"] is False
+    assert context["sources"][0]["data"]["path"]
+    assert set(context["sources"][0]["data"]) <= {"path", "tx_key", "rx_key", "nf_key"}
+    assert 'secret' not in json.dumps(context)

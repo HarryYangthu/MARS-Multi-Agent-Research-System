@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import yaml
 
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.runtime.project_scope import forbidden_source_path
@@ -63,3 +64,27 @@ def attach_repository_handoff(project: str, upstream: dict[str, str]) -> None:
     context = baseline_repository_context(load_project_repo(project), upstream)
     if context:
         upstream["baseline_code"] = context
+
+
+def baseline_data_description(repo: ProjectRepo, upstream: dict[str, str]) -> str:
+    """Describe actual baseline configuration, not inferred dataset contents."""
+    baseline = baseline_repository_context(repo, upstream)
+    if not baseline:
+        return ""
+    sources = []
+    for item in json.loads(baseline)["files"]:
+        if Path(item["path"]).suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        path = resolve_allowed_path(repo, item["path"], require_exists=True, require_text=True)
+        raw = yaml.safe_load(path.read_text())
+        if not isinstance(raw, dict) or not isinstance(raw.get("data"), dict) or not raw["data"].get("path"):
+            continue
+        fields = {key: raw["data"][key] for key in ("path", "tx_key", "rx_key", "nf_key") if key in raw["data"]}
+        parameters = raw.get("data_param", {})
+        parameters = {key: parameters[key] for key in ("channels", "train_ratio", "xmax", "ymax")
+                      if isinstance(parameters, dict) and key in parameters}
+        sources.append({"config_path": item["path"], "config_sha256": item["sha256"],
+                        "data": fields, "data_param": parameters})
+    return json.dumps({"schema_id": "context.data_configuration.v1", "project": repo.project,
+        "repo_path": str(repo.root), "sources": sources, "dataset_contents_loaded": False,
+        "instruction": "Actual baseline data configuration only. Verify dataset availability and effective overrides during execution confirmation; do not infer its contents."}, ensure_ascii=False) if sources else ""

@@ -56,6 +56,17 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if blocker:
                 return finish('blocked', blocker)
             stopped_draft = True
+        if (termination.get('type') == 'cancelled' and termination.get('cleanup_complete') is True
+                and termination.get('scope') == 'owned_async_tasks' and len(nodes) == 1
+                and parse_node_key(nodes[0]).stage == 'coding' and states.get(nodes[0]) == 'failed'):
+            from app.bridge.research_branch import stopped_coding_retry_blocker
+            try:
+                blocker = stopped_coding_retry_blocker(session.run, nodes[0])
+            except (OSError, ValueError, KeyError) as exc:
+                blocker = str(exc)
+            if blocker:
+                return finish('blocked', blocker)
+            stopped_draft = True
     if session.read_only or (session.termination and not stopped_draft) or orch.owned_tasks.closing:
         return finish('blocked', '此任务需要先核对停止或历史执行状态，请打开任务详情处理。')
     if research_execution_admission(session.run, session.request.extra) is not None:

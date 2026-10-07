@@ -46,17 +46,18 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                     # A --set value is encoded as text; validate its exact numeric meaning.
                     if not isinstance(seed, str) or seed != str(config['seed']):
                         raise ValueError('实际配置文件的随机种子与批准方案不一致')
-                epochs: Any = effective.get('Epoch', raw.get('Epoch', raw.get('epochs')))
-                total: Any = effective.get('Etotal', raw.get('Etotal', 1))
-                if isinstance(epochs, str) and epochs.isdigit():
-                    epochs = int(epochs)
-                if isinstance(total, str) and total.isdigit():
-                    total = int(total)
-                if type(epochs) is not int or type(total) is not int or epochs < 1 or total < 1:
-                    raise ValueError('实际训练轮数无法核验')
                 unit, count = budget(config)
-                if unit == 'epochs' and epochs * total < count:
-                    raise ValueError('配置文件在批准轮数之前结束，实际预算无法落实')
+                if unit == 'epochs':
+                    epochs: Any = effective.get('Epoch', raw.get('Epoch', raw.get('epochs')))
+                    total: Any = effective.get('Etotal', raw.get('Etotal', 1))
+                    if isinstance(epochs, str) and epochs.isdigit():
+                        epochs = int(epochs)
+                    if isinstance(total, str) and total.isdigit():
+                        total = int(total)
+                    if type(epochs) is not int or type(total) is not int or epochs < 1 or total < 1:
+                        raise ValueError('实际训练轮数无法核验')
+                    if epochs * total < count:
+                        raise ValueError('配置文件在批准轮数之前结束，实际预算无法落实')
             elif backend == 'local_command':
                 from app.harness.tools.execution.local_command import LocalCommandJob, _command
                 command_id = config.get('command_id')

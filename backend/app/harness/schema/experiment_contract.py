@@ -27,10 +27,14 @@ def document_hash(text: str) -> str:
 
 def budget(config: dict[str, Any]) -> tuple[str, int]:
     if 'budget_steps' in config:
-        if 'max_iters' in config or config.get('budget_unit', 'steps') != 'steps':
+        if config.get('budget_unit', 'steps') != 'steps':
             raise ValueError('steps 与 epochs 预算混用；不得把训练步数换成训练轮数')
         value = config['budget_steps']
+        if 'max_iters' in config and (type(config['max_iters']) is not int or config['max_iters'] != value):
+            raise ValueError('同一 steps 预算的数值别名不一致')
         unit = 'steps'
+    elif config.get('budget_unit') == 'steps' and 'max_iters' in config:
+        value, unit = config['max_iters'], 'steps'
     elif config.get('budget_unit') == 'epochs' and 'max_iters' in config:
         value, unit = config['max_iters'], 'epochs'
     else:

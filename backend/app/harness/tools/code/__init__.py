@@ -361,8 +361,10 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
                 error=f"{command.id} is not allowlisted for {tool_name}",
                 output={"argv": list(command.argv)},
             )
+        from app.harness.tools.check_interpreter import check_argv
+        argv = check_argv(command.argv)
         process = await start_process(
-            command.argv,
+            argv,
             backend=tool_config(tool_name).process_backend,
             require_isolation=tool_config(tool_name).require_isolation,
             cwd=str(root),
@@ -377,7 +379,7 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
             {
                 "id": command.id,
                 "label": command.label,
-                "argv": list(command.argv),
+                "argv": list(argv),
                 "returncode": process.returncode,
                 "stdout": stdout.decode("utf-8", errors="replace")[-4000:],
                 "stderr": stderr.decode("utf-8", errors="replace")[-4000:],

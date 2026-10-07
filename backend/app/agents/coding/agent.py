@@ -36,6 +36,10 @@ class CodingAgent(BaseAgent):
         "experiment_plan_sha256 必须是所依据的完整批准实验文档的 SHA-256；"
         "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
         "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
+        "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
+        "同一数值的两种字段是预算别名，不能改写批准数值或改成 epochs。"
+        "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
+        "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
     )
 
     def __init__(self, **kwargs: Any) -> None:

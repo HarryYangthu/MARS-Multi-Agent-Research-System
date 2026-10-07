@@ -494,6 +494,12 @@ def load_agent_handoff_context(
         attach_repository_handoff(run.project, upstream)
         if selected_data_source and not upstream.get("data_description", "").strip():
             upstream["data_description"] = selection_summary(selected_data_source)
+        if stage == "execution" and not upstream.get("data_description", "").strip():
+            from app.bridge.repository_handoff import baseline_data_description
+            from app.harness.tools.project_repo import load_project_repo
+            description = baseline_data_description(load_project_repo(run.project), upstream)
+            if description:
+                upstream["data_description"] = description
     return upstream, feedback_context
 
 
