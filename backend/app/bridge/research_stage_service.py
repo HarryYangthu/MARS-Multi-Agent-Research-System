@@ -234,6 +234,11 @@ def _inputs(run: RunHandle, *, node_key: str, candidate_id: str, ledger: Researc
     if row is None or row[0] != 1 or not isinstance(row[1], str) or _bytes_sha(row[1].encode()) != row[2]:
         raise StageBindingError("Stage requires the original sealed project capability")
     configuration = _configuration(identity.stage, output_schema)
+    if identity.stage == "writing":
+        from app.bridge.report_skill_binding import snapshot_ref
+        skill_ref = snapshot_ref(node_key)
+        if (run.root / skill_ref).exists():
+            configuration += (_Fingerprint(source=skill_ref, sha256=_bytes_sha(_read(run, skill_ref))),)
     # Existing host profile receipts are evidence only; no profile resolver is
     # invoked and no snapshot is manufactured as a side effect of this service.
     profile_path = run.root / "input/idea_runtime_profile.v1.json"
@@ -281,6 +286,15 @@ def bind_research_stage(run: RunHandle, *, node_key: str, candidate_id: str, led
     """
     # Validate the run/SQL paths before opening a writable transaction.
     restore_project_scope(run, candidate_id=candidate_id, ledger=ledger)
+    if parse_node_key(node_key).stage == "writing":
+        # New admission records the selection once, outside the SQL transaction.
+        # A pre-existing invocation must retain its original no-skill context.
+        with ledger.journal.connection() as connection:
+            present = connection.execute("SELECT name FROM sqlite_master WHERE name='research_stage_invocations'").fetchone()
+            existing = connection.execute("SELECT node_key FROM research_stage_invocations WHERE node_key=?", (node_key,)).fetchone() if present else None
+        if existing is None:
+            from app.bridge.report_skill_binding import frozen_report_skills
+            frozen_report_skills(run, node_key, create=True)
     try:
         with ledger.journal.transaction() as connection:
             inputs, snapshot = _inputs(run, node_key=node_key, candidate_id=candidate_id, ledger=ledger,

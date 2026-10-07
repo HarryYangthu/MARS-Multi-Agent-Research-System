@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.storage.run_store import RunHandle
+from app.harness.schema.frontmatter_parser import parse
+from app.harness.runtime.project_scope import safe_scope_path
 
 
 def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
     """Collect metrics, curves, logs, evaluation, and writing sources.
 
-    The function is deliberately tolerant: V2 reports must still generate a
+    The function is deliberately tolerant: reports must still generate a
     degraded bundle when simulations partially fail or no plots are available.
     """
     source_refs: list[str] = []
@@ -30,12 +34,14 @@ def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
     writing_source = _latest_existing(
         [
             run.subdir("writing") / "research_report.approved.md",
-            *_sorted_paths(run.subdir("writing").glob("research_report.v*.md")),
+            *reversed(sorted(run.subdir("writing").glob("research_report.v*.md"), key=lambda p: int(p.stem.rsplit("v", 1)[1]))),
         ]
     )
     report_markdown = ""
+    report_bytes = b""
     if writing_source is not None:
-        report_markdown = writing_source.read_text(encoding="utf-8")
+        report_bytes = writing_source.read_bytes()
+        report_markdown = parse(report_bytes.decode("utf-8")).body
         source_refs.append(_relative(run, writing_source))
 
     diagnostics = [
@@ -54,6 +60,8 @@ def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
         curves=curves,
         plots=plots,
     )
+    source_hashes = {ref: hashlib.sha256(safe_scope_path(run.root, ref, must_exist=True).read_bytes()).hexdigest()
+                     for ref in sorted(set(source_refs))}
 
     return {
         "schema": "report_data_pack.v1",
@@ -69,7 +77,13 @@ def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
         "diagnostics": diagnostics,
         "run_logs": run_logs,
         "report_markdown_excerpt": _excerpt(report_markdown, limit=2200),
+        "report_markdown": report_markdown,
+        "run_root": str(run.root.resolve()),
+        "report_source": _relative(run, writing_source) if writing_source else None,
+        "report_source_sha256": hashlib.sha256(report_bytes).hexdigest() if writing_source else None,
+        "report_approved": bool(writing_source and writing_source.name.endswith(".approved.md")),
         "source_refs": sorted(set(source_refs)),
+        "source_hashes": source_hashes,
         "degraded": bool(degraded_reasons),
         "degraded_reasons": degraded_reasons,
     }
@@ -146,32 +160,73 @@ def _summarize_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _collect_curves(run: RunHandle, source_refs: list[str]) -> list[dict[str, Any]]:
     curves_dir = run.subdir("execution") / "curves"
     out: list[dict[str, Any]] = []
-    if not curves_dir.exists():
-        return out
     for path in _sorted_paths(curves_dir.glob("*.json")):
         data = _read_json(path)
         if data is None:
             continue
         source_refs.append(_relative(run, path))
         points = data if isinstance(data, list) else data.get("points") if isinstance(data, dict) else []
+        if not isinstance(points, list) and isinstance(data, dict) and isinstance(data.get("values"), list):
+            points = [{"sample_index": index + 1, str(data.get("metric", "value")): value}
+                      for index, value in enumerate(data["values"])]
+        if isinstance(points, list) and points and all(isinstance(value, (int, float)) for value in points):
+            points = [{"sample_index": index + 1, "value": value} for index, value in enumerate(points)]
         points_count = len(points) if isinstance(points, list) else 0
         out.append(
             {
                 "path": _relative(run, path),
+                "experiment_id": str(data.get("experiment_id", path.stem)) if isinstance(data, dict) else path.stem,
                 "points_count": points_count,
                 "preview": points[:5] if isinstance(points, list) else [],
+                "points": points if isinstance(points, list) else [],
             }
         )
+    # Current runners write steps beside the receipt-bound summary, not curves/.
+    latest: dict[str, dict[str, Any]] = {}
+    for record in run.subdir("execution").joinpath("jobs").glob("*.json"):
+        job = _read_json(record)
+        if not isinstance(job, dict) or job.get("run_id") != run.run_id or job.get("project") != run.project:
+            continue
+        group = str(job.get("experiment_id", ""))
+        if group and int(job.get("attempt", 0)) >= int(latest.get(group, {}).get("attempt", -1)):
+            latest[group] = job
+    for group, job in latest.items():
+        if job.get("status") != "completed":
+            continue
+        for evidence in job.get("evidence", []):
+            try:
+                candidate = Path(str(evidence["path"]))
+                relative = candidate.relative_to(run.root.resolve()) if candidate.is_absolute() else candidate
+                if not str(relative).startswith("execution/"):
+                    raise ValueError("curve source outside execution")
+                summary = safe_scope_path(run.root, str(relative), must_exist=True)
+                if summary.name != "summary.json":
+                    continue
+                if evidence.get("sha256") != "sha256:" + hashlib.sha256(summary.read_bytes()).hexdigest():
+                    raise ValueError("summary digest differs from job receipt")
+                path = safe_scope_path(run.root, str(relative.parent / "steps.jsonl"), must_exist=True)
+                if path.stat().st_size > 16 * 1024 * 1024:
+                    raise ValueError("step file exceeds export limit")
+                points = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                if any(not isinstance(row, dict) or any(isinstance(v, float) and not math.isfinite(v) for v in row.values()) for row in points):
+                    raise ValueError("invalid step values")
+                source_refs.append(_relative(run, path))
+                out.append({"path": _relative(run, path), "experiment_id": group,
+                            "points_count": len(points), "points": points})
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
     return out
 
 
 def _collect_plots(run: RunHandle, source_refs: list[str]) -> list[dict[str, Any]]:
     plots_dir = run.subdir("execution") / "plots"
-    if not plots_dir.exists():
-        return []
     out: list[dict[str, Any]] = []
-    for path in _sorted_paths(plots_dir.iterdir()):
+    candidates = list(plots_dir.iterdir()) if plots_dir.exists() else []
+    candidates.extend(run.subdir("execution").glob("*.png"))
+    for path in _sorted_paths(candidates):
         if not path.is_file():
+            continue
+        if not path.resolve().is_relative_to(run.root.resolve()):
             continue
         if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".svg", ".pdf"}:
             continue
@@ -232,7 +287,7 @@ def _read_json(path: Path) -> Any | None:
 
 def _latest_existing(paths: list[Path]) -> Path | None:
     for path in paths:
-        if path.exists():
+        if path.is_file() and path.resolve().is_relative_to(path.parent.parent.resolve()):
             return path
     return None
 
@@ -243,7 +298,7 @@ def _sorted_paths(paths: Any) -> list[Path]:
 
 def _relative(run: RunHandle, path: Path) -> str:
     try:
-        return path.relative_to(run.root).as_posix()
+        return path.resolve().relative_to(run.root.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
 
@@ -269,4 +324,3 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [_jsonable(item) for item in value]
     return str(value)
-

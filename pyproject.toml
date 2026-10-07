@@ -32,6 +32,10 @@ dependencies = [
   "asyncssh[bcrypt]>=2.24,<3",
   "tensorboard>=2.16",
   "protobuf<7",
+  "openpyxl>=3.1,<4", # Editable report workbooks and native charts.
+  "python-docx>=1.1,<2", # Full report documents with native headings and tables.
+  "mistune>=3.0,<4", # Parse report Markdown without dropping structured content.
+  "pillow>=10,<13", # Preserve source plot aspect ratios in Office exports.
 ]
 
 [project.scripts]
@@ -48,6 +52,7 @@ dev = [
   "types-PyYAML",
   "types-jsonschema",
   "types-redis",
+  "types-openpyxl",
 ]
 
 [tool.setuptools.packages.find]

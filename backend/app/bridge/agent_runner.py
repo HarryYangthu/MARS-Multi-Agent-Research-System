@@ -180,8 +180,17 @@ async def _execute_agent_node(
     if not isinstance(skill_selection, dict):
         raise ValueError("selected_skills_by_agent must be an object")
     selected_skills = skill_selection.get(stage, [])
+    if research_stage is None and stage == "writing" and stage not in skill_selection:
+        from app.storage.report_skill_store import selected_report_skills
+        selected_skills = selected_report_skills(run.project)
     if not isinstance(selected_skills, list) or any(not isinstance(name, str) for name in selected_skills):
         raise ValueError("selected skills must be explicit names")
+    if stage == "writing":
+        if research_stage is not None:
+            selected_skills = list(research_stage.skills)
+        else:
+            from app.bridge.report_skill_binding import frozen_report_skills
+            selected_skills = frozen_report_skills(run, node_key, selected_skills, create=True)
     request_extra["skills"] = selected_skills
     task = research_stage.task if research_stage is not None else bind_task(run, node_key, goal=user_request, upstream=upstream,
                     output_schema=str(agent.output_schema), resume_invocation=resume_invocation,

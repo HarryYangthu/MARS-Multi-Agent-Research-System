@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { downloadResultExport, getResults, type RunResults } from "@/lib/results";
 import { isUncertainRequestError } from "@/lib/clientPolicy";
+import { ReportsPanel } from "./ReportsPanel";
 
 const OUTCOME: Record<RunResults["outcome"]["status"], string> = {
   unknown: "目标达成状态尚不能判定", goal_met: "完成且达标", goal_not_met: "完成但未达标",
@@ -65,6 +66,7 @@ export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
         <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-400"><p>执行回执核验：{data.evidence.verified_jobs} / {data.evidence.total_jobs} 项作业</p><p>状态来源：{data.state.authority === "sqlite" ? "已保存的任务状态" : data.state.authority === "legacy_json" ? "历史记录" : data.state.authority === "invalid" ? "状态损坏" : "状态缺失"}</p>{data.state.read_only ? <p>结果页仅读取已保存产物</p> : null}</div>
         {exportMessage ? <p role={exportError ? "alert" : "status"} className={`mt-4 text-sm ${exportError ? "text-amber-200" : "text-emerald-200"}`}>{exportMessage}</p> : null}
       </section>
+      <ReportsPanel key={`reports:${runId}`} runId={runId} />
       <section aria-labelledby="facts-title" className="grid gap-4 lg:grid-cols-3">
         <Statements title="已记录的事实" id="facts-title" values={data.conclusions.facts} empty="尚无可呈现的事实结论。" />
         <Statements title="待验证的假设" values={data.conclusions.hypotheses} empty="尚未记录假设。" />

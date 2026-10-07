@@ -9,6 +9,7 @@ import { latestStages, pendingReviewStage, reviewFocus } from "@/lib/runReview";
 import { ArtifactReviewDocument } from "./ArtifactReviewDocument";
 import { ResearchReviewPrompt } from "./ResearchReviewPrompt";
 import { ExecutionConfigurationReview } from "./ExecutionConfigurationReview";
+import { ReportsPanel } from "./ReportsPanel";
 
 export function ResearchRunWorkspace({ run, stale, onChanged }: { run: RunDetail | null; stale: boolean; onChanged: () => Promise<void> }): JSX.Element | null {
   const pathname = usePathname();
@@ -41,5 +42,6 @@ export function ResearchRunWorkspace({ run, stale, onChanged }: { run: RunDetail
     {stage ? <ArtifactReviewDocument key={`${run.run_id}:${stage}`} run={run} stage={stage} state={state} stale={stale} advanced={`/runs/${encodeURIComponent(run.run_id)}?view=advanced&agent=${stage}`} onChanged={onChanged} onNotice={setNotice} onArtifact={receiveArtifact} expanded reviewActions={false} initiallyCollapsed /> : <p className="text-sm text-slate-400">暂无阶段文档。</p>}
     <ResearchReviewPrompt run={run} artifact={pendingArtifact} stale={stale} onChanged={onChanged} />
     <ExecutionConfigurationReview key={run.run_id} runId={run.run_id} project={run.project} stale={stale} onChanged={onChanged} />
+    {stage === "writing" || stages.some(item => item.stage === "writing" && item.state === "done") ? <ReportsPanel key={`reports:${run.run_id}`} runId={run.run_id} refreshKey={`${run.status}:${stages.find(item => item.stage === "writing")?.state}`} /> : null}
   </section>;
 }

@@ -41,6 +41,7 @@ class BoundResearchStage:
     ledger: ResearchBudgetLedger
     project_scope: ProjectScope
     upstream: dict[str, str]
+    skills: tuple[str, ...] = ()
 
 
 def _sha(data: bytes) -> str:
@@ -126,7 +127,11 @@ def load_bound_research_stage(run: RunHandle, node_key: str, *, agent: Any) -> B
             if _sha(data) != host_evidence.sha256:
                 raise ValueError("Project context changed before dispatch")
             upstream["host:" + host_evidence.source] = data.decode("utf-8")
-    stage = BoundResearchStage(run, task, ledger, scope, upstream)
+    skills: list[str] = []
+    if task.agent == "writing":
+        from app.bridge.report_skill_binding import frozen_report_skills
+        skills = frozen_report_skills(run, node_key)
+    stage = BoundResearchStage(run, task, ledger, scope, upstream, tuple(skills))
     with ledger.journal.connection() as connection:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("BEGIN")

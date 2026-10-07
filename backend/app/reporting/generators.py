@@ -1,313 +1,183 @@
-"""Pure-Python Office deliverable writers used by V2 report bundles."""
+"""Editable Office exports of saved reports and observed experiment data."""
 from __future__ import annotations
 
 import json
-import zipfile
+import math
 from pathlib import Path
 from typing import Any
-from xml.sax.saxutils import escape
+
+import mistune
+from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+from openpyxl import Workbook
+from openpyxl.chart import LineChart, Reference
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from app.reporting.presentation import write_deck
 
 
-def write_results_workbook(path: Path, data_pack: dict[str, Any]) -> None:
-    sheets = [
-        ("Summary", _summary_rows(data_pack)),
-        ("Metrics", _metrics_rows(data_pack)),
-        ("Sources", [["Source"], *[[ref] for ref in _list(data_pack.get("source_refs"))]]),
-        ("QA", [["Check", "Detail"], *[[reason, "degraded"] for reason in _list(data_pack.get("degraded_reasons"))]]),
-    ]
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _xlsx_content_types(len(sheets)))
-        zf.writestr("_rels/.rels", _office_document_rels("xl/workbook.xml"))
-        zf.writestr("xl/workbook.xml", _workbook_xml([name for name, _ in sheets]))
-        zf.writestr("xl/_rels/workbook.xml.rels", _workbook_rels(len(sheets)))
-        zf.writestr("xl/styles.xml", _xlsx_styles())
-        for index, (_, rows) in enumerate(sheets, start=1):
-            zf.writestr(f"xl/worksheets/sheet{index}.xml", _worksheet_xml(rows))
+def report_blocks(pack: dict[str, Any]) -> list[dict[str, Any]]:
+    result = mistune.create_markdown(renderer="ast", plugins=["table"])(str(pack.get("report_markdown") or pack.get("report_markdown_excerpt") or ""))
+    return result if isinstance(result, list) else []
 
 
-def write_research_docx(path: Path, data_pack: dict[str, Any]) -> None:
-    summary = _dict(data_pack.get("summary"))
-    best = _dict(summary.get("best_experiment"))
-    paragraphs = [
-        f"MARS Research Report - {data_pack.get('task', '')}",
-        f"Run: {data_pack.get('run_id', '')}",
-        f"Project: {data_pack.get('project', '')}",
-        f"Experiments: {summary.get('experiment_count', 0)}",
-        f"Primary metric: {summary.get('primary_metric', 'n/a')}",
-        f"Best experiment: {best.get('experiment_id', 'n/a')}",
-    ]
-    if data_pack.get("degraded"):
-        paragraphs.append("Report generated in degraded mode: " + "; ".join(_list(data_pack.get("degraded_reasons"))))
-    excerpt = str(data_pack.get("report_markdown_excerpt", "") or "")
-    if excerpt:
-        paragraphs.append("Writing Agent approved markdown excerpt:")
-        paragraphs.append(excerpt)
-
-    body = "".join(f"<w:p><w:r><w:t>{_xml(text)}</w:t></w:r></w:p>" for text in paragraphs)
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _docx_content_types())
-        zf.writestr("_rels/.rels", _office_document_rels("word/document.xml"))
-        zf.writestr(
-            "word/document.xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-                f"<w:body>{body}<w:sectPr/></w:body></w:document>"
-            ),
-        )
+def plain(token: dict[str, Any]) -> str:
+    if token.get("type") in {"softbreak", "linebreak"}:
+        return "\n"
+    value = str(token.get("raw", "")) + "".join(plain(child) for child in token.get("children", []))
+    if token.get("type") in {"link", "image"}:
+        return value + f" ({token.get('attrs', {}).get('url', '')})"
+    return value
 
 
-def write_research_deck(path: Path, data_pack: dict[str, Any]) -> None:
-    summary = _dict(data_pack.get("summary"))
-    reasons = _list(data_pack.get("degraded_reasons"))
-    slides = [
-        (
-            "MARS Research Run",
-            [
-                f"Task: {data_pack.get('task', '')}",
-                f"Run: {data_pack.get('run_id', '')}",
-                f"Project: {data_pack.get('project', '')}",
-            ],
-        ),
-        (
-            "Simulation Summary",
-            [
-                f"Experiments: {summary.get('experiment_count', 0)}",
-                f"Primary metric: {summary.get('primary_metric', 'n/a')}",
-                f"Best: {_dict(summary.get('best_experiment')).get('experiment_id', 'n/a')}",
-            ],
-        ),
-        (
-            "QA Status",
-            reasons if reasons else ["All configured structural checks passed."],
-        ),
-    ]
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _pptx_content_types(len(slides)))
-        zf.writestr("_rels/.rels", _office_document_rels("ppt/presentation.xml"))
-        zf.writestr("ppt/presentation.xml", _presentation_xml(len(slides)))
-        zf.writestr("ppt/_rels/presentation.xml.rels", _presentation_rels(len(slides)))
-        for index, (title, bullets) in enumerate(slides, start=1):
-            zf.writestr(f"ppt/slides/slide{index}.xml", _slide_xml(title, bullets))
-            zf.writestr(f"ppt/slides/_rels/slide{index}.xml.rels", _empty_rels())
-
-
-def _summary_rows(data_pack: dict[str, Any]) -> list[list[Any]]:
-    summary = _dict(data_pack.get("summary"))
-    rows: list[list[Any]] = [
-        ["Field", "Value"],
-        ["run_id", data_pack.get("run_id", "")],
-        ["project", data_pack.get("project", "")],
-        ["task", data_pack.get("task", "")],
-        ["experiment_count", summary.get("experiment_count", 0)],
-        ["primary_metric", summary.get("primary_metric", "")],
-        ["degraded", data_pack.get("degraded", False)],
-    ]
-    best = _dict(summary.get("best_experiment"))
-    for key, value in best.items():
-        rows.append([f"best.{key}", value])
+def table_rows(token: dict[str, Any]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for section in token.get("children", []):
+        if section.get("type") == "table_head":
+            rows.append([plain(cell) for cell in section.get("children", [])])
+        else:
+            rows.extend([[plain(cell) for cell in row.get("children", [])] for row in section.get("children", [])])
     return rows
 
 
-def _metrics_rows(data_pack: dict[str, Any]) -> list[list[Any]]:
-    metrics = [row for row in _list(data_pack.get("metrics")) if isinstance(row, dict)]
-    keys: list[str] = []
-    for row in metrics:
-        for key in row:
-            if key not in keys:
-                keys.append(str(key))
-    if not keys:
-        return [["metric", "value"], ["status", "no metrics available"]]
-    return [keys, *[[row.get(key, "") for key in keys] for row in metrics]]
+def _cell(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return json.dumps(value, ensure_ascii=False, allow_nan=False) if isinstance(value, (dict, list)) else value
 
 
-def _worksheet_xml(rows: list[list[Any]]) -> str:
-    rendered_rows: list[str] = []
-    for row_index, row in enumerate(rows, start=1):
-        cells: list[str] = []
-        for col_index, value in enumerate(row, start=1):
-            ref = f"{_column_name(col_index)}{row_index}"
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                cells.append(f'<c r="{ref}"><v>{value}</v></c>')
-            else:
-                cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{_xml(str(value))}</t></is></c>')
-        rendered_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f'<sheetData>{"".join(rendered_rows)}</sheetData></worksheet>'
-    )
+def write_results_workbook(path: Path, data_pack: dict[str, Any]) -> None:
+    book = Workbook()
+    del book["Sheet"]
+    metrics = data_pack.get("metrics", [])
+    keys = list(dict.fromkeys(str(key) for row in metrics for key in row))
+    sheets: list[tuple[str, list[list[Any]]]] = [
+        ("Overview", [["Field", "Value"], ["Task", data_pack.get("task")], ["Run", data_pack.get("run_id")],
+            ["Project", data_pack.get("project")], ["Approved report", data_pack.get("report_approved")],
+            ["Report SHA-256", data_pack.get("report_source_sha256")], ["Experiments", len(metrics)]]),
+        ("Metrics", [keys or ["No metrics available"], *[[row.get(key) for key in keys] for row in metrics]]),
+        ("Sources", [["Source", "SHA-256"], *[[ref, data_pack.get("source_hashes", {}).get(ref)] for ref in data_pack.get("source_refs", [])]]),
+        ("Limitations", [["Input limitations"], *[[reason] for reason in data_pack.get("degraded_reasons", [])],
+            ["Only recorded observations are exported. Scientific conclusions and limitations are in the approved report."]]),
+        ("Report", [["Full approved report"], *[[line] for line in str(data_pack.get("report_markdown", "")).splitlines()]]),
+    ]
+    for index, curve in enumerate(data_pack.get("curves", []), 1):
+        points = [point for point in curve.get("points", []) if isinstance(point, dict)]
+        headers = list(dict.fromkeys(str(key) for point in points for key in point))
+        sheets.append((f"Steps_{index}", [headers or ["No step records"], *[[point.get(key) for key in headers] for point in points]]))
+    for name, rows in sheets:
+        sheet = book.create_sheet(name)
+        for row in rows:
+            sheet.append([_cell(value) for value in row])
+            for cell in sheet[sheet.max_row]:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"  # Imported report text must never become a formula.
+        sheet.freeze_panes, sheet.auto_filter.ref = "A2", sheet.dimensions
+        sheet.sheet_view.showGridLines = False
+        sheet.row_dimensions[1].height = 28
+        for cell in sheet[1]:
+            cell.font = Font(name="Arial", bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="18243A")
+        for column in sheet.columns:
+            header = str(column[0].value or "")
+            sheet.column_dimensions[get_column_letter(column[0].column)].width = 95 if name == "Report" else min(50, max(18, len(header) + 3))
+            for cell in column[1:]:
+                cell.font = Font(name="Arial", size=11)
+                cell.alignment = Alignment(vertical="top", wrap_text=isinstance(cell.value, str))
+                if isinstance(cell.value, float):
+                    cell.number_format = "0.000000" if "loss" in header or header == "lr" else "0.00"
+        curve_key = next((key for key in ("training_loss", "loss", "value") if key in rows[0]), None)
+        if name.startswith("Steps_") and curve_key and sheet.max_row > 1:
+            chart = LineChart()
+            chart.title = f"{data_pack['curves'][int(name.split('_')[1]) - 1].get('experiment_id', name)} · training loss"
+            step_key = "optimizer_step" if "optimizer_step" in rows[0] else "sample_index"
+            chart.y_axis.title, chart.x_axis.title = f"Recorded {curve_key}", "Optimizer step" if step_key == "optimizer_step" else "Sample index"
+            chart.add_data(Reference(sheet, min_col=rows[0].index(curve_key) + 1, min_row=1, max_row=sheet.max_row), titles_from_data=True)
+            if step_key in rows[0]:
+                chart.set_categories(Reference(sheet, min_col=rows[0].index(step_key) + 1, min_row=2, max_row=sheet.max_row))
+            chart.width, chart.height = 24, 12
+            sheet.add_chart(chart, f"{get_column_letter(sheet.max_column + 2)}2")
+    book.save(path)
 
 
-def _xlsx_content_types(sheet_count: int) -> str:
-    sheets = "".join(
-        '<Override PartName="/xl/worksheets/sheet{index}.xml" '
-        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'.format(index=index)
-        for index in range(1, sheet_count + 1)
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-        f"{sheets}</Types>"
-    )
+def _native_table(document: Any, rows: list[list[str]]) -> None:
+    if not rows:
+        return
+    width = max(len(row) for row in rows)
+    table = document.add_table(rows=0, cols=width)
+    table.style, table.autofit = "Table Grid", False
+    borders = OxmlElement("w:tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        edge = OxmlElement(f"w:{side}")
+        for key, value in (("val", "single"), ("sz", "4"), ("color", "D8DEE9")):
+            edge.set(qn(f"w:{key}"), value)
+        borders.append(edge)
+    table._tbl.tblPr.append(borders)
+    for index, values in enumerate(rows):
+        cells = table.add_row().cells
+        for column, cell in enumerate(cells):
+            cell.width, cell.text = Inches(6.5 / width), values[column] if column < len(values) else ""
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after = Pt(4)
+                for run in paragraph.runs:
+                    run.font.size, run.bold = Pt(9), index == 0
+            if index == 0:
+                shade = OxmlElement("w:shd")
+                shade.set(qn("w:fill"), "E9EDF2")
+                cell._tc.get_or_add_tcPr().append(shade)
+        if index == 0:
+            table.rows[index]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+    document.add_paragraph()
 
 
-def _workbook_xml(sheet_names: list[str]) -> str:
-    sheets = "".join(
-        f'<sheet name="{_xml(name)}" sheetId="{index}" r:id="rId{index}"/>'
-        for index, name in enumerate(sheet_names, start=1)
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        f"<sheets>{sheets}</sheets></workbook>"
-    )
+def write_research_docx(path: Path, data_pack: dict[str, Any]) -> None:
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = section.bottom_margin = section.left_margin = section.right_margin = Inches(.7)
+    for name in ("Normal", "Title", "Heading 1", "Heading 2", "Heading 3"):
+        style = document.styles[name]
+        style.font.name, style.font.color.rgb = "Arial", RGBColor(0, 0, 0)
+        style.element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    document.styles["Normal"].font.size = Pt(10.5)
+    document.styles["Normal"].paragraph_format.space_after = Pt(6)
+    document.styles["Normal"].paragraph_format.line_spacing = 1.15
+    document.core_properties.title, document.core_properties.author = str(data_pack.get("task", "Research report")), "MARS"
+
+    def add(tokens: list[dict[str, Any]], *, list_depth: int = 0) -> None:
+        for token in tokens:
+            kind = token.get("type")
+            if kind == "heading":
+                level = min(3, int(token.get("attrs", {}).get("level", 1)))
+                document.add_heading(plain(token), level=0 if not document.paragraphs and level == 1 else level)
+            elif kind in {"paragraph", "block_text"}:
+                document.add_paragraph(plain(token), style="List Bullet" if list_depth else None).paragraph_format.widow_control = True
+            elif kind == "table":
+                _native_table(document, table_rows(token))
+            elif kind == "block_code":
+                for run in document.add_paragraph(str(token.get("raw", ""))).runs:
+                    run.font.name, run.font.size = "Courier New", Pt(8)
+            elif kind == "list":
+                add(token.get("children", []), list_depth=list_depth + 1)
+            elif token.get("children"):
+                add(token["children"], list_depth=list_depth)
+    add(report_blocks(data_pack))
+    document.add_heading("导出来源", level=1)
+    document.add_paragraph(f"任务：{data_pack.get('run_id')}\n报告：{data_pack.get('report_source')}\nSHA-256：{data_pack.get('report_source_sha256')}")
+    for plot in data_pack.get("plots", []):
+        root = Path(str(data_pack.get("run_root", ""))).resolve()
+        image = (root / str(plot["path"])).resolve()
+        if image.is_relative_to(root) and image.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+            document.add_heading("已记录的训练曲线", level=2)
+            document.add_picture(str(image), width=Inches(6.3))
+            document.add_paragraph(str(plot["path"]))
+    document.save(str(path))
 
 
-def _workbook_rels(sheet_count: int) -> str:
-    rels = "".join(
-        '<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-        'Target="worksheets/sheet{index}.xml"/>'.format(index=index)
-        for index in range(1, sheet_count + 1)
-    )
-    rels += '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-    return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>'
-
-
-def _xlsx_styles() -> str:
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
-        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
-        '<borders count="1"><border/></borders>'
-        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs>'
-        '</styleSheet>'
-    )
-
-
-def _docx_content_types() -> str:
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-        '</Types>'
-    )
-
-
-def _pptx_content_types(slide_count: int) -> str:
-    slides = "".join(
-        '<Override PartName="/ppt/slides/slide{index}.xml" '
-        'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'.format(index=index)
-        for index in range(1, slide_count + 1)
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
-        f"{slides}</Types>"
-    )
-
-
-def _presentation_xml(slide_count: int) -> str:
-    slide_ids = "".join(f'<p:sldId id="{256 + index}" r:id="rId{index}"/>' for index in range(1, slide_count + 1))
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        f"<p:sldIdLst>{slide_ids}</p:sldIdLst><p:sldSz cx=\"12192000\" cy=\"6858000\" type=\"screen16x9\"/></p:presentation>"
-    )
-
-
-def _presentation_rels(slide_count: int) -> str:
-    rels = "".join(
-        '<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
-        'Target="slides/slide{index}.xml"/>'.format(index=index)
-        for index in range(1, slide_count + 1)
-    )
-    return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>'
-
-
-def _slide_xml(title: str, bullets: list[Any]) -> str:
-    bullet_xml = "".join(f"<a:p><a:r><a:t>{_xml(str(item))}</a:t></a:r></a:p>" for item in bullets)
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<p:cSld><p:spTree>'
-        '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
-        f'{_shape_xml(2, "Title", title, 700000, 450000, 10800000, 800000)}'
-        f'{_shape_xml(3, "Body", bullet_xml, 900000, 1500000, 10300000, 4300000, raw=True)}'
-        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>'
-    )
-
-
-def _shape_xml(
-    shape_id: int,
-    name: str,
-    text: str,
-    x: int,
-    y: int,
-    cx: int,
-    cy: int,
-    *,
-    raw: bool = False,
-) -> str:
-    paragraphs = text if raw else f"<a:p><a:r><a:t>{_xml(text)}</a:t></a:r></a:p>"
-    return (
-        "<p:sp>"
-        f'<p:nvSpPr><p:cNvPr id="{shape_id}" name="{_xml(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
-        f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
-        f"<p:txBody><a:bodyPr/><a:lstStyle/>{paragraphs}</p:txBody>"
-        "</p:sp>"
-    )
-
-
-def _office_document_rels(target: str) -> str:
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        f'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="{target}"/>'
-        '</Relationships>'
-    )
-
-
-def _empty_rels() -> str:
-    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
-
-
-def _column_name(index: int) -> str:
-    name = ""
-    while index:
-        index, rem = divmod(index - 1, 26)
-        name = chr(65 + rem) + name
-    return name
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _xml(value: str) -> str:
-    return escape(value, {'"': "&quot;", "'": "&apos;"})
+def write_research_deck(path: Path, data_pack: dict[str, Any]) -> None:
+    write_deck(path, data_pack, report_blocks(data_pack), plain, table_rows)
 
 
 def pretty_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-
+    return json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False, default=str)
