@@ -7,12 +7,23 @@ import { TopBar } from "@/components/TopBar";
 import { TensorBoardPanel } from "@/components/TensorBoardPanel";
 import { listRuns, type RunSummary } from "@/lib/api";
 import { useProject } from "@/lib/project";
+import { researchConversationUrl } from "@/lib/runConversation";
+
+function labUrl(runId: string, returnTo: string): string {
+  const params = new URLSearchParams();
+  if (runId) params.set("run", runId);
+  if (returnTo) params.set("returnTo", returnTo);
+  const query = params.toString();
+  return `/lab${query ? `?${query}` : ""}`;
+}
 
 function ExperimentLab(): JSX.Element {
   const { selectedProject, setSelectedProject, projects, loading: projectLoading } = useProject();
   const search = useSearchParams();
   const router = useRouter();
   const runId = search?.get("run") || "";
+  const source = search?.get("returnTo") || "";
+  const returnTo = /^\/runs\/new(?:\?|$)/.test(source) ? source : "";
   const routedProject = search?.get("project") || "";
   const project = routedProject || selectedProject;
   const projectLabel = projects.find((item) => item.name === project)?.display_name || project;
@@ -27,11 +38,14 @@ function ExperimentLab(): JSX.Element {
   useEffect(() => {
     if (routedProject) {
       if (routedProject !== selectedProject) setSelectedProject(routedProject);
-      router.replace(runId ? `/lab?run=${encodeURIComponent(runId)}` : "/lab");
+      router.replace(labUrl(runId, returnTo));
     }
-  }, [routedProject, selectedProject, setSelectedProject, router, runId]);
+  }, [routedProject, selectedProject, setSelectedProject, router, runId, returnTo]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [error, setError] = useState("");
+  function exitLab(): void {
+    router.replace(returnTo || (runId ? researchConversationUrl(runId, project) : "/projects"));
+  }
   useEffect(() => {
     if (projectLoading || !project) return;
     let alive = true;
@@ -58,7 +72,7 @@ function ExperimentLab(): JSX.Element {
             <label className="flex items-center gap-2 text-xs text-slate-400">
               展示实验
               <select aria-label="展示实验" value={runId}
-                onChange={(event) => router.replace(event.target.value ? `/lab?run=${encodeURIComponent(event.target.value)}` : "/lab")}
+                onChange={(event) => router.replace(labUrl(event.target.value, returnTo))}
                 className="max-w-80 rounded-lg border border-mars-border bg-mars-panel px-3 py-2 text-slate-100">
                 <option value="">{projectLabel} · 历史实验</option>
                 {runId && !runs.some((run) => run.run_id === runId) ? <option value={runId}>{runId}</option> : null}
@@ -66,6 +80,7 @@ function ExperimentLab(): JSX.Element {
               </select>
             </label>
             {runId ? <Link href={`/runs/${runId}?agent=execution`} className="text-xs text-mars-accent hover:underline">查看执行详情 →</Link> : null}
+            <button type="button" onClick={exitLab} aria-label="关闭实验台，返回上一界面" title="关闭实验台，返回上一界面" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-2xl leading-none text-slate-400 hover:bg-mars-panel hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"><span aria-hidden="true">×</span></button>
           </div>
         </header>
         {error ? <p role="alert" className="text-xs text-amber-200">{error}</p> : null}
