@@ -18,9 +18,10 @@ checks requiring an unavailable historical archive were explicitly skipped.
 Frontend type checking passed. The zero-default active-time field was added to
 the existing backward-compatible fingerprint regression expectation.
 
-Full-flow acceptance remains incomplete until a usable API account is configured.
-The current run's cumulative usage and candidate were preserved; no failed stage
-was relabeled as passed and no simulation/report was manufactured.
+At the original checkpoint full-flow acceptance was incomplete. The run's
+cumulative usage and candidate were preserved; no failed stage was relabeled as
+passed and no simulation/report was manufactured. See the continuation below
+for the subsequently completed real journey.
 
 ## Explicit resume after confirmed rejection
 
@@ -39,4 +40,27 @@ use this path. Unknown model requests are excluded from resume preflight.
 76 recovery checks passed; six checks requiring unavailable historical traces
 were explicitly skipped. The actual quota checkpoint passed both in-memory loop
 admission and product task admission without an API request or checkpoint edit.
-Continuing the real review still requires restored provider resources.
+At that checkpoint continuing the real review required restored provider resources.
+
+## Verified continuation after account resources were restored
+
+On 2026-10-08 the user's restored account passed the real product connection test
+with glm-5.3. The original attempt's time window had expired, so an explicit new
+stage attempt used the existing guarded retry path, preserving cumulative usage.
+
+That retry exposed a separate draft-retention gap: a native, settled 1113 model
+rejection was not admitted by the retry-draft logic. It now admits the original
+unapproved candidate and source index only when request identity, native
+rejection and ledger all match. It does not inherit tool observations, reading
+acceptance or independent-review acceptance. Thirty targeted recovery/draft
+checks passed and the old checkpoint/ledger bytes remained unchanged.
+
+The same task then completed Idea, Experiment, actual ZCode Coding, two fresh
+real CPU simulation jobs and final report review. Final state is completed with
+86/100 cumulative charged model requests. The original 100/100 failed task was
+kept separate. No request budget was expanded or reset. Actual results and the
+limits of this acceptance are documented in [product-user-journey.md](product-user-journey.md).
+
+Restoring account resources resolves the external prerequisite; it does not make
+unknown-effect requests safe to replay. Missing receipts, mismatched identities,
+newer requests and unsettled/unknown outcomes continue to block recovery.
