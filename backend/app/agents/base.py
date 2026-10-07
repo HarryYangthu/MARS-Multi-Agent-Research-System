@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator
 from app.harness.agent_loop import AgentLoopExecutor, AgentLoopPolicy, LoopInput, NativeAgentLoop
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.agent_loop.stop import StopCondition
+from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import guarded_complete, run_resource_scope
@@ -461,6 +462,9 @@ class BaseAgent(ABC):
     def loop_stop_condition(self, request: RunRequest) -> StopCondition | None:
         return None
 
+    def loop_revision_seed(self, request: RunRequest, context: ContextPack) -> RevisionSeed | None:
+        return None
+
     def loop_stop_contract_id(self, request: RunRequest) -> str | None:
         return None
 
@@ -534,6 +538,7 @@ class BaseAgent(ABC):
             stop_condition=self.loop_stop_condition(request),
             stop_contract_id=self.loop_stop_contract_id(request),
             final_schema=structured_schema or self.submission_schema(request),
+            revision_seed=self.loop_revision_seed(request, context),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))

@@ -26,6 +26,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     result: dict[str, Any] = {'run_id': run_id, 'project': project, 'actions': [],
                              'status': 'idle', 'message': '', 'token': ''}
     evidence: list[Any] = [states, session.read_only, session.termination]
+    stopped_draft = False
 
     def finish(status: str, message: str) -> dict[str, Any]:
         result.update(status=status, message=message, token=digest(evidence))
@@ -45,7 +46,17 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if not blocker:
                 result['actions'] = [{'action': 'retry', 'node': nodes[0], 'label': '重新核对并恢复仿真'}]
                 return finish('recoverable', '作业中断清理已确认；重新核对配置后开启明确的新尝试，旧收据保留。')
-    if session.read_only or session.termination or orch.owned_tasks.closing:
+        if len(nodes) == 1 and parse_node_key(nodes[0]).stage in {'idea', 'experiment', 'writing'}:
+            from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
+            try:
+                blocker = stopped_draft_retry_blocker(session.run, nodes[0],
+                    stage=parse_node_key(nodes[0]).stage, termination=termination, states=states)
+            except (OSError, ValueError, KeyError) as exc:
+                blocker = str(exc)
+            if blocker:
+                return finish('blocked', blocker)
+            stopped_draft = True
+    if session.read_only or (session.termination and not stopped_draft) or orch.owned_tasks.closing:
         return finish('blocked', '此任务需要先核对停止或历史执行状态，请打开任务详情处理。')
     if research_execution_admission(session.run, session.request.extra) is not None:
         return finish('blocked', '研究执行约束尚未就绪，请打开任务详情处理。')
@@ -121,7 +132,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     blocker = str(exc)
                 if blocker:
                     return finish('blocked', str(blocker))
-    resumable = not elapsed_exhausted
+    resumable = not elapsed_exhausted and not stopped_draft
     retryable: list[str] = []
     for node in candidates:
         path = task_contract_path(session.run, node)
@@ -177,7 +188,7 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
     else:
         result = await orch.request_artifact_revision(run_id=run_id, agent=parse_node_key(node).stage,
             reason='用户请求在原任务中重试失败阶段；保留上游产物、既有记录及累计资源用量。',
-            restart_stopped=parse_node_key(node).stage == 'execution')
+            restart_stopped=bool(orch.session(run_id).termination))
     result['run_id'] = run_id
     if result.get('ok'):
         result['message'] = '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。'

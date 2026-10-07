@@ -14,6 +14,7 @@ from app.harness.agent_loop.completion_recovery import apply_author_empty_comple
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
+from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.agent_loop.review_plan import (
     WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, completed_plan_decision, finish_review_unit, pack_review_unit,
     prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
@@ -83,6 +84,7 @@ class LoopInput:
     review_config: LLMConfig | None = None
     correlation: dict[str, str] = field(default_factory=dict)
     context_metadata: dict[str, Any] = field(default_factory=dict)
+    revision_seed: RevisionSeed | None = None
 
 
 @dataclass
@@ -316,6 +318,10 @@ class NativeAgentLoop:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:
             fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
+        if request.revision_seed is not None:
+            if not native or not p.document_revisions_enabled or p.trace != "full":
+                raise ValueError("revision seeds require native document revisions with full trace")
+            fingerprint = digest({"base": fingerprint, "revision_seed": request.revision_seed.receipt})
         fingerprint = stop_fingerprint(fingerprint, request.stop_condition, request.stop_contract_id)
         fingerprint = review_plan_fingerprint(fingerprint, request.review_plan_factory, request.review_plan_contract_id,
                                               request.config, p)
@@ -346,6 +352,17 @@ class NativeAgentLoop:
         }
         if request.review_plan_factory is not None:
             state["review_plan_contract_id"] = request.review_plan_contract_id
+        if request.revision_seed is not None and not request.resume:
+            from copy import deepcopy
+            state["candidate"] = request.revision_seed.candidate
+            state["history"] = deepcopy(list(request.revision_seed.observations))
+            state["revision_seed"] = deepcopy(request.revision_seed.receipt)
+            state["feedback"] = (
+                "This is an explicit human-requested revision of the current unapproved candidate. "
+                "Use mars_revise_document with its receipt to change only the required fields. "
+                "Historical readings carry their actual source receipts; do not repeat research without a gap. "
+                "Read current code again. The complete revised candidate still requires validation and independent review."
+            )
         if request.resume:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
@@ -396,6 +413,9 @@ class NativeAgentLoop:
         if p.max_active_seconds:
             state.setdefault("active_elapsed_seconds", 0.0)
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
+        if request.revision_seed is not None and not request.resume:
+            trace.emit("revision_seeded", {"counts_inherited": False, "acceptance_inherited": False},
+                       visible=request.revision_seed.receipt)
         if request.external_review:
             if not request.resume:
                 raise ValueError("external review requires an existing invocation")
@@ -829,6 +849,8 @@ class NativeAgentLoop:
                                                            "serialization_only": True})
                     await progress("candidate", text=state["candidate"])
                     errors = await request.validate(state["candidate"], state["history"])
+                    if state.get("revision_seed", {}).get("candidate_sha256") == digest(state["candidate"]):
+                        errors.append("/candidate: human-requested revision cannot resubmit the unchanged rejected draft")
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
                         errors.append("/candidate: unresolved review issues require a revised candidate")
                     state["validation_issues"] = list(errors)

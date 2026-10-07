@@ -131,6 +131,9 @@ async def _execute_agent_node(
         user_request = user_request_path.read_text(encoding="utf-8")
 
     if research_stage is None:
+        if resume_invocation is not None and not revision_reason:
+            from app.bridge.revision_resume import resume_revision_reason
+            revision_reason = resume_revision_reason(run, node_key, resume_invocation)
         upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
         from app.harness.tools.git_branch import current_git_branch
         branch = current_git_branch(run.project, run.run_id)

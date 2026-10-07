@@ -1419,7 +1419,7 @@ class Orchestrator:
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
-            if (not restart_stopped or agent not in {"coding", "execution"} or stopped_node is None
+            if (not restart_stopped or agent not in {"idea", "experiment", "coding", "execution", "writing"} or stopped_node is None
                     or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
                     or stopped_node not in termination.get("interrupted_nodes", [])
                     or self.owned_tasks.active(run_id) is not None
@@ -1428,8 +1428,13 @@ class Orchestrator:
             from app.bridge.research_branch import stopped_coding_retry_blocker
             from app.execution.job_journal import stopped_execution_retry_blocker
             try:
-                blocker = (stopped_coding_retry_blocker(session.run, stopped_node) if agent == "coding"
-                           else stopped_execution_retry_blocker(session.run.root))
+                if agent in {"idea", "experiment", "writing"}:
+                    from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
+                    blocker = stopped_draft_retry_blocker(session.run, stopped_node, stage=agent,
+                        termination=termination, states={key: value.value for key, value in session.graph.all_states().items()})
+                else:
+                    blocker = (stopped_coding_retry_blocker(session.run, stopped_node) if agent == "coding"
+                               else stopped_execution_retry_blocker(session.run.root))
             except (OSError, ValueError, KeyError) as exc:
                 blocker = str(exc)
             if blocker:

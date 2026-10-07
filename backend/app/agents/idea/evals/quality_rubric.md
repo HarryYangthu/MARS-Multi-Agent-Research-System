@@ -1,30 +1,12 @@
-# Idea 输出质量评估 Rubric — PIMC
+# 研究方案质量审查
 
-评估一个 PIM 抵消 proposal 是否合格。每个维度给 0/1/2 分,任一维度为 0 直接判不合格。
+所有判断以本次任务、真实来源和当前代码为准。本文件不预设领域指标、噪声底或训练入口。
 
-## 评分维度
+- 可检验性：核心假设能在规定预算内比较，变量与对照可执行；单次比较不冒充统计显著性。
+- 指标正确性：核对实际实现的定义、单位、优化方向及聚合顺序，附文件位置。缩写不能替代定义；阈值必须有本次任务或真实测量依据。
+- 证据：区分检索元数据、读到方法的内容及实验结果；采用文献能追溯到真实阅读记录。历史阅读只有来源绑定完整时可以沿用。
+- 工程可执行性：读取当前入口、配置与测试；已有能力优先复用。预算单位（更新步、epoch、批次）、随机种子、输入输出与调度时机一致。
+- 基线约束：以接入项目的保护规则为准，冻结模型、评测、数据等本次约定的控制变量，避免混入无关改动。
+- 结论边界：无实测数据不能声明改善；单种子短预算只能给描述性比较。失败、负结果与待验证假设应如实保留。
 
-- **Testability(可证伪性)**:假设能否映射到双载波 PIM simulator
-  (`backend/app/execution/pim_cancellation.py`)的旋钮并跑出 RES 曲线?
-  - 0:只说"更好/更强",无旋钮无量级。
-  - 2:明确扫 `expert_count`(→memory taps)/`order∈{1,3,5,7,9}`/`router_type∈{soft,hard-top2}`/
-    `snr_db`/`learning_rate`,并给出 RES 的目标方向与量级。
-
-- **Metric Correctness(指标约定)**:
-  - 0:把 **RES 写成"越高越好"**,或混淆 RES 与 PIM suppression。
-  - 2:RES 越低越好(gate ≤ -26 dB, mean)、loss ≤ 0.04(max)、PIM suppression=-RES 越高越好、
-    APE 越低越好;数量级合理(噪声地板 ≈ -29 dB,差 ≈ -20 dB)。
-
-- **Evidence**:是否引用本地 KB / 历史 run / 信号模型(12-tap memory、奇数阶互调
-  落在 2f1-f2 / 2f2-f1)作为依据,而非凭空设指标。
-
-- **Downstream Readiness**:Experiment Agent 能否一键把它展开成多条可比 RES 曲线的 ablation?
-
-- **Baseline Safety**:是否 ADDITIVE?有无触碰 `Paper_Total_0327` 方法体、
-  `forward(x, stream_label)` 签名、`baseline/`、`production_interface/`(任一触碰 → Gate 5 拦 → 0 分)。
-
-- **Novelty**:相对 baseline 与历史 run 是否有实质差异(新模块/新容量配置/新 routing 策略)。
-
-## self-heal 友好度(加分项)
-RES gate miss 多半是 ablation 网格过浅(memory 太短)。proposal 若预留"加深 canceller"
-的扫描空间,便于 Commander 在 `default_target=experiment`(`max_iterations=2`)下一次性补足容量,记加分。
+发现问题时给出具体字段、来源和可执行修改建议。通过格式或资料完整性检查不等于方法已被实验证明有效。
