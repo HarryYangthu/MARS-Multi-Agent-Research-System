@@ -16,8 +16,13 @@ def failed_idea_revision_context(root: Path, project: str) -> dict[str, str]:
             continue
         try:
             state = json.loads(path.read_text())
-            if (state.get("status") not in {"validation_exhausted", "reflection_rejected", "budget_exhausted", "evidence_unavailable"}
-                    or state.get("pending") or state.get("pending_batch")):
+            rejected_quota = None
+            if state.get("status") == "model_error":
+                from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
+                rejected_quota = checkpoint_quota_rejection_receipt(path.parent, state, run_root=root)
+            if ((state.get("status") not in {"validation_exhausted", "reflection_rejected", "budget_exhausted", "evidence_unavailable"}
+                    and rejected_quota is None)
+                    or state.get("pending") and rejected_quota is None or state.get("pending_batch")):
                 continue
             audit = audit_trace(path.parent)
             if not audit.get("consistent") or not state.get("counts", {}).get("model_responses"):
