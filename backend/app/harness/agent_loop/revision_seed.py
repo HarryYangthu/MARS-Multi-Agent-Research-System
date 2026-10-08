@@ -49,6 +49,49 @@ def load_revision_seed(root: Path, *, project: str, agent: str, candidate_path: 
             or state.get("correlation", {}).get("trace_id") != root.name
             or not audit_trace(source).get("consistent")):
         raise ValueError("revision candidate trace is unresolved or inconsistent")
+    return _seed_from_state(root, agent=agent, source=source, state=state, candidate=candidate,
+                            candidate_ref=candidate_path.relative_to(root).as_posix())
+
+
+def load_failed_revision_seed(root: Path, *, project: str, agent: str,
+                              schema: str) -> RevisionSeed | None:
+    """Reuse a settled rejected draft and verified readings, never its acceptance."""
+    traces = root / "agent_traces" / agent
+    paths = sorted(traces.glob("*/checkpoint.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in paths:
+        try:
+            state = _read(path, root)
+            if not isinstance(state, dict):
+                continue
+            rejected_quota = None
+            if state.get("status") == "model_error":
+                from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
+                rejected_quota = checkpoint_quota_rejection_receipt(path.parent, state, run_root=root)
+            if ((state.get("status") not in {"protocol_exhausted", "validation_exhausted",
+                    "reflection_rejected", "budget_exhausted", "evidence_unavailable"}
+                    and rejected_quota is None)
+                    or state.get("pending") and rejected_quota is None or state.get("pending_batch")):
+                continue
+            if (state.get("correlation", {}).get("trace_id") != root.name
+                    or not state.get("counts", {}).get("model_responses")
+                    or not audit_trace(path.parent).get("consistent")):
+                continue
+            candidate = state.get("candidate", "")
+            if not isinstance(candidate, str):
+                continue
+            parsed = validate_document(candidate, expected_schema=schema)
+            if not parsed.valid or parsed.metadata.get("project") != project:
+                continue
+            return _seed_from_state(root, agent=agent, source=path.parent, state=state,
+                candidate=candidate, candidate_ref=path.relative_to(root).as_posix() + "#candidate")
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    return None
+
+
+def _seed_from_state(root: Path, *, agent: str, source: Path, state: dict[str, Any],
+                     candidate: str, candidate_ref: str) -> RevisionSeed:
+    traces = root / "agent_traces" / agent
     evidence = []
     seen: set[str] = set()
     audited: dict[Path, list[dict[str, Any]]] = {}
@@ -86,8 +129,9 @@ def load_revision_seed(root: Path, *, project: str, agent: str, candidate_path: 
         seen.add(str(raw))
     return RevisionSeed(candidate, tuple(evidence), {
         "schema": "agent.revision_seed.v1", "candidate_sha256": digest(candidate),
-        "candidate_ref": candidate_path.relative_to(root).as_posix(),
+        "candidate_ref": candidate_ref,
         "invocation_id": source.name, "checkpoint_sha256": digest(state),
+        "source_status": state["status"],
         "observations": len(evidence), "evidence_sha256": digest(evidence),
         "acceptance_inherited": False, "tool_calls_replayed": False,
     })

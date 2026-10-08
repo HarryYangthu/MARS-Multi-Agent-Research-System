@@ -24,7 +24,7 @@ from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import parse
 from app.harness.agent_loop.stop import LoopStop, LoopStopView, StopCondition
-from app.harness.agent_loop.revision_seed import RevisionSeed, load_revision_seed
+from app.harness.agent_loop.revision_seed import RevisionSeed, load_revision_seed, load_failed_revision_seed
 from app.settings import repo_root, get_settings
 
 
@@ -126,7 +126,7 @@ class FocusedIdeaAgent(IdeaAgent):
         versions = [ref for ref in ArtifactStore(run).list_versions(agent_dir="idea", stem="idea_proposal")
                     if ref.version.startswith("v")]
         if not versions:
-            return None
+            return load_failed_revision_seed(root, project=request.project, agent=self.name, schema=self.output_schema)
         return load_revision_seed(root, project=request.project, agent=self.name,
                                   candidate_path=versions[-1].path, schema=self.output_schema)
 

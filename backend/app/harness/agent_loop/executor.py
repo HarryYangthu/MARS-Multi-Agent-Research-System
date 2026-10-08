@@ -426,6 +426,11 @@ class NativeAgentLoop:
         if request.revision_seed is not None and not request.resume:
             trace.emit("revision_seeded", {"counts_inherited": False, "acceptance_inherited": False},
                        visible=request.revision_seed.receipt)
+            # Recheck current requirements and archived source integrity before
+            # asking the model to revise. Old validation/acceptance is not reused.
+            state["validation_issues"] = await request.validate(state["candidate"], state["history"])
+            trace.emit("revision_seed_validation", {"acceptance_inherited": False,
+                "valid": not state["validation_issues"]}, visible=state["validation_issues"])
         if request.external_review:
             if not request.resume:
                 raise ValueError("external review requires an existing invocation")
@@ -794,6 +799,9 @@ class NativeAgentLoop:
                                 f"The host copies your {p.submission_body_field} as body. "
                                 "Use existing observations and resolve pinned errors. "
                                 + ("For local edits use mars_revise_document with the current base_sha256." if state["candidate"] else ""))
+                        if state["candidate"] and p.document_revisions_enabled:
+                            from app.harness.agent_loop.document_revision import revision_feedback
+                            state["feedback"] += "\n" + revision_feedback(str(parse_error))
                     trace.emit("protocol_error", {"error": str(parse_error),
                                "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
@@ -847,6 +855,10 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    if decision.get("format_compatibility"):
+                        trace.emit("document_format_normalized", {"call_id": decision["submission_id"],
+                            "candidate_sha256": digest(state["candidate"]), "content_invented": False,
+                            "validation_required": True}, visible=decision["format_compatibility"])
                     if "revision" in decision:
                         trace.emit("document_revision", {"call_id": decision["submission_id"],
                             "base_sha256": decision["revision"]["base_sha256"],

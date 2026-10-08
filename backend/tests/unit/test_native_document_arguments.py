@@ -1,4 +1,4 @@
-"""Strict native argument parsing and opt-in replay of unmodified real failures."""
+"""Native envelope checks and read-only parsing of unmodified real failures."""
 from __future__ import annotations
 
 import hashlib
@@ -53,11 +53,11 @@ def test_parsed_document_still_uses_existing_final_contract(arguments: str, erro
 
 
 @pytest.mark.parametrize("arguments, key", [
-    ('{"metadata":{"x":1},"body":"text","body":"text"}', "body"),
-    ('{"metadata":{"insights":[{"page":3,"page":3}]},"body":"text"}', "page"),
+    ('{"metadata":{"x":1},"body":"text","body":"different"}', "body"),
+    ('{"metadata":{"insights":[{"page":3,"page":4}]},"body":"text"}', "page"),
 ])
-def test_duplicate_keys_are_rejected_even_when_values_match(arguments: str, key: str) -> None:
-    with pytest.raises(DuplicateJSONKeyError, match=f"^duplicate JSON key: {key}$"):
+def test_conflicting_duplicate_keys_cannot_choose_a_value(arguments: str, key: str) -> None:
+    with pytest.raises(DuplicateJSONKeyError, match=f"^conflicting duplicate JSON key: {key}$"):
         _parse_arguments(arguments)
 
 
@@ -106,11 +106,12 @@ def test_real_run11_malformed_submissions_are_rejected_at_original_position(
     assert path.read_bytes() == original
 
 
-def test_real_run12_identical_duplicate_pages_remain_invalid() -> None:
+def test_real_run12_identical_duplicate_pages_are_coalesced_without_acceptance() -> None:
     path, original, call = _archived_call(
         "idea_research_20260908T163806_d3e93e/agent_traces/idea_research/f2d58c4255e1495798158fc744e9f3d9/events.jsonl",
         38, "75a97f86e4e63e7703cda4b47ebb0f2bdf89585fd6800261987dcc5ebfa0842f",
     )
-    with pytest.raises(DuplicateJSONKeyError, match="^duplicate JSON key: page$"):
-        native_decision(Completion("", "archive", "archive", tool_calls=(call,)), (), structured_final=True)
+    decision = native_decision(Completion("", "archive", "archive", tool_calls=(call,)), (), structured_final=True)
+    assert {'kind': 'identical_duplicate_key', 'key': 'page'} in decision['format_compatibility']
+    assert 'accept' not in decision
     assert path.read_bytes() == original
