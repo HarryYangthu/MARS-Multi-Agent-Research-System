@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from app.execution.results import SimulationResult
+from app.execution.paper_static_protocol import static_summary_errors, static_training_protocol
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.harness.tools.process_runtime import start_process, terminate_process_tree
 from app.settings import repo_root
@@ -79,6 +80,12 @@ async def run_paper_static_simulation(
     if validation_error:
         _write_failure_log(log_path, validation_error)
         return _failed_result(spec, started, validation_error)
+
+    try:
+        protocol = static_training_protocol(config_path, _override_args(spec.config, cfg), unit=unit, count=max_iters)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        _write_failure_log(log_path, str(exc))
+        return _failed_result(spec, started, str(exc))
 
     tag = _safe_tag(f"mars_{spec.run_id}_{spec.experiment_id}")
     argv = [
@@ -199,9 +206,10 @@ async def run_paper_static_simulation(
     if not metrics and loss_curve:
         metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
     has_measurements = summary_path is not None and bool(metrics) and all(math.isfinite(value) for value in metrics.values())
-    if unit == "steps" and (summary.get("optimizer_steps") != max_iters or summary.get("seed") != spec.seed):
+    protocol_errors = static_summary_errors(summary, unit=unit, count=max_iters, seed=spec.seed)
+    if protocol_errors:
         has_measurements = False
-        stderr_lines.append("actual optimizer updates or seed do not match the approved protocol")
+        stderr_lines.extend(protocol_errors)
     metrics.setdefault("returncode", float(returncode))
     metrics.setdefault("dry_run", 1.0 if dry_run else 0.0)
     metrics.setdefault("max_iters", float(max_iters))
@@ -271,7 +279,7 @@ async def run_paper_static_simulation(
     receipt_path = output_root / "execution_receipt.json"
     atomic_write_json(receipt_path, {"schema": "paper_static_receipt.v1", "run_id": spec.run_id,
         "experiment_id": spec.experiment_id, "status": status, "returncode": returncode,
-        "config": spec.config, "config_path": str(config_path),
+        "config": spec.config, "training_protocol": protocol, "config_path": str(config_path),
         "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(), "argv": argv,
         "summary_path": str(summary_path) if summary_path is not None else None,
         "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path is not None else None,

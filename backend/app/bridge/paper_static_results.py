@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.execution.paper_static_adapter import _metrics_from_summary, _parse_step_line
+from app.execution.paper_static_protocol import static_summary_errors
 from app.harness.agent_loop.trace import digest
 from app.harness.schema.experiment_contract import budget
 
@@ -74,7 +75,10 @@ def collect_paper_jobs(reader: ResultReader, *, existing_jobs: int = 0, existing
                 status=job.get("status", "unknown"), source_id=source_id)
             fingerprint = "sha256:" + sha256(raw)
             config = receipt.get("config")
-            if (not isinstance(config, dict) or config.get("backend") != "paper_static"
+            # The runtime backend is bound in the host submission digest below.
+            # Older valid receipts did not duplicate it inside the job config.
+            # An explicitly contradictory declaration must still be rejected.
+            if (not isinstance(config, dict) or config.get("backend") not in (None, "paper_static")
                     or receipt.get("schema") != "paper_static_receipt.v1"
                     or job.get("schema") != "execution.job" or job.get("project") != reader.run.project
                     or any(row.get("run_id") != reader.run.run_id or row.get("experiment_id") != name for row in (job, result, receipt))
@@ -115,8 +119,7 @@ def collect_paper_jobs(reader: ResultReader, *, existing_jobs: int = 0, existing
                     or any(measurements.get(key) != value for key, value in expected_metrics.items())
                     or measurements.get("returncode") != 0 or measurements.get("dry_run") != 0
                     or measurements.get("max_iters") != count or measurements.get("summary_written") != 1
-                    or unit == "steps" and (type(summary.get("optimizer_steps")) is not int
-                        or type(summary.get("seed")) is not int or summary.get("optimizer_steps") != count or summary.get("seed") != seed)):
+                    or static_summary_errors(summary, unit=unit, count=count, seed=seed)):
                 raise ValueError("Recorded measurements or budget differ from summary")
             points = result.get("loss_curve", [])
             if not isinstance(points, list) or len(points) > reader.policy["max_curve_points"] or any(finite_number(value) is None for value in points):
@@ -142,6 +145,9 @@ def collect_paper_jobs(reader: ResultReader, *, existing_jobs: int = 0, existing
                 curves.append({"experiment_id": public_text(name), "job_id": experiment["job_id"], "metric": "training_loss",
                     "points": points, "source_id": source_id})
             reader.limitations.append("paper_static 为原项目训练协议；APE 是抵消增益 dB，训练损失依赖损失函数，各种损失值不能直接横向比较。")
+            completed_epochs = finite_number(summary.get('epochs'))
+            if unit == 'steps' and completed_epochs is not None and completed_epochs < 1:
+                reader.limitations.append(f"{public_text(name)} 只完成 {count} 次更新（{completed_epochs:.3f} 个完整训练轮次），属于短预算试跑，不能代表充分训练的基线性能。")
         except (OSError, ValueError, TypeError, KeyError, UnicodeError, OverflowError):
             reader.limitations.append("一项 paper_static 作业的身份、预算、收据或测量文件未通过校验，未纳入已验证结果。")
         experiments.append(experiment)

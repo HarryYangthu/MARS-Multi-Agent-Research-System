@@ -183,6 +183,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             _bool_value, _override_args, _paper_static_config, _python_from_config,
             _resolve_path, _validate_inputs, approved_config_path,
         )
+        from app.execution.paper_static_protocol import static_training_protocol
         import yaml
         paper = _paper_static_config()
         files['adapter_policy'] = digest(paper)
@@ -212,19 +213,27 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     actual_seed = effective.get('seed', raw.get('seed'))
                     from app.harness.schema.experiment_contract import budget as approved_budget
                     unit, count = approved_budget(spec.config)
+                    protocol = static_training_protocol(cfg_path, overrides, unit=unit, count=count)
+                    files['base_config:' + spec.experiment_id] = _file_hash(cfg_path.with_name('base.yaml'))
                     item['effective'] = {'config_path': str(cfg_path), 'entrypoint': 'train_static.py',
                         'max_iters': count, 'budget_unit': unit,
                         'threads': effective.get('threads', raw.get('threads')),
                         'output_parent': str(run.root / 'execution/paper_static' / spec.experiment_id),
-                        'training_epochs': raw.get('Epoch', raw.get('epochs')),
+                        **protocol,
                         'dry_run': _bool_value(spec.config.get('dry_run', paper.get('default_dry_run', False))),
                         'seed': actual_seed, 'data_path': str(data_path), 'overrides': effective}
+                    if protocol['budget_warning']:
+                        warnings.append(f"{spec.experiment_id}：{protocol['budget_warning']}")
                     if str(actual_seed) != str(spec.seed):
                         blockers.append(f'{spec.experiment_id} 的实际训练种子与批准方案不一致。')
                     if not any(row['path'] == str(cfg_path.relative_to(root)) for row in source_configs):
                         source_configs.append({'path': str(cfg_path.relative_to(root)), 'seed': raw.get('seed'),
-                                               'epochs': raw.get('Epoch', raw.get('epochs'))})
-                except (OSError, ValueError) as exc:
+                                               'epochs': protocol['configured_total_epochs']})
+                    else:
+                        for row in source_configs:
+                            if row['path'] == str(cfg_path.relative_to(root)):
+                                row['epochs'] = protocol['configured_total_epochs']
+                except (OSError, ValueError, yaml.YAMLError) as exc:
                     blockers.append(f'{spec.experiment_id}：{exc}')
     elif settings.mars_execution_backend == 'local_command':
         from app.harness.tools.execution.local_command import LocalCommandJob, _command
