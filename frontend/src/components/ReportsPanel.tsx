@@ -37,13 +37,14 @@ export function ReportsPanel({ runId, refreshKey = "" }: { runId: string; refres
     finally { if (!controller.signal.aborted) setBusy(""); }
   }
 
-  async function generate(): Promise<void> {
-    await perform("export", async signal => {
-      const next = await reportRequest<OfficeBundle>(runId, "/regenerate", signal, "POST");
+  async function generate(kind?: string): Promise<void> {
+    await perform(kind || "materials", async signal => {
+      const next = await reportRequest<OfficeBundle>(runId, "/regenerate", signal, "POST", { formats: kind ? [kind] : [] });
       signal.throwIfAborted(); setBundle(next);
       const errors = next.metadata?.generation_errors || [];
       setFailed(errors.length > 0);
-      setMessage(errors.length ? `部分格式生成失败：${errors.join("；")}` : "Excel、Word 和 PPT 已生成，可以下载。未调用模型或重新运行实验。");
+      const label = FORMATS.find(format => format.kind === kind)?.label;
+      setMessage(errors.length ? `生成失败：${errors.join("；")}` : label ? `${label} 已生成，可以下载。` : "Markdown 与已记录的关键图片已保存，可按需生成其他格式。");
     });
   }
 
@@ -65,14 +66,20 @@ export function ReportsPanel({ runId, refreshKey = "" }: { runId: string; refres
     });
   }
 
+  const materialsSaved = Boolean(bundle?.current && bundle.metadata?.materials_saved);
+  const markdown = bundle?.metadata?.deliverables.find(item => item.kind === "markdown" && item.status === "completed");
+  const images = bundle?.metadata?.images || [];
+  const archive = bundle?.metadata?.materials_archive;
   return <section aria-label="报告导出" className="rounded-xl border border-mars-border bg-mars-panel/40">
-    <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"><div><h3 className="text-base font-medium text-slate-100">报告导出</h3><p className="mt-1 text-xs text-slate-400">基于已审核报告与真实实验记录生成，可继续编辑。</p></div><button type="button" onClick={() => void generate()} disabled={Boolean(busy) || !bundle || bundle.report_ready === false} className={button}>{busy === "export" ? "正在生成…" : bundle?.current ? "重新生成" : "生成导出文件"}</button></header>
+    <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"><div><h3 className="text-base font-medium text-slate-100">报告文件</h3><p className="mt-1 text-xs text-slate-400">先保存 Markdown 和关键图片，其他格式按需生成。</p></div>{materialsSaved && markdown && bundle?.manifest ? <a href={officeFileUrl(runId, markdown, bundle.manifest)} download className={button}>下载 Markdown</a> : <button type="button" onClick={() => void generate()} disabled={Boolean(busy) || !bundle || bundle.report_ready === false} className={button}>{busy === "materials" ? "正在保存…" : "保存 Markdown 与图片"}</button>}</header>
     {message ? <p role={failed ? "alert" : "status"} className={`px-5 pb-3 text-xs leading-6 ${failed ? "text-amber-200" : "text-emerald-200"}`}>{message}</p> : null}
     {bundle?.report_ready === false ? <p className="px-5 pb-4 text-xs text-slate-400">请先审核并批准研究报告，再导出。</p> : null}
-    {bundle?.exists && !bundle.current ? <p className="px-5 pb-4 text-xs text-amber-200">已有文件需要更新，请先生成本次导出。</p> : null}
+    {bundle?.exists && !bundle.current ? <p className="px-5 pb-4 text-xs text-amber-200">报告内容已更新，请重新保存或生成所需格式。</p> : null}
+    {materialsSaved ? <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-4 text-xs text-slate-400"><span>Markdown 已保存 · {images.length ? `${images.length} 张关键图片` : "尚未记录关键图片"}</span>{archive && bundle?.manifest ? <a href={officeFileUrl(runId, archive, bundle.manifest)} download className="text-indigo-200 hover:underline">下载 Markdown 与图片资料包</a> : null}{bundle?.manifest ? images.map((file, index) => <a key={file.path} href={officeFileUrl(runId, file, bundle.manifest!)} download className="text-indigo-200 hover:underline">下载图片 {index + 1}</a>) : null}</div> : null}
     <div className="grid gap-3 px-5 pb-5 sm:grid-cols-3">{FORMATS.map(format => {
       const file = bundle?.metadata?.deliverables.find(item => item.kind === format.kind && item.status === "completed");
-      return <div key={format.kind} className="rounded-lg border border-mars-border p-4"><div className="flex items-baseline justify-between gap-2"><h4 className="font-medium text-slate-100">{format.label}</h4><span className="text-xs text-slate-500">{format.extension}</span></div><p className="mt-2 min-h-10 text-xs leading-5 text-slate-400">{format.detail}</p>{file && bundle?.current && bundle.manifest ? <a href={officeFileUrl(runId, file, bundle.manifest)} download className={`${button} mt-3 inline-block`} aria-label={`下载 ${format.label}`}>下载 {format.label}</a> : <span className="mt-3 inline-block text-xs text-slate-500">尚未生成</span>}</div>;
+      const ready = Boolean(file && bundle?.current);
+      return <div key={format.kind} className="rounded-lg border border-mars-border p-4"><div className="flex items-baseline justify-between gap-2"><h4 className="font-medium text-slate-100">{format.label}</h4><span className="text-xs text-slate-500">{format.extension}</span></div><p className="mt-2 min-h-10 text-xs leading-5 text-slate-400">{format.detail}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void generate(format.kind)} disabled={Boolean(busy) || !bundle || bundle.report_ready === false} className={button}>{busy === format.kind ? "正在生成…" : ready ? `重新生成 ${format.label}` : `生成 ${format.label}`}</button>{ready && file && bundle?.manifest ? <a href={officeFileUrl(runId, file, bundle.manifest)} download className={button} aria-label={`下载 ${format.label}`}>下载</a> : null}</div></div>;
     })}</div>
     <details className="border-t border-mars-border px-5 py-4"><summary className="cursor-pointer text-sm text-slate-300">报告 Skill <span className="ml-2 text-xs text-slate-500">{skills?.selected.length ? `已选择 ${skills.selected.length} 项` : "接入写作方法与风格"}</span></summary><div className="mt-4 space-y-4"><p className="text-xs leading-6 text-slate-400">导入 SKILL.md，选择后用于此项目后续报告写作。指令与版本会随写作保存；已有报告的导出使用原文。当前支持指令型 skill，附带脚本和附件不会自动执行。</p><label className={`${button} inline-block cursor-pointer`}>接入 SKILL.md<input type="file" accept=".md,text/markdown,text/plain" className="sr-only" aria-label="接入 SKILL.md" disabled={Boolean(busy)} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} /></label>
       <div className="space-y-2">{skills?.options.map(option => { const id = `${option.id}@${option.version}`; return <label key={id} className="flex items-start gap-3 rounded-lg border border-mars-border p-3"><input type="checkbox" className="mt-1 accent-indigo-400" checked={selection.includes(id)} disabled={!option.available || Boolean(busy)} onChange={event => setSelection(previous => event.target.checked ? [...previous, id] : previous.filter(value => value !== id))} /><span className="min-w-0"><span className="text-sm text-slate-200">{option.name}</span><span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>{!option.available ? <span className="mt-1 block text-xs text-amber-200">暂不可用：{option.reason}</span> : null}</span></label>; })}</div><button type="button" className={button} disabled={Boolean(busy) || !skills} onClick={() => void saveSkills()}>{busy === "save" ? "正在保存…" : "保存报告 Skill"}</button><details className="text-xs text-slate-500"><summary className="cursor-pointer">SKILL.md 格式示例</summary><pre className="mt-2 overflow-x-auto rounded-lg bg-black/20 p-3">{`---\nname: research-team-report\ndescription: 团队报告的结构与写作要求\n---\n先列研究目标和实验条件，再呈现结果、证据与局限。\n区分事实、解释和待验证假设，不虚构缺失数据。`}</pre></details>

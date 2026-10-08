@@ -1,4 +1,4 @@
-"""Create and read report bundle manifests for completed Writing Agent runs."""
+"""Save report Markdown/images; convert requested Office formats on demand."""
 from __future__ import annotations
 
 import json
@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 from loguru import logger
@@ -29,15 +30,19 @@ from app.harness.runtime.project_scope import safe_scope_path
 from app.harness.schema.validator import validate_document
 
 
-def generate_report_bundle(run: RunHandle, *, actor: str = "system") -> dict[str, Any]:
+def generate_report_bundle(run: RunHandle, *, actor: str = "system", formats: tuple[str, ...] = ()) -> dict[str, Any]:
     with path_lock(run.root / "writing/.report_export.lock"):
-        return _generate_report_bundle(run, actor=actor)
+        return _generate_report_bundle(run, actor=actor, formats=formats)
 
 
-def _generate_report_bundle(run: RunHandle, *, actor: str) -> dict[str, Any]:
+def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, ...]) -> dict[str, Any]:
     cfg = _reporting_config()
     if not cfg.get("enabled", True):
         raise ValueError("报告导出已在配置中关闭")
+    if any(kind not in {"excel", "word", "powerpoint"} for kind in formats):
+        raise ValueError("仅支持 Excel、Word、PPT 格式")
+    if any(not _format_config(cfg, kind).get("enabled", True) for kind in formats):
+        raise ValueError("请求的报告格式已在配置中关闭")
     approved = safe_scope_path(run.root, "writing/research_report.approved.md", must_exist=True)
     if not approved.is_file():
         raise ValueError("请先审核并批准研究报告，再生成导出文件")
@@ -47,7 +52,9 @@ def _generate_report_bundle(run: RunHandle, *, actor: str) -> dict[str, Any]:
     deliverables_dir = safe_scope_path(run.root, str(Path(str(cfg.get("deliverables_dir", "writing/deliverables"))) / ".export_anchor")).parent / uuid4().hex
     deliverables_dir.mkdir(parents=True, exist_ok=True)
 
+    previous = read_latest_report_bundle(run)
     data_pack = collect_report_data_pack(run)
+    images = _save_images(run, deliverables_dir, data_pack)
     data_pack_path = deliverables_dir / Path(str(cfg.get("data_pack_filename", "report_data_pack.v1.json"))).name
     data_pack_path.write_text(pretty_json(data_pack), encoding="utf-8")
     _event(run, "reporting.data_pack_written", {"path": _relative(run, data_pack_path), "actor": actor})
@@ -57,41 +64,34 @@ def _generate_report_bundle(run: RunHandle, *, actor: str) -> dict[str, Any]:
     markdown_ref = _markdown_source(run)
     if markdown_ref is not None:
         snapshot = deliverables_dir / "research_report.md"
-        snapshot.write_bytes(markdown_ref.read_bytes())
+        text = markdown_ref.read_text(encoding="utf-8")
+        if images:
+            text += "\n\n## 已保存的关键图片\n\n" + '\n\n'.join(
+                f"{'!' if Path(item['path']).suffix.lower() != '.pdf' else ''}[已记录的实验图]({quote('images/' + Path(item['path']).name)})\n\n来源：`{item['source_path']}` · SHA-256：`{item['sha256']}`"
+                for item in images)
+            text += "\n"
+        snapshot.write_text(text, encoding="utf-8")
         deliverables.append(_completed_deliverable(run, "markdown", snapshot))
     else:
         deliverables.append({"kind": "markdown", "path": "writing/research_report.approved.md", "status": "skipped", "error": "approved markdown report not found"})
 
-    _run_writer(
-        run=run,
-        kind="excel",
-        path=deliverables_dir / _filename(cfg, "excel", "results_workbook.xlsx"),
-        data_pack=data_pack,
-        writer=write_results_workbook,
-        deliverables=deliverables,
-        errors=errors,
-        enabled=bool(_format_config(cfg, "excel").get("enabled", True)),
-    )
-    _run_writer(
-        run=run,
-        kind="word",
-        path=deliverables_dir / _filename(cfg, "word", "research_report.docx"),
-        data_pack=data_pack,
-        writer=write_research_docx,
-        deliverables=deliverables,
-        errors=errors,
-        enabled=bool(_format_config(cfg, "word").get("enabled", True)),
-    )
-    _run_writer(
-        run=run,
-        kind="powerpoint",
-        path=deliverables_dir / _filename(cfg, "powerpoint", "research_deck.pptx"),
-        data_pack=data_pack,
-        writer=write_research_deck,
-        deliverables=deliverables,
-        errors=errors,
-        enabled=bool(_format_config(cfg, "powerpoint").get("enabled", True)),
-    )
+    archive_path = deliverables_dir / "report_materials.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in [*deliverables, *images]:
+            path = safe_scope_path(run.root, item["path"], must_exist=True)
+            archive.write(path, path.relative_to(deliverables_dir).as_posix())
+    materials_archive = _completed_deliverable(run, "markdown_archive", archive_path)
+
+    reusable = _reusable_formats(run, previous, data_pack)
+    writers = [("excel", "results_workbook.xlsx", write_results_workbook),
+               ("word", "research_report.docx", write_research_docx),
+               ("powerpoint", "research_deck.pptx", write_research_deck)]
+    for kind, filename, writer in writers:
+        if kind in formats:
+            _run_writer(run=run, kind=kind, path=deliverables_dir / _filename(cfg, kind, filename),
+                        data_pack=data_pack, writer=writer, deliverables=deliverables, errors=errors)
+        elif kind in reusable:
+            deliverables.append(reusable[kind])
 
     qa_status = _qa_status(run=run, data_pack=data_pack, deliverables=deliverables, errors=errors)
     if hashlib.sha256(approved.read_bytes()).hexdigest() != data_pack["report_source_sha256"]:
@@ -109,6 +109,11 @@ def _generate_report_bundle(run: RunHandle, *, actor: str) -> dict[str, Any]:
         "generation_errors": errors,
         "generator": "office_editable",
         "report_source_sha256": data_pack["report_source_sha256"],
+        "materials_saved": True,
+        "images": images,
+        "materials_archive": materials_archive,
+        "source_hashes": data_pack["source_hashes"],
+        "requested_formats": list(dict.fromkeys(formats)),
     }
     body = _bundle_body(run=run, metadata=metadata, data_pack=data_pack)
     ref = ArtifactStore(run).write_metadata(
@@ -132,6 +137,44 @@ def _generate_report_bundle(run: RunHandle, *, actor: str) -> dict[str, Any]:
         "body": body,
         "current": True,
     }
+
+
+def _save_images(run: RunHandle, folder: Path, pack: dict[str, Any]) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for plot in pack.get("plots", []):
+        source_ref = str(plot["path"])
+        source = safe_scope_path(run.root, source_ref, must_exist=True)
+        data = source.read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        if sha != pack["source_hashes"].get(source_ref):
+            raise ValueError("关键图片在保存时发生修改，请重试")
+        target = folder / "images" / f"{sha[:12]}-{source.name}"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        item = _completed_deliverable(run, "image", target)
+        item["source_path"] = source_ref
+        images.append(item)
+        plot["source_path"], plot["path"] = source_ref, item["path"]
+    return images
+
+
+def _reusable_formats(run: RunHandle, previous: dict[str, Any] | None, pack: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if not previous or not previous.get("current"):
+        return {}
+    meta = previous["metadata"]
+    if meta.get("source_hashes") != pack["source_hashes"]:
+        return {}
+    reusable: dict[str, dict[str, Any]] = {}
+    for item in meta.get("deliverables", []):
+        if item.get("kind") not in {"excel", "word", "powerpoint"} or item.get("status") != "completed":
+            continue
+        try:
+            path = safe_scope_path(run.root, item["path"], must_exist=True)
+            if hashlib.sha256(path.read_bytes()).hexdigest() == item.get("sha256"):
+                reusable[item["kind"]] = dict(item)
+        except (ValueError, OSError):
+            continue
+    return reusable
 
 
 def read_latest_report_bundle(run: RunHandle) -> dict[str, Any] | None:

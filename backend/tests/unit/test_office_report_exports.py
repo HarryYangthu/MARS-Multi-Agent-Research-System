@@ -20,6 +20,69 @@ from app.bridge.report_service import download_path, export_bundle
 from app.storage.report_skill_store import import_report_skill, report_skill_options, select_report_skills, selected_report_skills
 from app.harness.skills.registry import load_selected_skills
 from app.storage.artifact_store import ArtifactStore
+from app.storage.run_store import RunHandle
+
+
+def _approved_conversion_run(tmp_path: Path) -> RunHandle:
+    run = RunStore(tmp_path).create(task="on-demand document conversion", project="synthetic_regression")
+    reference = ArtifactStore(run).write_metadata(metadata={"schema": "report.v1", "agent": "writing",
+        "project": run.project, "deliverable_type": "research_report", "target_audience": "research team",
+        "chain_refs": {}}, body="# 文件转换测试\n\n此文档用于验证文件转换，不作研究结果声明。", expected_schema="report.v1")
+    ArtifactStore(run).approve(reference)
+    return run
+
+
+def test_approval_default_saves_portable_markdown_and_images_without_office(tmp_path: Path) -> None:
+    from PIL import Image
+    run = _approved_conversion_run(tmp_path)
+    original = (run.root / "writing/research_report.approved.md").read_bytes()
+    plot = run.root / "execution/conversion-fixture.png"
+    Image.new("RGB", (16, 16), "white").save(plot)
+    image_bytes = plot.read_bytes()
+    bundle = generate_report_bundle(run, actor="inline_approve")
+    assert bundle["metadata"]["requested_formats"] == []
+    assert [item["kind"] for item in bundle["metadata"]["deliverables"]] == ["markdown"]
+    assert not list(run.root.rglob("*.xlsx"))
+    assert not list(run.root.rglob("*.docx"))
+    assert not list(run.root.rglob("*.pptx"))
+    assert (run.root / "writing/research_report.approved.md").read_bytes() == original
+    md = run.root / bundle["metadata"]["deliverables"][0]["path"]
+    image = bundle["metadata"]["images"][0]
+    saved = run.root / image["path"]
+    assert saved.read_bytes() == image_bytes
+    assert f"(images/{saved.name})" in md.read_text(encoding="utf-8")
+    package = download_path(run, "report_materials.zip", bundle["manifest"])
+    with zipfile.ZipFile(package) as archive:
+        assert archive.read("research_report.md").decode() == md.read_text(encoding="utf-8")
+        assert archive.read(f"images/{saved.name}") == image_bytes
+        assert archive.testzip() is None
+    plot.write_bytes(b"source changed after saving")
+    assert download_path(run, saved.name, bundle["manifest"]).read_bytes() == image_bytes
+
+
+def test_formats_generate_individually_and_preserve_other_current_files(tmp_path: Path) -> None:
+    run = _approved_conversion_run(tmp_path)
+    excel = export_bundle(run, formats=("excel",))
+    assert list(run.root.rglob("*.xlsx")) and not list(run.root.rglob("*.docx")) and not list(run.root.rglob("*.pptx"))
+    saved_excel = next(item for item in excel["metadata"]["deliverables"] if item["kind"] == "excel")
+    word = export_bundle(run, formats=("word",))
+    assert not list(run.root.rglob("*.pptx"))
+    assert next(item for item in word["metadata"]["deliverables"] if item["kind"] == "excel") == saved_excel
+    slides = export_bundle(run, formats=("powerpoint",))
+    assert {item["kind"] for item in slides["metadata"]["deliverables"]} == {"markdown", "excel", "word", "powerpoint"}
+    assert download_path(run, Path(saved_excel["path"]).name, slides["manifest"]).is_file()
+    # Changing recorded inputs invalidates re-use, without deleting old exports.
+    (run.root / "execution/metrics.json").write_text("[]", encoding="utf-8")
+    updated = export_bundle(run, formats=("word",))
+    assert {item["kind"] for item in updated["metadata"]["deliverables"]} == {"markdown", "word"}
+    assert (run.root / saved_excel["path"]).is_file()
+
+
+def test_unknown_office_format_is_rejected_before_writing(tmp_path: Path) -> None:
+    run = _approved_conversion_run(tmp_path)
+    with pytest.raises(ValueError, match="仅支持"):
+        export_bundle(run, formats=("unknown",))
+    assert not (run.root / "writing/deliverables").exists()
 
 
 def test_editable_office_formats_keep_full_text_and_numeric_precision(tmp_path: Path) -> None:
@@ -57,7 +120,7 @@ def test_export_requires_approval_and_rejects_tampered_or_unlisted_download(tmp_
         "project": run.project, "deliverable_type": "research_report", "target_audience": "research team",
         "chain_refs": {}}, body="# 文件转换测试\n\n不是研究成功声明。", expected_schema="report.v1")
     ArtifactStore(run).approve(reference)
-    bundle = generate_report_bundle(run)
+    bundle = generate_report_bundle(run, formats=("word",))
     assert bundle["metadata"]["generator"] == "office_editable"
     path = download_path(run, "research_report.docx", bundle["manifest"])
     path.write_bytes(path.read_bytes() + b"tampered")
@@ -67,7 +130,7 @@ def test_export_requires_approval_and_rejects_tampered_or_unlisted_download(tmp_
         download_path(run, "report_data_pack.v1.json", bundle["manifest"])
     with pytest.raises(ValueError):
         download_path(run, "../secret")
-    next_bundle = generate_report_bundle(run)
+    next_bundle = generate_report_bundle(run, formats=("word",))
     assert next_bundle["metadata"]["data_pack"] != bundle["metadata"]["data_pack"]
 
 

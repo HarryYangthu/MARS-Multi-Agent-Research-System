@@ -27,10 +27,10 @@ def get_bundle(run: RunHandle) -> dict[str, Any]:
     return bundle
 
 
-def export_bundle(run: RunHandle) -> dict[str, Any]:
+def export_bundle(run: RunHandle, *, formats: tuple[str, ...] = ()) -> dict[str, Any]:
     if not (run.subdir("writing") / "research_report.approved.md").is_file():
         raise ValueError("请先审核并批准研究报告，再生成导出文件")
-    return generate_report_bundle(run, actor="api")
+    return generate_report_bundle(run, actor="api", formats=formats)
 
 
 def download_path(run: RunHandle, filename: str, manifest: str | None = None) -> Path:
@@ -43,7 +43,9 @@ def download_path(run: RunHandle, filename: str, manifest: str | None = None) ->
             raise ValueError("报告清单路径无效")
         ref = safe_scope_path(run.root, manifest, must_exist=True)
         bundle = {"metadata": parse(ref.read_text(encoding="utf-8")).metadata}
-    for item in bundle.get("metadata", {}).get("deliverables", []):
+    metadata = bundle.get("metadata", {})
+    archive = metadata.get("materials_archive")
+    for item in [*metadata.get("deliverables", []), *metadata.get("images", []), *([archive] if isinstance(archive, dict) else [])]:
         if item.get("status") != "completed" or Path(item.get("path", "")).name != filename:
             continue
         path = safe_scope_path(run.root, item["path"], must_exist=True)

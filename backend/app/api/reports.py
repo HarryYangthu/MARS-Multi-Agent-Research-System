@@ -1,7 +1,7 @@
 """Report Office export and instruction skill endpoints, through the bridge."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -20,6 +20,10 @@ class SkillChoice(BaseModel):
     ids: list[str] = Field(max_length=20)
 
 
+class ReportGeneration(BaseModel):
+    formats: list[Literal["excel", "word", "powerpoint"]] = Field(default_factory=list, max_length=3)
+
+
 def _run(run_id: str) -> RunHandle:
     run = get_run_store().get(run_id)
     if run is None:
@@ -33,9 +37,9 @@ def get_report_bundle(run_id: str) -> dict[str, Any]:
 
 
 @router.post("/{run_id}/regenerate")
-def regenerate_report_bundle(run_id: str) -> dict[str, Any]:
+def regenerate_report_bundle(run_id: str, body: ReportGeneration | None = None) -> dict[str, Any]:
     try:
-        return report_service.export_bundle(_run(run_id))
+        return report_service.export_bundle(_run(run_id), formats=tuple(body.formats) if body else ())
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

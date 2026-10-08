@@ -46,7 +46,7 @@ def test_generate_report_bundle_writes_data_pack_and_office_files(tmp_path: Path
     assert source is not None
     (run.subdir("writing") / "research_report.approved.md").write_bytes(source.path.read_bytes())
 
-    result = generate_report_bundle(run, actor="test")
+    result = generate_report_bundle(run, actor="test", formats=("excel", "word", "powerpoint"))
 
     assert result["exists"] is True
     manifest = run.root / str(result["manifest"])

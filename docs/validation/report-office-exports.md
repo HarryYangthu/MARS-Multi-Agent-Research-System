@@ -2,6 +2,14 @@
 
 Validated on 2026-10-08 through the real MARS main chat, API, bridge and saved report artifacts. This checks report conversion and skill admission; it does not claim repository-wide bug freedom or new scientific acceptance.
 
+## On-demand workflow
+
+Writing approval now defaults to saving Markdown and immutable copies of recorded key images, plus a portable ZIP containing the Markdown and its relative `images/` directory. It does not invoke Office writers. The same existing inline, legacy and automatic approval call sites all use that default; only explicit format requests invoke the corresponding writer. Main chat and results offer separate Excel, Word and PPT generation buttons.
+
+New real-file checks verify that default approval creates no Office files, copied images remain unchanged after the original is modified, the material ZIP contains matching Markdown/image bytes, each requested format is generated alone, other current exports are retained, source changes stop reuse without deleting old files, and unknown formats fail before output creation. The latest combined suite passed 102 tests; strict mypy on the seven conversion/API modules and frontend type checking also passed. The previous 99-test evidence below describes the initial export implementation.
+
+The actual main chat saved Markdown and one recorded key image with no Office files in that generation. Clicking only Excel then produced an Excel workbook while Word and PPT remained ungenerated in the new package. Browser downloads of the material ZIP and workbook matched manifest hashes. ZIP contents matched the saved Markdown and relative image bytes, and the approved report hash remained unchanged. No model or experiment was invoked for this workflow check.
+
 ## Real product verification
 
 The already approved report for `2026-10-07T1221_static_pimc_lr_acceptance` was exported from the main chat. All three download controls were exercised. Browser downloads matched the fixed manifest's SHA-256 values exactly. The approved report hash remained `5ae6d9ce44b6c4749bccee5c21719d3c918f7e7b966f48001bbe546a27cfee85`; conversion did not call a model or rerun experiments.
