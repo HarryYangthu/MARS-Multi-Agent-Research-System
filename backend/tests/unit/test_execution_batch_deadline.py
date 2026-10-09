@@ -111,3 +111,24 @@ def test_explicit_retry_archives_interruption_and_refuses_changed_or_unknown_inp
         with pytest.raises(ValueError):
             rearm_interrupted_jobs([spec], steps=20)
         assert path.exists()
+
+
+def test_recovery_uses_persisted_cause_and_rejects_another_run(tmp_path: Path) -> None:
+    from app.bridge.execution_batch_deadline import execution_failure_hint
+    from app.harness.runtime.task_contract import FailureEnvelope
+    from app.storage.run_store import RunStore
+    run = RunStore(tmp_path).create(task='deadline-admission', project='regression', entrypoint='execution')
+    assert execution_failure_hint(run, 'execution') == ('', {})
+    path = run.root / 'input/node_failures/execution.json'
+    path.parent.mkdir(parents=True)
+    failure = FailureEnvelope(task_id=f'{run.run_id}:execution', code='execution_dispatch_timeout',
+                              message='Tool dispatch exceeded 6000 seconds; cleanup acknowledged.', outcome_known=False)
+    path.write_text(failure.model_dump_json())
+    before = path.read_bytes()
+    hint, evidence = execution_failure_hint(run, 'execution')
+    assert '6000' in hint and evidence['code'] == 'execution_dispatch_timeout'
+    assert path.read_bytes() == before
+    failure = failure.model_copy(update={'task_id': 'different-run:execution'})
+    path.write_text(failure.model_dump_json())
+    with pytest.raises(ValueError, match='不匹配'):
+        execution_failure_hint(run, 'execution')

@@ -36,6 +36,33 @@ def test_data_summary_uses_resolved_adapter_inputs() -> None:
     assert effective_data_summary([]) == ''
 
 
+@pytest.mark.asyncio
+async def test_real_execution_preflight_failure_persists_for_recovery_after_reload(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    # The standalone fixture has no bound research repository. Actual execution
+    # preflight must fail and remain understandable after its owner is gone.
+    from app.bridge.execution_batch_deadline import execution_failure_hint
+    from app.harness.runtime.task_contract import FailureEnvelope
+    orch, session, _, _ = execution
+    view = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', view['token'])
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    await orch._complete_approved_node(session, 'execution')
+    assert session.graph.state('execution') == NodeState.FAILED
+    failure_path = session.run.root / 'input/node_failures/execution.json'
+    failure = FailureEnvelope.model_validate_json(failure_path.read_text())
+    assert failure.code == 'execution_batch_failed' and not failure.outcome_known
+    hint, evidence = execution_failure_hint(session.run, 'execution')
+    assert 'no real repository configured' in hint and evidence['task_id'] == f'{session.run.run_id}:execution'
+    assert not (session.run.root / 'execution/batch_summary.json').exists()
+    assert not any(row['status'] == 'completed' for row in job_states_for_test(session.run.root))
+
+
+def job_states_for_test(root: Path) -> list[dict[str, object]]:
+    return [json.loads(path.read_text()) for path in (root / 'execution/jobs').glob('*.json')]
+
+
 @pytest.fixture
 def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Orchestrator, RunSession, Path, Path]]:
     configuration = tmp_path / 'execution.yaml'

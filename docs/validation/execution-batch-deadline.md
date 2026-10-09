@@ -38,3 +38,11 @@ process timeout with verified termination, and durable retry/archive guards.
 No provider, service or execution-success substitute is used. Confirmation and
 run-recovery regressions are also run. The desktop Test6 acceptance log records
 live recovery/results separately; unit checks alone are not a research result.
+
+Execution runtime/preflight failures are also saved as identity-checked
+`task.failure.v1` records under `input/node_failures`. Recovery reads this durable
+cause, including the dispatch scope, instead of depending on an open WebSocket.
+A different-run or corrupt failure record blocks recovery; its contents affect
+the recovery token. Tests cover an actual missing-repository preflight refusal
+through the execution boundary and rereading its persisted failure, alongside
+pure failure-envelope identity checks.

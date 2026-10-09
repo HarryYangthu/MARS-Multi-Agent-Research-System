@@ -895,6 +895,7 @@ class Orchestrator:
             if not await self._await_execution_confirmation(session, node_key):
                 return
             await self._transition(session, node_key, NodeState.RUNNING)
+            failure_code = 'execution_batch_failed'
             try:
                 from app.bridge.agent_runner import _run_execution_batch, load_agent_handoff_context
                 from app.bridge.task_runtime import admit_handoffs
@@ -941,13 +942,22 @@ class Orchestrator:
                     ),
                 )
                 if not tool_result.ok:
+                    if tool_result.status == 'timeout':
+                        failure_code = 'execution_dispatch_timeout'
                     raise RuntimeError(tool_result.error or "execution batch failed")
             except Exception as exc:
+                from app.harness.runtime.task_contract import FailureEnvelope
+                from app.harness.agent_loop.trace import atomic_json
+                failure = FailureEnvelope(task_id=f'{session.run.run_id}:{node_key}',
+                    code=failure_code, message=str(exc) or type(exc).__name__,
+                    retryable=True, outcome_known=False,
+                    evidence_refs=['execution/jobs', 'events/tool_events.jsonl'])
+                atomic_json(session.run.root / 'input/node_failures' / (node_key + '.json'), failure.model_dump())
                 await self._transition(session, node_key, NodeState.FAILED)
                 await self._publish_state(
                     session,
                     channel=f"run.{session.run.run_id}.failure",
-                    payload={"node": node_key, "error": str(exc)},
+                    payload={"node": node_key, "error": failure.message, "failure": failure.model_dump()},
                 )
                 return
         await self._transition(session, node_key, NodeState.DONE)

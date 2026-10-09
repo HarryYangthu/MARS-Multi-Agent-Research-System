@@ -147,6 +147,14 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     retryable: list[str] = []
     provider_hint = ''
     for node in candidates:
+        if parse_node_key(node).stage == 'execution' and states[node] == 'failed':
+            from app.bridge.execution_batch_deadline import execution_failure_hint
+            try:
+                hint, failure_evidence = execution_failure_hint(session.run, node)
+            except (OSError, ValueError):
+                return finish('blocked', '执行失败记录无法核验，请先核对原始记录。')
+            evidence.append(failure_evidence)
+            provider_hint = hint or provider_hint
         path = task_contract_path(session.run, node)
         if path.exists():
             contract = TaskEnvelope.model_validate_json(path.read_text())

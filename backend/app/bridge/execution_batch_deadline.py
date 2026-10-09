@@ -49,3 +49,18 @@ def prepare_interrupted_execution_retry(run: RunHandle, node_key: str) -> None:
     for spec in prepared.specs:
         spec.config['confirmation_token'] = view['token']
     rearm_interrupted_jobs(prepared.specs, steps=prepared.batch_steps)
+
+
+def execution_failure_hint(run: RunHandle, node_key: str) -> tuple[str, dict[str, Any]]:
+    """Use a persisted, identity-checked cause after reload/restart as well."""
+    from app.harness.runtime.task_contract import FailureEnvelope
+    path = run.root / 'input/node_failures' / (node_key + '.json')
+    if not path.is_file():
+        return '', {}
+    failure = FailureEnvelope.model_validate_json(path.read_text())
+    if failure.task_id != f'{run.run_id}:{node_key}':
+        raise ValueError('执行失败记录与当前任务不匹配。')
+    if failure.code not in {'execution_batch_failed', 'execution_dispatch_timeout'}:
+        return '', failure.model_dump()
+    return ('执行中断原因：' + failure.message + '。已有结果保留；核对配置后可在原任务中重试。',
+            failure.model_dump())
