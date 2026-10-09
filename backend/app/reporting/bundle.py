@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import zipfile
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -64,7 +65,7 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     markdown_ref = _markdown_source(run)
     if markdown_ref is not None:
         snapshot = deliverables_dir / "research_report.md"
-        text = markdown_ref.read_text(encoding="utf-8")
+        text = portable_image_links(markdown_ref.read_text(encoding="utf-8"), images)
         if images:
             text += "\n\n## 已保存的关键图片\n\n" + '\n\n'.join(
                 f"{'!' if Path(item['path']).suffix.lower() != '.pdf' else ''}[已记录的实验图]({quote('images/' + Path(item['path']).name)})\n\n来源：`{item['source_path']}` · SHA-256：`{item['sha256']}`"
@@ -156,6 +157,38 @@ def _save_images(run: RunHandle, folder: Path, pack: dict[str, Any]) -> list[dic
         images.append(item)
         plot["source_path"], plot["path"] = source_ref, item["path"]
     return images
+
+
+def portable_image_links(text: str, images: list[dict[str, Any]]) -> str:
+    """Relink only hash-verified bundled images, preserving the approved source."""
+    links: dict[str, str] = {}
+    for item in images:
+        source = str(item['source_path'])
+        target = quote('images/' + Path(item['path']).name)
+        for ref in (source, './' + source, '../' + source):
+            links[ref] = target
+            links[quote(ref)] = target
+    pattern = re.compile(r'(!\[[^\]\n]*\]\()[ \t]*(<[^>\n]+>|[^\s)]+)([ \t]+(?:"[^"\n]*"|\x27[^\x27\n]*\x27))?[ \t]*\)')
+
+    def relink(match: re.Match[str]) -> str:
+        ref = match.group(2)
+        ref = ref[1:-1] if ref.startswith('<') else ref
+        target = links.get(ref)
+        return match.group(1) + target + (match.group(3) or '') + ')' if target else match.group(0)
+
+    lines: list[str] = []
+    fence = ''
+    for line in text.splitlines(keepends=True):
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line.rstrip('\r\n'))
+        if marker:
+            if not fence:
+                fence = marker.group(1)
+            elif marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) and not marker.group(2).strip():
+                fence = ''
+            lines.append(line)
+        else:
+            lines.append(line if fence else pattern.sub(relink, line))
+    return ''.join(lines)
 
 
 def _reusable_formats(run: RunHandle, previous: dict[str, Any] | None, pack: dict[str, Any]) -> dict[str, dict[str, Any]]:

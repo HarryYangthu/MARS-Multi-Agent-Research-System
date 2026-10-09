@@ -14,6 +14,7 @@ import pytest
 from docx import Document
 from openpyxl import load_workbook
 from app.reporting import generate_report_bundle
+from app.reporting.bundle import portable_image_links
 from app.reporting.generators import write_research_deck, write_research_docx, write_results_workbook
 from app.storage.run_store import RunStore
 from app.bridge.report_service import download_path, export_bundle
@@ -35,7 +36,9 @@ def _approved_conversion_run(tmp_path: Path) -> RunHandle:
 def test_approval_default_saves_portable_markdown_and_images_without_office(tmp_path: Path) -> None:
     from PIL import Image
     run = _approved_conversion_run(tmp_path)
-    original = (run.root / "writing/research_report.approved.md").read_bytes()
+    report = run.root / "writing/research_report.approved.md"
+    report.write_text(report.read_text() + '\n![正文图片](execution/conversion-fixture.png "实验图片")\n')
+    original = report.read_bytes()
     plot = run.root / "execution/conversion-fixture.png"
     Image.new("RGB", (16, 16), "white").save(plot)
     image_bytes = plot.read_bytes()
@@ -51,6 +54,8 @@ def test_approval_default_saves_portable_markdown_and_images_without_office(tmp_
     saved = run.root / image["path"]
     assert saved.read_bytes() == image_bytes
     assert f"(images/{saved.name})" in md.read_text(encoding="utf-8")
+    assert f'![正文图片](images/{saved.name} "实验图片")' in md.read_text(encoding="utf-8")
+    assert '](execution/conversion-fixture.png' not in md.read_text(encoding="utf-8")
     package = download_path(run, "report_materials.zip", bundle["manifest"])
     with zipfile.ZipFile(package) as archive:
         assert archive.read("research_report.md").decode() == md.read_text(encoding="utf-8")
@@ -58,6 +63,16 @@ def test_approval_default_saves_portable_markdown_and_images_without_office(tmp_
         assert archive.testzip() is None
     plot.write_bytes(b"source changed after saving")
     assert download_path(run, saved.name, bundle["manifest"]).read_bytes() == image_bytes
+
+
+def test_portable_links_preserve_unbundled_sources_and_code_examples() -> None:
+    images = [{'source_path': 'execution/关键 图片.png', 'path': 'writing/deliverables/id/images/hash-关键 图片.png'}]
+    source = '![已保存](<../execution/关键 图片.png> "标题")\n![未保存](execution/other.png)\n![外部](https://example.com/a.png)\n```md\n![示例](<execution/关键 图片.png>)\n```\n'
+    result = portable_image_links(source, images)
+    assert '![已保存](images/hash-%E5%85%B3%E9%94%AE%20%E5%9B%BE%E7%89%87.png "标题")' in result
+    assert '![未保存](execution/other.png)' in result
+    assert '![外部](https://example.com/a.png)' in result
+    assert '```md\n![示例](<execution/关键 图片.png>)\n```' in result
 
 
 def test_formats_generate_individually_and_preserve_other_current_files(tmp_path: Path) -> None:
