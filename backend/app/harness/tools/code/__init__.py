@@ -56,6 +56,19 @@ async def repo_reader_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
     path = str(args.get("path", "")).strip()
     if not path:
         return ToolResult(ok=False, error="path is required")
+    # Task context commonly carries absolute filenames. Normalize only reads
+    # inside the active repository; the existing resolver still checks scope,
+    # allowlists, ignored paths and symlink escapes. Writes remain relative.
+    if Path(path).is_absolute():
+        try:
+            root = _project_root(ctx)
+            if root is None:
+                return ToolResult(ok=False, error=f"project repo for '{ctx.project}' is not connected")
+            if ".." in Path(path).parts:
+                return ToolResult(ok=False, error="invalid project-relative path")
+            path = Path(path).relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return ToolResult(ok=False, error="absolute read path is outside the active project repo")
     resolved = _resolve_project_file(ctx, path, must_exist=True)
     if isinstance(resolved, ToolResult):
         return resolved
