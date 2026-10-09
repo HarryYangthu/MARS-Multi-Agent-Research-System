@@ -49,12 +49,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         if len(nodes) == 1 and parse_node_key(nodes[0]).stage in {'idea', 'experiment', 'writing'}:
             from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
             try:
-                blocker = stopped_draft_retry_blocker(session.run, nodes[0],
+                draft_blocker = stopped_draft_retry_blocker(session.run, nodes[0],
                     stage=parse_node_key(nodes[0]).stage, termination=termination, states=states)
             except (OSError, ValueError, KeyError) as exc:
-                blocker = str(exc)
-            if blocker:
-                return finish('blocked', blocker)
+                draft_blocker = str(exc)
+            if draft_blocker:
+                return finish('blocked', draft_blocker)
             stopped_draft = True
         if (termination.get('type') == 'cancelled' and termination.get('cleanup_complete') is True
                 and termination.get('scope') == 'owned_async_tasks' and len(nodes) == 1
@@ -165,6 +165,29 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                 provider_hint = checkpoint_failure_hint(checkpoint.parent, status=str(state.get('status', ''))) or provider_hint
                 if state.get('pending') == 'tool' or state.get('pending_batch'):
                     return finish('blocked', '存在结果未确认的工具操作，需先核对执行回执，避免重复修改或运行。')
+        if (parse_node_key(node).stage in {'coding', 'execution'}
+                and any((session.run.root / 'idea').glob('*.approved.md'))):
+            from app.bridge.agent_runner import load_agent_handoff_context
+            from app.bridge.task_runtime import inspect_handoffs
+            from app.harness.runtime.task_contract import HandoffBlockedError
+            try:
+                supplied, _ = load_agent_handoff_context(session.run, node, registry=orch.registry)
+                handoffs = inspect_handoffs(session.run, node, supplied_context=supplied)
+                evidence.append([item.model_dump() for item in handoffs])
+                if any(item.missing_context for item in handoffs):
+                    raise HandoffBlockedError(handoffs)
+            except (OSError, ValueError, RuntimeError) as exc:
+                return finish('blocked', str(exc))
+            failure_path = session.run.root / 'input/node_failures' / (node + '.json')
+            if failure_path.is_file():
+                try:
+                    failure = json.loads(failure_path.read_text())
+                except (OSError, ValueError):
+                    return finish('blocked', '阶段失败记录无法核验，请先核对记录。')
+                if not isinstance(failure, dict):
+                    return finish('blocked', '阶段失败记录格式异常，请先核对记录。')
+                if failure.get('code') == 'handoff_context_missing':
+                    provider_hint = '交接资料绑定已核验，可仅重试当前阶段；已有研究方案和代码保留。'
         try:
             resumable_task(session.run, node)
         except (OSError, ValueError, KeyError):

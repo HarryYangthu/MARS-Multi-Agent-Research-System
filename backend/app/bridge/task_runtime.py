@@ -45,7 +45,8 @@ def bind_task(run: RunHandle, node_key: str, *, goal: str, upstream: dict[str, s
     return task
 
 
-def admit_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str, str]) -> list[HandoffEnvelope]:
+def inspect_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str, str]) -> list[HandoffEnvelope]:
+    """Read-only check shared by dispatch, recovery and configuration preview."""
     task_contract_path(run, node_key)
     stage = parse_node_key(node_key).stage
     if stage not in {"experiment", "coding", "execution", "writing"}:
@@ -65,7 +66,7 @@ def admit_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str,
         if errors:
             raise ValueError('上游交接未通过；请修正实验设计或编码交付：' + '；'.join(dict.fromkeys(errors)))
     handoffs: list[HandoffEnvelope] = []
-    for source in sorted(run.subdir("idea").glob("*.approved.md")):
+    for source in sorted((run.root / "idea").glob("*.approved.md")):
         if not source.resolve().is_relative_to(run.root.resolve()):
             raise ValueError("handoff artifact escapes its run")
         raw = source.read_bytes()
@@ -77,10 +78,18 @@ def admit_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str,
         if not isinstance(declared, dict):
             raise ValueError("handoff must be an object")
         prerequisites = [HandoffPrerequisite.model_validate(item) for item in declared.get("required_context", [])]
+        from app.bridge.handoff_context_bindings import resolve_legacy_bindings
+        prerequisites, bindings = resolve_legacy_bindings(run, source, prerequisites, supplied_context)
         handoffs.append(HandoffEnvelope(source_ref=source.relative_to(run.root).as_posix(),
             source_sha256=hashlib.sha256(raw).hexdigest(), destination_task_id=f"{run.run_id}:{node_key}",
             prerequisites=prerequisites, supplied_context_refs=sorted(supplied_context),
-            missing_context=missing_prerequisites(prerequisites, stage=stage, supplied_context=supplied_context)))
+            missing_context=missing_prerequisites(prerequisites, stage=stage, supplied_context=supplied_context),
+            binding_receipts=bindings))
+    return handoffs
+
+
+def admit_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[str, str]) -> list[HandoffEnvelope]:
+    handoffs = inspect_handoffs(run, node_key, supplied_context=supplied_context)
     path = run.root / "input" / "handoffs" / (node_key + ".json")
     atomic_json(path, {"schema_id": "task.handoff_set.v1", "handoffs": [item.model_dump() for item in handoffs]})
     if any(item.missing_context for item in handoffs):

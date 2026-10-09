@@ -88,6 +88,18 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     request_extra = json.loads(options.read_text()).get('extra', {}) if options.is_file() else {}
     defaults['stop_after_execution'] = request_extra.get('stop_after') == 'execution'
     files: dict[str, str] = {}
+    if any((run.root / 'idea').glob('*.approved.md')):
+        from app.bridge.agent_runner import load_agent_handoff_context
+        from app.bridge.task_runtime import inspect_handoffs
+        from app.harness.runtime.task_contract import HandoffBlockedError
+        try:
+            supplied, _ = load_agent_handoff_context(run, node_key)
+            handoffs = inspect_handoffs(run, node_key, supplied_context=supplied)
+            files['handoff_inputs'] = digest([item.model_dump() for item in handoffs])
+            if any(item.missing_context for item in handoffs):
+                raise HandoffBlockedError(handoffs)
+        except (OSError, ValueError, RuntimeError) as exc:
+            blockers.append(str(exc))
     for name in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md',
                  'execution/run_log.approved.md', 'input/selected_data_source.json', 'input/run_request_options.v1.json'):
         files[name] = _file_hash(run.root / name)

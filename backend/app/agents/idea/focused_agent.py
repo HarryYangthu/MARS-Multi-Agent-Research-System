@@ -13,7 +13,7 @@ import yaml
 from app.agents.base import BaseAgent, ContextPack, RunRequest
 from app.agents.idea.agent import IdeaAgent
 from app.agents.idea.acceptance import archive_baseline_input
-from app.agents.idea.delivery import delivery_errors
+from app.agents.idea.delivery import delivery_errors, require_named_handoff_inputs
 from app.agents.idea.focused_research import focused_research_errors, focused_requirement_errors, research_schema, validate_review_mode
 from app.agents.idea.parameter_schema import parameter_budget_schema
 from app.agents.idea.focused_runtime import bind_focused_snapshot
@@ -184,6 +184,10 @@ class FocusedIdeaAgent(IdeaAgent):
         context.task += "\n可获取正文的域名：" + get_settings().mars_web_search_allowlist
         scope = request.extra.get("scope", "method_proposal")
         context.task += "\n本次范围：" + str(scope) + "\n用户明确的约束：" + json.dumps(requirements, ensure_ascii=False)
+        context.task += ("\nhandoff.required_context 的 kind 只是资料类别；context_ref 必须指向实际命名输入。"
+            "blocks_execution=true 且 kind=other 时必须写 context_ref，例如初始化权重对应 checkpoint。"
+            "不要把 other 当作输入字段，也不要从描述文字猜测绑定。可用输入名称："
+            + json.dumps(sorted(request.upstream_artifacts), ensure_ascii=False))
         policy = quality_policy(self._quality, requirements)
         context.task += ("\n宿主调研验收门槛：" + json.dumps(policy, ensure_ascii=False)
             + "\n流程：检索候选→按相关性筛选→完整阅读方法→比较不同方向→提出方案→独立评审。"
@@ -215,6 +219,7 @@ class FocusedIdeaAgent(IdeaAgent):
     def submission_schema(self, request: RunRequest) -> dict[str, Any] | None:
         schema = BaseAgent.submission_schema(self, request)
         assert schema is not None
+        require_named_handoff_inputs(schema)
         schema["required"] += ["human_summary", "handoff", "method_spec", "decision_rule", "research_context"]
         for field in ("method_spec", "decision_rule"):
             schema["properties"][field] = {"type": "object", "minProperties": 1}

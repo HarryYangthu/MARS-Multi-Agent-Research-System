@@ -13,6 +13,7 @@ from app.agents.idea.research_review import RESEARCH_EVIDENCE_SCOPE_GUIDANCE
 from app.agents.idea.research_unit import UNIT_PARENT_GUIDANCE, configured_research_unit
 from app.agents.idea.delivery import (
     STRUCTURED_REFERENCE_GUIDANCE, delivery_errors, progress_sink, write_delivery,
+    require_named_handoff_inputs,
 )
 from app.agents.idea.acceptance import archive_baseline_input
 from app.agents.idea.protocol import protocol_schema
@@ -88,6 +89,7 @@ class IdeaAgent(BaseAgent):
         schema = super().submission_schema(request)
         if schema is None:
             return None
+        require_named_handoff_inputs(schema)
         # New submissions require the full delivery contract, while historical
         # proposal.v1 documents retain their original compatibility contract.
         schema["required"] += ["human_summary", "handoff", "method_spec", "decision_rule",
@@ -133,6 +135,9 @@ class IdeaAgent(BaseAgent):
             "handoff must follow idea.handoff.v1, target experiment, match the task scope, define next_step, "
             "changes, verification_requirements and required_context. Use blocks_execution for actual "
             "missing prerequisites, not hypothetical bureaucracy. Do not invent paths or data. "
+            "kind describes a material category; context_ref names its exact supplied input key. "
+            "Every blocking kind=other must have context_ref, for example checkpoint for initial weights. "
+            "Never treat other as an input key or guess a binding from prose. "
             "Before important actions, give a short visible Chinese explanation of the information gap "
             "you are resolving. After finding enough relevant method evidence, draft rather than repeating searches. "
             "Keep assistant commentary brief; spend the output allowance on one complete "
@@ -198,6 +203,7 @@ class IdeaAgent(BaseAgent):
             "and evidence; otherwise withdraw the guarantee. A numerical example is not a universal proof. "
             "Report only actual memory, tools, PDF page excerpts and review/debate activity."
         )
+        context.task += "\nAvailable named input references: " + json.dumps(sorted(request.upstream_artifacts))
         if requirements.get("require_parameter_budget") or requirements.get("require_evaluation_protocol"):
             context.task += (
                 "\nUse evaluation_protocol (idea.evaluation.v1) as the canonical controlled-comparison "
