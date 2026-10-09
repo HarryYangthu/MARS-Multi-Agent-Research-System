@@ -886,6 +886,8 @@ class Orchestrator:
         self,
         session: RunSession,
         node_key: str,
+        *,
+        retry_interrupted_jobs: bool = False,
     ) -> None:
         if self._stopping(session) or session.graph.state(node_key) != NodeState.APPROVED:
             return
@@ -898,10 +900,7 @@ class Orchestrator:
                 from app.bridge.task_runtime import admit_handoffs
                 supplied, _ = load_agent_handoff_context(session.run, node_key, registry=self.registry)
                 admit_handoffs(session.run, node_key, supplied_context=supplied)
-                from app.harness.tools.registry import (
-                    ToolContext,
-                    get_registry as get_tool_registry,
-                )
+                from app.harness.tools.registry import ToolContext
 
                 async def _batch_runner(
                     _args: dict[str, Any],
@@ -909,6 +908,9 @@ class Orchestrator:
                 ) -> dict[str, Any]:
                     from app.bridge.research_branch import research_branch_scope
                     with research_branch_scope(session.run, node_key):
+                        if retry_interrupted_jobs:
+                            from app.bridge.execution_batch_deadline import prepare_interrupted_execution_retry
+                            prepare_interrupted_execution_retry(session.run, node_key)
                         await _run_execution_batch(
                             run=session.run,
                             node_key=node_key,
@@ -924,7 +926,8 @@ class Orchestrator:
                         "failures": summary["failures"], "summary": summary,
                     }
 
-                tool_result = await get_tool_registry().dispatch(
+                from app.bridge.execution_batch_deadline import execution_batch_registry
+                tool_result = await execution_batch_registry(session.run, node_key).dispatch(
                     "execution.batch_runner",
                     {"node_key": node_key},
                     ToolContext(
@@ -1501,7 +1504,22 @@ class Orchestrator:
         try:
             if self._stopping(session):
                 return
+            retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
             await self._transition(session, node_key, NodeState.RUNNING)
+            if (retry_existing_execution and parse_node_key(node_key).stage == 'execution'
+                    and (session.run.subdir('execution') / 'run_log.approved.md').is_file()
+                    and self._has_interrupted_execution_jobs(session)):
+                # Execution retries run the already-approved deterministic intake.
+                # Regenerating its invocation would invalidate confirmations and
+                # force completed jobs to run again despite unchanged inputs.
+                await self._transition(session, node_key, NodeState.WAITING_REVIEW)
+                await self._transition(session, node_key, NodeState.APPROVED)
+                await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
+                    'event': 'execution.explicit_retry', 'node': node_key,
+                    'message': '沿用已批准执行清单；核验已完成作业，仅恢复已清理的中断作业。'})
+                await self._complete_approved_node(session, node_key, retry_interrupted_jobs=True)
+                await self.run(session.run.run_id)
+                return
             if not await self._run_node_runner(
                 session,
                 node_key,
@@ -1532,6 +1550,11 @@ class Orchestrator:
         if not candidates:
             return None
         return max(candidates, key=lambda key: parse_node_key(key).attempt)
+
+    @staticmethod
+    def _has_interrupted_execution_jobs(session: RunSession) -> bool:
+        from app.execution.job_journal import job_states
+        return any(row['status'] == 'interrupted' for row in job_states(session.run.root))
 
     def _recover_session(self, run_id: str) -> RunSession | None:
         run = self.run_store.get(run_id)

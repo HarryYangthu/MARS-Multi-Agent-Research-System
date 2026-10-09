@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.execution.results import SimulationResult
 from app.execution.simulation_runner import JobSpec, run_one
 from app.harness.agent_loop.trace import digest
 from app.harness.persistence import atomic_write_json
+from app.harness.persistence import path_lock
 from app.settings import get_settings
 
 
@@ -84,9 +86,7 @@ async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None 
         return await run_one(spec, steps=steps, bus_publish=bus_publish)
     path = _path(spec)
     path.parent.mkdir(parents=True, exist_ok=True)
-    inputs = digest({'run_id': spec.run_id, 'project': spec.project, 'name': spec.experiment_id,
-                     'config': spec.config, 'seed': spec.seed, 'steps': steps,
-                     'backend': get_settings().mars_execution_backend})
+    inputs = _inputs(spec, steps)
     if path.exists():
         saved = json.loads(path.read_text())
         if saved.get('inputs') != inputs:
@@ -132,7 +132,9 @@ async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None 
             state['error'] = '作业失败，请检查原始日志与收据；不会自动修改实验参数。'
         return result
     except asyncio.CancelledError:
-        state.update(status='interrupted', error='作业已中断；检查清理结果后显式恢复。')
+        # run_one propagates cancellation only after adapter process cleanup.
+        state.update(status='interrupted', cleanup_complete=True,
+                     error='作业已中断；检查清理结果后显式恢复。')
         raise
     except Exception as exc:
         state.update(status='failed', error=str(exc))
@@ -140,6 +142,40 @@ async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None 
     finally:
         state['updated_at'] = datetime.now(timezone.utc).isoformat()
         atomic_write_json(path, state)
+
+
+def _inputs(spec: JobSpec, steps: int) -> str:
+    return digest({'run_id': spec.run_id, 'project': spec.project, 'name': spec.experiment_id,
+                   'config': spec.config, 'seed': spec.seed, 'steps': steps,
+                   'backend': get_settings().mars_execution_backend})
+
+
+def rearm_interrupted_jobs(specs: list[JobSpec], *, steps: int) -> None:
+    """Explicit owner retry only, after the previous batch acknowledged cleanup.
+
+    Completed receipts remain in place for verification/reuse. Never infer a
+    stopped process from a running or failed record, or silently change inputs.
+    Interrupted is written only after cancellation cleanup has returned.
+    """
+    from app.execution.simulation_runner import effective_job_steps
+    for spec in specs:
+        path = _path(spec)
+        with path_lock(path.with_suffix('.retry.lock')):
+            if not path.exists():
+                continue
+            saved = json.loads(path.read_text())
+            if saved.get('inputs') != _inputs(spec, effective_job_steps(spec, steps)):
+                raise ValueError('中断作业输入已变化，禁止沿用旧尝试。')
+            if saved.get('status') == 'completed':
+                continue
+            if saved.get('status') != 'interrupted' or saved.get('cleanup_complete') is False:
+                raise ValueError('作业尚未确认中断清理，禁止重复启动。')
+            archive = path.parent / 'retry_history' / path.stem / uuid.uuid4().hex
+            archive.mkdir(parents=True, exist_ok=False)
+            claim = path.with_suffix('.claim')
+            if claim.exists():
+                claim.replace(archive / claim.name)
+            path.replace(archive / path.name)
 
 
 def stopped_execution_retry_blocker(run_root: Path) -> str:

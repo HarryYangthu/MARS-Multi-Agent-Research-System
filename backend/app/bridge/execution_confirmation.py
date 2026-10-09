@@ -276,6 +276,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             files['remote_config'] = digest(str(remote))
         except (OSError, ValueError):
             blockers.append('远端 GPU 连接配置未就绪，请核对 SSH、工作目录和 GPU 配置。')
+    elif settings.mars_execution_backend == 'pim_cpu':
+        defaults['timeout_seconds'] = config.get('pim_cpu_timeout_seconds', config['command_timeout_seconds'])
     elif settings.mars_execution_backend not in {'paper_static', 'local_command', 'pim_cpu', 'remote_gpu'}:
         blockers.append('当前执行后端无法核验真实仿真配置。')
     if experiments:
