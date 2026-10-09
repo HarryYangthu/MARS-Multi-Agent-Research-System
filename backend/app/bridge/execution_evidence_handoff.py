@@ -17,12 +17,31 @@ def _read(root: Path, name: str) -> tuple[Path, bytes]:
     return path, path.read_bytes()
 
 
+def measured_metrics(raw: object) -> dict[str, float]:
+    """Validate bounded measured values without choosing a comparison policy."""
+    if not isinstance(raw, dict) or len(raw) > 128:
+        raise ValueError("Job metrics must be a bounded mapping")
+    values: dict[str, float] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or type(value) not in (int, float):
+            raise ValueError("Job metrics must contain named numeric measurements")
+        try:
+            number = float(value)
+        except OverflowError as exc:
+            raise ValueError("Job metrics must be finite") from exc
+        if not math.isfinite(number):
+            raise ValueError("Job metrics must be finite")
+        values[key] = number
+    return values
+
+
 def execution_job_evidence(root: Path, run_id: str, project: str) -> str:
     """Keep file identity and measured steps, never infer scientific acceptance."""
     jobs = safe_scope_path(root, "execution/jobs/.handoff_anchor").parent
     lines = ["# Actual job file evidence", "Paths below belong to this run, relative to its root.",
              "Configured output_dir is a plan default; these are the actual host-owned job directories.",
              "Use complete filenames, including .json and .jsonl. These files are outside the source repository.",
+             "Each completed job includes its actual stored metrics; use all paired jobs, not only the abbreviated aggregate preview.",
              "Min/max loss does not establish monotonic convergence or statistical significance."]
     paths = sorted(jobs.glob("*.json")) if jobs.exists() else []
     for job_path in paths[:64]:
@@ -72,6 +91,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str) -> str:
                             "training_loss_min": min(values["training_loss"]) if values["training_loss"] else None,
                             "training_loss_max": max(values["training_loss"]) if values["training_loss"] else None})
                     record["files"].append(item)
+            record["metrics"] = measured_metrics(job.get("result", {}).get("metrics"))
             lines.append(json.dumps(record, ensure_ascii=False, allow_nan=False))
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             lines.append(json.dumps({"source": name, "evidence_error": str(exc)}, ensure_ascii=False))
