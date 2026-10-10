@@ -178,8 +178,13 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
             timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     runtime = resolve_git(environment=environment)
     limit = timeout or float(_policy(repo_root() / "configs/git_runtime.yaml")["command_timeout_seconds"])
+    child_environment = git_environment(environment)
+    # Local transports invoke Git again (for example upload-pack during a
+    # file fetch). They must discover the verified host binary before an
+    # unusable system shim, just like configured coding commands do.
+    child_environment["PATH"] = str(Path(runtime.executable).parent) + os.pathsep + child_environment.get("PATH", "")
     try:
-        result = subprocess.run([runtime.executable, *arguments], cwd=cwd, env=git_environment(environment),
+        result = subprocess.run([runtime.executable, *arguments], cwd=cwd, env=child_environment,
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=limit)
     except subprocess.TimeoutExpired as exc:
         raise GitRuntimeError("Git 操作超时，进度已保留，请核对后重试。", "git_timeout") from exc

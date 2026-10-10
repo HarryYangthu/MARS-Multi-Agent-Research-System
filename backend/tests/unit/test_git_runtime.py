@@ -144,6 +144,14 @@ def test_real_source_history_and_child_git_share_runtime(tmp_path: Path) -> None
     assert run_git(["--git-dir", str(archive), "show", commit + ":main.py"]).stdout == "VALUE = 1\n"
     selected = resolve_git()
     assert git_child_environment()["PATH"].split(os.pathsep)[0] == str(Path(selected.executable).parent)
+    # File transport starts a second Git process to read the baseline archive.
+    # Its PATH must retain the same verified host runtime.
+    (root / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+    candidate_archive = tmp_path / "candidate.git"
+    candidate = archive_source_commit(source_root=root, git_dir=candidate_archive,
+        paths=["main.py", "candidate.py"], environment=environment,
+        parent_git_dir=archive, parent_commit=commit)
+    assert run_git(["--git-dir", str(candidate_archive), "rev-parse", candidate + "^"]).stdout.strip() == commit
 
 
 def test_zcode_environment_uses_verified_git_without_ambient_routing(

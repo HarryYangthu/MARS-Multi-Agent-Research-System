@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -64,7 +65,7 @@ async def test_real_write_patch_rollback_compile_and_original_branch_preserved(r
         assert written.ok and written.rollback_ref
         patch = "--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n-VALUE = 2\n+VALUE = 3\n"
         assert (await apply_patch_tool({"diff": patch}, ctx(run))).ok
-        result = subprocess.run(["python3", "-m", "py_compile", str(source / "main.py")], capture_output=True)
+        result = subprocess.run([sys.executable, "-m", "py_compile", str(source / "main.py")], capture_output=True)
         assert result.returncode == 0
         restored = await rollback_patch_tool({"rollback_ref": written.rollback_ref}, ctx(run))
         assert restored.ok and (source / "main.py").read_text() == "VALUE = 1\n"
