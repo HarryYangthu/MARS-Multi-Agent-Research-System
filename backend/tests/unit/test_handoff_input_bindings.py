@@ -31,7 +31,7 @@ def saved_input(root: Path) -> tuple[RunHandle, dict[str, str]]:
     run = RunStore(root / 'runs').create(task='binding-contract', project='pimc')
     source = run.root / 'idea/idea_proposal.approved.md'
     source.parent.mkdir(exist_ok=True)
-    from backend.tests.unit.test_idea_delivery import authored_metadata
+    from tests.unit.test_idea_delivery import authored_metadata
     metadata = authored_metadata()
     metadata['handoff']['required_context'] = [requirement()]
     source.write_text(dumps(metadata, metadata['human_summary']))
@@ -52,7 +52,7 @@ def test_category_is_never_a_wildcard_or_a_prose_inferred_key() -> None:
 
 
 def test_new_proposals_require_reference_but_old_approved_documents_remain_readable(tmp_path: Path) -> None:
-    from backend.tests.unit.test_idea_delivery import authored_metadata
+    from tests.unit.test_idea_delivery import authored_metadata
     metadata = authored_metadata()
     metadata['handoff']['required_context'].append(requirement())
     text = dumps(metadata, metadata['human_summary'])
@@ -85,7 +85,7 @@ def test_explicit_binding_preserves_approved_bytes_and_rejects_unknown_inputs(tm
             context_ref='unknown', supplied_context=supplied, reason='Explicit structural repair', authorized_by='caller')
     assert not (run.root / 'input/handoff_context_bindings.json').exists()
     resource_hash = hashlib.sha256(Path(supplied['checkpoint']).read_bytes()).hexdigest()
-    args = dict(source_ref='idea/idea_proposal.approved.md', prerequisite_index=0, context_ref='checkpoint',
+    args: dict[str, Any] = dict(source_ref='idea/idea_proposal.approved.md', prerequisite_index=0, context_ref='checkpoint',
                 supplied_context=supplied, reason='Explicit structural repair', authorized_by='caller',
                 resource_sha256=resource_hash)
     bind_legacy_input(run, **args)
@@ -124,7 +124,7 @@ def test_recovery_preflights_named_inputs_and_retains_all_upstream_work(tmp_path
     from app.bridge.orchestrator import Orchestrator, RunRequest as WorkflowRequest
     from app.bridge.run_recovery import recovery_status
     from app.harness.runtime.state_machine import NodeState
-    from backend.tests.unit.test_idea_delivery import authored_metadata
+    from tests.unit.test_idea_delivery import authored_metadata
     registry = AgentRegistry()
     registry.register('execution', ExecutionAgent())
     orch = Orchestrator(run_store=RunStore(tmp_path / 'runs'), registry=registry)

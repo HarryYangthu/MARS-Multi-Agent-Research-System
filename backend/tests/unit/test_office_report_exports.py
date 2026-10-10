@@ -108,14 +108,15 @@ def test_editable_office_formats_keep_full_text_and_numeric_precision(tmp_path: 
             {"optimizer_step": 1, "training_loss": .002, "lr": .0004}, {"optimizer_step": 2, "training_loss": .001, "lr": .0004}]}]}
     for name, writer in (("report.docx", write_research_docx), ("report.xlsx", write_results_workbook), ("report.pptx", write_research_deck)):
         writer(tmp_path / name, pack)
-    doc = Document(tmp_path / "report.docx")
+    doc = Document(str(tmp_path / "report.docx"))
     assert "末尾完整保留。" in '\n'.join(p.text for p in doc.paragraphs)
     assert len(doc.tables) == 1
     workbook = load_workbook(tmp_path / "report.xlsx")
     assert workbook["Metrics"]["B2"].value == pytest.approx(23.759658938026675, rel=0, abs=1e-14)
     assert workbook["Metrics"]["C2"].value == .000001234
     assert workbook["Metrics"].freeze_panes == "A2"
-    assert len(workbook["Steps_1"]._charts) == 1
+    with zipfile.ZipFile(tmp_path / "report.xlsx") as archive:
+        assert len([name for name in archive.namelist() if name.startswith("xl/charts/chart") and name.endswith(".xml")]) == 1
     with zipfile.ZipFile(tmp_path / "report.pptx") as archive:
         slides = [name for name in archive.namelist() if name.startswith("ppt/slides/slide") and name.endswith(".xml")]
         assert len(slides) > 3
@@ -181,7 +182,7 @@ def test_long_slide_heading_keeps_text_without_duplicate_shapes(tmp_path: Path) 
     heading = "很长的证据章节标题" * 24
     path = tmp_path / "long.pptx"
     write_research_deck(path, {"report_markdown": f"# {heading}\n\n完整正文仍须保留。"})
-    texts = []
+    texts: list[str] = []
     with zipfile.ZipFile(path) as archive:
         for name in archive.namelist():
             if name.startswith("ppt/slides/slide") and name.endswith(".xml"):

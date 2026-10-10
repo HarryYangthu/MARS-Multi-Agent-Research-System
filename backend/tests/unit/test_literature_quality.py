@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 import json
 
 import pytest
@@ -44,7 +45,7 @@ def test_filled_coverage_does_not_pass_without_real_readings(tmp_path: Path) -> 
     # A manually authored proposal is input to a pure refusal check. It claims
     # no model/tool execution and cannot supply missing observation evidence.
     source = "source_without_receipt"
-    context = {"sources": [], "stop_status": "complete", "coverage": [
+    context: dict[str, Any] = {"sources": [], "stop_status": "complete", "coverage": [
         {"axis": axis, "finding": "An unsupported assertion", "source_ids": [source], "remaining_gap": ""}
         for axis in policy["coverage_axes"]], "method_comparison": [
             {"direction": name, "source_ids": [source], "mechanism": "claim", "compatibility": "claim",
@@ -92,7 +93,7 @@ def test_incomplete_or_inflight_checkpoint_is_not_reused_as_a_model_draft(tmp_pa
 
 
 def test_active_timer_is_persisted_and_resume_starts_from_saved_usage(tmp_path: Path) -> None:
-    state = {"status": "interrupted", "counts": {}, "usage": {}, "usage_complete": True,
+    state: dict[str, Any] = {"status": "interrupted", "counts": {}, "usage": {}, "usage_complete": True,
              "fingerprint": "input", "pending": None, "active_elapsed_seconds": 12.5}
     trace = LoopTrace(tmp_path, "full")
     trace.emit("started", {})

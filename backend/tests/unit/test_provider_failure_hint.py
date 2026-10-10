@@ -1,5 +1,6 @@
 """Pure classification plus optional real archived provider failure evidence."""
 from pathlib import Path
+from typing import Any
 import os
 
 import pytest
@@ -8,7 +9,7 @@ from app.harness.llm.failure_hint import checkpoint_failure_hint, provider_failu
 
 
 def test_timeout_hint_requires_a_terminal_timeout_and_keeps_outcome_uncertainty() -> None:
-    events = [{'kind': 'model_request', 'provider': 'zhipu'},
+    events: list[dict[str, Any]] = [{'kind': 'model_request', 'provider': 'zhipu'},
               {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APITimeoutError'}},
               {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APITimeoutError'}}]
     hint = provider_failure_hint(events, status='model_error')
@@ -19,7 +20,7 @@ def test_timeout_hint_requires_a_terminal_timeout_and_keeps_outcome_uncertainty(
 
 
 def test_protocol_hint_explains_rejected_work_without_claiming_acceptance() -> None:
-    events = [{'kind': 'protocol_error', 'error': 'revision path must be a valid pointer'}]
+    events: list[dict[str, Any]] = [{'kind': 'protocol_error', 'error': 'revision path must be a valid pointer'}]
     hint = provider_failure_hint(events, status='protocol_exhausted')
     assert '字段路径' in hint and '仍需通过内容校验与独立评审' in hint
     assert provider_failure_hint(events, status='passed') == ''
@@ -38,7 +39,7 @@ def test_actual_timeout_is_explained_without_another_model_request() -> None:
 
 
 def test_quota_hint_requires_matching_provider_status_and_terminal_rejection() -> None:
-    events = [{'kind': 'model_request', 'provider': 'zhipu'}, {'kind': 'sdk_attempt_failed',
+    events: list[dict[str, Any]] = [{'kind': 'model_request', 'provider': 'zhipu'}, {'kind': 'sdk_attempt_failed',
               'details': {'http_status': 429, 'api_error_code': '1113'}}]
     assert '1113' in provider_failure_hint(events, status='model_error')
     assert provider_failure_hint(events, status='passed') == ''
@@ -50,7 +51,7 @@ def test_quota_hint_requires_matching_provider_status_and_terminal_rejection() -
 def test_unknown_or_missing_receipts_do_not_invent_quota_failure(tmp_path: Path) -> None:
     assert checkpoint_failure_hint(tmp_path, status='model_error') == ''
     assert provider_failure_hint([], status='model_error') == ''
-    events = [{'kind': 'model_request', 'provider': 'zhipu'}, {'kind': 'sdk_attempt_failed',
+    events: list[dict[str, Any]] = [{'kind': 'model_request', 'provider': 'zhipu'}, {'kind': 'sdk_attempt_failed',
               'details': {'http_status': 429, 'api_error_code': '1302'}}]
     assert provider_failure_hint(events, status='model_error') == ''
 

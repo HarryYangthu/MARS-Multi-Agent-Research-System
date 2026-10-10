@@ -43,7 +43,7 @@ def test_policy_is_opt_in_and_keeps_default_fingerprint_byte_equivalent() -> Non
     before.pop("reflection_format_repair_enabled")
     before.pop("native_observation_history")
     before.pop("max_active_seconds")
-    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"):
+    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field", "completion_driven"):
         before.pop(name)
     assert policy.fingerprint_data() == before
     enabled = replace(policy, author_empty_completion_repair_enabled=True)

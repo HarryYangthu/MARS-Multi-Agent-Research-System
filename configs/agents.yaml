@@ -6,11 +6,9 @@ commander:
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
-    # Thinking tokens and visible final text share this upper bound.
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -46,12 +44,10 @@ idea:
     provider: zhipu
     model: glm-5.3
     temperature: 0.7
-    # Product default: billed output includes provider reasoning usage.
     max_tokens: 8192
     top_p: 1.0
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -84,11 +80,9 @@ idea:
     native_observation_history: true
     mode: reflection
     trace: full
-    # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
     reflection_reasoning_effort: low
     reflection_format_repair_enabled: false
-    # Includes the submission schema, supplied context and visible paper excerpts.
     input_token_budget: 128000
     max_model_calls: 36
     max_validation_repairs: 6
@@ -113,7 +107,6 @@ idea_research:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -159,7 +152,6 @@ experiment:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -188,7 +180,6 @@ coding:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -210,7 +201,6 @@ coding:
   - python_research
   - c_production
   loop:
-    # Stop on validated delivery, real blockers, or explicit user cancellation.
     completion_driven: true
     protocol: native_tools
     mode: react
@@ -252,7 +242,6 @@ writing:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -278,9 +267,6 @@ writing:
   tools:
   - knowledge.methodology
   - knowledge.run_archive
-
-# Separate author/reviewer configurations; focused review_mode explicitly permits
-# independent sessions on the same model, with truthful same-model audit receipts.
 idea_author:
   enabled: true
   output_schema: proposal.v1
@@ -292,7 +278,6 @@ idea_author:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -314,7 +299,6 @@ idea_reviewer:
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low

@@ -83,6 +83,12 @@ def test_historical_api_preserves_view_and_download_and_rejects_mutation(tmp_pat
     store, run = _historical_run(tmp_path / "runs", "pipeline", "draft")
     download = run.subdir("writing") / "historical-note.md"
     download.write_text("Human-authored historical export; no execution claim.\n", encoding="utf-8")
+    ArtifactStore(run).write_metadata(metadata={"schema": "report_bundle.v1", "project": run.project,
+        "agent": "writing", "run_id": run.run_id, "created_at": "2026-10-10T00:00:00Z",
+        "data_pack": "human-authored-archive", "deliverables": [{"kind": "markdown",
+        "path": "writing/" + download.name, "status": "completed", "sha256": hashlib.sha256(download.read_bytes()).hexdigest()}],
+        "qa_status": {"status": "degraded", "checks": []}}, body="Human-authored file manifest; no execution claim.",
+        expected_schema="report_bundle.v1")
     original_files = _files(run.root)
     dependencies.reset_for_tests()
     dependencies._run_store = store  # Real temporary store; all APIs use the actual bridge.

@@ -95,6 +95,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
         auto_approve=ctx.session.auto_mode,
+        extra=({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {}),
     )
     rsession = ctx.orchestrator.create_session(request)
     run_id = rsession.run.run_id

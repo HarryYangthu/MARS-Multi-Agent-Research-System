@@ -1,4 +1,5 @@
 """Canonical units stay explicit when two artifact schemas use count aliases."""
+from typing import Any
 import pytest
 from app.harness.schema.experiment_contract import budget
 
@@ -14,6 +15,6 @@ def test_explicit_steps_alias_and_identical_merged_counts_are_steps() -> None:
     {'budget_steps': 50, 'max_iters': 50, 'budget_unit': 'epochs'},
     {'budget_steps': 50, 'max_iters': True}, {'max_iters': '50', 'budget_unit': 'steps'},
 ])
-def test_ambiguous_units_changed_counts_and_noninteger_aliases_fail(config: dict) -> None:
+def test_ambiguous_units_changed_counts_and_noninteger_aliases_fail(config: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         budget(config)

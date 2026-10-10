@@ -37,13 +37,14 @@ def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     assert again['state']['levels'] == at['state']['levels']
 
 
-def test_protected_over_target_is_retained_and_over_max_blocks(tmp_path: Path) -> None:
+def test_protected_over_target_is_retained_and_over_budget_dispatches(tmp_path: Path) -> None:
     messages = [Message('system', 'hard constraint ' * 350)]
     size = token_upper_bound(messages)
     _, manifest = pack_messages(messages, policy=load_policy(), budget=size + 10, root=tmp_path)
     assert manifest['triggered'] and not manifest['target_reached']
-    with pytest.raises(ValueError, match='no request sent'):
-        pack_messages(messages, policy=load_policy(), budget=size - 1, root=tmp_path)
+    packed, over = pack_messages(messages, policy=load_policy(), budget=size - 1, root=tmp_path)
+    assert over['over_budget_allowed'] and over['used'] == size
+    assert packed == messages
 
 
 def test_latest_tool_pair_and_failed_attempt_survive(tmp_path: Path) -> None:
@@ -65,11 +66,13 @@ def test_latest_tool_pair_and_failed_attempt_survive(tmp_path: Path) -> None:
 
 
 def test_review_evidence_never_replaced_with_reference(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match='protected context'):
-        pack_native(pinned=[Message('user', 'review')], history=[{'tool':'code.repo_reader',
-            'ok': True, 'output': {'content': 'required evidence ' * 2000}}], feedback='', candidate='',
-            budget=10000, tools=(), policy=load_policy(), metadata={}, root=tmp_path, previous=None,
-            agent='idea', readback_available=False, reviewing=True, required_review_tools=('code.repo_reader',))
+    packed, manifest = pack_native(pinned=[Message('user', 'review')], history=[{'tool':'code.repo_reader',
+        'ok': True, 'output': {'content': 'required evidence ' * 2000}}], feedback='', candidate='',
+        budget=10000, tools=(), policy=load_policy(), metadata={}, root=tmp_path, previous=None,
+        agent='idea', readback_available=False, reviewing=True, required_review_tools=('code.repo_reader',))
+    # Without a readback tool the evidence cannot be excerpted; it is dispatched in full.
+    assert manifest['over_budget_allowed']
+    assert 'required evidence ' * 2000 in str([m.to_wire() for m in packed])
 
 
 def test_original_hash_paging_and_tamper(tmp_path: Path) -> None:
@@ -130,9 +133,11 @@ def test_verified_model_window_supersedes_old_agent_and_run_quotas() -> None:
 
 def test_no_offload_when_reader_unavailable(tmp_path: Path) -> None:
     m = Message('user', 'unavailable source ' * 1000)
-    with pytest.raises(ValueError, match='protected context'):
-        pack_messages([m], policy=load_policy(), budget=4000, root=tmp_path,
+    packed, manifest = pack_messages([m], policy=load_policy(), budget=4000, root=tmp_path,
                       materials={message_key(m):Material('background','doc',False)}, readback_available=False)
+    # No readback tool means no excerpting; the source is dispatched in full.
+    assert manifest['over_budget_allowed'] and manifest['used'] == token_upper_bound([m])
+    assert packed == [m]
 
 
 def test_incomplete_tool_pair_rejected() -> None:
@@ -170,11 +175,12 @@ def test_explicit_model_capacity_is_validated() -> None:
 def test_receipt_index_cannot_displace_latest_observation_protection(tmp_path: Path) -> None:
     # A receipt index follows the actual observation. It is not a replacement
     # for the unread source, even though both are classified as runtime history.
-    with pytest.raises(ValueError, match='protected context'):
-        pack_native(pinned=[Message('user', 'read this source')],
-            history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
-            feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
-            metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)
+    packed, manifest = pack_native(pinned=[Message('user', 'read this source')],
+        history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
+        feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
+        metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)
+    assert manifest['over_budget_allowed']
+    assert 'important ' * 2000 in str([m.to_wire() for m in packed])
 
 
 def test_repository_index_can_offload_while_latest_source_is_retained(tmp_path: Path) -> None:

@@ -75,8 +75,15 @@ def save_background(project: FolderProject, filename: str, data: bytes) -> dict[
             raise
 
 
-def bind_code_folder(project: FolderProject, path: str) -> Path:
-    """Bind existing code without copying files or changing project identity."""
+def bind_code_folder(project: FolderProject, path: str, *, role: str = "simulation_baseline") -> Path:
+    """Bind existing code without copying files or changing project identity.
+
+    ``simulation_baseline`` is the read-only research baseline (default).
+    ``ainative`` binds a generated AI Native working repo that agents may
+    write to; the previous baseline path is preserved as ``baseline_repo_path``.
+    """
+    if role not in {"simulation_baseline", "ainative"}:
+        raise ValueError(f"未知的代码仓角色：{role}")
     candidate = Path(path).expanduser()
     if not path.strip() or not candidate.is_absolute():
         raise ValueError("请选择代码工程文件夹的完整路径")
@@ -92,8 +99,10 @@ def bind_code_folder(project: FolderProject, path: str) -> Path:
             raise ValueError("代码关联配置与当前项目不匹配")
         if raw.get("repo_mode") != "local_path":
             raise ValueError("当前代码关联不是本地文件夹模式，请保留现有工程配置")
+        if role == "ainative" and raw.get("repo_role") == "simulation_baseline":
+            raw["baseline_repo_path"] = str(raw.get("repo_path", ""))
         raw["repo_path"] = str(code)
-        raw["repo_role"] = "simulation_baseline"
-        raw["read_only"] = True
+        raw["repo_role"] = role
+        raw["read_only"] = role != "ainative"
         atomic_write_text(link, yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
     return code

@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.agents.idea.literature_quality import discovered_sources, publication_key, verified_method_sources
-from app.agents.idea.focused_runtime import load_focused_snapshot
+from app.harness.schema.literature_quality import discovered_sources, publication_key, verified_method_sources
+from app.harness.context.invocation_snapshot import load_focused_snapshot
 from app.harness.agent_loop.context import reading_coverage_index
 from app.harness.schema.frontmatter_parser import parse
 

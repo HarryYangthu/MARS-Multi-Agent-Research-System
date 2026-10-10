@@ -111,7 +111,7 @@ class CodingAgent(BaseAgent):
                 if upstream.get("schema") == "experiment_plan.v1":
                     plans.append(text)
         if plans or metadata.get('execution_jobs') or request.extra.get('execution_delivery_required'):
-            from app.execution.handoff_validation import coding_handoff_errors
+            from app.harness.tools.execution.handoff import coding_handoff_errors
             if len(plans) > 1:
                 errors.append('/upstream: 必须有唯一的批准实验方案')
             else:

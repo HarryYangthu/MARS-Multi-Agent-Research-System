@@ -39,17 +39,17 @@ def read(budget: RunModelBudget) -> dict[str, Any]:
 def test_components_reject_before_call_even_with_ample_combined_budget(
     tmp_path: Path, key: str, value: int, error: str,
 ) -> None:
-    ledger = RunModelBudget(tmp_path, configuration=policy(**{key: value}))
+    ledger = RunModelBudget(tmp_path, configuration=policy(**{key: value}), token_mode="limited")
     with pytest.raises(ResourceBudgetError, match=error):
         ledger.reserve(messages(), config(), {})
     assert not ledger.path.exists()
 
 
 def test_each_retry_reserves_both_components_before_execution(tmp_path: Path) -> None:
-    ledger = RunModelBudget(tmp_path, configuration=policy(max_billed_output_tokens=299))
+    ledger = RunModelBudget(tmp_path, configuration=policy(max_billed_output_tokens=299), token_mode="limited")
     with pytest.raises(ResourceBudgetError, match="output-token"):
         ledger.reserve(messages(), replace(config(), max_retries=2), {})
-    ledger = RunModelBudget(tmp_path, configuration=policy(max_billed_output_tokens=300))
+    ledger = RunModelBudget(tmp_path, configuration=policy(max_billed_output_tokens=300), token_mode="limited")
     reservation = ledger.reserve(messages(), replace(config(), max_retries=2), {})
     row = read(ledger)["requests"][reservation.request_id]
     assert row["reserved_output_tokens"] == row["charged_output_tokens"] == 300
@@ -98,11 +98,11 @@ def test_unknown_or_invalid_usage_cannot_refund_either_component(
 
 def test_output_limit_applies_to_all_requests_after_process_reopen(tmp_path: Path) -> None:
     selected = policy(max_billed_output_tokens=150)
-    ledger = RunModelBudget(tmp_path, configuration=selected)
+    ledger = RunModelBudget(tmp_path, configuration=selected, token_mode="limited")
     reservation = ledger.reserve(messages(), config(), {})
     ledger.settle(reservation, usage={"prompt_tokens": 10, "completion_tokens": 80, "total_tokens": 90},
                   complete=True, outcome="completed")
-    reopened = RunModelBudget(tmp_path, configuration=selected)
+    reopened = RunModelBudget(tmp_path, configuration=selected, token_mode="limited")
     with pytest.raises(ResourceBudgetError, match="output-token"):
         reopened.reserve(messages(), config(), {})
     smaller = reopened.reserve(messages(), replace(config(), max_tokens=70), {})

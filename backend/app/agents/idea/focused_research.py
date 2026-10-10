@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.idea.delivery import resolve_pointer
+from app.harness.agent_loop.research_evidence import reading_sources as reading_sources
 
 
 def validate_review_mode(author: tuple[str, str], reviewer: tuple[str, str], mode: object = "cross_model") -> str:
@@ -38,21 +39,6 @@ def research_schema(*, version: int = 1) -> dict[str, Any]:
                 "stop_reason": text, "open_questions": strings}}
 
 
-def reading_sources(observations: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    result: dict[str, list[dict[str, Any]]] = {}
-    for observation in observations:
-        if observation.get("tool") != "search.fetch_sources":
-            continue
-        output = observation.get("output", {})
-        if not isinstance(output, dict):
-            continue
-        for row in output.get("sources", []):
-            if not isinstance(row, dict) or not row.get("ok") or not row.get("archive_complete"):
-                continue
-            source_id = row.get("source_id")
-            if isinstance(source_id, str) and source_id:
-                result.setdefault(source_id, []).append(row)
-    return result
 
 
 def observed_urls(value: Any) -> set[str]:

@@ -8,7 +8,7 @@ import pytest
 
 from app.bridge.revision_resume import resume_revision_reason
 from app.storage.run_store import RunStore
-from backend.tests.unit.test_run_recovery import checkpoint, session_at
+from tests.unit.test_run_recovery import checkpoint, session_at
 
 
 def test_regular_interrupted_task_does_not_gain_revision_feedback(tmp_path: Path) -> None:

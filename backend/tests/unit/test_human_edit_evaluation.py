@@ -1,6 +1,7 @@
 """Authored files exercise edit, evaluation, and approval boundaries without models."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 import json
 
 from fastapi import FastAPI
@@ -15,7 +16,7 @@ from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 from app.storage.run_store import RunStore
 
 
-def metadata() -> dict:
+def metadata() -> dict[str, Any]:
     return {'schema': 'experiment_plan.v1', 'project': 'edit-check', 'agent': 'experiment',
         'variables': {'independent': ['learning rate'], 'dependent': ['RES']},
         'metrics': {'primary': 'RES', 'secondary': ['loss']},

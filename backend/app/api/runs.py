@@ -212,6 +212,7 @@ class CreateRunPayload(BaseModel):
     execution_context: dict[str, str] = Field(default_factory=dict)
     evaluation_policy: dict[str, Any] | None = None
     selected_skills_by_agent: dict[str, list[str]] = Field(default_factory=dict)
+    experiment_id: str = Field(default="", max_length=64)
 
     @field_validator("idea_mode", mode="before")
     @classmethod
@@ -251,6 +252,7 @@ class RunSummary(BaseModel):
     task: str
     entrypoint: str
     created_at: str
+    experiment_id: str = ""
 
 
 class TrashRunSummary(RunSummary):
@@ -358,6 +360,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         request_extra["evaluation_policy"] = dict(payload.evaluation_policy)
     if payload.selected_skills_by_agent:
         request_extra["selected_skills_by_agent"] = dict(payload.selected_skills_by_agent)
+    if payload.experiment_id:
+        request_extra["experiment_id"] = payload.experiment_id
     request = RunRequest(
         task=payload.task,
         project=payload.project,
@@ -443,9 +447,10 @@ def _resolve_data_source_selection(
 
 
 @router.get("", response_model=list[RunSummary])
-async def list_runs(project: str = "") -> list[RunSummary]:
+async def list_runs(project: str = "", experiment: str = "") -> list[RunSummary]:
     store = get_run_store()
     project_filter = project.strip()
+    experiment_filter = experiment.strip()
     return [
         RunSummary(
             run_id=r.run_id,
@@ -453,9 +458,11 @@ async def list_runs(project: str = "") -> list[RunSummary]:
             task=r.task,
             entrypoint=r.entrypoint,
             created_at=r.created_at,
+            experiment_id=str((r.meta or {}).get("experiment_id", "") or ""),
         )
         for r in store.list()
-        if not project_filter or r.project == project_filter
+        if (not project_filter or r.project == project_filter)
+        and (not experiment_filter or str((r.meta or {}).get("experiment_id", "") or "") == experiment_filter)
     ]
 
 
@@ -555,6 +562,7 @@ async def restore_run(run_id: str) -> RunSummary:
         task=restored.task,
         entrypoint=restored.entrypoint,
         created_at=restored.created_at,
+        experiment_id=str((restored.meta or {}).get("experiment_id", "") or ""),
     )
 
 

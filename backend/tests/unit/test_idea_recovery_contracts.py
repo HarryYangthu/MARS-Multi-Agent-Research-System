@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 from jsonschema import Draft202012Validator
 
@@ -33,7 +34,7 @@ def test_required_error_below_array_escapes_json_pointer() -> None:
 def test_empty_source_ids_are_missing_evidence_not_duplicate_documents(tmp_path: Path) -> None:
     source = {"source_id": "", "title": "Authored negative validation input",
               "url": "https://example.org/not-retrieved", "decision": "use", "reason": "No retrieval claimed"}
-    metadata = {"research_context": {"schema": "idea.research_context.v2", "question": "Check refusal",
+    metadata: dict[str, Any] = {"research_context": {"schema": "idea.research_context.v2", "question": "Check refusal",
         "selection_principles": ["Use real evidence"], "sources": [source, deepcopy(source)],
         "stop_reason": "This is a validation input", "open_questions": [],}}
     for item in metadata["research_context"]["sources"]:

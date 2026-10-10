@@ -1,6 +1,7 @@
 """Real Git checkouts and actual code tools; no model or tool substitutes."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -21,7 +22,7 @@ from app.storage.run_store import RunHandle
 
 
 @pytest.fixture
-def research(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[RunHandle, Path]:
+def research(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[RunHandle, Path]]:
     monkeypatch.setenv("MARS_FOLDER_PROJECTS_REGISTRY", str(tmp_path / "registry.json"))
     reset_settings_cache()
     project = open_folder(str(tmp_path / "project"), create=True)

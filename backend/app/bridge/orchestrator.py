@@ -158,6 +158,7 @@ class Orchestrator:
             entrypoint=request.entrypoint,
             user_request=request.user_request,
             data_source=request.data_source,
+            experiment_id=str(request.extra.get("experiment_id", "") or ""),
         )
         if on_run_allocated is not None:
             on_run_allocated(run)

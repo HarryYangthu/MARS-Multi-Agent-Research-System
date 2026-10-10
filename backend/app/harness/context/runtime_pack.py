@@ -11,6 +11,8 @@ from typing import Any
 import json
 import re
 
+from loguru import logger
+
 from app.harness.agent_loop.context import token_upper_bound
 from app.harness.agent_loop.trace import atomic_json, canonical, digest
 from app.harness.llm.provider_base import Message
@@ -182,11 +184,12 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
                 reduce_unit(i, 2, 'offload_with_original')
     packed = [m for unit in units for m in unit]
     used = cost()
-    if used > budget:
-        required = sum(token_upper_bound(unit) for i, unit in enumerate(units) if protected[i])
-        raise ContextBudgetExceeded(f'protected context exceeds input budget ({used}>{budget}); '
-            f'protected={required}, tool_schema={schema_size}, trigger={policy["trigger_percent"]}%, '
-            f'target={target}; compression exhausted; split task or configure a verified larger model window; no request sent')
+    # Deployment policy: the input budget is advisory, never a dispatch blocker.
+    # The provider enforces the real model window and fails explicitly there.
+    over_budget = used > budget
+    if over_budget:
+        logger.warning('context exceeds advisory input budget (used={used}>{budget}); '
+                       'dispatching full protected context anyway', used=used, budget=budget)
     components: dict[str, int] = {'tools_schema': schema_size}
     segments = []
     for i, (unit, descriptor) in enumerate(zip(units, descriptors)):
@@ -202,7 +205,8 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
                 'target_percent': policy['target_percent'],
                 'compression_order': ['exact_duplicate', 'tool', 'history', 'code', 'background', 'upstream'],
                 'compression_method': 'reversible_excerpt_and_offload',
-                'target_reached': used <= target, 'decisions': decisions, 'segments': segments,
+                'target_reached': used <= target, 'over_budget_allowed': over_budget,
+                'decisions': decisions, 'segments': segments,
                 'components': components, 'profile': role_profile(policy, agent),
                 'state': {'version': 3, 'levels': levels, 'source_units': keys},
                 'messages_sha256': digest([m.to_wire() for m in packed]),

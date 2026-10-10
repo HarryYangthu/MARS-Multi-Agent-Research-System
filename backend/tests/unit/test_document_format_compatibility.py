@@ -14,7 +14,7 @@ from app.harness.agent_loop.protocol import parse_review
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.provider_base import Completion, ToolCall
 from app.harness.schema.frontmatter_parser import dumps, parse
-from backend.tests.unit.test_idea_protocol import proposal
+from tests.unit.test_idea_protocol import proposal
 
 
 def submitted(arguments: str) -> dict[str, Any]:

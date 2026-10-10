@@ -731,6 +731,7 @@ export type ProjectSummary = {
   repo_exists: boolean;
   repo_read_only?: boolean;
   repo_role?: string;
+  baseline_repo_path?: string;
 };
 
 export type EventEntry = {
@@ -2263,6 +2264,58 @@ export async function dataPipelineAction(project: string, job: string, action: "
 }
 export function dataPipelineArtifact(project: string, job: string, name: string): string {
   return `${pipelineUrl(project)}/${encodeURIComponent(job)}/files/${encodeURIComponent(name)}`;
+}
+
+// ------------------------------------------------------------- experiments
+export type ExperimentRun = { run_id: string; experiment_id: string; task: string; entrypoint: string; created_at: string };
+export type Experiment = {
+  id: string;
+  project: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  run_count: number;
+  latest_run_id: string | null;
+  latest_run_created_at: string | null;
+};
+export async function listProjectExperiments(project: string, signal?: AbortSignal): Promise<Experiment[]> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/experiments`, { signal, cache: "no-store" }));
+}
+export async function createProjectExperiment(project: string, name: string, description = ""): Promise<Experiment> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/experiments`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description }),
+  }));
+}
+export async function getProjectExperimentRuns(project: string, experimentId: string, signal?: AbortSignal): Promise<ExperimentRun[]> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/experiments/${encodeURIComponent(experimentId)}/runs`, { signal, cache: "no-store" }));
+}
+
+// --------------------------------------------------------------- ainative
+export type AinativeCheck = { name: string; label: string; passed: boolean };
+export type AinativeDetection = { repo_path: string; is_native: boolean; checks: AinativeCheck[] };
+export type AinativeStep = { name: string; status: string; detail: string };
+export type AinativeJob = {
+  id: string;
+  project: string;
+  status: string;
+  created_at: string;
+  step: string;
+  error: string;
+  baseline_repo: string;
+  repo_path: string;
+  detection: AinativeDetection;
+  steps: AinativeStep[];
+};
+export type AinativeStatus = { project: string; has_job: boolean; job?: AinativeJob; detection: AinativeDetection };
+export async function detectAinative(project: string): Promise<AinativeDetection> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/ainative/detect`, { method: "POST" }));
+}
+export async function startAinativeGeneration(project: string): Promise<{ skipped: boolean; reason?: string; detection: AinativeDetection; job?: AinativeJob }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/ainative/generate`, { method: "POST" }));
+}
+export async function getAinativeStatus(project: string, signal?: AbortSignal): Promise<AinativeStatus> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/ainative/status`, { signal, cache: "no-store" }));
 }
 
 // ---------------------------------------------------- project execution config

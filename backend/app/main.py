@@ -19,6 +19,7 @@ from app.agents.idea.service_agent import ServiceIdeaAgent
 from app.agents.idea.focused_agent import FocusedIdeaAgent
 from app.agents.writing.agent import WritingAgent
 from app.api import agents as agents_api
+from app.api import ainative as ainative_api
 from app.api import artifacts as artifacts_api
 from app.api import chat as chat_api
 from app.api import capabilities as capabilities_api
@@ -26,11 +27,12 @@ from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
 from app.api import data_pipeline as data_pipeline_api
-from app.api import execution_config as execution_config_api
 from app.api import diagnoses as diagnoses_api
 from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
+from app.api import execution_config as execution_config_api
+from app.api import experiments as experiments_api
 from app.api import execution as execution_api
 from app.api import tensorboard as tensorboard_api
 from app.bridge.tensorboard_service import shutdown_tensorboard
@@ -170,7 +172,6 @@ def create_app() -> FastAPI:
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
     app.include_router(data_pipeline_api.router)
-    app.include_router(execution_config_api.router)
     app.include_router(diagnoses_api.router)
     app.include_router(discovery_api.router)
     app.include_router(agents_api.router)
@@ -185,6 +186,9 @@ def create_app() -> FastAPI:
     app.include_router(tools_api.router)
     app.include_router(tools_api.run_router)
     app.include_router(projects_api.router)
+    app.include_router(experiments_api.router)
+    app.include_router(ainative_api.router)
+    app.include_router(execution_config_api.router)
     app.include_router(readiness_api.router)
     app.include_router(runtime_api.router)
     app.include_router(config_api.router)

@@ -6,14 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from app.bridge.orchestrator import Orchestrator, RunSession
 from app.bridge.run_recovery import recovery_status
 from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
 from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
-from backend.tests.unit.test_run_recovery import checkpoint, session_at
+from tests.unit.test_run_recovery import checkpoint, session_at
 
 
-def stopped_session(root: Path):
+def stopped_session(root: Path) -> tuple[Orchestrator, RunSession]:
     orch, session = session_at(root)
     session.termination = {"type": "cancelled", "scope": "owned_async_tasks",
                            "cleanup_complete": True, "interrupted_nodes": ["idea"]}
@@ -33,6 +34,7 @@ def test_clean_stopped_draft_offers_new_attempt_only(tmp_path: Path) -> None:
 @pytest.mark.parametrize("change", ["cleanup", "node", "tool"])
 def test_ambiguous_stop_is_blocked(tmp_path: Path, change: str) -> None:
     orch, session = stopped_session(tmp_path)
+    assert session.termination is not None
     if change == "cleanup":
         session.termination["cleanup_complete"] = False
     elif change == "node":

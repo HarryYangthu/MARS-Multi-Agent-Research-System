@@ -14,9 +14,9 @@ from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_re
 
 def _failure_metadata() -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     correlation = {key: key for key in ('invocation_id', 'node_id', 'task_id', 'parent_task_id', 'trace_id')}
-    state = {'status': 'model_error', 'pending': 'model', 'next_phase': 'reflect',
+    state: dict[str, Any] = {'status': 'model_error', 'pending': 'model', 'next_phase': 'reflect',
              'last_model_error': None, 'counts': {'model_requests': 1}, 'correlation': correlation}
-    events = [
+    events: list[dict[str, Any]] = [
         {'kind': 'model_request', 'provider': 'zhipu', 'model': 'contract-input', 'phase': 'reflect',
          'request': 1, 'event_seq': 1, 'time': '2026-10-07T00:00:00+00:00', 'correlation': correlation},
         {'kind': 'sdk_attempt_started', 'attempt': 1, 'request': 1, 'event_seq': 2,
@@ -27,7 +27,7 @@ def _failure_metadata() -> tuple[dict[str, Any], list[dict[str, Any]], dict[str,
         {'kind': 'model_error', 'error_type': 'RateLimitError', 'reason': None, 'event_seq': 4,
          'time': '2026-10-07T00:00:03+00:00', 'correlation': correlation},
     ]
-    ledger = {'schema': 'runtime.model_budget.v1', 'requests': {'request1': {
+    ledger: dict[str, Any] = {'schema': 'runtime.model_budget.v1', 'requests': {'request1': {
         'status': 'failed', 'attempts_complete': True, 'observed_attempts': 1, 'charged_attempts': 1,
         'provider': 'zhipu', 'model': 'contract-input', 'correlation': correlation,
         'started_at': 1791331200.5, 'finished_at': 1791331202.5}}}

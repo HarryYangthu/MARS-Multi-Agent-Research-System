@@ -236,7 +236,8 @@ class ArtifactStore:
                 errors = experiment_errors(result.metadata)
             elif result.schema_id == 'code_spec.v1':
                 plan = self.run.root / 'experiment/experiment_plan.approved.md'
-                from app.execution.handoff_validation import coding_handoff_errors, execution_delivery_required, experiment_plan_required
+                from app.harness.tools.execution.handoff import coding_handoff_errors
+                from app.storage.artifact_handoff import execution_delivery_required, experiment_plan_required
                 if plan.is_file() or 'execution_jobs' in result.metadata or execution_delivery_required(self.run, 'coding'):
                     errors = coding_handoff_errors(plan.read_text() if plan.is_file() else '', result.metadata,
                         project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'))
@@ -245,7 +246,7 @@ class ArtifactStore:
                 coding = self.run.root / 'coding/code_spec.approved.md'
                 if coding.is_file():
                     from app.harness.schema.experiment_contract import delivery_execution_errors, document_metadata
-                    from app.execution.handoff_validation import experiment_plan_required
+                    from app.storage.artifact_handoff import experiment_plan_required
                     if plan.is_file() or 'execution_jobs' in document_metadata(coding.read_text()):
                         errors = delivery_execution_errors(plan.read_text() if plan.is_file() else '',
                             coding.read_text(), result.metadata, project=self.run.project,
