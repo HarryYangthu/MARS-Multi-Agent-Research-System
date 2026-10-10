@@ -29,6 +29,7 @@ class ProjectSummary(BaseModel):
     repo_exists: bool = False
     repo_read_only: bool = False
     repo_role: str = ""
+    baseline_repo_path: str = ""
     pack_version: str | None = None
     contract_version: Literal["project_pack.v1"] | None = None
     capabilities: list[str] = Field(default_factory=list)
@@ -72,6 +73,7 @@ def _summary(project_dir: Path, name: str = "") -> ProjectSummary:
         repo_exists=bool(raw_path) and abs_path.exists(),
         repo_read_only=bool(rl.get("read_only", False)),
         repo_role=str(rl.get("repo_role", "")),
+        baseline_repo_path=str(rl.get("baseline_repo_path", "")),
         folder_path=str(project_dir.parent) if project_dir.name == ".mars" else str(project_dir),
         project_type="folder" if project_dir.name == ".mars" else "configured",
     )

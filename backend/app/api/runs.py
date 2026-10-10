@@ -10,6 +10,7 @@ from app.api.dependencies import existing_orchestrator, get_orchestrator, get_ru
 from app.bridge.orchestrator import RunRequest, RunSession
 from app.bridge.idea_input_context import IdeaRequirements, validate_idea_context
 from app.bridge.run_observability import build_run_observability
+from app.bridge.research_activity import build_research_activity
 from app.bridge.research_contract_service import ResearchContractIntegrityError
 from app.bridge.research_run_service import (
     CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
@@ -19,6 +20,171 @@ from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+@router.get('/{run_id}/code-repository')
+def get_code_directory(run_id: str, project: str, path: str = '', offset: int = 0,
+                       repository_token: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, offset, repository_token, directory=True)
+
+
+@router.get('/{run_id}/code-repository/file')
+def get_code_file(run_id: str, project: str, path: str, start: int = 0,
+                  repository_token: str = '', version: str = '') -> dict[str, Any]:
+    return _code_repository(run_id, project, path, start, repository_token, directory=False, version=version)
+
+
+def _code_repository(run_id: str, project: str, path: str, offset: int, token: str,
+                     *, directory: bool, version: str = '') -> dict[str, Any]:
+    from app.bridge.code_repository import run_code_repository
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        browser = run_code_repository(run, project=project)
+        result = (browser.directory(path, offset=offset, token=token) if directory
+                  else browser.file(path, start=offset, version=version, token=token))
+        return {'run_id': run_id, 'project': project, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail='代码文件不可读取，请刷新并核对项目配置') from exc
+
+
+@router.get('/{run_id}/code-changes')
+def get_code_changes(run_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project)
+
+
+@router.get('/{run_id}/code-changes/{change_id}')
+def get_code_change(run_id: str, change_id: str, project: str) -> dict[str, Any]:
+    return _code_changes(run_id, project, change_id)
+
+
+def _code_changes(run_id: str, project: str, change_id: str | None = None) -> dict[str, Any]:
+    from app.bridge.completed_code_changes import completed_code_changes as code_changes
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    try:
+        return code_changes(run, project=project, change_id=change_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='代码改动记录无法校验，请核对项目及记录。') from exc
+
+
+class RecoveryPayload(BaseModel):
+    project: str
+    action: Literal['resume', 'retry']
+    node: str
+    token: str = Field(min_length=1)
+
+
+class ExecutionConfirmationPayload(BaseModel):
+    project: str
+    token: str = Field(min_length=64, max_length=64, pattern='^[0-9a-f]+$')
+
+
+def _execution_configuration(run_id: str, project: str, *, include_hidden: bool = False) -> tuple[RunSession, dict[str, Any]]:
+    from app.bridge.execution_confirmation import execution_preview
+    from app.bridge.node_key import parse_node_key
+    from app.harness.runtime.state_machine import NodeState
+    session = _execution_session(run_id)
+    if session.run.project != project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目，请重新打开对应对话。')
+    nodes = [key for key in session.graph.nodes if parse_node_key(key).stage == 'execution']
+    if not nodes:
+        return session, {'visible': False}
+    node = max(nodes, key=lambda key: parse_node_key(key).attempt)
+    state = session.graph.state(node)
+    coding = [key for key in session.graph.nodes if parse_node_key(key).stage == 'coding']
+    visible = not coding or session.graph.state(max(coding, key=lambda key: parse_node_key(key).attempt)) in {
+        NodeState.DONE, NodeState.SKIPPED}
+    visible = visible and state != NodeState.SKIPPED
+    if not visible and not include_hidden:
+        return session, {'visible': False}
+    if state == NodeState.DONE:
+        from app.execution.job_journal import job_states
+        return session, {'visible': visible, 'state': state.value, 'run_id': run_id, 'project': project,
+            'node': node, 'runtime_mode': 'deterministic', 'token': '', 'launch_ready': False,
+            'can_confirm': False, 'confirmed': True, 'jobs': job_states(session.run.root)}
+    try:
+        view = execution_preview(session.run, node)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail='仿真配置无法核验，请检查项目配置与任务记录。') from exc
+    return session, {**view, 'visible': visible,
+        'state': state.value, 'launch_ready': state == NodeState.APPROVED,
+        'can_confirm': state == NodeState.APPROVED and not view['blockers'] and not session.read_only}
+
+
+@router.get('/{run_id}/execution-configuration')
+def get_execution_configuration(run_id: str, project: str) -> dict[str, Any]:
+    return _execution_configuration(run_id, project)[1]
+
+
+class ExecutionBoundaryPayload(BaseModel):
+    project: str
+    stop_after_execution: bool
+
+
+@router.post('/{run_id}/execution-boundary')
+def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
+    session = _execution_session(run_id)
+    if session.run.project != payload.project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目。')
+    try:
+        get_orchestrator().set_stage_limit(run_id, stop_after='execution' if payload.stop_after_execution else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _execution_configuration(run_id, payload.project)[1]
+
+
+@router.post('/{run_id}/execution-configuration/confirm')
+async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirmationPayload) -> dict[str, Any]:
+    import asyncio
+    from app.bridge.execution_confirmation import save_confirmation
+    session, view = await asyncio.to_thread(_execution_configuration, run_id, payload.project, include_hidden=True)
+    if view.get('token') != payload.token:
+        raise HTTPException(status_code=409, detail='配置或代码已变化，请重新核对；尚未启动新的仿真。')
+    if view.get('confirmed') and view.get('state') in {'running', 'done'}:
+        return {'ok': True, 'confirmed': True, 'status': 'already_started', 'run_id': run_id}
+    if not view.get('can_confirm'):
+        raise HTTPException(status_code=409, detail='当前配置还不可启动：' + '；'.join(view.get('blockers', [])))
+    try:
+        receipt = await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail='配置未确认，请刷新并核对配置变化。') from exc
+    if not receipt['created']:
+        return {'ok': True, 'confirmed': True, 'status': 'already_confirmed', 'run_id': run_id}
+    result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')
+    return {**result, 'confirmed': True}
+
+
+@router.get('/{run_id}/recovery')
+async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.run_recovery import recovery_status
+    try:
+        return recovery_status(get_orchestrator(), run_id, project=project)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在，请打开任务详情核对。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请打开任务详情核对。') from exc
+
+
+@router.post('/{run_id}/recovery')
+async def post_recovery(run_id: str, payload: RecoveryPayload) -> dict[str, Any]:
+    from app.bridge.run_recovery import recover_run
+    try:
+        result = await recover_run(get_orchestrator(), run_id, project=payload.project,
+                                  action=payload.action, node=payload.node, token=payload.token)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='任务或执行记录不存在。') from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail='恢复记录无法校验，请核对任务详情；没有自动重试。') from exc
+    if not result.get('ok'):
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 class CreateRunPayload(BaseModel):
@@ -46,6 +212,7 @@ class CreateRunPayload(BaseModel):
     execution_context: dict[str, str] = Field(default_factory=dict)
     evaluation_policy: dict[str, Any] | None = None
     selected_skills_by_agent: dict[str, list[str]] = Field(default_factory=dict)
+    experiment_id: str = Field(default="", max_length=64)
 
     @field_validator("idea_mode", mode="before")
     @classmethod
@@ -85,6 +252,7 @@ class RunSummary(BaseModel):
     task: str
     entrypoint: str
     created_at: str
+    experiment_id: str = ""
 
 
 class TrashRunSummary(RunSummary):
@@ -107,6 +275,7 @@ class RunDetail(RunSummary):
 
 class RetryAgentPayload(BaseModel):
     reason: str = ""
+    restart_stopped: bool = False
 
 
 def _ensure_active_run(run_id: str) -> None:
@@ -152,6 +321,31 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         selection=payload.data_source,
         project=payload.project,
     )
+    # Project execution target: selecting GPU must never silently fall back to
+    # local simulation. Unmet prerequisites or a non-remote runtime block the
+    # run here with the exact reasons instead of starting a local replacement.
+    from app.bridge.project_execution_config import execution_config_status
+    try:
+        execution_status = execution_config_status(payload.project)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="项目执行配置无法核对，请检查项目配置；尚未创建研究任务。") from exc
+    if execution_status["device"] == "remote_gpu":
+        blockers = [*execution_status["missing"], *execution_status["findings"]]
+        if blockers:
+            raise HTTPException(status_code=422, detail={
+                "code": "gpu_execution_not_ready",
+                "message": "项目已配置使用 GPU，但远端执行前置条件未满足；未发起本地仿真。",
+                "missing": execution_status["missing"],
+                "findings": execution_status["findings"]})
+        if not execution_status["remote_capable_runtime"]:
+            raise HTTPException(status_code=422, detail={
+                "code": "gpu_runtime_not_selected",
+                "message": "项目已配置使用 GPU，但当前执行后端未启用 remote_gpu；未发起本地仿真。请先启用远端 GPU 执行后端。",
+                "runtime_backend": execution_status["runtime_backend"]})
+        remote = execution_status.get("remote_gpu", {})
+        context = dict(payload.execution_context or {})
+        context["execution.target"] = f"remote_gpu@{remote.get('host', '')}"
+        payload = payload.model_copy(update={"execution_context": context})
     orch = get_orchestrator()
     request_extra: dict[str, Any] = payload.idea_request_extra()
     if payload.idea_mode is not None:
@@ -166,6 +360,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         request_extra["evaluation_policy"] = dict(payload.evaluation_policy)
     if payload.selected_skills_by_agent:
         request_extra["selected_skills_by_agent"] = dict(payload.selected_skills_by_agent)
+    if payload.experiment_id:
+        request_extra["experiment_id"] = payload.experiment_id
     request = RunRequest(
         task=payload.task,
         project=payload.project,
@@ -251,9 +447,10 @@ def _resolve_data_source_selection(
 
 
 @router.get("", response_model=list[RunSummary])
-async def list_runs(project: str = "") -> list[RunSummary]:
+async def list_runs(project: str = "", experiment: str = "") -> list[RunSummary]:
     store = get_run_store()
     project_filter = project.strip()
+    experiment_filter = experiment.strip()
     return [
         RunSummary(
             run_id=r.run_id,
@@ -261,9 +458,11 @@ async def list_runs(project: str = "") -> list[RunSummary]:
             task=r.task,
             entrypoint=r.entrypoint,
             created_at=r.created_at,
+            experiment_id=str((r.meta or {}).get("experiment_id", "") or ""),
         )
         for r in store.list()
-        if not project_filter or r.project == project_filter
+        if (not project_filter or r.project == project_filter)
+        and (not experiment_filter or str((r.meta or {}).get("experiment_id", "") or "") == experiment_filter)
     ]
 
 
@@ -363,6 +562,7 @@ async def restore_run(run_id: str) -> RunSummary:
         task=restored.task,
         entrypoint=restored.entrypoint,
         created_at=restored.created_at,
+        experiment_id=str((restored.meta or {}).get("experiment_id", "") or ""),
     )
 
 
@@ -375,6 +575,14 @@ async def permanently_delete_run(run_id: str) -> None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="run not found in trash") from exc
+
+
+@router.get("/{run_id}/activity")
+def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return build_research_activity(run, limit=max(1, min(limit, 500)))
 
 
 @router.get("/{run_id}/observability")
@@ -493,6 +701,7 @@ async def retry_agent(
             run_id=run_id,
             agent=agent,
             reason=reason,
+            restart_stopped=payload.restart_stopped,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc

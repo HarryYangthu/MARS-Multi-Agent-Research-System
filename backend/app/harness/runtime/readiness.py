@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from app.harness.project_workspace import project_root
+from app.harness.runtime.git_runtime import GitRuntimeError, resolve_git
 from app.harness.llm.model_registry import (
     available_providers,
     list_agent_configs,
@@ -85,6 +86,7 @@ def check_readiness(*, project: str | None = None) -> ReadinessReport:
     settings = get_settings()
     project_name = project or settings.mars_default_project
     checks = [
+        check_git_readiness(),
         _check_llm_providers(),
         _check_project_repo(project_name),
         _check_schema_templates(),
@@ -108,10 +110,24 @@ def check_readiness(*, project: str | None = None) -> ReadinessReport:
 def assert_ready_for_run(*, project: str | None = None) -> None:
     settings = get_settings()
     if not settings.is_production:
+        check = check_git_readiness()
+        if not check.ready:
+            raise GitRuntimeError(check.message, str(check.details["code"]))
         return
     report = check_readiness(project=project)
     if not report.ready:
         raise ProductionReadinessError(report)
+
+
+def check_git_readiness() -> ReadinessCheck:
+    try:
+        runtime = resolve_git()
+    except GitRuntimeError as exc:
+        return ReadinessCheck(name="git_runtime", ready=False, severity="blocker", message=str(exc),
+                              details={"code": exc.reason["code"]})
+    return ReadinessCheck(name="git_runtime", ready=True, severity="info", message="Git 已通过可用性检查",
+                          details={"executable": runtime.executable, "version": runtime.version,
+                                   "source": runtime.source})
 
 
 def _check_llm_providers() -> ReadinessCheck:
@@ -122,7 +138,7 @@ def _check_llm_providers() -> ReadinessCheck:
     mock_requested: list[str] = []
 
     for cfg in list_agent_configs():
-        if not cfg.enabled:
+        if not cfg.enabled or cfg.raw.get("runtime_mode") == "deterministic":
             continue
         provider = cfg.model_provider
         required.add(provider)

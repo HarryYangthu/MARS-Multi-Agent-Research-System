@@ -165,16 +165,20 @@ class TensorBoardManager:
         self.activations.clear()
 
 
-_manager: TensorBoardManager | None = None
+_managers: dict[asyncio.AbstractEventLoop, TensorBoardManager] = {}
 
 
 def get_tensorboard_manager() -> TensorBoardManager:
-    global _manager
-    if _manager is None:
-        _manager = TensorBoardManager()
-    return _manager
+    # Subprocess transports and locks belong to the loop that created them.
+    # Separate application lifespans must not await or terminate each other's
+    # TensorBoard sessions during shutdown.
+    loop = asyncio.get_running_loop()
+    if loop not in _managers:
+        _managers[loop] = TensorBoardManager()
+    return _managers[loop]
 
 
 async def shutdown_tensorboard() -> None:
-    if _manager is not None:
-        await _manager.close()
+    manager = _managers.pop(asyncio.get_running_loop(), None)
+    if manager is not None:
+        await manager.close()

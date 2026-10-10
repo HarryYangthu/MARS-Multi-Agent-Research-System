@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator
 from app.harness.agent_loop import AgentLoopExecutor, AgentLoopPolicy, LoopInput, NativeAgentLoop
 from app.harness.agent_loop.executor import ProgressSink
 from app.harness.agent_loop.stop import StopCondition
+from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import guarded_complete, run_resource_scope
@@ -36,6 +37,7 @@ class RunRequest:
     extra: dict[str, Any] = field(default_factory=dict)
     progress_sink: ProgressSink | None = field(default=None, repr=False, compare=False)
     runtime: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    candidate_validator: Callable[[str], list[str]] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -292,7 +294,7 @@ class BaseAgent(ABC):
                 raise ValueError("Agent context does not belong to its bound project scope")
             root = _request_run_root(request)
             request.extra["run_root"] = str(root)
-            with run_resource_scope(root):
+            with run_resource_scope(root, completion_driven=self.loop_policy.completion_driven):
                 artifact = await self.draft(request, context)
             result = await self.validate_output(artifact)
             if not result.valid:
@@ -342,7 +344,7 @@ class BaseAgent(ABC):
             await provider.close()
 
     def _messages_for_context(self, request: RunRequest, context: ContextPack, *,
-                              purpose: str) -> list[Message]:
+                              purpose: str, structured_delivery: bool = False) -> list[Message]:
         schema_path = repo_root() / "backend/app/harness/schema/schemas" / (self.output_schema + ".json")
         schema = json.loads(schema_path.read_text())
         output_instruction = (
@@ -353,7 +355,7 @@ class BaseAgent(ABC):
             "and final.body as Markdown. The host serializes the artifact's YAML frontmatter. JSON Schema:\n"
         )
         schema_instruction = output_instruction + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
-        if self.loop_policy.protocol == "native_tools" and self.native_structured_delivery:
+        if self.loop_policy.protocol == "native_tools" and (self.native_structured_delivery or structured_delivery):
             schema_instruction = (
                 "Submit the complete candidate with mars_submit_document. Its metadata argument must match "
                 + self.output_schema + ", whose JSON Schema is supplied in that function's parameters. "
@@ -406,6 +408,8 @@ class BaseAgent(ABC):
             if submission_schema is not None:
                 errors.extend("/" + "/".join(str(p) for p in error.absolute_path) + ": " + error.message
                               for error in Draft202012Validator(submission_schema).iter_errors(validation.metadata))
+            if request.candidate_validator is not None:
+                errors.extend(request.candidate_validator(text))
         selection = request.runtime.get("skill_selection")
         if selection is not None:
             from app.harness.skills import skill_acceptance_errors
@@ -461,6 +465,9 @@ class BaseAgent(ABC):
     def loop_stop_condition(self, request: RunRequest) -> StopCondition | None:
         return None
 
+    def loop_revision_seed(self, request: RunRequest, context: ContextPack) -> RevisionSeed | None:
+        return None
+
     def loop_stop_contract_id(self, request: RunRequest) -> str | None:
         return None
 
@@ -472,7 +479,9 @@ class BaseAgent(ABC):
         return None
 
     async def _draft_via_llm(self, request: RunRequest, context: ContextPack, *,
-                             debate_role: str | None = None) -> Artifact:
+                             debate_role: str | None = None,
+                             executor: AgentLoopExecutor | None = None,
+                             structured_schema: dict[str, Any] | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext
         from app.harness.tools.config import tool_config
         from app.harness.agent_loop.review import ExternalReview
@@ -516,8 +525,8 @@ class BaseAgent(ABC):
         except Exception:
             await provider.close()
             raise
-        result = await self._executor.run(LoopInput(
-            messages=self._messages_for_context(request, context, purpose="loop"),
+        result = await (executor or self._executor).run(LoopInput(
+            messages=self._messages_for_context(request, context, purpose="loop", structured_delivery=structured_schema is not None),
             provider=provider, config=config, registry=registry,
             review_provider=review[0] if review else None, review_config=review[1] if review else None,
             tool_context=ToolContext(run_id=str(request.extra.get("run_id", run_root.name)),
@@ -531,7 +540,8 @@ class BaseAgent(ABC):
             required_review_tools=self.required_review_tools(request),
             stop_condition=self.loop_stop_condition(request),
             stop_contract_id=self.loop_stop_contract_id(request),
-            final_schema=self.submission_schema(request),
+            final_schema=structured_schema or self.submission_schema(request),
+            revision_seed=self.loop_revision_seed(request, context),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))
@@ -539,6 +549,13 @@ class BaseAgent(ABC):
         request.runtime["observations"] = result.observations
         context.metadata["reflection_accepted"] = result.reflection_accepted
         if result.status != "passed":
+            if result.status == "budget_exhausted" and result.resource_error:
+                from app.harness.llm.accounting import ResourceBudgetError
+                raise ResourceBudgetError(result.resource_error)
+            from app.harness.llm.failure_hint import checkpoint_failure_hint
+            hint = checkpoint_failure_hint(trace_root, status=result.status)
+            if hint:
+                raise RuntimeError(f"{hint} evidence: {trace_root}")
             raise RuntimeError(f"{self.name} loop {result.status}; evidence: {trace_root}")
         return self._artifact_from_completion(Completion(text=result.text, provider=config.provider,
                                                          model=config.model, debate_role=debate_role))

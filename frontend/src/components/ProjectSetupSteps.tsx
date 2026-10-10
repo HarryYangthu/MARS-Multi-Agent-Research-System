@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { OnboardingModelSetup } from "./OnboardingModelSetup";
+import { ProjectDataPipeline } from "./ProjectDataPipeline";
+import { ProjectGpuConfig } from "./ProjectGpuConfig";
 import { ProjectCodeFolder } from "./ProjectCodeFolder";
 import { ProjectContextFiles } from "./ProjectContextFiles";
 import { uploadProjectBackground, type ProjectSummary } from "@/lib/api";
 
 const BUTTON = "rounded-lg border border-mars-border px-4 py-2 text-sm hover:bg-mars-panel2 disabled:opacity-40";
-const STEPS = ["项目文件夹", "配置 API", "代码与背景", "完成"];
+const STEPS = ["项目文件夹", "模型连接", "代码与资料", "研究数据", "执行环境（可选）", "完成"];
 
 export function ProjectSetupSteps({ project, onDone, onBusy }: {
   project: ProjectSummary;
@@ -40,11 +42,21 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
   }
 
   return <div className="mt-4 space-y-4">
-    <ol aria-label="新建项目步骤" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-      {STEPS.map((title, index) => <li key={title} aria-current={index === step ? "step" : undefined} className={`rounded-lg border px-3 py-2 ${index === step ? "border-indigo-400 bg-indigo-500/10 text-indigo-100" : "border-mars-border text-slate-400"}`}>{index === 0 ? "✓" : index + 1} {title}</li>)}
+    <ol aria-label="新建项目步骤" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
+      {STEPS.map((title, index) => <li key={title}>
+        <button type="button" aria-current={index === step ? "step" : undefined} disabled={busy}
+          onClick={() => setStep(index)}
+          className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${index === step ? "border-indigo-400 bg-indigo-500/10 text-indigo-100" : "border-mars-border text-slate-400 hover:bg-mars-panel2 hover:text-slate-200"}`}>
+          {index === 0 ? "✓" : index + 1} {title}
+        </button>
+      </li>)}
     </ol>
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs leading-5"><span className="shrink-0 text-slate-500">项目目录</span><span className="min-w-0 break-all text-slate-300">{project.folder_path || project.repo_path}</span></div>
-    {step !== 2 ? <h3 className="text-base font-semibold">{step === 3 ? "项目已创建" : STEPS[step]}</h3> : null}
+    {step === 0 ? <div className="space-y-2 text-sm leading-6 text-slate-400">
+      <p>项目文件夹在「新建项目 / 打开文件夹」时已选定；项目元数据保存在目录内的 .mars/ 中，背景资料与研究记录都不会写入基线代码仓。</p>
+      <p>顶部步骤条可以随时点击跳转，已保存的内容会保留。</p>
+    </div> : null}
+    {step !== 2 ? <h3 className="text-base font-semibold">{step === 5 ? "项目已创建" : STEPS[step]}</h3> : null}
     <div hidden={step !== 1}><OnboardingModelSetup onStatus={setApiSaved} onBusy={setModelBusy} /></div>
     <div hidden={step !== 2} className="space-y-3">
       {project.project_type === "folder" ? <ProjectCodeFolder project={project} onBusy={setCodeBusy} /> : null}
@@ -55,14 +67,16 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
       {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
       <ProjectContextFiles key={revision} project={project.name} />
     </div>
-    {step === 3 ? <div className="space-y-4 text-sm leading-6">
+    {step === 3 ? <ProjectDataPipeline key={project.name} project={project.name} /> : null}
+    {step === 4 ? <div className="space-y-4"><p className="rounded-lg border border-mars-border p-4 text-sm text-slate-400">在本机执行可跳过此步骤。使用远程 GPU 时再配置 SSH、代码和数据路径，仿真启动前还会再次核对。</p><ProjectGpuConfig key={project.name} project={project.name} /></div> : null}
+    {step === 5 ? <div className="space-y-4 text-sm leading-6">
       <p className="text-slate-400">{apiSaved ? "已保存模型配置。" : "API 可稍后在模型连接设置中配置。"}代码和背景准备完成后，再在对话中描述本次研究目标。</p>
       <p className="text-slate-400">关闭后，仍可从此项目的「项目配置」继续操作。</p>
-      <p className="text-xs text-amber-200">当前可保存研究任务，完整研究启动尚未开放。</p>
+      <p className="text-sm text-emerald-200">准备就绪后，从项目卡片点击「启动研究」，直接描述研究目标即可。</p>
     </div> : null}
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-mars-border pt-4">
       {step > 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => setStep((value) => value - 1)}>上一步</button> : <span className="text-xs text-slate-500">已保存的内容会保留</span>}
-      <div className="flex flex-wrap gap-2">{step === 3 ? <><button type="button" className={`${BUTTON} bg-mars-accent text-white`} onClick={onDone}>完成</button></> : <>{step === 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => setStep(2)}>稍后配置</button> : null}<button type="button" disabled={busy} className={`${BUTTON} bg-mars-accent text-white`} onClick={() => setStep((value) => value + 1)}>{step === 1 ? "下一步：代码与背景" : "下一步：完成"}</button></>}</div>
+      <div className="flex flex-wrap gap-2">{step === 5 ? <><button type="button" className={`${BUTTON} bg-mars-accent text-white`} onClick={onDone}>完成</button></> : <>{step === 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => setStep(2)}>稍后配置</button> : null}<button type="button" disabled={busy} className={`${BUTTON} bg-mars-accent text-white`} onClick={() => setStep((value) => value + 1)}>{`下一步：${STEPS[step + 1]}`}</button></>}</div>
     </footer>
   </div>;
 }

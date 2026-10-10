@@ -228,6 +228,34 @@ class ArtifactStore:
             result = validate_document(text)
             if not result.valid:
                 raise ArtifactValidationError(result)
+            # Approval is an admission boundary for both humans and agents. Old
+            # documents remain readable; incomplete new approvals cannot advance.
+            errors: list[str] = []
+            if result.schema_id == 'experiment_plan.v1':
+                from app.harness.schema.experiment_contract import experiment_errors
+                errors = experiment_errors(result.metadata)
+            elif result.schema_id == 'code_spec.v1':
+                plan = self.run.root / 'experiment/experiment_plan.approved.md'
+                from app.harness.tools.execution.handoff import coding_handoff_errors
+                from app.storage.artifact_handoff import execution_delivery_required, experiment_plan_required
+                if plan.is_file() or 'execution_jobs' in result.metadata or execution_delivery_required(self.run, 'coding'):
+                    errors = coding_handoff_errors(plan.read_text() if plan.is_file() else '', result.metadata,
+                        project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'))
+            elif result.schema_id == 'run_log.v1' and 'planned_experiments' in result.metadata:
+                plan = self.run.root / 'experiment/experiment_plan.approved.md'
+                coding = self.run.root / 'coding/code_spec.approved.md'
+                if coding.is_file():
+                    from app.harness.schema.experiment_contract import delivery_execution_errors, document_metadata
+                    from app.storage.artifact_handoff import experiment_plan_required
+                    if plan.is_file() or 'execution_jobs' in document_metadata(coding.read_text()):
+                        errors = delivery_execution_errors(plan.read_text() if plan.is_file() else '',
+                            coding.read_text(), result.metadata, project=self.run.project,
+                            plan_required=experiment_plan_required(self.run, 'execution'))
+            if errors:
+                from app.harness.schema.validator import ValidationError
+                result.valid = False
+                result.errors.extend(ValidationError(path='/handoff', message=error) for error in errors)
+                raise ArtifactValidationError(result)
             approved_path = expected.parent / f"{ref.stem}.approved.md"
             records = self._approval_dir(ref.agent_dir, ref.stem)
             existing = sorted(records.glob("*.json")) if records.exists() else []

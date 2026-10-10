@@ -5,8 +5,11 @@ import os
 from pathlib import Path
 from typing import Literal, Mapping
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, PrivateAttr, TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+
+ExecutionBackend = Literal['pim_cpu', 'paper_static', 'local_command', 'docker_command', 'remote_gpu']
 
 def resolve_runtime_root(configured: str, source_root: Path) -> Path:
     """Select an explicitly seeded desktop workspace without reading source secrets."""
@@ -27,7 +30,23 @@ REPO_ROOT = resolve_runtime_root(
 LOCAL_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")
 
 
+def local_service_defaults() -> tuple[str, int, int]:
+    """Share source defaults with the frontend; explicit environment wins."""
+    raw = yaml.safe_load((REPO_ROOT / "configs/local_runtime.yaml").read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("host"), str):
+        raise ValueError("Invalid local runtime configuration")
+    for field_name in ("backend_port", "frontend_port"):
+        value = raw.get(field_name)
+        if type(value) is not int or not 1 <= value <= 65535:
+            raise ValueError("Invalid local runtime port")
+    return raw["host"], raw["backend_port"], raw["frontend_port"]
+
+
+_LOCAL_HOST, _LOCAL_BACKEND_PORT, _LOCAL_FRONTEND_PORT = local_service_defaults()
+
+
 class Settings(BaseSettings):
+    _execution_backend_source: str = PrivateAttr(default='default')
     model_config = SettingsConfigDict(
         env_file=tuple(str(path) for path in LOCAL_ENV_FILES),
         env_file_encoding="utf-8",
@@ -55,9 +74,9 @@ class Settings(BaseSettings):
     chromadb_path: str = str(REPO_ROOT / "knowledge" / ".chromadb")
 
     # === Service ===
-    backend_host: str = "0.0.0.0"
-    backend_port: int = 8000
-    frontend_port: int = 3000
+    backend_host: str = _LOCAL_HOST
+    backend_port: int = _LOCAL_BACKEND_PORT
+    frontend_port: int = _LOCAL_FRONTEND_PORT
     mars_cors_origins: str = "*"
     mars_desktop_session_token: SecretStr = Field(default=SecretStr(""), repr=False)
 
@@ -77,6 +96,7 @@ class Settings(BaseSettings):
     mars_execution_device: Literal["cpu", "gpu"] = "cpu"
     mars_coding_backend: Literal[
         "native_llm",
+        "zcode",
         "opencode",
         "codex",
         "claude_code",
@@ -150,6 +170,10 @@ class Settings(BaseSettings):
         return "default"
 
     @property
+    def execution_backend_source(self) -> str:
+        return self._execution_backend_source
+
+    @property
     def cors_origins(self) -> list[str]:
         raw = self.mars_cors_origins.strip()
         if not raw or raw == "*":
@@ -180,7 +204,21 @@ _settings: Settings | None = None
 def get_settings() -> Settings:
     global _settings
     if _settings is None:
-        _settings = Settings()
+        selected = Settings()
+        if 'mars_execution_backend' in selected.model_fields_set:
+            selected._execution_backend_source = 'environment'
+        else:
+            import yaml
+            configured = env_or_local('MARS_EXECUTION_CONFIG_PATH')
+            path = Path(configured).expanduser() if configured else REPO_ROOT / 'configs/execution.yaml'
+            if not path.is_absolute():
+                path = REPO_ROOT / path
+            raw = yaml.safe_load(path.read_text()) if path.is_file() else {}
+            execution = raw.get('execution', {}) if isinstance(raw, dict) else {}
+            if isinstance(execution, dict) and execution.get('backend') is not None:
+                selected.mars_execution_backend = TypeAdapter(ExecutionBackend).validate_python(execution['backend'])
+                selected._execution_backend_source = 'execution_config'
+        _settings = selected
     return _settings
 
 

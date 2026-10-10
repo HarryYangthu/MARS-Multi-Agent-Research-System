@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.harness.discovery.models import BudgetLimits, BudgetTransaction
+from app.harness.llm.usage_policy import TokenUsageMode, token_usage_mode
 from app.storage.discovery_common import (
     DiscoveryConflictError,
     DiscoveryCorruptionError,
@@ -67,6 +68,7 @@ class BudgetSnapshot(BaseModel):
 
     schema_id: Literal["budget_snapshot.v1"] = "budget_snapshot.v1"
     run_id: str
+    token_usage_mode: TokenUsageMode = 'limited'
     limits: BudgetLimits
     used: BudgetUsage
     remaining: BudgetUsage
@@ -77,6 +79,7 @@ class BudgetLedger:
     """Use immutable transactions as truth and an atomic state file as cache."""
 
     def __init__(self, run_root: Path, *, run_id: str, limits: BudgetLimits) -> None:
+        self.token_mode = token_usage_mode()
         self.paths = DiscoveryPaths(run_root=run_root, run_id=run_id)
         self.limits = limits
         self.budget_root = self.paths.root / "budget"
@@ -242,6 +245,7 @@ class BudgetLedger:
         )
         return BudgetSnapshot(
             run_id=self.paths.run_id,
+            token_usage_mode=self.token_mode,
             limits=self.limits,
             used=used,
             remaining=remaining,
@@ -318,6 +322,8 @@ class BudgetLedger:
             ("api_cost", usage.api_cost, self.limits.api_cost),
         )
         for resource, attempted, limit in checks:
+            if resource == 'llm_tokens' and self.token_mode == 'statistics_only':
+                continue
             if attempted <= limit + 1e-9:
                 continue
             if corruption:

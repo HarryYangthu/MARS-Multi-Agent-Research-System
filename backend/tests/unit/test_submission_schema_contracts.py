@@ -72,6 +72,7 @@ def focused_document(project: str) -> dict[str, Any]:
         "research_context": {"schema": "idea.research_context.v2", "question": "Structure only",
             "selection_principles": ["Schema fixture"], "sources": [{"source_id": "", "title": "Authored fixture",
                 "url": "https://example.org/fixture", "decision": "defer", "reason": "No source was retrieved"}],
+            "stop_status": "evidence_gap", "coverage": [], "method_comparison": [],
             "stop_reason": "This is not research", "open_questions": []},
         "parameter_budget": ledger()}, "body": "Human-authored schema fixture"}
 

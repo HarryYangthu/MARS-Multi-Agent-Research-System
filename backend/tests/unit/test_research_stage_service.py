@@ -55,7 +55,7 @@ def approved(run: RunHandle, *, project: str | None = None) -> ApprovedStageInpu
     store = ArtifactStore(run)
     reference = store.write_metadata(metadata={"schema": "experiment_plan.v1", "project": project or run.project,
         "agent": "experiment", "variables": {"independent": ["scale"], "dependent": ["mse"]},
-        "metrics": {"primary": "mse"}, "ablations": [{"name": "authored plan", "config": {}}],
+        "metrics": {"primary": "mse"}, "ablations": [{"name": "authored_plan", "config": {"seed": 0, "budget_steps": 1}}],
         "estimated_runs": 1}, body="Human-authored and approved plan, not a model or experiment result.",
         expected_schema="experiment_plan.v1")
     store.approve(reference)
@@ -79,6 +79,26 @@ def test_binding_repeated_and_restore_readonly_with_same_task_envelope(tmp_path:
     (tmp_path / "source").rename(tmp_path / "source-gone")
     assert restore_research_stage(run, node_key="coding", ledger=ledger) == task
     assert scope.resolve_file("candidate.py").read_text() == "VALUE = 1\n"
+
+
+def test_writing_skill_admission_is_in_the_sealed_inputs_and_restore_is_readonly(tmp_path: Path) -> None:
+    from app.bridge.report_skill_binding import snapshot_ref
+    run, scope, ledger = scope_fixture(tmp_path)
+    graph = RunGraph()
+    graph.add_node("writing", metadata={"stage": "writing", "attempt": 1})
+    previous = ledger.journal.read()
+    RunStateStore(run).write(graph=graph, request=previous["request"], status="created", expected_revision=previous["revision"])
+    seal_project_scope(run, scope, ledger)
+    task = bind_research_stage(run, node_key="writing", candidate_id="one", ledger=ledger,
+        goal="Actual file tool checks", output_schema="report.v1")
+    skill_path = run.root / snapshot_ref("writing")
+    assert json.loads(skill_path.read_text())["ids"] == []
+    before = files(run.root)
+    assert restore_research_stage(run, node_key="writing", ledger=ledger) == task
+    assert files(run.root) == before
+    skill_path.write_text(skill_path.read_text() + " ")
+    with pytest.raises(ValueError, match="changed"):
+        restore_research_stage(run, node_key="writing", ledger=ledger)
 
 
 def test_missing_lookup_never_installs_table_or_files(tmp_path: Path) -> None:

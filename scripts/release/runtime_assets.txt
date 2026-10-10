@@ -91,3 +91,7 @@ configs/research_defaults.yaml
 configs/results.yaml
 configs/research_jobs.yaml
 configs/research_templates.yaml
+configs/local_runtime.yaml
+configs/data_pipeline.yaml
+configs/git_runtime.yaml
+configs/skills/imported/f7ecc96802d44685b630665fb9ec732f7790a06b5cd51701b5018542bd1226a2/SKILL.md

@@ -38,6 +38,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - CHROMADB_PATH=/app/knowledge/.chromadb
+      - BACKEND_PORT=8000
     env_file:
       - .env
     volumes:
@@ -52,14 +53,17 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: mars-frontend
     depends_on:
       - backend
     ports:
       - "3000:3000"
     environment:
+      - BACKEND_URL=http://backend:8000
+      - FRONTEND_PORT=3000
+      - MARS_HOST=0.0.0.0
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       - NEXT_PUBLIC_WS_URL=ws://localhost:8000
 

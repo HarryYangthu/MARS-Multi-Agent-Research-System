@@ -10,6 +10,7 @@ import yaml
 
 from app.harness.project_workspace import project_root
 from app.harness.runtime.project_scope import ProjectScope, current_project_scope
+from app.harness.tools.git_branch import GitBranch, current_git_branch
 from app.settings import repo_root
 
 
@@ -31,6 +32,7 @@ TEXT_SUFFIXES: frozenset[str] = frozenset(
         ".txt",
         ".yaml",
         ".yml",
+        ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".r", ".jl", ".ps1",
     }
 )
 
@@ -45,6 +47,7 @@ class ProjectRepo:
     protected_paths: tuple[str, ...]
     ignore_patterns: tuple[str, ...]
     scope: ProjectScope | None = None
+    git_branch: GitBranch | None = None
 
 
 def load_project_repo(project: str) -> ProjectRepo:
@@ -66,14 +69,18 @@ def load_project_repo(project: str) -> ProjectRepo:
     else:
         raise ValueError(f"no real repository configured for project {project!r}")
     allowed = _tuple(raw.get("allowed_paths")) or ("",)
+    branch = current_git_branch(project)
+    if branch is not None and root.resolve() != branch.root:
+        raise ValueError("代码工程关联已变化，实验分支授权已停止")
     return ProjectRepo(
         project=project,
         root=root.resolve(),
         repo_mode=str(raw.get("repo_mode", "local_path")),
-        read_only=bool(raw.get("read_only", False)),
+        read_only=bool(raw.get("read_only", False)) and branch is None,
         allowed_paths=allowed,
         protected_paths=_tuple(raw.get("protected_paths")),
         ignore_patterns=_tuple(raw.get("ignore_patterns")),
+        git_branch=branch,
     )
 
 
@@ -85,6 +92,9 @@ def resolve_allowed_path(
     require_text: bool = False,
     for_write: bool = False,
 ) -> Path:
+    if repo.git_branch is not None:
+        if current_git_branch(repo.project) != repo.git_branch:
+            raise ValueError("实验分支授权未绑定到当前执行")
     if repo.scope is not None:
         if current_project_scope(repo.project) != repo.scope:
             raise ValueError("Project repository capability is not bound to this execution")
@@ -96,11 +106,22 @@ def resolve_allowed_path(
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise ValueError("path must be a relative path inside the project repo")
     normalized = rel.as_posix()
+    if repo.git_branch is not None:
+        from app.harness.runtime.project_scope import forbidden_source_path
+        if forbidden_source_path(normalized):
+            raise ValueError("实验分支不能访问 Git 控制文件、凭据或运行配置")
+        if for_write and any(normalized.casefold() == p.rstrip("/").casefold()
+                or normalized.casefold().startswith(p.rstrip("/").casefold() + "/")
+                or fnmatch.fnmatch(normalized.casefold(), p.casefold()) for p in repo.protected_paths if p.strip()):
+            raise ValueError(f"path '{normalized}' is baseline-protected")
     if _ignored(normalized, repo.ignore_patterns):
         raise ValueError(f"path '{normalized}' is ignored by project rules")
     if not _allowed(normalized, repo.allowed_paths):
         raise ValueError(f"path '{normalized}' is outside repo_link.yaml allowed_paths")
     target = (repo.root / rel).resolve()
+    if repo.git_branch is not None:
+        from app.harness.runtime.project_scope import safe_scope_path
+        target = safe_scope_path(repo.root, normalized, must_exist=require_exists)
     if not _is_relative_to(target, repo.root):
         raise ValueError("path escapes the project repo")
     if require_exists and not target.exists():

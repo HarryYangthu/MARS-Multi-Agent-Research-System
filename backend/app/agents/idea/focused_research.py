@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agents.idea.delivery import resolve_pointer
+from app.harness.agent_loop.research_evidence import reading_sources as reading_sources
 
 
 def validate_review_mode(author: tuple[str, str], reviewer: tuple[str, str], mode: object = "cross_model") -> str:
@@ -29,7 +30,8 @@ def research_schema(*, version: int = 1) -> dict[str, Any]:
         source["properties"]["method_pages"] = {"type": "array", "uniqueItems": True,
                                                 "items": {"type": "integer", "minimum": 1}}
         source["allOf"] = [{"if": {"properties": {"decision": {"const": "use"}}},
-                            "then": {"required": ["method_pages"]}}]
+                            "then": {"required": ["method_pages", "method_sections", "method_summary",
+                                                  "transfer", "limitations", "method_spec_ref"]}}]
     return {"type": "object", "required": ["schema", "question", "selection_principles", "sources", "stop_reason", "open_questions"],
             "properties": {"schema": {"const": f"idea.research_context.v{version}"}, "question": text,
                 "selection_principles": {**strings, "minItems": 1},
@@ -37,21 +39,6 @@ def research_schema(*, version: int = 1) -> dict[str, Any]:
                 "stop_reason": text, "open_questions": strings}}
 
 
-def reading_sources(observations: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    result: dict[str, list[dict[str, Any]]] = {}
-    for observation in observations:
-        if observation.get("tool") != "search.fetch_sources":
-            continue
-        output = observation.get("output", {})
-        if not isinstance(output, dict):
-            continue
-        for row in output.get("sources", []):
-            if not isinstance(row, dict) or not row.get("ok") or not row.get("archive_complete"):
-                continue
-            source_id = row.get("source_id")
-            if isinstance(source_id, str) and source_id:
-                result.setdefault(source_id, []).append(row)
-    return result
 
 
 def observed_urls(value: Any) -> set[str]:
@@ -87,15 +74,16 @@ def focused_research_errors(metadata: dict[str, Any], observations: list[dict[st
         if source["decision"] != "use":
             continue
         source_id = source["source_id"]
-        if source_id in adopted:
-            errors.append(prefix + ": duplicate adopted document")
-        adopted.add(source_id)
         rows = readings.get(source_id, [])
         if not rows:
             errors.append(prefix + "/source_id: copy the source_id from successful full-text reading observations; abstracts alone are insufficient")
             continue
+        if source_id in adopted:
+            errors.append(prefix + ": duplicate adopted document")
+        adopted.add(source_id)
         if source["url"] not in observed_urls(rows):
-            errors.append(prefix + "/url: does not belong to this read document; use its returned URL")
+            errors.append(prefix + "/url: does not belong to this read document; copy a returned URL: "
+                          + ", ".join(sorted(observed_urls(rows))))
         for field in ("method_summary", "transfer", "limitations", "method_spec_ref"):
             if not isinstance(source.get(field), str) or not source[field].strip():
                 errors.append(prefix + "/" + field + ": explain the actual method and its transfer")
@@ -191,6 +179,11 @@ def focused_handoff(run_root: Path, proposal_text: str, project: str) -> dict[st
         if (state.get("candidate") == proposal_text and state.get("status") == "passed"
                 and state.get("reflection_accepted") and state.get("reviewed_candidate_sha") == digest(proposal_text)):
             configuration = load_focused_snapshot(run_root, path.parent.name)
+            if configuration.get("research_quality"):
+                from app.agents.idea.literature_quality import quality_errors
+                issues = quality_errors(metadata, state.get("history", []), run_root, configuration["research_quality"])
+                if issues:
+                    raise ValueError("focused handoff research quality failed: " + "; ".join(issues))
             review_receipt = verify_review_trace(path.parent, configuration)
             reviewed = True
     errors = focused_research_errors(metadata, observations, run_root)

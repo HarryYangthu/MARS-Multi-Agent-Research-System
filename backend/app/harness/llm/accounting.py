@@ -24,12 +24,18 @@ from filelock import BaseFileLock, FileLock, Timeout as FileLockTimeout
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, MAX_LLM_RETRIES
 from app.harness.persistence import atomic_write_json, path_lock
 from app.settings import repo_root
+from app.harness.llm.usage_policy import TokenUsageMode, token_usage_mode
 
+_COMPLETION_DRIVEN: ContextVar[bool] = ContextVar("mars_completion_driven", default=False)
 _RUN_ROOT: ContextVar[Path | None] = ContextVar("mars_model_budget_root", default=None)
 
 
 class ResourceBudgetError(RuntimeError):
     """No model request was sent because the run's hard limit was reached."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.reason = {"code": "resource_budget_blocked", "request_sent": False}
 
 
 class ModelConcurrencyBusy(ResourceBudgetError):
@@ -47,13 +53,15 @@ def require_accounted_model_backend(backend: str) -> None:
 
 
 @contextmanager
-def run_resource_scope(run_root: Path) -> Iterator[None]:
+def run_resource_scope(run_root: Path, *, completion_driven: bool = False) -> Iterator[None]:
     # Nested Discovery/Agent work must share its ancestor's quota.
     token = _RUN_ROOT.set(_RUN_ROOT.get() or run_root.resolve())
+    mode_token = _COMPLETION_DRIVEN.set(completion_driven)
     try:
         yield
     finally:
         _RUN_ROOT.reset(token)
+        _COMPLETION_DRIVEN.reset(mode_token)
 
 
 def _canonical(value: Any) -> str:
@@ -95,6 +103,33 @@ def charged_model_attempts(row: Mapping[str, Any]) -> int:
     return int(charged)
 
 
+@dataclass(frozen=True)
+class ModelRequestCapacity:
+    used: int
+    limit: int | None
+    required: int
+
+    @property
+    def available(self) -> bool:
+        return self.limit is None or self.used + self.required <= self.limit
+
+    def require(self) -> None:
+        if not self.available:
+            raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts "
+                f"(used={self.used}, limit={self.limit}, required={self.required})")
+
+
+def model_request_capacity(state: Mapping[str, Any], max_retries: int) -> ModelRequestCapacity:
+    """Admission and recovery use the same worst-case SDK-attempt reservation."""
+    if type(max_retries) is not int:
+        raise ValueError("max_retries must be an integer")
+    return ModelRequestCapacity(
+        used=sum(charged_model_attempts(row) for row in state["requests"].values()),
+        limit=state["configuration"]["limits"]["max_model_requests"],
+        required=min(max(max_retries, 0), MAX_LLM_RETRIES) + 1,
+    )
+
+
 def charged_token_component(row: Mapping[str, Any], component: str) -> int:
     """Legacy rows retain their entire total in each unknown token bucket."""
     if component not in {"input", "output"}:
@@ -117,7 +152,12 @@ def validate_token_components(row: Mapping[str, Any]) -> None:
 
 
 class RunModelBudget:
-    def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None) -> None:
+    def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None,
+                 active_model_time: bool = False, completion_driven: bool | None = None,
+                 token_mode: TokenUsageMode | None = None) -> None:
+        self.token_mode = token_mode or token_usage_mode()
+        self.completion_driven = _COMPLETION_DRIVEN.get() if completion_driven is None else completion_driven
+        self.active_model_time = active_model_time
         self.root = root.resolve()
         self.path = self.root / "resources" / "model_budget.v1.json"
         self.lock_path = self.path.with_name("." + self.path.name + ".lock")
@@ -174,6 +214,34 @@ class RunModelBudget:
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
         return state
+
+    def recovery_snapshot(self) -> dict[str, Any]:
+        """Validate persisted accounting without reconciling or refunding requests."""
+        with path_lock(self.lock_path):
+            return self._read()
+
+    def remaining_seconds(self) -> float:
+        with path_lock(self.lock_path):
+            return self._remaining_seconds(self._read(), time.time())
+
+    def _remaining_seconds(self, state: dict[str, Any], now: float) -> float:
+        # Completion-driven controls local loop counters only. All roles and
+        # inherited tasks obey the same durable run limits, including Coding.
+        limit = float(state['configuration']['limits']['max_elapsed_seconds'])
+        if not self.active_model_time:
+            start = _number(state.get('revision_started_at', state['started_at']), 'budget start time')
+            return max(0.0, limit - (now - start))
+        # Conversations survive overnight. Charge actual model request durations
+        # across all turns, including failed/cancelled calls, not human idle time.
+        # Legacy ledgers already contain these timestamps; no quota is reset.
+        elapsed = 0.0
+        for row in state['requests'].values():
+            start = _number(row.get('started_at'), 'request start time')
+            end = _number(row.get('finished_at', row.get('owner_lost_at', now)), 'request end time')
+            if end < start:
+                raise ResourceBudgetError('invalid request time interval')
+            elapsed += end - start
+        return max(0.0, limit - elapsed)
 
     def begin_revision(self, *, invocation_id: str, reason: str) -> None:
         """Record an explicit fresh execution without refunding previous usage.
@@ -306,17 +374,17 @@ class RunModelBudget:
             if unresolved:
                 raise ResourceReconciliationRequired("unknown model requests require explicit reconciliation: " + ", ".join(unresolved))
             limits = state["configuration"]["limits"]
-            if time.time() - state.get("revision_started_at", state["started_at"]) >= limits["max_elapsed_seconds"]:
+            if self._remaining_seconds(state, time.time()) <= 0:
                 raise ResourceBudgetError("run elapsed-time budget exhausted")
+            if self.active_model_time:
+                state['elapsed_clock'] = 'cumulative_model_activity'
             rows = list(state["requests"].values())
-            if (limits["max_model_requests"] is not None
-                    and sum(charged_model_attempts(row) for row in rows) + attempts > limits["max_model_requests"]):
-                raise ResourceBudgetError("run model-request budget cannot reserve all SDK attempts")
-            if sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
+            model_request_capacity(state, config.max_retries).require()
+            if self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
             for component, key, amount in (("input", "max_input_tokens", reserved_input),
                                            ("output", "max_billed_output_tokens", reserved_output)):
-                if key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
+                if self.token_mode == 'limited' and key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
                     raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
             if limits.get("max_cost") is not None:
                 if cost is None or any(row["charged_cost"] is None for row in rows):
@@ -327,6 +395,8 @@ class RunModelBudget:
                 raise ModelConcurrencyBusy("run model concurrency slots are occupied")
             state["requests"][identifier] = {"status": "in_flight", "started_at": time.time(),
                 "provider": config.provider, "model": config.model, "correlation": dict(correlation),
+                "execution_mode": "completion_driven" if self.completion_driven else "bounded",
+                "token_usage_mode": self.token_mode,
                 "reserved_tokens": reserved_tokens, "charged_tokens": reserved_tokens,
                 "reserved_input_tokens": reserved_input, "charged_input_tokens": reserved_input,
                 "reserved_output_tokens": reserved_output, "charged_output_tokens": reserved_output,
@@ -394,6 +464,7 @@ class RunModelBudget:
 
 async def guarded_complete(provider: LLMProvider, messages: list[Message], config: LLMConfig,
                            *, run_root: Path | None = None,
+                           active_model_time: bool = False,
                            correlation: Mapping[str, Any] | None = None) -> Completion:
     root = _RUN_ROOT.get() or run_root
     if root is None:
@@ -408,7 +479,7 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
         config = bounded_contract_config(scope, config)
         budget = ContractModelBudget(scope, endpoint=provider.base_url)
     else:
-        budget = RunModelBudget(root)
+        budget = RunModelBudget(root, active_model_time=active_model_time)
     while True:
         try:
             reservation = budget.reserve(messages, config, correlation or {})
@@ -451,7 +522,15 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     from dataclasses import replace
     actual = replace(config, attempt_observer=observe)
     try:
-        if scope is None:
+        if isinstance(budget, RunModelBudget) and active_model_time:
+            try:
+                async with asyncio.timeout(budget.remaining_seconds()):
+                    result = await provider.complete(messages, actual)
+            except TimeoutError as exc:
+                if budget.remaining_seconds() <= 0:
+                    raise ResourceBudgetError('run elapsed-time budget exhausted') from exc
+                raise
+        elif scope is None:
             result = await provider.complete(messages, actual)
         else:
             from app.harness.llm.provider_base import llm_call_deadline_seconds

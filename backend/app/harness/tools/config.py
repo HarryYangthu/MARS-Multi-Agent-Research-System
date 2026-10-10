@@ -32,6 +32,7 @@ class ToolConfig:
     mcp_env: tuple[str, ...] = ()
     process_backend: str = "local_process"
     require_isolation: bool = False
+    repeatable_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ def load_tool_configs() -> dict[str, ToolConfig]:
             mcp_env=_str_tuple(cfg.get("mcp_env")),
             process_backend=str(cfg.get("process_backend") or "local_process"),
             require_isolation=bool(cfg.get("require_isolation", False)),
+            repeatable_read=bool(cfg.get("repeatable_read", False)),
         )
     return out
 
@@ -86,7 +88,11 @@ def load_execution_config() -> dict[str, Any]:
     execution = raw.get("execution", {})
     if not isinstance(execution, dict):
         execution = {}
-    execution.setdefault("backend", settings.mars_execution_backend)
+    # Runtime selection has one precedence order; every consumer sees the same
+    # effective backend. Keep the declared value only as configuration provenance.
+    execution['declared_backend'] = execution.get('backend')
+    execution['backend'] = settings.mars_execution_backend
+    execution['backend_source'] = settings.execution_backend_source
     execution.setdefault("max_concurrency", 16)
     execution.setdefault("batch_steps", 120)
     execution.setdefault("command_timeout_seconds", 60)

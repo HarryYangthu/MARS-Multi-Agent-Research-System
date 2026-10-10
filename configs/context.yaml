@@ -127,7 +127,7 @@ runtime_context:
   trigger_percent: 80
   target_percent: 65
   safety_margin: 2048
-  input_budget: 48000
+  input_budget: 128000
   excerpt_chars: 800
   read_chars: 6000
   index_files: 120

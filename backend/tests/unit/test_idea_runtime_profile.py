@@ -15,7 +15,7 @@ import yaml
 from app.agents.base import RunRequest
 from app.agents.idea.agent import IdeaAgent
 from app.agents.idea.runtime_profile import (
-    PROFILE_FILE, SNAPSHOT_FILE, ResolvedIdeaProfile, _Definition, bind_profile_snapshot,
+    PROFILE_FILE, SNAPSHOT_FILE, ResolvedIdeaProfile, _Definition, _overlay, bind_profile_snapshot,
     public_agent_configuration, resolve_idea_profile,
 )
 from app.agents.idea.service_agent import ServiceIdeaAgent
@@ -42,6 +42,26 @@ def test_profile_selection_is_local_explicit_and_baseline_is_default() -> None:
             resolve_idea_profile(invalid)
         with pytest.raises(ValidationError):
             Settings(_env_file=None, mars_idea_runtime_profile=invalid)  # type: ignore[call-arg, arg-type]
+
+
+@pytest.mark.parametrize("version", range(1, 7))
+def test_historical_profiles_keep_disabled_active_time_cap(version: int) -> None:
+    selected = resolve_idea_profile(f"experimental_research_pro_per_insight_v{version}")
+    assert selected is not None
+    for config in (selected.lead, selected.child):
+        assert AgentLoopPolicy.from_mapping(config.raw["loop"]).max_active_seconds == 0
+
+
+def test_active_time_cap_is_optional_without_relaxing_existing_budget_contract() -> None:
+    original = yaml.safe_load((repo_root() / PROFILE_FILE).read_text())["profiles"]["experimental_research_pro_per_insight_v1"]
+    configured = deepcopy(original)
+    configured["lead"]["loop"]["max_active_seconds"] = 120
+    definition = _Definition.model_validate(configured)
+    config = _overlay(get_agent_config("idea"), definition.lead)
+    assert AgentLoopPolicy.from_mapping(config.raw["loop"]).max_active_seconds == 120
+    del configured["lead"]["loop"]["max_model_calls"]
+    with pytest.raises(ValueError, match="every loop setting"):
+        _overlay(get_agent_config("idea"), _Definition.model_validate(configured).lead)
 
 
 def test_resolution_preserves_base_configuration_files_environment_and_product_tools() -> None:

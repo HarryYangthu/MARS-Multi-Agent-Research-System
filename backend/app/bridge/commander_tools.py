@@ -18,6 +18,7 @@ from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.discovery_types import DiscoveryRunSpec
+from app.bridge.commander_code import execute_code_inspection
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
 from app.harness.tools.config import tool_config
@@ -94,6 +95,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
         auto_approve=ctx.session.auto_mode,
+        extra=({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {}),
     )
     rsession = ctx.orchestrator.create_session(request)
     run_id = rsession.run.run_id
@@ -154,6 +156,22 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     states = {k: s.value for k, s in rsession.graph.all_states().items()}
     waiting = [k for k, v in states.items() if v == "waiting_review"]
     return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting}
+
+
+async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.run_recovery import recovery_status
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    return {'ok': True, **recovery_status(ctx.orchestrator, run_id, project=ctx.session.project)}
+
+
+async def _recover_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.run_recovery import recover_run
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    result = await recover_run(ctx.orchestrator, run_id, project=ctx.session.project,
+        action=str(args.get('action', '')), node=str(args.get('node', '')), token=str(args.get('token', '')))
+    if result.get('ok'):
+        ctx.session.linked_run_id = run_id
+    return result
 
 
 async def _feedback_loop(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -472,7 +490,33 @@ async def _read_context_material(args: dict[str, Any], ctx: ToolContext) -> dict
     return {"ok": result.ok, "output": result.output, "error": result.error}
 
 
+async def _repo_list(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    return await execute_code_inspection("code.repo_list", args, ctx)
+
+
+async def _repo_search(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    return await execute_code_inspection("code.repo_search", args, ctx)
+
+
+async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    if set(args) - {"path", "start_line", "end_line"}:
+        return {"ok": False, "error": "Code reads accept only path and start_line/end_line; use the connected project."}
+    return await execute_code_inspection("code.repo_read_lines", args, ctx)
+
+
 TOOLS: dict[str, ToolSpec] = {
+    "code.repo_list": ToolSpec(name="code.repo_list",
+        description="List the connected project's source paths, without reading contents. Browse relevant directories or filter filenames. Read-only; no shell. Paginate with next_offset; narrow the path if scan_limited.",
+        parameters={"path": "relative directory, default .", "glob": "optional filename glob", "depth": "1 by default, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        handler=_repo_list),
+    "code.repo_search": ToolSpec(name="code.repo_search",
+        description="Search literal text (case-insensitive) in selected source files. Returns path, line, snippet and SHA256, not whole files. Use task-related names, config keys or functions. Never scan unrelated code unnecessarily.",
+        parameters={"query": "literal text, not regex", "path": "relative directory, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        handler=_repo_search),
+    "code.repo_read_lines": ToolSpec(name="code.repo_read_lines",
+        description="Read only a relevant source/config line range from the connected repository. Returns exact source, line numbers and SHA256. Maximum 160 lines/12000 characters per call. Use search results to pick ranges; no execution or modification.",
+        parameters={"path": "exact project-relative file path", "start_line": "first line, 1-based", "end_line": "last line, inclusive; at most 160 lines"},
+        handler=_repo_read),
     "context.read_material": ToolSpec(name="context.read_material",
         description="Read original run-local context material. Follow next_offset for further pages.",
         parameters={"ref": "exact SHA256 ref from context", "char_offset": "optional character offset"},
@@ -493,6 +537,19 @@ TOOLS: dict[str, ToolSpec] = {
         description="Start an existing run (defaults to the linked run).",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_start_run,
+    ),
+    "run.recovery_status": ToolSpec(
+        name="run.recovery_status",
+        description="Inspect checkpoint recovery and stage-retry options for the existing linked run. Read this before recovery; returns actions and a state token.",
+        parameters={"run_id": "optional; defaults to linked run"},
+        handler=_recovery_status,
+    ),
+    "run.recover": ToolSpec(
+        name="run.recover",
+        description="Explicitly recover the same run after the user asks to continue/retry. Prefer resume; otherwise use the offered retry action. Never creates a run or bypasses blocked/unknown outcomes. Do not automatically repeat this mutation.",
+        parameters={"run_id": "optional; defaults to linked run", "action": "resume|retry from recovery_status",
+                    "node": "node from recovery_status", "token": "exact token from recovery_status"},
+        handler=_recover_run,
     ),
     "run.status": ToolSpec(
         name="run.status",

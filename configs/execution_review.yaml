@@ -1,0 +1,2 @@
+poll_interval_seconds: 1
+max_source_bytes: 2000000

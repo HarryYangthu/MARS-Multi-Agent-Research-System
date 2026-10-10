@@ -27,6 +27,7 @@ from app.harness.discovery.code_materialization import (
 from app.harness.discovery.snapshots import SnapshotPolicy, create_snapshot, verify_snapshot
 from app.harness.discovery.source_commit import archive_source_commit, source_commit_diff
 from app.harness.project_workspace import folder_project, open_folder
+from app.harness.runtime.git_runtime import run_git
 from app.harness.research_reuse import reuse_research, verify_research_reuse
 from app.harness.research_selection import freeze_selection, load_selection, verify_trial_archive, worker_identity
 from app.harness.research_trial import ResearchBudget, compare, file_sha256, read_record, select_candidate
@@ -147,8 +148,8 @@ def initialize(repo: Path, data: Path, output: Path, task: str, model: str, budg
         paths=[item.path for item in snapshot.manifest.files], environment=sanitized_subprocess_environment())
     atomic_json(output / "context/source.json", context)
     atomic_json(output / "experiment/protocol.json", protocol)
-    revision = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True)
-    source_status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True)
+    revision = run_git(["-C", str(repo), "rev-parse", "HEAD"], check=False)
+    source_status = run_git(["-C", str(repo), "status", "--porcelain", "--untracked-files=no"], check=False)
     manifest = {"schema": "cli_research.run.v1", "created_at": datetime.now(timezone.utc).isoformat(),
         "project": project.name, "repo": str(repo), "data": str(data), "task": task, "model": model,
         "folder_context_files": {item["path"]: item["sha256"] for item in folder_context["files"]},

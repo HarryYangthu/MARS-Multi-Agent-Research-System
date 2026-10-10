@@ -156,7 +156,10 @@ def test_worklog_treats_not_yet_created_optional_logs_as_empty(
     payload = worklog.json()
     assert payload["run_id"] == run_id
     assert payload["agent"] == "idea"
-    assert [item["kind"] for item in payload["items"]] == ["run"]
+    assert payload["items"] == []
+    all_agents = client.get(f"/api/timeline/runs/{run_id}/worklog")
+    assert all_agents.status_code == 200
+    assert [item["kind"] for item in all_agents.json()["items"]] == ["run"]
 
 
 def test_context_workbench_can_be_disabled(

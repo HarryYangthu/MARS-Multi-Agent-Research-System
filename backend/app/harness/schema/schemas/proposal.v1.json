@@ -395,6 +395,11 @@
               },
               "blocks_execution": {
                 "type": "boolean"
+              },
+              "context_ref": {
+                "type": ["string", "null"],
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+                "description": "Exact key of the supplied task input. kind is only a category. Blocking other prerequisites require this reference in new proposals."
               }
             }
           }

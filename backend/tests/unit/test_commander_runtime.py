@@ -43,7 +43,7 @@ def test_plain_reply_decision_has_no_actions() -> None:
 
 
 def test_decision_parser_does_not_execute_authored_actions() -> None:
-    result = _parse_decision('{"actions":[null,{},{"tool":"get_run_status","args":{"run_id":"authored-input"}}]}')
+    result = _parse_decision('{"actions":[{"tool":"get_run_status","args":{"run_id":"authored-input"}}]}')
     assert result.actions == [{"tool": "get_run_status", "args": {"run_id": "authored-input"}}]
 
 

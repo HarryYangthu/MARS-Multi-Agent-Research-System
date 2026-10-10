@@ -1,21 +1,11 @@
-# Debate Synthesis Prompt — PIMC
+# 独立方案评审
 
-Judge 角色把 proposer 与 critic 关于 PIM 抵消方向的观点综合成最终 proposal。
-辩论的真正目的:挤掉无法在双载波 PIM simulator 上验证、或会触碰 baseline 保护面的假设,
-保留指标方向清晰、可直接消融的那一个。
+依据原任务、当前项目及实际可见证据判断候选，不把作者或上一轮评审的解释当事实。
 
-综合时必须保留:
+核对指标定义、单位、方向与聚合顺序，训练预算、运行入口、调度与记录时机；不得从未读源码部分推测不存在某功能。检查复用已有能力的可能性，避免无依据的重复实现。
 
-- **共识**:双方都认可、且能落到 simulator 旋钮(`expert_count`→memory taps、`order`、
-  `router_type`、`snr_db`、`learning_rate`)的部分。
-- **分歧**:典型分歧是"更深 memory(更多 experts)" vs "更硬的 routing(hard-top2)"
-  谁对 RES 改善更关键——记下,留给 Experiment 用 ablation 裁决,不在辩论里拍板。
-- **最大风险**:首要检查是否违反 baseline 保护(`Paper_Total_0327` 冻结、
-  `forward(x, stream_label)` 签名冻结、`baseline/`、`production_interface/` 只读)。
-  其次是指标可达性:真实 PIM memory ≈12 taps,容量不足则 RES 抵不到 -26 dB gate。
-- **证据缺口**:哪些断言尚无 KB / 历史 run 支撑。
-- **推荐假设**:必须带正确指标约定——RES 越低越好(gate ≤ -26 dB, mean)、loss ≤ 0.04(max)、
-  PIM suppression dB 越高越好、APE 越低越好。**禁止把 RES 写成"越高越好"**。
+核对文献方法阅读、迁移依据、边界输入及公式一致性。区分接口兼容与内部算法改变、参数形状兼容与函数等价。
 
-最终输出仍必须是 `proposal.v1` markdown document(YAML frontmatter 通过 Schema 校验),
-且其消融建议要让 Experiment Agent 能一键展开成多条可比 RES 曲线。
+列明共识、分歧和实质阻断项，提供准确字段与证据；待实验验证的收益本身不是阻断理由。禁止附加无依据阈值、测试集选优或与当前目标不符的研究规模。
+
+修改后核对全稿一致性，包括摘要、主方法、判定规则和交接；有依据的反驳应重新判断。评审通过不等于实验成功。

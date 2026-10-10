@@ -1,179 +1,85 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { isUncertainRequestError } from "@/lib/clientPolicy";
+import { officeFileUrl, reportRequest, type OfficeBundle, type ReportSkills } from "@/lib/reportExports";
 
-import {
-  getReportBundle,
-  regenerateReportBundle,
-  reportFileUrl,
-  type ReportBundle,
-  type ReportDeliverable,
-} from "@/lib/api";
+const FORMATS = [
+  { kind: "excel", label: "Excel", extension: ".xlsx", detail: "完整指标 · 训练数据 · 可编辑曲线" },
+  { kind: "word", label: "Word", extension: ".docx", detail: "完整报告 · 表格 · 实验图像" },
+  { kind: "powerpoint", label: "PPT", extension: ".pptx", detail: "研究内容 · 结果 · 局限与来源" },
+];
+const button = "rounded-lg border border-mars-border px-3 py-2 text-xs text-slate-200 hover:border-indigo-400/60 disabled:cursor-not-allowed disabled:opacity-50";
 
-export function ReportsPanel({ runId }: { runId: string }): JSX.Element {
-  const [bundle, setBundle] = useState<ReportBundle | null>(null);
-  const [busy, setBusy] = useState(false);
+export function ReportsPanel({ runId, refreshKey = "" }: { runId: string; refreshKey?: string }): JSX.Element {
+  const [bundle, setBundle] = useState<OfficeBundle | null>(null);
+  const [skills, setSkills] = useState<ReportSkills | null>(null);
+  const [selection, setSelection] = useState<string[]>([]);
+  const [formatKind, setFormatKind] = useState("excel");
+  const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-
-  const refresh = useMemo(
-    () => async (): Promise<void> => {
-      const next = await getReportBundle(runId);
-      setBundle(next);
-    },
-    [runId],
-  );
-
+  const [failed, setFailed] = useState(false);
+  const action = useRef<AbortController | null>(null);
   useEffect(() => {
-    let alive = true;
-    void refresh().catch((error) => {
-      if (alive) setMessage(error instanceof Error ? error.message : "reports load failed");
+    const controller = new AbortController();
+    setBundle(null); setSkills(null); setSelection([]); setMessage(""); setBusy(""); setFailed(false);
+    void Promise.all([reportRequest<OfficeBundle>(runId, "", controller.signal), reportRequest<ReportSkills>(runId, "/skills", controller.signal)])
+      .then(([nextBundle, nextSkills]) => { if (!controller.signal.aborted) { setBundle(nextBundle); setSkills(nextSkills); setSelection(nextSkills.selected); } })
+      .catch((error: unknown) => { if (!controller.signal.aborted) { setFailed(true); setMessage(error instanceof Error ? error.message : "无法读取报告产物"); } });
+    return () => { controller.abort(); action.current?.abort(); };
+  }, [runId, refreshKey]);
+
+  async function perform(name: string, operation: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    action.current?.abort();
+    const controller = new AbortController(); action.current = controller;
+    setBusy(name); setMessage(""); setFailed(false);
+    try { await operation(controller.signal); }
+    catch (error: unknown) { if (!controller.signal.aborted) { setFailed(true); setMessage(isUncertainRequestError(error) ? "连接中断或等待超时，尚不能确认操作结果。刷新后再核对。" : error instanceof Error ? error.message : "操作失败"); } }
+    finally { if (!controller.signal.aborted) setBusy(""); }
+  }
+
+  async function generate(kind?: string): Promise<void> {
+    await perform(kind || "materials", async signal => {
+      const next = await reportRequest<OfficeBundle>(runId, "/regenerate", signal, "POST", { formats: kind ? [kind] : [] });
+      signal.throwIfAborted(); setBundle(next);
+      const errors = next.metadata?.generation_errors || [];
+      setFailed(errors.length > 0);
+      const label = FORMATS.find(format => format.kind === kind)?.label;
+      setMessage(errors.length ? `生成失败：${errors.join("；")}` : label ? `${label} 已生成，可以下载。` : "Markdown 与已记录的关键图片已保存，可按需生成其他格式。");
     });
-    return () => {
-      alive = false;
-    };
-  }, [refresh]);
-
-  async function regenerate(): Promise<void> {
-    setBusy(true);
-    setMessage("");
-    try {
-      const next = await regenerateReportBundle(runId);
-      setBundle(next);
-      setMessage("报告包已重新生成");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "regenerate failed");
-    } finally {
-      setBusy(false);
-    }
   }
 
-  const metadata = bundle?.metadata;
-  const deliverables = metadata?.deliverables ?? [];
-  const qa = metadata?.qa_status;
+  async function importFile(file: File): Promise<void> {
+    if (file.size > 100_000) { setFailed(true); setMessage("SKILL.md 不能超过 100 KB"); return; }
+    await perform("import", async signal => {
+      const content = await file.text(); signal.throwIfAborted();
+      const next = await reportRequest<ReportSkills>(runId, "/skills/import", signal, "POST", { content });
+      signal.throwIfAborted(); setSkills(next); setSelection(next.selected);
+      setMessage("Skill 已接入。勾选并保存后，用于此项目后续的报告写作。");
+    });
+  }
 
-  return (
-    <section className="rounded border border-mars-border bg-mars-bg/50">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-3 py-2.5">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-100">报告产物</h3>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            Markdown、Excel、Word、PPT 与 QA manifest
-          </p>
-        </div>
-        <button
-          onClick={regenerate}
-          disabled={busy}
-          className="rounded border border-mars-accent/60 bg-mars-accent/15 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-mars-accent/25 disabled:opacity-50"
-        >
-          {busy ? "生成中..." : "重新生成"}
-        </button>
-      </div>
-      {message ? <p className="border-b border-mars-border px-3 py-2 text-xs text-slate-300">{message}</p> : null}
-      {!bundle?.exists ? (
-        <div className="p-4">
-          <div className="rounded border border-dashed border-mars-border bg-mars-panel/40 p-6 text-center">
-            <p className="text-sm text-slate-300">当前 run 还没有 report bundle。</p>
-            <button
-              onClick={regenerate}
-              disabled={busy}
-              className="mt-3 rounded bg-mars-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-            >
-              生成报告包
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-3 p-3 xl:grid-cols-[1.1fr,0.9fr]">
-          <div className="space-y-3">
-            <div className="rounded border border-mars-border bg-mars-panel/60 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-slate-500">Manifest</p>
-                  <p className="mt-1 font-mono text-xs text-slate-300">{bundle.manifest}</p>
-                </div>
-                <span className={`rounded border px-2 py-1 text-xs ${qaTone(qa?.status ?? "")}`}>
-                  {qa?.status ?? "unknown"}
-                </span>
-              </div>
-              {metadata?.data_pack ? (
-                <p className="mt-2 font-mono text-[11px] text-slate-500">data_pack={metadata.data_pack}</p>
-              ) : null}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {deliverables.map((item) => (
-                <DeliverableCard key={`${item.kind}:${item.path}`} runId={runId} item={item} />
-              ))}
-            </div>
-          </div>
-          <div className="space-y-3">
-            <div className="rounded border border-mars-border bg-mars-panel/60 p-3">
-              <h4 className="text-sm font-semibold text-slate-100">QA 检查</h4>
-              <ol className="mt-2 space-y-1.5">
-                {(qa?.checks ?? []).map((check) => (
-                  <li key={`${check.name}:${check.detail ?? ""}`} className="flex items-start justify-between gap-2 rounded bg-mars-bg/70 px-2 py-1.5 text-xs">
-                    <span className="min-w-0">
-                      <span className="font-medium text-slate-200">{check.name}</span>
-                      {check.detail ? <span className="ml-2 text-slate-500">{check.detail}</span> : null}
-                    </span>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 ${qaTone(check.status)}`}>
-                      {check.status}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <div className="rounded border border-mars-border bg-mars-panel/60 p-3">
-              <h4 className="text-sm font-semibold text-slate-100">Bundle 摘要</h4>
-              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[11px] leading-relaxed text-slate-300">
-                {bundle.body ?? ""}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
+  async function saveSkills(): Promise<void> {
+    await perform("save", async signal => {
+      const next = await reportRequest<ReportSkills>(runId, "/skills", signal, "PUT", { ids: selection });
+      signal.throwIfAborted(); setSkills(next); setSelection(next.selected);
+      setMessage("报告 skill 已保存，后续写作将使用所选版本。当前已审核报告保持原文。");
+    });
+  }
+
+  const materialsSaved = Boolean(bundle?.current && bundle.metadata?.materials_saved);
+  const markdown = bundle?.metadata?.deliverables.find(item => item.kind === "markdown" && item.status === "completed");
+  const images = bundle?.metadata?.images || [];
+  const archive = bundle?.metadata?.materials_archive;
+  return <section aria-label="报告导出" className="rounded-xl border border-mars-border bg-mars-panel/40">
+    <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"><div><h3 className="text-base font-medium text-slate-100">报告文件</h3><p className="mt-1 text-xs text-slate-400">先保存 Markdown 和关键图片，其他格式按需生成。</p></div>{materialsSaved && markdown && bundle?.manifest ? <a href={officeFileUrl(runId, markdown, bundle.manifest)} download className={button}>下载 Markdown</a> : <button type="button" onClick={() => void generate()} disabled={Boolean(busy) || !bundle || bundle.report_ready === false} className={button}>{busy === "materials" ? "正在保存…" : "保存 Markdown 与图片"}</button>}</header>
+    {message ? <p role={failed ? "alert" : "status"} className={`px-5 pb-3 text-xs leading-6 ${failed ? "text-amber-200" : "text-emerald-200"}`}>{message}</p> : null}
+    {bundle?.report_ready === false ? <p className="px-5 pb-4 text-xs text-slate-400">请先审核并批准研究报告，再导出。</p> : null}
+    {bundle?.exists && !bundle.current ? <p className="px-5 pb-4 text-xs text-amber-200">报告内容已更新，请重新保存或生成所需格式。</p> : null}
+    {materialsSaved ? <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 pb-4 text-xs text-slate-400"><span>Markdown 已保存 · {images.length ? `${images.length} 张关键图片` : "尚未记录关键图片"}</span>{archive && bundle?.manifest ? <a href={officeFileUrl(runId, archive, bundle.manifest)} download className="text-indigo-200 hover:underline">下载 Markdown 与图片资料包</a> : null}{bundle?.manifest ? images.map((file, index) => <a key={file.path} href={officeFileUrl(runId, file, bundle.manifest!)} download className="text-indigo-200 hover:underline">下载图片 {index + 1}</a>) : null}</div> : null}
+    <div className="flex flex-wrap items-center gap-3 px-5 pb-5"><label className="text-xs text-slate-400">按需导出<select aria-label="报告导出格式" value={formatKind} onChange={event => setFormatKind(event.target.value)} className="ml-3 rounded-lg border border-mars-border bg-mars-panel px-3 py-2 text-slate-200">{FORMATS.map(format => <option key={format.kind} value={format.kind}>{format.label} ({format.extension})</option>)}</select></label><button type="button" onClick={() => void generate(formatKind)} disabled={Boolean(busy) || !bundle || bundle.report_ready === false} className={button}>{busy === formatKind ? "正在生成…" : `生成 ${FORMATS.find(format => format.kind === formatKind)?.label}`}</button>{FORMATS.map(format => { const file = bundle?.metadata?.deliverables.find(item => item.kind === format.kind && item.status === "completed"); return file && bundle?.current && bundle.manifest ? <a key={format.kind} href={officeFileUrl(runId, file, bundle.manifest)} download className={button}>下载 {format.label}</a> : null; })}</div>
+    <details className="border-t border-mars-border px-5 py-4"><summary className="cursor-pointer text-sm text-slate-300">报告 Skill <span className="ml-2 text-xs text-slate-500">{skills?.selected.length ? `已选择 ${skills.selected.length} 项` : "接入写作方法与风格"}</span></summary><div className="mt-4 space-y-4"><p className="text-xs leading-6 text-slate-400">导入 SKILL.md，选择后用于此项目后续报告写作。指令与版本会随写作保存；已有报告的导出使用原文。当前支持指令型 skill，附带脚本和附件不会自动执行。</p><label className={`${button} inline-block cursor-pointer`}>接入 SKILL.md<input type="file" accept=".md,text/markdown,text/plain" className="sr-only" aria-label="接入 SKILL.md" disabled={Boolean(busy)} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importFile(file); }} /></label>
+      <div className="space-y-2">{skills?.options.map(option => { const id = `${option.id}@${option.version}`; return <label key={id} className="flex items-start gap-3 rounded-lg border border-mars-border p-3"><input type="checkbox" className="mt-1 accent-indigo-400" checked={selection.includes(id)} disabled={!option.available || Boolean(busy)} onChange={event => setSelection(previous => event.target.checked ? [...previous, id] : previous.filter(value => value !== id))} /><span className="min-w-0"><span className="text-sm text-slate-200">{option.name}</span><span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>{!option.available ? <span className="mt-1 block text-xs text-amber-200">暂不可用：{option.reason}</span> : null}</span></label>; })}</div><button type="button" className={button} disabled={Boolean(busy) || !skills} onClick={() => void saveSkills()}>{busy === "save" ? "正在保存…" : "保存报告 Skill"}</button><details className="text-xs text-slate-500"><summary className="cursor-pointer">SKILL.md 格式示例</summary><pre className="mt-2 overflow-x-auto rounded-lg bg-black/20 p-3">{`---\nname: research-team-report\ndescription: 团队报告的结构与写作要求\n---\n先列研究目标和实验条件，再呈现结果、证据与局限。\n区分事实、解释和待验证假设，不虚构缺失数据。`}</pre></details>
+    </div></details>
+  </section>;
 }
-
-function DeliverableCard({ runId, item }: { runId: string; item: ReportDeliverable }): JSX.Element {
-  const filename = item.path.split("/").pop() ?? item.path;
-  const completed = item.status === "completed";
-  return (
-    <div className="rounded border border-mars-border bg-mars-panel/60 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-100">{item.kind}</p>
-          <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{item.path}</p>
-        </div>
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${qaTone(item.status)}`}>
-          {item.status}
-        </span>
-      </div>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-slate-500">{item.bytes ? `${item.bytes} bytes` : item.error ?? ""}</span>
-        {completed ? (
-          <a
-            href={reportFileUrl(runId, filename)}
-            className="rounded border border-mars-border bg-mars-bg px-2 py-1 text-xs text-slate-200 hover:bg-mars-subtle"
-          >
-            下载
-          </a>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function qaTone(status: string): string {
-  if (status === "passed" || status === "completed") {
-    return "border-emerald-500/40 bg-emerald-500/10 text-emerald-100";
-  }
-  if (status === "failed") {
-    return "border-red-500/40 bg-red-500/10 text-red-100";
-  }
-  if (status === "skipped") {
-    return "border-slate-500/40 bg-slate-500/10 text-slate-300";
-  }
-  return "border-amber-500/40 bg-amber-500/10 text-amber-100";
-}
-

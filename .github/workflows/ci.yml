@@ -34,13 +34,19 @@ jobs:
           python-version: "3.11"
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip uv==0.11.1
+          uv lock --check
           pip install -e ".[dev]"
           pip install -e projects/synthetic_regression
       - name: Pytest
         env:
           PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
         run: pytest backend/tests projects/synthetic_regression/tests -q
+      - name: Research failure and recovery regressions
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: |
+          pytest -q backend/tests/unit/test_coding_approval.py backend/tests/unit/test_completed_code_changes.py backend/tests/unit/test_completion_driven.py backend/tests/unit/test_run_recovery.py backend/tests/unit/test_model_accounting.py backend/tests/unit/test_model_attempt_budget.py backend/tests/unit/test_loop_generation_resume.py
       - name: Strict mypy
         env:
           MYPYPATH: .:backend:posttrain/src:projects/synthetic_regression/src
@@ -70,6 +76,21 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
+      - name: Research activity, review prompt and code marker checks
+        working-directory: frontend
+        run: |
+          npx tsc --outDir .tmp/research-activity --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/research-activity-smoke.ts
+          node .tmp/research-activity/scripts/research-activity-smoke.js
+          npx tsc --outDir .tmp/conversation-history --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/conversation-history-smoke.ts
+          node .tmp/conversation-history/scripts/conversation-history-smoke.js
+          npx tsc --outDir .tmp/review-prompt --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/review-prompt-smoke.ts
+          node .tmp/review-prompt/scripts/review-prompt-smoke.js
+          npx tsc --outDir .tmp/review-submission --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/review-submission-smoke.ts
+          node .tmp/review-submission/scripts/review-submission-smoke.js
+          npx tsc --outDir .tmp/literature-evidence --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/literature-evidence-smoke.ts
+          node .tmp/literature-evidence/scripts/literature-evidence-smoke.js
+          npx tsc --outDir .tmp/code-change-markers --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/code-change-markers-smoke.ts
+          node .tmp/code-change-markers/scripts/code-change-markers-smoke.js
       - name: Production build
         working-directory: frontend
         env:

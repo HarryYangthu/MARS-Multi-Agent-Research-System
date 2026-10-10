@@ -21,19 +21,23 @@ def revision_spec() -> dict[str, Any]:
             "Revise the current candidate atomically, then validate and independently review the entire document. "
             "Call alone. Copy base_sha256 from the current candidate receipt. Operations use absolute JSON "
             "Pointers rooted at /metadata or /body. Set adds/replaces an object field or replaces an existing "
-            "array element; remove deletes an existing field/element. Parents must exist; replace whole arrays "
-            "to insert/reorder. Update all related fields, including body if human_summary changes. "
+            "array element; remove deletes an existing field/element. Append adds one supplied value at the "
+            "end of the array addressed by path (e.g. /metadata/research_context/sources). Parents must exist; "
+            "Use op=set on a whole array to insert/reorder. The replace alias is accepted only for an existing target. "
+            "Use /metadata/field, not /field; a missing prefix is accepted only when the existing target is unambiguous. "
+            "Update all related fields, including body if human_summary changes. "
             "Unchanged fields are preserved exactly as data; no content is supplied by the host."),
         "parameters": {"type": "object", "additionalProperties": False,
             "required": ["base_sha256", "operations"], "properties": {
                 "base_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
                 "operations": {"type": "array", "minItems": 1, "maxItems": 64, "items": {
                     "type": "object", "additionalProperties": False, "required": ["op", "path"],
-                    "properties": {"op": {"enum": ["set", "remove"]},
+                    "properties": {"op": {"enum": ["set", "remove", "append", "replace"]},
                         "path": {"type": "string", "pattern": "^/(metadata/|body$)"}, "value": {}}}}}}}}
 
 
-def apply_document_revision(candidate: str, revision: Any) -> str:
+def apply_document_revision(candidate: str, revision: Any, *,
+                            compatibility: list[dict[str, Any]] | None = None) -> str:
     if not candidate:
         raise ValueError("no current candidate; submit a complete document first")
     if not isinstance(revision, dict) or set(revision) != {"base_sha256", "operations"}:
@@ -45,13 +49,20 @@ def apply_document_revision(candidate: str, revision: Any) -> str:
         raise ValueError("revision requires 1..64 explicit operations")
     parsed = parse(candidate)
     document = deepcopy({"metadata": parsed.metadata, "body": parsed.body})
+    changes: list[dict[str, Any]] = []
     for operation in operations:
-        if not isinstance(operation, dict) or operation.get("op") not in {"set", "remove"}:
-            raise ValueError("revision operation must be set or remove")
-        expected = {"op", "path", "value"} if operation["op"] == "set" else {"op", "path"}
+        if not isinstance(operation, dict) or operation.get("op") not in {"set", "remove", "append", "replace"}:
+            raise ValueError("revision operation must be set, remove, append or replace (existing target only)")
+        expected = {"op", "path", "value"} if operation["op"] != "remove" else {"op", "path"}
         if set(operation) != expected:
             raise ValueError("set requires a value; remove must omit value; unknown keys are forbidden")
         path = operation["path"]
+        if (isinstance(path, str) and path.startswith("/") and not path.startswith("/metadata/")
+                and path != "/body" and not re.search(r"~(?![01])", path)):
+            first = path[1:].split("/", 1)[0].replace("~1", "/").replace("~0", "~")
+            if first not in {"metadata", "body"} and first in document["metadata"]:
+                path = "/metadata" + path
+                changes.append({"kind": "metadata_prefix", "from": operation["path"], "to": path})
         if (not isinstance(path, str) or not (path.startswith("/metadata/") or path == "/body")
                 or re.search(r"~(?![01])", path)):
             raise ValueError("revision path must be a valid pointer below /metadata or exactly /body")
@@ -76,7 +87,18 @@ def apply_document_revision(candidate: str, revision: Any) -> str:
                     raise ValueError("set cannot append to an array; replace the array")
             elif not isinstance(parent, dict):
                 raise ValueError("revision parent is not a container")
-            if operation["op"] == "set":
+            if path == "/body" and operation["op"] == "remove":
+                raise ValueError("revision cannot remove the required body")
+            if operation["op"] == "replace":
+                if isinstance(parent, dict) and key not in parent:
+                    raise ValueError(f"replace requires an existing target: {path}")
+                changes.append({"kind": "replace_alias", "path": path, "from": "replace", "to": "set"})
+            if operation["op"] == "append":
+                target = parent[key]
+                if not isinstance(target, list):
+                    raise ValueError("append path must identify an existing array")
+                target.append(deepcopy(operation["value"]))
+            elif operation["op"] in {"set", "replace"}:
                 parent[key] = deepcopy(operation["value"])
             else:
                 del parent[key]
@@ -84,4 +106,21 @@ def apply_document_revision(candidate: str, revision: Any) -> str:
             raise ValueError(f"revision path does not resolve: {path}") from exc
     # Reuse exactly the ordinary submission serializer, including its finite-number
     # and final-envelope checks. The usual whole-document validators run next.
-    return str(parse_action(json.dumps({"final": document}, ensure_ascii=False, allow_nan=False))["final"])
+    result = str(parse_action(json.dumps({"final": document}, ensure_ascii=False, allow_nan=False))["final"])
+    if compatibility is not None:
+        compatibility.extend(changes)
+    return result
+
+
+def revision_feedback(error: str) -> str:
+    """Give a precise repair contract without supplying any research content."""
+    return (f"Document format error: {error}. No rejected revision was applied. "
+            "Keep the current candidate and existing observations; repair only the rejected arguments. "
+            "Call mars_revise_document alone with exactly base_sha256 and operations. Copy the current receipt hash. "
+            "Each operation has op, path, and value, except remove which must omit value. "
+            "Use op=set to add/change a field or replace a whole array; replace requires an existing target. "
+            "Use an absolute pointer /metadata/... or exactly /body; parents must exist and array indices must be valid. "
+            "For example, an array field is replaced by {\"op\":\"set\",\"path\":\"/metadata/<existing_field>\",\"value\":[]}. "
+            "This example is syntax only, not a suggested content change. Emit each JSON key once. "
+            "Conflicting duplicate values, stale hashes, and unresolved targets remain rejected. "
+            "Resolve every pinned content-validation issue too; format compatibility is not acceptance.")

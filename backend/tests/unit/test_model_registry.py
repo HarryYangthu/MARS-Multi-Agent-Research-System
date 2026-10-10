@@ -37,6 +37,9 @@ def test_all_enabled_agents_use_the_bounded_glm_research_profile() -> None:
     for cfg in list_agent_configs():
         if not cfg.enabled:
             continue
+        if cfg.raw.get("runtime_mode") == "deterministic":
+            assert cfg.name == "execution" and not cfg.model_provider and not cfg.model_name
+            continue
         assert cfg.model_provider == "zhipu"
         assert cfg.model_name == "glm-5.3"
         assert cfg.api_key_env == "ZHIPU_API_KEY"

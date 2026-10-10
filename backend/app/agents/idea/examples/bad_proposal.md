@@ -1,26 +1,14 @@
-# 不合格 Proposal 示例 — PIMC
+# 需要退回的方案
 
-下面是一个会被打回的 PIM 抵消 proposal 样例,以及它为什么不合格。
+以下是问题类型示例，不是项目事实或可采用的方案：
 
----
-schema: proposal.v1
-title: "换一个更强的 router 让 PIM 抵消更好"
-hypothesis: "用一个全新的 attention router 替换现有 routing,把 RES 拉高,效果会更好。"
----
+- 根据指标缩写猜测单位和优化方向，未读实际指标函数。
+- 只读训练文件开头便宣布没有短预算入口，要求重写已有功能。
+- 把完整 epoch 当作 optimizer 更新次数，导致实际训练量与批准预算不一致。
+- 用另一项目的模型、阈值或仿真旋钮替代当前代码与数据。
+- 把摘要、PDF 下载记录或文献结果当成本次方案已经有效的证据。
+- 添加没有测量依据的噪声阈值，声称单种子结果具有统计显著性。
+- 修改冻结模型、指标或数据口径来满足验收。
+- 返工时丢失已核验来源，重新检索全部材料，却保留未核验的旧结论。
 
-## 想法
-我觉得现在的 router 太简单了,可以试试更先进的 router,顺便重写一下 baseline 的
-`forward(x, stream_label)` 多传几个参数,再在真实射频功放上测一下 PIM 功耗。
-
----
-
-## 为什么不合格(对照检查)
-- **指标约定写反**:说"把 RES 拉高",但 RES 越低越好(gate ≤ -26 dB, mean),"拉高"= 变差。
-- **没有可证伪假设 / 无数量级**:只说"更好",没给 RES / loss 的目标方向与量级。
-- **没有可实验旋钮**:没落到 simulator 真正消费的 `expert_count`(→memory taps)、
-  `order∈{1,3,5,7,9}`、`router_type∈{soft, hard-top2}`、`snr_db`、`learning_rate`。
-- **违反 baseline 保护**:要改 `forward(x, stream_label)` 签名、动 baseline 方法体——Gate 5 直接拦;
-  改动应当 ADDITIVE(新模块/子类)。
-- **依赖现有代码库无法复现的条件**:"真实射频功放测 PIM 功耗",而 V0 只有双载波 simulator +
-  `data_gen.py` 合成数据,无硬件 proxy。
-- **把猜测当结论**:"更先进的 router 一定更好",无 KB / 历史 run 证据支撑。
+退回时指出具体错误字段、实际证据和必要修改；保留有效工作，修改后重新验收。

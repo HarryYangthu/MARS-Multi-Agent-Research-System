@@ -4,7 +4,8 @@ reporting:
   data_pack_filename: report_data_pack.v1.json
   manifest_filename: report_bundle.v1.md
   deliverables_dir: writing/deliverables
-  generate_on_writing_approval: true
+  # Approval saves Markdown and key images. Office formats require a user request.
+  generate_on_writing_approval: false
   formats:
     markdown:
       enabled: true
@@ -26,4 +27,3 @@ reporting:
     allow_missing_metrics: true
     allow_missing_plots: true
     allow_partial_experiment_failures: true
-

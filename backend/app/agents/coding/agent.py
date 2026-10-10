@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import socket
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from app.harness.schema.frontmatter_parser import dumps as fm_dumps
 from app.harness.llm.openai_provider import CustomEndpointProvider, LocalVllmProvider
 from app.harness.llm.post_training_loader import PostTrainingHandle, load_handle
 from app.harness.llm.provider_base import LLMConfig, LLMProvider
-from app.settings import env_or_local, get_settings
+from app.settings import env_or_local, get_settings, repo_root
 
 
 class CodingAgent(BaseAgent):
@@ -30,6 +31,18 @@ class CodingAgent(BaseAgent):
         "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
         "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
+        "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
+        "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "有批准实验方案时 experiment_plan_sha256 必须绑定该完整文档；没有方案时按用户任务交付运行清单，不得捏造方案哈希。"
+        "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
+        "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
+        "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
+        "同一数值的两种字段是预算别名，不能改写批准数值或改成 epochs。"
+        "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
+        "files_changed 只列本任务成功写入记录形成的净改动；相同内容重写是复用，不能声明新增。"
+        "全部复用时 files_changed=[]，正文列出复用文件、指纹及真实检查；不要为了登记制造改动。"
+        "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
+        "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -41,6 +54,42 @@ class CodingAgent(BaseAgent):
     @property
     def post_training_handle(self) -> PostTrainingHandle:
         return self._post_training
+
+    def execution_blocker(self, project: str) -> str:
+        if not self.loop_policy.completion_driven:
+            return ""
+        from app.harness.tools.project_repo import load_project_repo
+        repo = load_project_repo(project)
+        if repo.read_only:
+            return "编码实验分支未就绪：请通过研究任务启动，系统会在原 Git 仓库创建并绑定任务分支；未调用模型。"
+        if not repo.root.is_dir():
+            return "编码工作目录不存在；未调用模型。"
+        return ""
+
+    async def run_loop(self, request: RunRequest, context: ContextPack) -> Artifact:
+        blocker = self.execution_blocker(request.project)
+        if blocker:
+            raise ValueError(blocker)
+        return await super().run_loop(request, context)
+
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        from app.harness.tools.config import check_commands
+        context.upstream['configured_code_checks'] = json.dumps({
+            kind: [{'command_id': cmd.id, 'argv': list(cmd.argv)} for cmd in check_commands(kind)]
+            for kind in ('lint', 'test')})
+        context.upstream['configured_code_checks_usage'] = (
+            'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
+            '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
+            '避免上一组残留的 scheduler 等字段污染下一组。')
+        from app.harness.schema.experiment_contract import document_hash, document_metadata
+        for supplied in request.upstream_artifacts.values():
+            text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied
+            if text.startswith('---\n') and document_metadata(text).get('schema') == 'experiment_plan.v1':
+                context.upstream['approved_experiment_identity'] = json.dumps({
+                    'experiment_plan_sha256': document_hash(text),
+                    'instruction': '此哈希由宿主计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
+        return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
@@ -54,6 +103,20 @@ class CodingAgent(BaseAgent):
             for item in observations
         ):
             errors.append("/files_changed: implement the proposed changes through the real code tools before submitting")
+        plans = []
+        for supplied in request.upstream_artifacts.values():
+            text = supplied.split("\n", 1)[1] if supplied.startswith("[upstream artifact: ") else supplied
+            if text.startswith("---\n"):
+                upstream = parse(text).metadata
+                if upstream.get("schema") == "experiment_plan.v1":
+                    plans.append(text)
+        if plans or metadata.get('execution_jobs') or request.extra.get('execution_delivery_required'):
+            from app.harness.tools.execution.handoff import coding_handoff_errors
+            if len(plans) > 1:
+                errors.append('/upstream: 必须有唯一的批准实验方案')
+            else:
+                errors.extend(coding_handoff_errors(plans[0] if plans else '', metadata, project=request.project,
+                    plan_required=bool(request.extra.get('experiment_plan_required'))))
         return errors
 
     def load_post_training(
@@ -66,8 +129,22 @@ class CodingAgent(BaseAgent):
         self, request: RunRequest, context: ContextPack
     ) -> Artifact:
         settings = get_settings()
+        # A persisted invocation chooses its recovery engine. A default change
+        # must never reinterpret a native checkpoint as a ZCode session.
+        backend = settings.mars_coding_backend
+        invocation = request.extra.get("resume_invocation")
+        if invocation:
+            root = Path(str(request.extra["run_root"]))
+            checkpoint = root / "agent_traces/coding" / str(invocation) / "checkpoint.json"
+            data = json.loads(checkpoint.read_text())
+            backend = "zcode" if data.get("backend") == "zcode" else "native_llm"
+        if backend == "zcode":
+            from app.harness.agent_loop.zcode.executor import ZCodeLoopExecutor
+            schema = json.loads((repo_root() / "backend/app/harness/schema/schemas/code_spec.v1.json").read_text())
+            schema["properties"]["project"] = {"type": "string", "const": request.project}
+            return await self._draft_via_llm(request, context, executor=ZCodeLoopExecutor(), structured_schema=schema)
         if (
-            settings.mars_coding_backend == "opencode"
+            backend == "opencode"
         ):
             adapter = OpenCodeAdapter()
             if not adapter.is_available():

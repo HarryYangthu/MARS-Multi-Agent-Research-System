@@ -130,7 +130,7 @@ tools:
 
   search.arxiv_search:
     enabled: true
-    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Use exact IDs to register a known paper's real metadata before reading it; ID lookup cannot be combined with query, filters, sorting or top_k.
+    description: Search arXiv with short keywords, or look up known papers by arxiv_ids (including vN). Unfiltered topic searches fall back to actual OpenAlex PDF metadata on failure; source and failure receipts are explicit. After an outage the unavailable endpoint is skipped for this invocation. Exact ID/filter requests fail explicitly without relaxing their semantics; use another search tool. ID lookup cannot be combined with query, filters, sorting or top_k.
     mutation_level: read
     allowed_agents: [idea, idea_research]
     timeout_seconds: 65
@@ -335,6 +335,7 @@ tools:
     enabled: true
     description: Read text from a project file. When truncated is true, continue with the returned next_offset as char_offset; path must remain the exact file path, without fragment or class suffix.
     mutation_level: read
+    repeatable_read: true
     allowed_agents: [idea, experiment, coding, execution, writing]
     timeout_seconds: 10
     input_schema:
@@ -347,6 +348,70 @@ tools:
     output_schema:
       type: object
       required: [repo_root, path, content]
+      additionalProperties: true
+
+  code.repo_read_lines:
+    enabled: true
+    description: Read a selected source line range with exact path, line numbers and SHA256; no automatic whole-repository context.
+    mutation_level: read
+    repeatable_read: true
+    allowed_agents: [commander]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        path: {type: string, minLength: 1}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+    output_schema:
+      type: object
+      required: [repo_root, path, content, sha256, line_start, line_end]
+      additionalProperties: true
+
+  code.repo_list:
+    enabled: true
+    description: Browse connected project paths without source content; narrow scope before reading.
+    mutation_level: read
+    repeatable_read: true
+    allowed_agents: [commander]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        path: {type: string, default: .}
+        glob: {type: string, maxLength: 300}
+        depth: {type: integer, minimum: 1, maximum: 16}
+        offset: {type: integer, minimum: 0, maximum: 20000}
+        limit: {type: integer, minimum: 1, maximum: 100}
+    output_schema:
+      type: object
+      required: [repo_root, entries, truncated, scan_limited]
+      additionalProperties: true
+
+  code.repo_search:
+    enabled: true
+    description: Search literal task-related text in selected source files; returns bounded snippets with path, line and hash.
+    mutation_level: read
+    repeatable_read: true
+    allowed_agents: [commander]
+    timeout_seconds: 10
+    input_schema:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query: {type: string, minLength: 1, maxLength: 300}
+        path: {type: string, default: .}
+        glob: {type: string, maxLength: 300}
+        depth: {type: integer, minimum: 1, maximum: 16}
+        offset: {type: integer, minimum: 0, maximum: 20000}
+        limit: {type: integer, minimum: 1, maximum: 100}
+    output_schema:
+      type: object
+      required: [repo_root, query, matches, truncated, scan_limited]
       additionalProperties: true
 
   code.patch_generator:
@@ -605,6 +670,18 @@ tools:
     allowed_agents: [commander]
 
   run.start:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
+  run.recovery_status:
+    enabled: true
+    bridge_only: true
+    mutation_level: read
+    allowed_agents: [commander]
+
+  run.recover:
     enabled: true
     bridge_only: true
     mutation_level: write

@@ -57,6 +57,13 @@ class HandoffPrerequisite(Contract):
     description: str = Field(min_length=1)
     reason: str = Field(min_length=1)
     blocks_execution: bool
+    context_ref: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+
+    @property
+    def input_ref(self) -> str | None:
+        # Known legacy categories had exact named input keys. A generic category
+        # is never an input identity and cannot stand in for arbitrary material.
+        return self.context_ref or (self.kind if self.kind != "other" else None)
 
 
 class HandoffEnvelope(Contract):
@@ -67,13 +74,18 @@ class HandoffEnvelope(Contract):
     prerequisites: list[HandoffPrerequisite] = Field(default_factory=list)
     supplied_context_refs: list[str] = Field(default_factory=list)
     missing_context: list[str] = Field(default_factory=list)
+    binding_receipts: list[str] = Field(default_factory=list)
 
 
 class HandoffBlockedError(ValueError):
     def __init__(self, handoffs: list[HandoffEnvelope]) -> None:
         self.handoffs = handoffs
         missing = sorted({kind for handoff in handoffs for kind in handoff.missing_context})
-        super().__init__("Execution prerequisites missing: " + ", ".join(missing))
+        details = [f"{item.description}（需绑定实际输入 context_ref）" if item.input_ref is None
+                   else f"{item.input_ref}：{item.description}"
+                   for handoff in handoffs for item in handoff.prerequisites
+                   if (item.input_ref or "other (unbound)") in handoff.missing_context]
+        super().__init__("执行交接资料未就绪：" + "；".join(details or missing))
         self.reason = {"code": "handoff_context_missing", "missing_context": missing, "retryable": False}
 
 
@@ -82,6 +94,13 @@ def missing_prerequisites(prerequisites: list[HandoffPrerequisite], *, stage: st
     """Planning may proceed with gaps; writing code needs code, execution needs all."""
     if stage not in {"coding", "execution"}:
         return []
-    return sorted({item.kind for item in prerequisites if item.blocks_execution
+    return sorted({item.input_ref or "other (unbound)" for item in prerequisites if item.blocks_execution
                    and (stage == "execution" or item.kind == "baseline_code")
-                   and not supplied_context.get(item.kind, "").strip()})
+                   and (item.input_ref is None or not supplied_context.get(item.input_ref, "").strip())})
+
+
+def prerequisite_binding_errors(prerequisites: list[HandoffPrerequisite]) -> list[str]:
+    """Catch unmappable blocking declarations when the proposal is authored."""
+    return [f"/handoff/required_context/{index}/context_ref: a blocking other prerequisite must "
+            "name its actual input key (e.g. checkpoint); kind is a category, not an input reference"
+            for index, item in enumerate(prerequisites) if item.blocks_execution and item.input_ref is None]

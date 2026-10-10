@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
+import { CodingBackendSettings } from "@/components/CodingBackendSettings";
 
 const CONFIG_SECTIONS = [
   {
@@ -60,6 +61,7 @@ export default function ConfigIndexPage(): JSX.Element {
             </Link>
           ))}
         </div>
+        <CodingBackendSettings />
       </div>
     </main></div>
   );

@@ -145,6 +145,8 @@ class Orchestrator:
             raise ValueError("production mode cannot create auto-approved runs")
         if research_contract is None:
             assert_ready_for_run(project=request.project)
+            from app.bridge.project_execution_config import require_project_execution
+            require_project_execution(request.project)
         from app.harness.context.folder_context import load_folder_context
         from app.harness.agent_loop.trace import atomic_json
         # A contract-backed project is not an alias for mutable global project
@@ -156,6 +158,7 @@ class Orchestrator:
             entrypoint=request.entrypoint,
             user_request=request.user_request,
             data_source=request.data_source,
+            experiment_id=str(request.extra.get("experiment_id", "") or ""),
         )
         if on_run_allocated is not None:
             on_run_allocated(run)
@@ -308,7 +311,8 @@ class Orchestrator:
         if session.read_only or self._stopping(session) or self.owned_tasks.closing:
             return {"ok": False, "status": "not_resumable", "run_id": run_id}
         candidates = [key for key, state in session.graph.all_states().items()
-                      if state in {NodeState.RUNNING, NodeState.FAILED}]
+                      if state in {NodeState.RUNNING, NodeState.FAILED}
+                      and key == self._latest_node_for_stage(session, parse_node_key(key).stage)]
         if not candidates:
             return {"ok": False, "status": "no_interrupted_loop", "run_id": run_id,
                     "error": "use start for pending work or the review API for completed drafts"}
@@ -513,6 +517,9 @@ class Orchestrator:
             if self._stopping(session):
                 return
             if session.waiting_for_feedback:
+                self._persist_state(session, status="waiting_feedback")
+                return
+            if self._stage_limit_reached(session):
                 self._persist_state(session, status="waiting_feedback")
                 return
             ready = ready_batch(graph, self.max_parallel_nodes)
@@ -721,7 +728,8 @@ class Orchestrator:
         """
         if self._stopping(session):
             return
-        if session.request.auto_approve:
+        if session.request.auto_approve or parse_node_key(node_key).stage == "execution":
+            # Deterministic intake is validated here; configuration confirmation remains mandatory.
             if not self._auto_promote(session, node_key):
                 await self._transition(session, node_key, NodeState.FAILED)
                 return
@@ -881,30 +889,37 @@ class Orchestrator:
         self,
         session: RunSession,
         node_key: str,
+        *,
+        retry_interrupted_jobs: bool = False,
     ) -> None:
         if self._stopping(session) or session.graph.state(node_key) != NodeState.APPROVED:
             return
         if parse_node_key(node_key).stage == "execution":
+            if not await self._await_execution_confirmation(session, node_key):
+                return
             await self._transition(session, node_key, NodeState.RUNNING)
+            failure_code = 'execution_batch_failed'
             try:
                 from app.bridge.agent_runner import _run_execution_batch, load_agent_handoff_context
                 from app.bridge.task_runtime import admit_handoffs
                 supplied, _ = load_agent_handoff_context(session.run, node_key, registry=self.registry)
                 admit_handoffs(session.run, node_key, supplied_context=supplied)
-                from app.harness.tools.registry import (
-                    ToolContext,
-                    get_registry as get_tool_registry,
-                )
+                from app.harness.tools.registry import ToolContext
 
                 async def _batch_runner(
                     _args: dict[str, Any],
                     _ctx: ToolContext,
                 ) -> dict[str, Any]:
-                    await _run_execution_batch(
-                        run=session.run,
-                        node_key=node_key,
-                        bus=session.bus,
-                    )
+                    from app.bridge.research_branch import research_branch_scope
+                    with research_branch_scope(session.run, node_key):
+                        if retry_interrupted_jobs:
+                            from app.bridge.execution_batch_deadline import prepare_interrupted_execution_retry
+                            prepare_interrupted_execution_retry(session.run, node_key)
+                        await _run_execution_batch(
+                            run=session.run,
+                            node_key=node_key,
+                            bus=session.bus,
+                        )
                     summary_path = session.run.subdir("execution") / "batch_summary.json"
                     import json
                     summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -915,7 +930,8 @@ class Orchestrator:
                         "failures": summary["failures"], "summary": summary,
                     }
 
-                tool_result = await get_tool_registry().dispatch(
+                from app.bridge.execution_batch_deadline import execution_batch_registry
+                tool_result = await execution_batch_registry(session.run, node_key).dispatch(
                     "execution.batch_runner",
                     {"node_key": node_key},
                     ToolContext(
@@ -929,18 +945,54 @@ class Orchestrator:
                     ),
                 )
                 if not tool_result.ok:
+                    if tool_result.status == 'timeout':
+                        failure_code = 'execution_dispatch_timeout'
                     raise RuntimeError(tool_result.error or "execution batch failed")
             except Exception as exc:
+                from app.harness.runtime.task_contract import FailureEnvelope
+                from app.harness.agent_loop.trace import atomic_json
+                failure = FailureEnvelope(task_id=f'{session.run.run_id}:{node_key}',
+                    code=failure_code, message=str(exc) or type(exc).__name__,
+                    retryable=True, outcome_known=False,
+                    evidence_refs=['execution/jobs', 'events/tool_events.jsonl'])
+                atomic_json(session.run.root / 'input/node_failures' / (node_key + '.json'), failure.model_dump())
                 await self._transition(session, node_key, NodeState.FAILED)
                 await self._publish_state(
                     session,
                     channel=f"run.{session.run.run_id}.failure",
-                    payload={"node": node_key, "error": str(exc)},
+                    payload={"node": node_key, "error": failure.message, "failure": failure.model_dump()},
                 )
                 return
         await self._transition(session, node_key, NodeState.DONE)
         if parse_node_key(node_key).stage == "execution":
             await self._after_execution(session, node_key)
+
+    async def _await_execution_confirmation(self, session: RunSession, node_key: str) -> bool:
+        from app.bridge.execution_confirmation import confirmation_policy, execution_preview, save_confirmation
+        interval = float(confirmation_policy()['poll_interval_seconds'])
+        announced = False
+        while not self._stopping(session):
+            try:
+                view = await asyncio.to_thread(execution_preview, session.run, node_key)
+                if not view['blockers']:
+                    if view['confirmed']:
+                        return True
+                    if session.request.auto_approve:
+                        await asyncio.to_thread(save_confirmation, session.run, node_key, view['token'], actor='auto_approve')
+                        return True
+            except (OSError, ValueError, RuntimeError):
+                # A changed/unreadable input never becomes permission to launch.
+                view = {'blockers': ['仿真配置无法核验，请刷新配置核对窗口。']}
+            if not announced:
+                self._persist_state(session, status='waiting_execution_confirmation')
+                await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
+                    'event': 'execution.configuration_confirmation_required', 'node': node_key,
+                    'message': '启动仿真前，请核对实际运行环境、数据与实验参数。',
+                    'blockers': view['blockers'],
+                })
+                announced = True
+            await asyncio.sleep(interval)
+        return False
 
     def _release_review_stop(self, session: RunSession, *, agent: str, operation: Literal["approval", "revision"]) -> bool:
         """Explicit action on a durable review never replays interrupted generation."""
@@ -1012,12 +1064,22 @@ class Orchestrator:
             # The existing driver observes the ReviewSession approval event or
             # the already-written approved artifact. Never start a second one.
             return {"ok": True, "status": "approval_signalled", "run_id": run_id}
+        if agent == 'execution':
+            node = self._latest_node_for_stage(session, agent)
+            if node is None or session.graph.state(node) not in {
+                    NodeState.WAITING_REVIEW, NodeState.APPROVED, NodeState.DONE, NodeState.SKIPPED}:
+                return {'ok': False, 'status': 'not_resumable', 'run_id': run_id}
         acknowledgement: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
 
         async def resume_owned() -> None:
             try:
+                if agent == 'execution':
+                    # Confirmation and simulation can wait for minutes. HTTP
+                    # acknowledges owned scheduling, never waits for job output.
+                    acknowledgement.set_result({'ok': True, 'status': 'approval_signalled', 'run_id': run_id})
                 result = await self._resume_approved_artifact(session, agent=agent)
-                acknowledgement.set_result(result)
+                if not acknowledgement.done():
+                    acknowledgement.set_result(result)
                 if result.get("status") == "resumed" and not self._stopping(session):
                     await self.run(run_id)
             finally:
@@ -1084,6 +1146,10 @@ class Orchestrator:
             if dir_name != stage:
                 continue
             latest = store.latest(agent_dir=dir_name, stem=stem)
+            if stage == "execution":
+                versions = [ref for ref in store.list_versions(agent_dir=dir_name, stem=stem) if ref.version != "approved"]
+                if versions:
+                    latest = versions[-1]
             if latest is None or latest.version == "approved":
                 continue
             from app.bridge.evaluation_service import build_artifact_evaluation_summary
@@ -1112,7 +1178,11 @@ class Orchestrator:
                     },
                 )
                 return False
+            from app.harness.schema.frontmatter_parser import parse as parse_execution_manifest
             approved = store.approve(latest)
+            if stage == "execution" and parse_execution_manifest(approved.path.read_text()).metadata.get("runtime_mode") == "deterministic":
+                # Intake is an operational manifest, not a new scientific finding to sediment.
+                return True
             try:
                 sediment_approved_artifact(
                     run=session.run,
@@ -1152,6 +1222,28 @@ class Orchestrator:
 
         return _real
 
+    def set_stage_limit(self, run_id: str, *, stop_after: str | None) -> None:
+        """Persist a user-selected boundary before acknowledging a launch."""
+        if stop_after not in (None, "execution"):
+            raise ValueError("目前支持在 execution 完成后停住")
+        session = self.session(run_id)
+        if self.owned_tasks.active(run_id) is not None or session.read_only:
+            raise ValueError("只能在启动前设置阶段边界")
+        session.request.extra = {**session.request.extra, "stop_after": stop_after}
+        self._persist_request_extra(session.run, session.request.extra)
+        self._persist_state(session, status="waiting_execution_confirmation")
+
+    @staticmethod
+    def _stage_limit_reached(session: RunSession) -> bool:
+        if session.request.extra.get("stop_after") != "execution":
+            return False
+        nodes = [key for key in session.graph.nodes if parse_node_key(key).stage == "execution"]
+        latest = max(nodes, key=lambda key: parse_node_key(key).attempt) if nodes else None
+        reached = latest is not None and session.graph.state(latest) == NodeState.DONE
+        if reached:
+            session.waiting_for_feedback = True
+        return reached
+
     async def _after_execution(self, session: RunSession, node_key: str) -> None:
         """Let the Commander/Bridge evaluate metrics after execution.
 
@@ -1160,6 +1252,11 @@ class Orchestrator:
         chain automatically so legacy e2e stays runnable; otherwise the run
         pauses at waiting_feedback until a human starts the feedback loop.
         """
+        if self._stage_limit_reached(session):
+            self._persist_state(session, status="waiting_feedback")
+            await self._publish_state(session, channel=f"run.{session.run.run_id}.execution", payload={
+                "event": "execution.stage_limit_reached", "message": "仿真已完成，按要求停在结果验收；报告阶段尚未启动。"})
+            return
         if not self.registry.has("execution"):
             self._persist_state(session, status="running")
             return
@@ -1328,6 +1425,7 @@ class Orchestrator:
         run_id: str,
         agent: str,
         reason: str,
+        restart_stopped: bool = False,
     ) -> dict[str, Any]:
         session = self.session(run_id)
         if session.read_only:
@@ -1335,7 +1433,38 @@ class Orchestrator:
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
-            return {"ok": False, "status": "stopped_run_requires_new_execution"}
+            termination = session.termination or {}
+            stopped_node = self._latest_node_for_stage(session, agent)
+            if (not restart_stopped or agent not in {"idea", "experiment", "coding", "execution", "writing"} or stopped_node is None
+                    or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
+                    or stopped_node not in termination.get("interrupted_nodes", [])
+                    or self.owned_tasks.active(run_id) is not None
+                    or session.graph.state(stopped_node) != NodeState.FAILED):
+                return {"ok": False, "status": "stopped_run_requires_new_execution"}
+            from app.bridge.research_branch import stopped_coding_retry_blocker
+            from app.execution.job_journal import stopped_execution_retry_blocker
+            try:
+                if agent in {"idea", "experiment", "writing"}:
+                    from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
+                    blocker = stopped_draft_retry_blocker(session.run, stopped_node, stage=agent,
+                        termination=termination, states={key: value.value for key, value in session.graph.all_states().items()})
+                else:
+                    blocker = (stopped_coding_retry_blocker(session.run, stopped_node) if agent == "coding"
+                               else stopped_execution_retry_blocker(session.run.root))
+            except (OSError, ValueError, KeyError) as exc:
+                blocker = str(exc)
+            if blocker:
+                return {"ok": False, "status": "recovery_blocked", "error": blocker}
+            session.run.write_event("run_lifecycle", {"event": f"run.explicit_{agent}_retry",
+                "run_id": run_id, "node": stopped_node, "previous_termination": dict(termination),
+                "reason": reason, "automatic_resume": False, "timestamp": datetime.now(tz=timezone.utc).isoformat()})
+            session.termination = None
+            try:
+                self._persist_state(session, status="failed")
+            except Exception:
+                session.termination = termination
+                raise
+            self.owned_tasks.release_after_explicit_review(run_id)
         node_key = self._latest_node_for_stage(session, agent)
         if node_key is None:
             return {"ok": False, "error": f"stage {agent} is not in this run"}
@@ -1388,7 +1517,25 @@ class Orchestrator:
         try:
             if self._stopping(session):
                 return
+            retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
+            if retry_existing_execution and parse_node_key(node_key).stage == 'execution':
+                from app.bridge.execution_confirmation import renew_execution_confirmation
+                renew_execution_confirmation(session.run, node_key)
             await self._transition(session, node_key, NodeState.RUNNING)
+            if (retry_existing_execution and parse_node_key(node_key).stage == 'execution'
+                    and (session.run.subdir('execution') / 'run_log.approved.md').is_file()
+                    and self._has_interrupted_execution_jobs(session)):
+                # Execution retries run the already-approved deterministic intake.
+                # Keep completed measurement identities while requiring a fresh
+                # confirmation decision before recovering cleaned interrupted jobs.
+                await self._transition(session, node_key, NodeState.WAITING_REVIEW)
+                await self._transition(session, node_key, NodeState.APPROVED)
+                await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
+                    'event': 'execution.explicit_retry', 'node': node_key,
+                    'message': '沿用已批准执行清单；核验已完成作业，仅恢复已清理的中断作业。'})
+                await self._complete_approved_node(session, node_key, retry_interrupted_jobs=True)
+                await self.run(session.run.run_id)
+                return
             if not await self._run_node_runner(
                 session,
                 node_key,
@@ -1419,6 +1566,11 @@ class Orchestrator:
         if not candidates:
             return None
         return max(candidates, key=lambda key: parse_node_key(key).attempt)
+
+    @staticmethod
+    def _has_interrupted_execution_jobs(session: RunSession) -> bool:
+        from app.execution.job_journal import job_states
+        return any(row['status'] == 'interrupted' for row in job_states(session.run.root))
 
     def _recover_session(self, run_id: str) -> RunSession | None:
         run = self.run_store.get(run_id)
@@ -1652,7 +1804,9 @@ class Orchestrator:
         candidate = RunGraph.from_dict(deepcopy(session.graph.to_dict()))
         candidate.transition(node_key, new_state)
         # No file event, bus publication, or live-graph mutation precedes commit.
-        self._persist_state(session, status="running", graph=candidate)
+        status = ("failed" if new_state == NodeState.FAILED
+                  and NodeState.RUNNING not in candidate.all_states().values() else "running")
+        self._persist_state(session, status=status, graph=candidate)
         await self.replay_state_events(session.run.run_id)
 
     async def replay_state_events(self, run_id: str) -> int:

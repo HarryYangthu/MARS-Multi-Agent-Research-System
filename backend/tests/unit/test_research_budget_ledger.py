@@ -17,6 +17,7 @@ from app.harness.runtime.research_budget_ledger import (
     ResearchBudgetLedger, interval_union_us,
 )
 from app.harness.runtime.research_contract import ResearchBudget
+from app.harness.llm.usage_policy import TokenUsageMode
 from app.harness.runtime.run_graph import RunGraph
 from app.harness.runtime.state_journal import RunStateConflictError, RunStateIntegrityError, StateJournal
 from app.storage.run_state_store import RunStateStore
@@ -36,7 +37,7 @@ def _budget(**changes: Any) -> ResearchBudget:
 
 
 def _setup(tmp_path: Path, *, budget: ResearchBudget | None = None, initialize: bool = True,
-           priced: bool = False) -> tuple[ResearchBudgetLedger, RunHandle]:
+           priced: bool = False, token_mode: TokenUsageMode = 'limited') -> tuple[ResearchBudgetLedger, RunHandle]:
     import sys
 
     from app.bridge.research_contract_service import freeze_research_task
@@ -62,7 +63,7 @@ def _setup(tmp_path: Path, *, budget: ResearchBudget | None = None, initialize: 
     journal = StateJournal.from_authority(run.root, run_id=run.run_id)
     assert journal is not None
     ledger = ResearchBudgetLedger(journal, task_sha256=frozen.task_sha256, budget=frozen.task.budget,
-        price_reference_sha256=PRICE_HASH if priced else None)
+        price_reference_sha256=PRICE_HASH if priced else None, token_mode=token_mode)
     if initialize:
         ledger.initialize(now_us=0)
     return ledger, run
@@ -203,7 +204,7 @@ def test_reader_and_gpu_slots_are_atomic_and_persist_across_instances(tmp_path: 
     ledger, _ = _setup(tmp_path)
     for index in range(2):
         assert ledger.reserve(_reserve(f"reader{index}", kind="reader", amounts=BudgetAmounts(deep_read_papers=1)), now_us=0).admitted
-    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget)
+    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget, token_mode='limited')
     assert reopened.reserve(_reserve("reader2", kind="reader", amounts=BudgetAmounts(deep_read_papers=1)), now_us=0).reason == "reader_concurrency_limit"
     ledger.settle("reader0", _settlement(BudgetAmounts(deep_read_papers=1)), now_us=1)
     assert reopened.reserve(_reserve("reader2", kind="reader", amounts=BudgetAmounts(deep_read_papers=1)), now_us=1).admitted
@@ -220,7 +221,7 @@ def test_retries_and_repeated_error_fingerprints_survive_reopen(tmp_path: Path) 
     retry = first.model_copy(update={"reservation_id": "retry1", "attempt_index": 1})
     assert ledger.reserve(retry, now_us=2).admitted
     ledger.settle("retry1", error, now_us=3)
-    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget)
+    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget, token_mode=ledger.token_mode)
     third = first.model_copy(update={"reservation_id": "retry2", "attempt_index": 2})
     assert reopened.reserve(third, now_us=4).reason == "repeated_error_limit"
     duplicate_operation = first.model_copy(update={"reservation_id": "new", "operation_id": "renamed"})
@@ -397,6 +398,27 @@ def test_each_cumulative_resource_rejects_before_inserting_reservation(
     assert ledger.snapshot(now_us=0).used[field] == 0
     with ledger.journal.connection() as connection:
         assert connection.execute("SELECT COUNT(*) FROM research_reservations").fetchone() == (0,)
+
+
+def test_statistics_only_reopens_frozen_token_limits_without_resetting_usage(tmp_path: Path) -> None:
+    ledger, run = _setup(tmp_path)
+    frozen = (run.root / 'input/research_task.v1.json').read_bytes()
+    spec = _reserve('large', kind='model', amounts=BudgetAmounts(model_requests=1,
+        input_tokens=1_000_001, billed_output_tokens=128_001))
+    assert ledger.reserve(spec, now_us=0).reason == 'exhausted:input_tokens'
+    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256,
+        budget=ledger.budget, token_mode='statistics_only')
+    assert reopened.reserve(spec, now_us=0).admitted
+    snapshot = reopened.snapshot(now_us=0)
+    assert snapshot.token_usage_mode == 'statistics_only'
+    assert snapshot.used['input_tokens'] == 1_000_001
+    assert snapshot.used['billed_output_tokens'] == 128_001
+    assert (run.root / 'input/research_task.v1.json').read_bytes() == frozen
+    # The per-request context capacity still applies, independently of cumulative usage.
+    too_large = _reserve('window', kind='model', amounts=BudgetAmounts(model_requests=1),
+        request_input_tokens=ledger.budget.request_input_tokens + 1)
+    assert reopened.reserve(too_large, now_us=0).reason == 'request_input_limit'
+    assert reopened.reserve(spec, now_us=0).replay  # existing operation is not counted twice
 
 
 def test_all_model_requests_across_distinct_operations_share_one_limit(tmp_path: Path) -> None:
@@ -629,7 +651,7 @@ def test_unknown_observed_lower_bound_never_refunds_and_survives_reopen(tmp_path
     ledger.mark_unknown("model", reason="incomplete actual receipt",
         observed_lower_bound=BudgetAmounts(input_tokens=40, billed_output_tokens=8), now_us=2)
     ledger.mark_unknown("model", reason="incomplete actual receipt", now_us=2)
-    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget)
+    reopened = ResearchBudgetLedger(ledger.journal, task_sha256=ledger.task_sha256, budget=ledger.budget, token_mode=ledger.token_mode)
     snapshot = reopened.snapshot(now_us=10)
     assert snapshot.used["model_requests"] == 3
     assert snapshot.used["input_tokens"] == 40 and snapshot.used["billed_output_tokens"] == 80

@@ -11,9 +11,11 @@ from typing import Any, Literal, Protocol
 
 from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.completion_recovery import apply_author_empty_completion_recovery, validate_author_empty_recovery_resume
+from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
+from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.agent_loop.review_plan import (
     WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, completed_plan_decision, finish_review_unit, pack_review_unit,
     prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
@@ -25,7 +27,7 @@ from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_finge
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
-from app.harness.tools.registry import ToolContext, ToolRegistry
+from app.harness.tools.registry import ToolContext, ToolPolicy, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
 ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
@@ -83,6 +85,7 @@ class LoopInput:
     review_config: LLMConfig | None = None
     correlation: dict[str, str] = field(default_factory=dict)
     context_metadata: dict[str, Any] = field(default_factory=dict)
+    revision_seed: RevisionSeed | None = None
 
 
 @dataclass
@@ -93,6 +96,7 @@ class LoopResult:
     counts: dict[str, int]
     trace_root: Path
     reflection_accepted: bool = False
+    resource_error: str = ""
 
 
 class AgentLoopExecutor(Protocol):
@@ -102,9 +106,36 @@ class AgentLoopExecutor(Protocol):
 def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
     """Expose actual remaining local resources before choosing another action."""
     remaining = {"model_calls": policy.remaining_model_calls(counts["model_requests"]),
-                 "tool_calls": max(0, policy.max_tool_steps - counts["tool_dispatches"]),
-                 "validation_repairs": max(0, policy.max_validation_repairs - counts["validation_repairs"])}
-    return remaining_budget_message(remaining)
+                 "tool_calls": policy.remaining_tool_calls(counts["tool_dispatches"]),
+                 "validation_repairs": None if policy.completion_driven else max(0, policy.max_validation_repairs - counts["validation_repairs"])}
+    message = remaining_budget_message(remaining)
+    from app.harness.agent_loop.review_plan import SHARED_BUDGET_NOTICE
+
+    return Message(message.role, message.content + SHARED_BUDGET_NOTICE)
+
+
+def permits_fresh_read(policy: ToolPolicy) -> bool:
+    """Only host-configured local reads can bypass successful-call deduplication."""
+    return bool(policy.repeatable_read and policy.mutation_level == "read"
+                and not policy.network and not policy.requires_approval)
+
+
+def rejected_batch_feedback(actions: list[dict[str, Any]], *, seen: dict[str, Any],
+                            history: list[dict[str, Any]], policy: AgentLoopPolicy, used: int) -> str:
+    """Identify rejected actions and return their actual prior observations."""
+    identities = [digest({"tool": action["tool"], "args": action["args"]}) for action in actions]
+    prior = {digest({"tool": item["tool"], "args": item["args"]}): item for item in history}
+    completed = [identity for identity in dict.fromkeys(identities)
+                 if identity in seen and not seen[identity]["retry_allowed"]]
+    return canonical({"batch_not_executed": True,
+        "remaining_tool_calls": policy.remaining_tool_calls(used),
+        "over_budget": not policy.allows_tool_calls(used, len(actions)),
+        "duplicate_within_batch": [action for index, action in enumerate(actions) if identities[index] in identities[:index]],
+        "prior_observations_untrusted": [compact(prior[identity], policy.observation_chars) for identity in completed if identity in prior],
+        "not_executed": [{"tool": action["tool"], "args": action["args"]} for action in actions],
+        "instruction": "No action in this batch ran. Reuse the actual prior observations shown here, even if their old context was offloaded. "
+            "Use context.read_material for missing archived windows. Submit only new needed actions within budget; "
+            "do not include already completed/permanent-failed calls in the next batch."})
 
 
 def action_instructions(specs: list[dict[str, Any]], *, native: bool,
@@ -256,11 +287,14 @@ class NativeAgentLoop:
             raise ValueError("review provider and configuration must be supplied together")
         validate_reflection_format_repair(request.review_config or request.config, p)
         specs = []
+        fresh_reads: set[str] = set()
         for name in request.tools:
             spec = request.registry.spec(name)
             if not request.registry.has(name) or spec is None or spec.bridge_only:
                 raise ValueError(f"configured tool has no executable specification: {name}")
             specs.append({"name": name, "description": spec.description, "args_schema": spec.input_schema})
+            if permits_fresh_read(spec.policy):
+                fresh_reads.add(name)
         native = p.protocol == "native_tools"
         validate_native_thinking(request.config, p)
         wire_tools = native_specs(specs, request.final_schema, allow_revisions=p.document_revisions_enabled,
@@ -284,6 +318,10 @@ class NativeAgentLoop:
             fingerprint = digest({"base": fingerprint, "review_messages": [m.to_wire() for m in request.review_messages]})
         if request.final_schema is not None:
             fingerprint = digest({"base": fingerprint, "final_schema": request.final_schema})
+        if request.revision_seed is not None:
+            if not native or not p.document_revisions_enabled or p.trace != "full":
+                raise ValueError("revision seeds require native document revisions with full trace")
+            fingerprint = digest({"base": fingerprint, "revision_seed": request.revision_seed.receipt})
         fingerprint = stop_fingerprint(fingerprint, request.stop_condition, request.stop_contract_id)
         fingerprint = review_plan_fingerprint(fingerprint, request.review_plan_factory, request.review_plan_contract_id,
                                               request.config, p)
@@ -314,6 +352,18 @@ class NativeAgentLoop:
         }
         if request.review_plan_factory is not None:
             state["review_plan_contract_id"] = request.review_plan_contract_id
+        if request.revision_seed is not None and not request.resume:
+            from copy import deepcopy
+            state["candidate"] = request.revision_seed.candidate
+            state["history"] = deepcopy(list(request.revision_seed.observations))
+            state["revision_seed"] = deepcopy(request.revision_seed.receipt)
+            state["feedback"] = (
+                "This is an explicit human-requested revision of the current unapproved candidate. "
+                "Use mars_revise_document with its receipt to change only the required fields. "
+                "Historical readings carry their actual source receipts; do not repeat research without a gap. "
+                "Read current code again. The complete revised candidate still requires validation and independent review."
+            )
+        rejection_receipt = None
         if request.resume:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
@@ -327,6 +377,12 @@ class NativeAgentLoop:
                 review_revision(state, request.external_review, p)
             if state["fingerprint"] != fingerprint or state["status"] not in allowed_status:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
+            rejection_receipt = checkpoint_quota_rejection_receipt(request.trace_root, state,
+                run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)))
+            if rejection_receipt is not None:
+                # An explicit rejection has no unknown result to replay. Keep
+                # all request/attempt counts and unknown token usage unchanged.
+                state["pending"] = None
             validate_author_empty_recovery_resume(state, p)
             if request.review_plan_contract_id is not None:
                 validate_review_plan_resume(state, request.trace_root, contract_id=request.review_plan_contract_id)
@@ -337,6 +393,7 @@ class NativeAgentLoop:
             if state["pending"] == "model":
                 state["usage_complete"] = False
             state["status"] = "running"
+            state.pop("resource_error", None)
             state["pending"] = None
         state.setdefault("review_issues", [])
         state.setdefault("validation_issues", [])
@@ -360,7 +417,19 @@ class NativeAgentLoop:
             state["last_model_error"] = next((row.get("reason") for row in reversed(prior_events)
                                                if row["kind"] == "model_error"), None)
         counts = state["counts"]
+        if p.max_active_seconds:
+            state.setdefault("active_elapsed_seconds", 0.0)
+        if rejection_receipt is not None:
+            trace.emit("provider_rejection_reconciled", rejection_receipt)
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
+        if request.revision_seed is not None and not request.resume:
+            trace.emit("revision_seeded", {"counts_inherited": False, "acceptance_inherited": False},
+                       visible=request.revision_seed.receipt)
+            # Recheck current requirements and archived source integrity before
+            # asking the model to revise. Old validation/acceptance is not reused.
+            state["validation_issues"] = await request.validate(state["candidate"], state["history"])
+            trace.emit("revision_seed_validation", {"acceptance_inherited": False,
+                "valid": not state["validation_issues"]}, visible=state["validation_issues"])
         if request.external_review:
             if not request.resume:
                 raise ValueError("external review requires an existing invocation")
@@ -456,6 +525,15 @@ class NativeAgentLoop:
             if request.resume:
                 recover_completion(state.get("last_model_error"))
             while p.allows_model_calls(counts["model_requests"]):
+                trace.snapshot(state)
+                if p.max_active_seconds and state["active_elapsed_seconds"] >= p.max_active_seconds:
+                    state["status"] = "budget_exhausted"
+                    state["feedback"] = "Agent active-time budget exhausted; progress preserved for review."
+                    state["reflection_accepted"] = False
+                    trace.emit("stopped", {"status": state["status"], "reason": state["feedback"],
+                        "active_elapsed_seconds": state["active_elapsed_seconds"], "budgets_reset": False})
+                    trace.snapshot(state)
+                    break
                 if stop_at_boundary("before_model"):
                     break
                 reviewing = state["next_phase"] == "reflect"
@@ -496,13 +574,19 @@ class NativeAgentLoop:
                 if reviewing and unit is None:
                     extra.append(reflection_instruction(request.reflection_rubric, format_repair=format_repair))
                 feedback = state["feedback"]
-                if not reviewing and counts["tool_dispatches"] >= p.max_tool_steps:
+                if not reviewing and not p.allows_tool_calls(counts["tool_dispatches"]):
                     feedback += "\nTool budget exhausted. Return a final grounded document or explicit evidence gaps."
                 # Reflection sends no tools; reserve only schemas actually sent.
                 phase_schema_budget = 0 if reviewing else tool_schema_budget
+                effective_budget = p.input_token_budget
+                if modern_context:
+                    from app.harness.context.runtime_policy import input_budget
+                    phase_cfg = phase_config()
+                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
+                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                 if unit is not None:
                     try:
-                        messages, manifest = pack_review_unit(unit, budget=p.input_token_budget,
+                        messages, manifest = pack_review_unit(unit, budget=effective_budget,
                                                               budget_context=budget_message(p, counts))
                     except ValueError as exc:
                         state["status"] = "review_evidence_unavailable"
@@ -512,10 +596,6 @@ class NativeAgentLoop:
                         break
                 elif modern_context:
                     from app.harness.context.runtime_native import pack_native
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
-                    effective_budget = input_budget(runtime_policy, p.input_token_budget,
-                        output_reserve=phase_cfg.max_tokens, model_window=phase_cfg.extra.get("context_window"))
                     phase_tools = () if reviewing else wire_tools
                     messages, manifest = pack_native(
                         pinned=(request.review_messages if reviewing and request.review_messages is not None else pinned) + extra,
@@ -541,11 +621,8 @@ class NativeAgentLoop:
                     )
                 if modern_context and unit is not None:
                     from app.harness.context.runtime_pack import pack_messages
-                    from app.harness.context.runtime_policy import input_budget
-                    phase_cfg = phase_config()
                     messages, modern_manifest = pack_messages(messages, policy=runtime_policy,
-                        budget=input_budget(runtime_policy, p.input_token_budget, output_reserve=phase_cfg.max_tokens,
-                            model_window=phase_cfg.extra.get("context_window")),
+                        budget=effective_budget,
                         root=None, agent=request.tool_context.agent, readback_available=False)
                     manifest.update(modern_manifest)
                     manifest["estimated_upper_bound_tokens"] = modern_manifest["used"]
@@ -598,6 +675,7 @@ class NativeAgentLoop:
                 except ResourceBudgetError as exc:
                     state["status"] = "budget_exhausted"
                     state["pending"] = None
+                    state["resource_error"] = str(exc)
                     trace.emit("resource_budget_exhausted", {"reason": str(exc), "request_sent": False})
                     break
                 except Exception as exc:
@@ -720,6 +798,9 @@ class NativeAgentLoop:
                                 f"The host copies your {p.submission_body_field} as body. "
                                 "Use existing observations and resolve pinned errors. "
                                 + ("For local edits use mars_revise_document with the current base_sha256." if state["candidate"] else ""))
+                        if state["candidate"] and p.document_revisions_enabled:
+                            from app.harness.agent_loop.document_revision import revision_feedback
+                            state["feedback"] += "\n" + revision_feedback(str(parse_error))
                     trace.emit("protocol_error", {"error": str(parse_error),
                                "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
                     if counts["protocol_repairs"] > p.max_protocol_repairs:
@@ -773,6 +854,10 @@ class NativeAgentLoop:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
+                    if decision.get("format_compatibility"):
+                        trace.emit("document_format_normalized", {"call_id": decision["submission_id"],
+                            "candidate_sha256": digest(state["candidate"]), "content_invented": False,
+                            "validation_required": True}, visible=decision["format_compatibility"])
                     if "revision" in decision:
                         trace.emit("document_revision", {"call_id": decision["submission_id"],
                             "base_sha256": decision["revision"]["base_sha256"],
@@ -785,6 +870,8 @@ class NativeAgentLoop:
                                                            "serialization_only": True})
                     await progress("candidate", text=state["candidate"])
                     errors = await request.validate(state["candidate"], state["history"])
+                    if state.get("revision_seed", {}).get("candidate_sha256") == digest(state["candidate"]):
+                        errors.append("/candidate: human-requested revision cannot resubmit the unchanged rejected draft")
                     if state["review_issues"] and digest(state["candidate"]) == state["reviewed_candidate_sha"]:
                         errors.append("/candidate: unresolved review issues require a revised candidate")
                     state["validation_issues"] = list(errors)
@@ -793,7 +880,7 @@ class NativeAgentLoop:
                     if errors:
                         counts["validation_repairs"] += 1
                         state["feedback"] = canonical({"validation_errors": errors})
-                        if counts["validation_repairs"] > p.max_validation_repairs:
+                        if not p.completion_driven and counts["validation_repairs"] > p.max_validation_repairs:
                             state["status"] = "validation_exhausted"
                             break
                     elif stop_at_boundary("after_validation"):
@@ -808,10 +895,12 @@ class NativeAgentLoop:
                     actions = decision.get("batch", [decision])
                     identities = [digest({"tool": a["tool"], "args": a["args"]}) for a in actions]
                     if len(actions) > 1:
-                        if (len(actions) > p.max_tool_steps - counts["tool_dispatches"] or
+                        if (not p.allows_tool_calls(counts["tool_dispatches"], len(actions)) or
                             len(identities) != len(set(identities)) or
-                            any(i in state["seen"] and not state["seen"][i]["retry_allowed"] for i in identities)):
-                            state["feedback"] = "Batch not executed: exceeds remaining tool budget or repeats completed/permanent-failed actions. Submit only needed actions within budget."
+                            any(i in state["seen"] and not state["seen"][i]["retry_allowed"]
+                                and action["tool"] not in fresh_reads for i, action in zip(identities, actions))):
+                            state["feedback"] = rejected_batch_feedback(actions, seen=state["seen"],
+                                history=state["history"], policy=p, used=counts["tool_dispatches"])
                             trace.snapshot(state)
                             continue
                         for action in actions:
@@ -823,10 +912,12 @@ class NativeAgentLoop:
                         identity = digest({"tool": tool, "args": decision["args"]})
                         if tool not in request.tools:
                             state["feedback"] = f"Tool {tool} is not available for this agent."
-                        elif counts["tool_dispatches"] >= p.max_tool_steps:
+                        elif not p.allows_tool_calls(counts["tool_dispatches"]):
                             state["feedback"] = "Tool budget exhausted."
-                        elif identity in state["seen"] and not state["seen"][identity]["retry_allowed"]:
-                            state["feedback"] = "Duplicate successful/permanent-failed action rejected; use its prior Observation."
+                        elif (identity in state["seen"] and not state["seen"][identity]["retry_allowed"]
+                              and tool not in fresh_reads):
+                            state["feedback"] = rejected_batch_feedback([decision], seen=state["seen"],
+                                history=state["history"], policy=p, used=counts["tool_dispatches"])
                         else:
                             prior = state["seen"].get(identity)
                             state["pending"] = "tool"
@@ -883,4 +974,4 @@ class NativeAgentLoop:
             cfg.attempt_observer = None
             await progress("finished", status=state["status"], reason=state.get("termination", {}).get("reason", ""))
         return LoopResult(state["candidate"], state["status"], state["history"], dict(counts),
-                          request.trace_root, state["reflection_accepted"])
+                          request.trace_root, state["reflection_accepted"], state.get("resource_error", ""))

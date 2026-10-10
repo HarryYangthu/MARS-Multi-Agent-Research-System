@@ -8,6 +8,7 @@ standard execution result shape used by reports, diagnostics, and the workbench.
 from __future__ import annotations
 
 import asyncio
+from app.harness.tools.execution.paper_config import approved_config_path as approved_config_path, override_args
 import hashlib
 import json
 import math
@@ -15,12 +16,14 @@ import os
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from app.execution.results import SimulationResult
+from app.execution.paper_static_protocol import static_summary_errors, static_training_protocol
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.harness.tools.process_runtime import start_process, terminate_process_tree
 from app.settings import repo_root
@@ -47,8 +50,11 @@ async def run_paper_static_simulation(
     log_path = logs_dir / f"{_safe_name(spec.experiment_id)}_paper_static.log"
 
     try:
-        repo_path = _resolve_path(str(cfg.get("repo_path", "")), repo_root())
-        config_path = _resolve_path(str(cfg.get("config_path", "configs/static.yaml")), repo_path)
+        from app.harness.tools.git_branch import current_git_branch
+        branch = current_git_branch(spec.project, spec.run_id)
+        # Host binding wins over a global adapter path or model arguments.
+        repo_path = branch.root if branch is not None else _resolve_path(str(cfg.get("repo_path", "")), repo_root())
+        config_path = approved_config_path(spec.config, cfg, repo_path)
         data_path = _resolve_path(
             str(spec.config.get("data_path") or cfg.get("data_path", "")),
             repo_path,
@@ -59,10 +65,11 @@ async def run_paper_static_simulation(
         return _failed_result(spec, started, str(exc))
 
     dry_run = _bool_value(spec.config.get("dry_run", cfg.get("default_dry_run", False)))
-    max_iters = _positive_int(spec.config.get("max_iters", cfg.get("default_max_iters")), max(1, steps))
+    from app.harness.schema.experiment_contract import budget
+    unit, max_iters = budget(spec.config)
     timeout = _positive_float(cfg.get("timeout_seconds"), 900.0)
-    output_root = run_root / "execution" / "paper_static" / _safe_name(spec.experiment_id)
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = run_root / "execution" / "paper_static" / _safe_name(spec.experiment_id) / uuid.uuid4().hex
+    output_root.mkdir(parents=True, exist_ok=False)
 
     validation_error = _validate_inputs(
         python=python,
@@ -74,13 +81,19 @@ async def run_paper_static_simulation(
         _write_failure_log(log_path, validation_error)
         return _failed_result(spec, started, validation_error)
 
+    try:
+        protocol = static_training_protocol(config_path, _override_args(spec.config, cfg), unit=unit, count=max_iters)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        _write_failure_log(log_path, str(exc))
+        return _failed_result(spec, started, str(exc))
+
     tag = _safe_tag(f"mars_{spec.run_id}_{spec.experiment_id}")
     argv = [
         python,
         "train_static.py",
         "--cfg",
         str(config_path),
-        "--max-iters",
+        "--max-steps" if unit == "steps" else "--max-iters",
         str(max_iters),
         "--tag",
         tag,
@@ -104,6 +117,7 @@ async def run_paper_static_simulation(
                 "data_path": str(data_path),
                 "config_path": str(config_path),
                 "max_iters": max_iters,
+                "budget_unit": unit,
                 "dry_run": dry_run,
             },
         )
@@ -137,13 +151,19 @@ async def run_paper_static_simulation(
             async for raw in process.stdout:
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 stdout_lines.append(line)
-                parsed = _parse_epoch_line(line)
+                progress = _parse_step_line(line)
+                parsed = progress if unit == "steps" else _parse_epoch_line(line)
                 if parsed is not None:
-                    step = len(loss_curve)
+                    curve_metric = "training_loss" if unit == "steps" else "cancellation_residual_ratio"
+                    step = int(parsed.get("optimizer_step", len(loss_curve)))
                     loss_curve.append(parsed["loss"])
-                    pim_db_curve.append(parsed["paper_PIM_db"])
-                    res_db_curve.append(parsed["paper_RES_db"])
-                    ape_db_curve.append(parsed["paper_APE_db"])
+                    if "paper_RES_db" in parsed:
+                        pim_db_curve.append(parsed["paper_PIM_db"])
+                        res_db_curve.append(parsed["paper_RES_db"])
+                        ape_db_curve.append(parsed["paper_APE_db"])
+                    from app.execution.curve_parser import write_curve
+                    write_curve(run_root=run_root, experiment_id=spec.experiment_id,
+                                metric_name=curve_metric, values=loss_curve)
                     if bus_publish is not None:
                         await bus_publish(
                             channel,
@@ -151,7 +171,7 @@ async def run_paper_static_simulation(
                                 "event": "execution.curve_point",
                                 "experiment_id": spec.experiment_id,
                                 "step": step,
-                                "metric": "loss",
+                                "metric": curve_metric,
                                 "value": parsed["loss"],
                                 "paper_metrics": parsed,
                             },
@@ -184,9 +204,11 @@ async def run_paper_static_simulation(
     summary_path = _summary_path(output_root=output_root, done_path=done_path)
     summary = _read_json(summary_path) if summary_path is not None else {}
     metrics = _metrics_from_summary(summary)
-    if not metrics and loss_curve:
-        metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
-    has_measurements = bool(metrics) and all(math.isfinite(value) for value in metrics.values())
+    has_measurements = summary_path is not None and bool(metrics) and all(math.isfinite(value) for value in metrics.values())
+    protocol_errors = static_summary_errors(summary, unit=unit, count=max_iters, seed=spec.seed)
+    if protocol_errors:
+        has_measurements = False
+        stderr_lines.extend(protocol_errors)
     metrics.setdefault("returncode", float(returncode))
     metrics.setdefault("dry_run", 1.0 if dry_run else 0.0)
     metrics.setdefault("max_iters", float(max_iters))
@@ -252,21 +274,16 @@ async def run_paper_static_simulation(
         },
     )
 
-    fingerprint_hash = "sha256:" + hashlib.sha256(
-        json.dumps(
-            {
-                "project": spec.project,
-                "run_id": spec.run_id,
-                "experiment_id": spec.experiment_id,
-                "config": spec.config,
-                "data_path": str(data_path),
-                "summary": summary,
-                "returncode": returncode,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        ).encode("utf-8")
-    ).hexdigest()[:24]
+    from app.harness.persistence import atomic_write_json
+    receipt_path = output_root / "execution_receipt.json"
+    atomic_write_json(receipt_path, {"schema": "paper_static_receipt.v1", "run_id": spec.run_id,
+        "experiment_id": spec.experiment_id, "status": status, "returncode": returncode,
+        "config": spec.config, "training_protocol": protocol, "config_path": str(config_path),
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(), "argv": argv,
+        "summary_path": str(summary_path) if summary_path is not None else None,
+        "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path is not None else None,
+        "log_path": str(log_path), "log_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest()})
+    fingerprint_hash = "sha256:" + hashlib.sha256(receipt_path.read_bytes()).hexdigest()
 
     if bus_publish is not None:
         await bus_publish(
@@ -317,12 +334,19 @@ def paper_static_readiness() -> dict[str, Any]:
 
 
 def _paper_static_config() -> dict[str, Any]:
-    raw = yaml.safe_load((repo_root() / "configs" / "execution.yaml").read_text(encoding="utf-8")) or {}
+    from app.harness.tools.config import load_execution_config
+    raw = load_execution_config()
     execution = raw.get("execution", {})
     if not isinstance(execution, dict):
         return {}
     cfg = execution.get("paper_static", {})
     return cfg if isinstance(cfg, dict) else {}
+
+
+
+
+def _override_args(config: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
+    return override_args(config, cfg)
 
 
 def _python_from_config(cfg: dict[str, Any]) -> str:
@@ -373,34 +397,24 @@ def _subprocess_env(*, run_root: Path, spec: Any) -> dict[str, str]:
     )
 
 
-def _override_args(config: dict[str, Any], cfg: dict[str, Any]) -> list[str]:
-    allowed = cfg.get("allowed_overrides", [])
-    if not isinstance(allowed, list):
-        allowed = []
-    pairs: list[tuple[str, Any]] = []
-    for key in allowed:
-        key_s = str(key)
-        if key_s in config:
-            pairs.append((key_s, config[key_s]))
-    for source, target in {
-        "learning_rate": "lr_init",
-        "lr": "lr_init",
-        "lut_n_spline": "model.lut_n_spline",
-        "lut_rmax": "model.lut_rmax",
-        "lut_init": "model.lut_init",
-    }.items():
-        if source in config:
-            pairs.append((target, config[source]))
-    args: list[str] = []
-    for key, value in pairs:
-        if isinstance(value, bool):
-            rendered = "true" if value else "false"
-        elif isinstance(value, int | float | str):
-            rendered = str(value)
-        else:
-            continue
-        args.extend(["--set", f"{key}={rendered}"])
-    return args
+
+
+def _parse_step_line(line: str) -> dict[str, float] | None:
+    """Only accept actual finite optimizer-update observations."""
+    if not line.startswith("mars.progress "):
+        return None
+    try:
+        row = json.loads(line.removeprefix("mars.progress "))
+        step, loss = row["optimizer_step"], row["training_loss"]
+        if type(step) is not int or step < 1 or type(loss) not in (int, float) or not math.isfinite(loss):
+            return None
+        values = {"optimizer_step": float(step), "loss": float(loss)}
+        for source, target in (("PIM", "paper_PIM_db"), ("RES", "paper_RES_db"), ("APE", "paper_APE_db")):
+            if source in row and type(row[source]) in (int, float) and math.isfinite(row[source]):
+                values[target] = float(row[source])
+        return values
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 def _parse_epoch_line(line: str) -> dict[str, float] | None:
@@ -416,15 +430,16 @@ def _parse_epoch_line(line: str) -> dict[str, float] | None:
         "paper_APE_db": ape,
         "PIM": pim,
         "APE": ape,
-        "RES": -ape,
+        "RES": res,
         "loss": 10.0 ** (-ape / 10.0),
+        "cancellation_residual_ratio": 10.0 ** (-ape / 10.0),
     }
 
 
 def _summary_path(*, output_root: Path, done_path: Path | None) -> Path | None:
     if done_path is not None:
         candidate = done_path / "summary.json"
-        if candidate.is_file():
+        if candidate.is_file() and candidate.resolve().is_relative_to(output_root.resolve()):
             return candidate
     summaries = sorted(output_root.glob("*/summary.json"), key=lambda p: p.stat().st_mtime)
     return summaries[-1] if summaries else None
@@ -444,6 +459,11 @@ def _metrics_from_summary(summary: dict[str, Any]) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for raw_key, out_key in {
         "epochs": "epochs",
+        "optimizer_steps": "optimizer_steps",
+        "parameter_counts": "parameter_counts",
+        "seed": "seed",
+        "loss": "loss",
+        "loss_max": "loss_max",
         "PIM": "paper_PIM_db",
         "RES": "paper_RES_db",
         "APE": "paper_APE_db",
@@ -458,8 +478,10 @@ def _metrics_from_summary(summary: dict[str, Any]) -> dict[str, float]:
     if "paper_APE_db" in metrics:
         ape = metrics["paper_APE_db"]
         metrics["APE"] = ape
-        metrics["RES"] = -ape
-        metrics["loss"] = 10.0 ** (-ape / 10.0)
+        metrics["cancellation_residual_ratio"] = 10.0 ** (-ape / 10.0)
+        metrics.setdefault("loss", metrics["cancellation_residual_ratio"])
+    if "paper_RES_db" in metrics:
+        metrics["RES"] = metrics["paper_RES_db"]
     return metrics
 
 

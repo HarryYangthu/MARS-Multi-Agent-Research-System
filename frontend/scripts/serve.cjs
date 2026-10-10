@@ -1,0 +1,14 @@
+const { readFileSync } = require('node:fs');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+const YAML = require('yaml');
+const settings = YAML.parse(readFileSync(path.join(__dirname, '../../configs/local_runtime.yaml'), 'utf8'));
+const mode = process.argv[2];
+const args = process.argv.slice(3);
+const overridesPort = args.some(arg => ['-p', '--port'].includes(arg) || arg.startsWith('--port='));
+const port = process.env.FRONTEND_PORT || process.env.PORT || settings.frontend_port;
+const host = process.env.MARS_HOST || settings.host;
+if (!['dev', 'start'].includes(mode) || !Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535) throw new Error('Invalid local server settings');
+const child = spawn(process.execPath, [require.resolve('next/dist/bin/next'), mode, ...(overridesPort ? [] : ['--port', String(port)]), '--hostname', host, ...args], { stdio: 'inherit', env: process.env });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
+child.on('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });

@@ -38,24 +38,27 @@ def test_generate_report_bundle_writes_data_pack_and_office_files(tmp_path: Path
                 "target_audience": "research team",
                 "chain_refs": {"runs": ["exp_1"]},
             },
-            "# Research Report\n\nRES improved in the mock run.\n",
+            "# Research Report\n\nOffice conversion fixture; no model or simulation result is asserted.\n",
         ),
         expected_schema="report.v1",
     )
+    source = ArtifactStore(run).latest(agent_dir="writing", stem="research_report")
+    assert source is not None
+    (run.subdir("writing") / "research_report.approved.md").write_bytes(source.path.read_bytes())
 
-    result = generate_report_bundle(run, actor="test")
+    result = generate_report_bundle(run, actor="test", formats=("excel", "word", "powerpoint"))
 
     assert result["exists"] is True
     manifest = run.root / str(result["manifest"])
     assert manifest.exists()
     assert validate_document(manifest.read_text(encoding="utf-8"), expected_schema="report_bundle.v1").valid
 
-    data_pack = run.subdir("writing") / "report_data_pack.v1.json"
+    data_pack = run.root / result["metadata"]["data_pack"]
     assert data_pack.exists()
     parsed = json.loads(data_pack.read_text(encoding="utf-8"))
     assert parsed["summary"]["experiment_count"] == 1
 
-    deliverables = run.subdir("writing") / "deliverables"
+    deliverables = data_pack.parent
     for filename in ("results_workbook.xlsx", "research_report.docx", "research_deck.pptx"):
         path = deliverables / filename
         assert path.exists()
@@ -65,4 +68,3 @@ def test_generate_report_bundle_writes_data_pack_and_office_files(tmp_path: Path
     latest = read_latest_report_bundle(run)
     assert latest is not None
     assert latest["metadata"]["qa_status"]["status"] in {"passed", "degraded"}
-

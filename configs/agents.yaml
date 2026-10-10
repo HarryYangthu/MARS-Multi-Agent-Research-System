@@ -2,14 +2,13 @@ commander:
   enabled: true
   output_schema: ''
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
-    # Thinking tokens and visible final text share this upper bound.
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -23,9 +22,14 @@ commander:
   loop:
     max_tool_steps: 12
   tools:
+  - code.repo_list
+  - code.repo_search
+  - code.repo_read_lines
   - run.create
   - run.start
   - run.status
+  - run.recovery_status
+  - run.recover
   - run.feedback_loop
   - artifact.read
   - artifact.review
@@ -36,15 +40,14 @@ idea:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.7
-    # Product default: billed output includes provider reasoning usage.
     max_tokens: 8192
     top_p: 1.0
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -77,12 +80,10 @@ idea:
     native_observation_history: true
     mode: reflection
     trace: full
-    # Tool-free Reflection may reason independently of the native action protocol.
     reflection_thinking_enabled: true
     reflection_reasoning_effort: low
     reflection_format_repair_enabled: false
-    # Includes the submission schema, supplied context and visible paper excerpts.
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_model_calls: 36
     max_validation_repairs: 6
     max_tool_steps: 18
@@ -99,13 +100,13 @@ idea_research:
   enabled: true
   output_schema: research_report.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -127,7 +128,7 @@ idea_research:
     reflection_format_repair_enabled: false
     max_reflections: 2
     trace: full
-    input_token_budget: 48000
+    input_token_budget: 128000
     observation_chars: 16000
     max_model_calls: 16
     max_tool_steps: 12
@@ -144,13 +145,13 @@ experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.3
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -161,7 +162,7 @@ experiment:
   debate:
     enabled: false
   loop:
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
@@ -172,13 +173,13 @@ coding:
   enabled: true
   output_schema: code_spec.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.1
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -200,10 +201,11 @@ coding:
   - python_research
   - c_production
   loop:
+    completion_driven: true
     protocol: native_tools
     mode: react
     native_observation_history: true
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 2
     max_tool_steps: 20
   tools:
@@ -219,25 +221,11 @@ coding:
 execution:
   enabled: true
   output_schema: run_log.v1
-  model:
-    provider: zhipu
-    model: glm-5.3
-    temperature: 0.1
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
-    thinking:
-      enabled: true
-    reasoning_effort: low
-    request_timeout_seconds: 120
-    retry:
-      max_retries: 2
-      base_delay_seconds: 1
+  runtime_mode: deterministic
   debate:
     enabled: false
   loop:
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 6
   tools:
@@ -247,13 +235,13 @@ writing:
   enabled: true
   output_schema: report.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.4
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -273,26 +261,23 @@ writing:
       model: glm-5.3
   loop:
     mode: reflection
-    input_token_budget: 48000
+    input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
   tools:
   - knowledge.methodology
   - knowledge.run_archive
-
-# Separate author/reviewer configurations; focused review_mode explicitly permits
-# independent sessions on the same model, with truthful same-model audit receipts.
 idea_author:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low
@@ -307,13 +292,13 @@ idea_reviewer:
   enabled: true
   output_schema: proposal.v1
   model:
+    context_window: 128000
     provider: zhipu
     model: glm-5.3
     temperature: 0.1
     max_tokens: 8192
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
-    base_url_env: ZHIPU_BASE_URL
     thinking:
       enabled: true
     reasoning_effort: low

@@ -15,6 +15,7 @@ from app.harness.agent_loop.executor import ProgressSink
 from app.harness.agent_loop.trace import atomic_json, digest
 from app.harness.schema.frontmatter_parser import FrontmatterError, parse
 from app.harness.schema.validator import validate_document
+from app.harness.runtime.task_contract import HandoffPrerequisite, prerequisite_binding_errors
 
 
 STRUCTURED_REFERENCE_GUIDANCE = (
@@ -25,6 +26,15 @@ STRUCTURED_REFERENCE_GUIDANCE = (
     "~ in a key as ~0 and a literal / as ~1 in its reference token. This fragment only "
     "illustrates structure; supply complete task-specific definitions."
 )
+
+
+def require_named_handoff_inputs(schema: dict[str, Any]) -> None:
+    """New submissions are explicit; saved legacy documents remain readable."""
+    item = schema["properties"]["handoff"]["properties"]["required_context"]["items"]
+    item.setdefault("allOf", []).append({"if": {"properties": {"kind": {"const": "other"},
+                         "blocks_execution": {"const": True}}, "required": ["kind", "blocks_execution"]},
+                      "then": {"required": ["context_ref"],
+                               "properties": {"context_ref": {"type": "string"}}}})
 
 
 def resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
@@ -62,6 +72,12 @@ def delivery_errors(metadata: dict[str, Any], scope: str, *, body: str | None = 
         return errors + ["/handoff: required versioned downstream contract; follow the handoff schema"]
     if handoff.get("scope") != scope:
         errors.append("/handoff/scope: must match the requested scope")
+    from pydantic import ValidationError
+    try:
+        prerequisites = [HandoffPrerequisite.model_validate(item) for item in handoff.get("required_context", [])]
+        errors.extend(prerequisite_binding_errors(prerequisites))
+    except (ValidationError, TypeError) as exc:
+        errors.append("/handoff/required_context: invalid input binding: " + str(exc))
     for i, change in enumerate(handoff.get("changes", [])):
         if not isinstance(change, dict):
             continue  # JSON Schema reports malformed objects first.

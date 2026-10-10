@@ -26,6 +26,7 @@ from app.harness.tools.project_repo import (
 from app.settings import env_or_local
 from app.harness.llm.model_registry import get_agent_config
 from app.harness.tools.process_runtime import communicate_process, start_process
+from app.harness.runtime.git_runtime import git_child_environment, run_git
 
 
 _OPENCODE_TIMEOUT_SECONDS = 600
@@ -94,6 +95,8 @@ class OpenCodeAdapter:
                     prompt=prompt,
                 ),
                 cwd=str(project_repo.root),
+                env=git_child_environment(),
+                replace_environment=True,
                 credential_env=scoped_credentials,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -563,14 +566,12 @@ def _opencode_edited_paths(stdout: str, project_repo: ProjectRepo) -> list[str]:
 
 def _git_head_text(repo_root: Path, rel_path: str) -> str | None:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "show", f"HEAD:{rel_path}"],
+        result = run_git(
+            ["-C", str(repo_root), "show", f"HEAD:{rel_path}"],
             check=False,
-            capture_output=True,
-            text=True,
             timeout=5,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
         return None

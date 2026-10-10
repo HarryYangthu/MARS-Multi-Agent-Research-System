@@ -4,8 +4,17 @@ review_agent: idea_reviewer
 # Same GLM-5.3 model in separate author/reviewer sessions, explicitly selected.
 # Set cross_model to require different provider/model pairs again.
 review_mode: independent_session
+research_quality:
+  min_candidates: 10
+  min_read_papers: 3
+  min_method_directions: 2
+  coverage_axes:
+    baseline: 基线方法与任务的关系
+    improvement: 满足项目约束的可迁移改进
+    evaluation: 与当前指标和对照条件的可比性
+    limitations: 适用假设、失败条件与限制
 author:
-  # GLM-5.3 requires thinking; low effort bounds routine navigation.
+  # GLM-5.3 requires thinking and supports low, high or max effort.
   thinking_enabled: true
   reasoning_effort: low
   temperature: 0.2
@@ -20,15 +29,17 @@ loop:
   deduplicate_evidence_enabled: true
   mode: reflection
   trace: full
-  input_token_budget: 48000
+  input_token_budget: 128000
   observation_chars: 24000
   # All child calls additionally share the run resource ledger.
-  max_model_calls: 60
-  max_tool_steps: 24
+  max_model_calls: 30
+  max_active_seconds: 1800
+  max_tool_steps: 36
   max_protocol_repairs: 2
-  max_validation_repairs: 2
+  max_validation_repairs: 6
   author_empty_completion_repair_enabled: true
-  max_reflections: 1
+  # First review plus at most two focused revision/review rounds.
+  max_reflections: 3
   reflection_thinking_enabled: true
   reflection_reasoning_effort: low
   reflection_format_repair_enabled: false

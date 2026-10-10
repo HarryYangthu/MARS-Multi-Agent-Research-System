@@ -16,6 +16,7 @@ from app.harness.llm.provider_base import Message, ToolCall
 
 def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     policy = load_policy()
+    assert input_budget(policy, 128000, output_reserve=8192, model_window=128000) == 117760
     messages = [Message('system', 'Never modify baseline'), Message('user', 'logs ' * 5000), Message('user', 'Current goal')]
     materials = {message_key(messages[1]): Material('history', 'completed steps', False)}
     # Use background so this is not the newest unprocessed tool exchange.
@@ -27,6 +28,8 @@ def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     packed, at = pack_messages(messages, policy=policy, budget=size * 100 // 80,
         materials=materials, root=tmp_path)
     assert at['triggered'] and at['used'] <= at['target']
+    assert at['trigger_percent'] == 80 and at['target_percent'] == 65
+    assert at['compression_method'] == 'reversible_excerpt_and_offload'
     assert packed[0] == messages[0] and packed[-1] == messages[-1]
     restored, again = pack_messages(messages, policy=policy, budget=size * 100 // 80,
         materials=materials, root=tmp_path, previous=at['state'])
@@ -34,13 +37,14 @@ def test_threshold_exact_and_recovery(tmp_path: Path) -> None:
     assert again['state']['levels'] == at['state']['levels']
 
 
-def test_protected_over_target_is_retained_and_over_max_blocks(tmp_path: Path) -> None:
+def test_protected_over_target_is_retained_and_over_budget_dispatches(tmp_path: Path) -> None:
     messages = [Message('system', 'hard constraint ' * 350)]
     size = token_upper_bound(messages)
     _, manifest = pack_messages(messages, policy=load_policy(), budget=size + 10, root=tmp_path)
     assert manifest['triggered'] and not manifest['target_reached']
-    with pytest.raises(ValueError, match='no request sent'):
-        pack_messages(messages, policy=load_policy(), budget=size - 1, root=tmp_path)
+    packed, over = pack_messages(messages, policy=load_policy(), budget=size - 1, root=tmp_path)
+    assert over['over_budget_allowed'] and over['used'] == size
+    assert packed == messages
 
 
 def test_latest_tool_pair_and_failed_attempt_survive(tmp_path: Path) -> None:
@@ -62,11 +66,13 @@ def test_latest_tool_pair_and_failed_attempt_survive(tmp_path: Path) -> None:
 
 
 def test_review_evidence_never_replaced_with_reference(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match='protected context'):
-        pack_native(pinned=[Message('user', 'review')], history=[{'tool':'code.repo_reader',
-            'ok': True, 'output': {'content': 'required evidence ' * 2000}}], feedback='', candidate='',
-            budget=10000, tools=(), policy=load_policy(), metadata={}, root=tmp_path, previous=None,
-            agent='idea', readback_available=False, reviewing=True, required_review_tools=('code.repo_reader',))
+    packed, manifest = pack_native(pinned=[Message('user', 'review')], history=[{'tool':'code.repo_reader',
+        'ok': True, 'output': {'content': 'required evidence ' * 2000}}], feedback='', candidate='',
+        budget=10000, tools=(), policy=load_policy(), metadata={}, root=tmp_path, previous=None,
+        agent='idea', readback_available=False, reviewing=True, required_review_tools=('code.repo_reader',))
+    # Without a readback tool the evidence cannot be excerpted; it is dispatched in full.
+    assert manifest['over_budget_allowed']
+    assert 'required evidence ' * 2000 in str([m.to_wire() for m in packed])
 
 
 def test_original_hash_paging_and_tamper(tmp_path: Path) -> None:
@@ -115,11 +121,23 @@ def test_old_checkpoint_keeps_legacy_and_new_policy_freezes(tmp_path: Path) -> N
     assert input_budget(policy, 48000, output_reserve=8192, model_window=32000) == 32000-8192-policy['safety_margin']
 
 
+def test_verified_model_window_supersedes_old_agent_and_run_quotas() -> None:
+    policy = {**load_policy(), 'input_budget': 32000}
+    assert input_budget(policy, 48000, output_reserve=8192, model_window=128000) == 117760
+    assert input_budget(policy, 24000, output_reserve=16384, model_window=128000) == 109568
+    # Unknown model capacity is never guessed or treated as infinite.
+    assert input_budget(policy, 48000, output_reserve=8192) == 32000
+    with pytest.raises(ValueError, match='no input space'):
+        input_budget(policy, 48000, output_reserve=8192, model_window=8192)
+
+
 def test_no_offload_when_reader_unavailable(tmp_path: Path) -> None:
     m = Message('user', 'unavailable source ' * 1000)
-    with pytest.raises(ValueError, match='protected context'):
-        pack_messages([m], policy=load_policy(), budget=4000, root=tmp_path,
+    packed, manifest = pack_messages([m], policy=load_policy(), budget=4000, root=tmp_path,
                       materials={message_key(m):Material('background','doc',False)}, readback_available=False)
+    # No readback tool means no excerpting; the source is dispatched in full.
+    assert manifest['over_budget_allowed'] and manifest['used'] == token_upper_bound([m])
+    assert packed == [m]
 
 
 def test_incomplete_tool_pair_rejected() -> None:
@@ -157,8 +175,34 @@ def test_explicit_model_capacity_is_validated() -> None:
 def test_receipt_index_cannot_displace_latest_observation_protection(tmp_path: Path) -> None:
     # A receipt index follows the actual observation. It is not a replacement
     # for the unread source, even though both are classified as runtime history.
-    with pytest.raises(ValueError, match='protected context'):
-        pack_native(pinned=[Message('user', 'read this source')],
-            history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
-            feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
-            metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)
+    packed, manifest = pack_native(pinned=[Message('user', 'read this source')],
+        history=[{'tool': 'code.repo_reader', 'ok': True, 'output': {'content': 'important ' * 2000}}],
+        feedback='', candidate='', budget=10000, tools=(), policy=load_policy(),
+        metadata={}, root=tmp_path, previous=None, agent='coding', readback_available=True)
+    assert manifest['over_budget_allowed']
+    assert 'important ' * 2000 in str([m.to_wire() for m in packed])
+
+
+def test_repository_index_can_offload_while_latest_source_is_retained(tmp_path: Path) -> None:
+    index = Message('user', 'directory listing\n' * 4000)
+    code = Message('user', 'def forward(x): return x')
+    messages = [Message('system', 'Keep baseline unchanged'), index, code, Message('user', 'Improve residual')]
+    materials = {message_key(index): Material('code', 'repository index', False),
+                 message_key(code): Material('code', 'model.py', False)}
+    packed, manifest = pack_messages(messages, policy=load_policy(), budget=10000,
+                                     materials=materials, root=tmp_path)
+    assert manifest['used'] < 10000
+    assert packed[2] == code and packed[0] == messages[0] and packed[-1] == messages[-1]
+    assert read_material(tmp_path, manifest['segments'][1]['refs'][0], 0, 100000)['content'] == index.content
+    # Also applies to old manifests containing only an index and no source yet.
+    packed, manifest = pack_messages([messages[0], index, messages[-1]], policy=load_policy(),
+                                     budget=10000, materials=materials, root=tmp_path)
+    assert manifest['used'] < 10000 and not manifest['segments'][1]['protected']
+
+
+def test_observation_status_comes_from_outer_envelope() -> None:
+    from app.harness.context.runtime_native import observation_failed
+    assert not observation_failed(json.dumps({'ok': True, 'output': {'ok': False}}))
+    assert observation_failed(json.dumps({'ok': False, 'error': 'missing baseline'}))
+    assert observation_failed('invalid host envelope')
+    assert observation_failed(json.dumps({'output': 'unknown status'}))

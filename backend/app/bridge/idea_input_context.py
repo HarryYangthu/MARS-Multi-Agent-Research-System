@@ -39,6 +39,9 @@ class IdeaRequirements(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     min_sources: int | None = Field(default=None, ge=0, le=100)
     min_pdfs: int | None = Field(default=None, ge=0, le=100)
+    min_candidates: int | None = Field(default=None, ge=0, le=100)
+    min_read_papers: int | None = Field(default=None, ge=0, le=100)
+    min_method_directions: int | None = Field(default=None, ge=0, le=100)
     require_parameter_budget: bool | None = None
     max_parameter_ratio: float | None = Field(default=None, gt=0, le=100)
     require_evaluation_protocol: bool | None = None

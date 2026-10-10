@@ -25,10 +25,17 @@ _BUDGET_SUFFIX = (". The next model call is included. Each dispatched tool, incl
                   "one tool call. Reserve tools for acquiring and checking evidence, and calls for submission "
                   "and revision. These are local counters, not the total cost of any delegated loops. "
                   "Do not invent evidence when resources are insufficient.")
+SHARED_BUDGET_NOTICE = (
+    "\nThese are local loop counters only. The shared run request/time/cost limits "
+    "still apply to every Agent and child task, including completion-driven loops. "
+    "Never interpret an unlimited local counter as permission to bypass the shared run budget."
+)
 
 
 def remaining_budget_message(remaining: dict[str, int | None]) -> Message:
     explanation = ". A null model_calls value means no model-request count limit" if remaining.get("model_calls") is None else ""
+    if remaining.get("tool_calls") is None or remaining.get("validation_repairs") is None:
+        explanation += ". Null counters have no fixed quota; continue until validated completion, a real blocker, or user cancellation"
     # Preserve the historical template exactly for finite-budget trace audits.
     return Message("system", _BUDGET_PREFIX + canonical(remaining) + explanation + _BUDGET_SUFFIX)
 
@@ -211,6 +218,11 @@ def isolated_unit_input_errors(unit: dict[str, Any], actual: Any) -> list[str]:
     budget = actual[-2]
     try:
         content = budget["content"]
+        # The host may append the current shared-budget notice. Keep historical
+        # traces valid, but never allow arbitrary reviewer context after it.
+        if isinstance(content, str) and content.endswith(SHARED_BUDGET_NOTICE):
+            content = content[:-len(SHARED_BUDGET_NOTICE)]
+            budget = {**budget, "content": content}
         if not isinstance(content, str) or not content.startswith(_BUDGET_PREFIX) or not content.endswith(_BUDGET_SUFFIX):
             return ["isolated review budget message is not the host template"]
         values, _ = json.JSONDecoder().raw_decode(content[len(_BUDGET_PREFIX):])

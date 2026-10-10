@@ -181,7 +181,11 @@ def _overlay(original: AgentConfig, configured: _Lead | _Child) -> AgentConfig:
         required.discard("author_empty_completion_repair_enabled")
     if not policy.native_observation_history and "native_observation_history" not in declared:
         required.discard("native_observation_history")
-    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field"):
+    # Historical profiles predate the opt-in active-time cap. Zero keeps their
+    # existing budgets and receipts unchanged; a configured cap stays explicit.
+    if not policy.max_active_seconds and "max_active_seconds" not in declared:
+        required.discard("max_active_seconds")
+    for name in ("document_revisions_enabled", "deduplicate_evidence_enabled", "submission_body_field", "completion_driven"):
         if not getattr(policy, name) and name not in declared:
             required.discard(name)
     if declared != required:

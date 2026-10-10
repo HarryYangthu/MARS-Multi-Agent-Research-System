@@ -1,7 +1,10 @@
 schema: runtime.resources.v1
 limits:
-  # Finite aggregate model limit, shared by inherited child tasks.
-  max_model_requests: 60
+  # Finite aggregate SDK-attempt limit, shared by all Agents and child tasks.
+  # completion_driven only removes local loop counters; it never waives this cap.
+  max_model_requests: 100
+  # Historical quota values; inactive when model_usage.yaml selects statistics_only.
+  # Kept for compatibility with existing immutable accounting configuration hashes.
   max_total_tokens: 1128000
   max_input_tokens: 1000000
   max_billed_output_tokens: 128000

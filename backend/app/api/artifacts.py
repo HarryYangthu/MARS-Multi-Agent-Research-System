@@ -5,9 +5,11 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable, Coroutine
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.routing import APIRoute
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -24,9 +26,72 @@ from app.hitl.revision_loop import apply_human_edit
 from app.harness.tools.registry import ToolContext
 from app.harness.tools.registry import get_registry as get_tool_registry
 from app.reporting import generate_report_bundle
-from app.storage.artifact_store import ArtifactStore
+from app.storage.artifact_store import ArtifactStore, ArtifactValidationError
 
-router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
+
+class ArtifactRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        original = super().get_route_handler()
+        async def checked(request: Request) -> Response:
+            try:
+                return await original(request)
+            except ArtifactValidationError as exc:
+                return JSONResponse(status_code=422, content={'detail': {
+                    'code': 'handoff_inconsistent', 'message': str(exc),
+                    'issues': [error.message for error in exc.result.errors]}})
+        return checked
+
+
+router = APIRouter(prefix="/api/artifacts", tags=["artifacts"], route_class=ArtifactRoute)
+
+
+def _ensure_current_review(run_id: str, agent: str, stem: str, version: str) -> None:
+    review = get_review_registry().get(run_id, agent)
+    normalized = version if version.startswith('v') else 'v' + version
+    if review is not None and review.artifact_ref.version != normalized:
+        raise HTTPException(status_code=409, detail={
+            'code': 'stale_review', 'message': '待审核文档已更新，请刷新后审核当前版本。',
+            'current_version': review.artifact_ref.version})
+    if review is None:
+        run = get_run_store().get(run_id)
+        if run is not None:
+            versions = ArtifactStore(run).list_versions(agent_dir=agent, stem=stem)
+            numbered = [ref for ref in versions if ref.version != 'approved']
+            if numbered and numbered[-1].version != normalized:
+                raise HTTPException(status_code=409, detail={
+                    'code': 'stale_review', 'message': '待审核文档已更新，请刷新后审核当前版本。',
+                    'current_version': numbered[-1].version})
+
+
+def _check_handoff_before_approval(run_id: str, agent_dir: str, stem: str, version: str) -> None:
+    if agent_dir not in {'experiment', 'coding'}:
+        return
+    from app.harness.schema.experiment_contract import experiment_errors, handoff_errors
+    metadata = fm_parse(_resolve(run_id, agent_dir, stem, version).read_text()).metadata
+    errors: list[str] = []
+    if agent_dir == 'experiment':
+        errors = experiment_errors(metadata)
+    else:
+        run = get_run_store().get(run_id)
+        if run is not None:
+            path = run.root / 'experiment/experiment_plan.approved.md'
+            if path.is_file():
+                errors = handoff_errors(path.read_text(), metadata)
+    if errors:
+        raise HTTPException(status_code=422, detail={'code': 'handoff_inconsistent',
+            'message': errors[0], 'issues': errors})
+
+
+@router.get("/{run_id}/idea/literature-evidence")
+def get_literature_evidence(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.literature_evidence import literature_evidence
+    run = get_run_store().get(run_id)
+    if run is None or run.project != project:
+        raise HTTPException(status_code=404, detail="任务或项目不存在")
+    try:
+        return literature_evidence(run.root, run_id, project)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail="研究记录暂不可校验，请稍后重试。") from exc
 
 
 @router.get("/{run_id}/idea/materials", response_model=IdeaMaterialsView)
@@ -324,12 +389,35 @@ def _extract_diff_paths(diff: str) -> list[str]:
     return paths
 
 
-async def _apply_patch_or_raise(run_id: str, version: str) -> None:
+async def _apply_patch_or_raise(run_id: str, version: str, *, artifact_version: str | None = None) -> None:
+    from app.bridge.coding_approval import verify_written_code
+    from app.bridge.research_branch import research_branch_scope
+
     store = get_run_store()
     run = store.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     normalized = version if version.startswith("v") else f"v{version}"
+    # Native and ZCode implementations can use governed file writes instead
+    # of a patch. Re-enter the persisted run branch for both verification and
+    # legacy patch application; the project's baseline stays read-only.
+    try:
+        with research_branch_scope(run, "coding"):
+            spec = _resolve(run_id, "coding", "code_spec", artifact_version or normalized)
+            text = spec.read_text(encoding="utf-8")
+            if verify_written_code(run, text):
+                return
+            await _apply_unwritten_patch(run_id, normalized)
+            if not verify_written_code(run, text):
+                raise ValueError("没有可核验的实际代码改动，未批准。")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _apply_unwritten_patch(run_id: str, normalized: str) -> None:
+    run = get_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
     patch_path = run.subdir("coding") / f"patch.{normalized}.diff"
     if not patch_path.exists():
         raise HTTPException(
@@ -342,13 +430,19 @@ async def _apply_patch_or_raise(run_id: str, version: str) -> None:
     if _patch_application_succeeded(patch_path, normalized):
         return
     diff = patch_path.read_text(encoding="utf-8")
+    from app.harness.runtime.project_scope import validated_diff_paths
+    try:
+        paths = validated_diff_paths(diff)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="该片段只是代码变更说明，不是可执行补丁。"
+                            "请先核对实际写入记录并修正编码方案；未修改代码或批准任务。") from exc
     result = await get_tool_registry().dispatch(
         "code.apply_patch",
         {
             "version": normalized,
             "patch_path": str(patch_path),
             "diff": diff,
-            "files": [{"path": p} for p in _extract_diff_paths(diff)],
+            "files": [{"path": p} for p in paths],
         },
         ToolContext(
             run_id=run_id,
@@ -388,8 +482,12 @@ async def get_patch(run_id: str, version: str) -> PatchView:
 @router.post("/{run_id}/coding/patch/{version}/approve", response_model=ArtifactView)
 async def approve_patch(run_id: str, version: str) -> ArtifactView:
     _ensure_writable_run(run_id)
-    await _apply_patch_or_raise(run_id, version)
     normalized = version if version.startswith("v") else f"v{version}"
+    review = get_review_registry().get(run_id, "coding")
+    candidate = review.artifact_ref.version if review is not None else normalized
+    _ensure_current_review(run_id, 'coding', 'code_spec', candidate)
+    _check_handoff_before_approval(run_id, 'coding', 'code_spec', candidate)
+    await _apply_patch_or_raise(run_id, version, artifact_version=candidate)
     review = get_review_registry().get(run_id, "coding")
     if review is not None:
         bus = get_event_bus()
@@ -566,12 +664,20 @@ async def edit_artifact(
         base=base,
         body=payload.body,
         metadata_patch=payload.metadata_patch,
-        expected_schema=str(base.path.read_text(encoding="utf-8").split("\n")[1].split(":", 1)[1].strip()) if base.path.exists() else None,
+        expected_schema=str(fm_parse(base.path.read_text(encoding="utf-8")).metadata.get('schema', '')),
     )
     # update review session if any
     review = get_review_registry().get(run_id, agent_dir)
     if review is not None:
         review.record_edit(new_ref)
+    else:
+        # Backend restarts discard the in-memory review, not the edit audit.
+        from app.hitl.audit_log import AuditEntry, append as append_audit
+        append_audit(run.subdir('hitl') / 'review_log.jsonl', AuditEntry(
+            run_id=run_id, agent=agent_dir, action='edit', actor='user',
+            detail={'version': new_ref.version, 'path': str(new_ref.path)}))
+    from app.bridge.evaluation_service import emit_artifact_evaluation_event
+    await emit_artifact_evaluation_event(run=run, ref=new_ref, node_key=agent_dir)
     return _read_view(run_id, agent_dir, stem, new_ref.version)
 
 
@@ -580,6 +686,8 @@ async def approve_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
     _ensure_writable_run(run_id)
+    _ensure_current_review(run_id, agent_dir, stem, version)
+    _check_handoff_before_approval(run_id, agent_dir, stem, version)
     if agent_dir == "coding":
         patch_version = _patch_version_from_artifact(run_id, stem, version)
         if patch_version is None:
@@ -587,7 +695,7 @@ async def approve_artifact(
                 status_code=409,
                 detail="coding approval requires a patch reference in coding_backend.diff",
             )
-        await _apply_patch_or_raise(run_id, patch_version)
+        await _apply_patch_or_raise(run_id, patch_version, artifact_version=version)
     review = get_review_registry().get(run_id, agent_dir)
     if review is None:
         # No active review; promote inline.

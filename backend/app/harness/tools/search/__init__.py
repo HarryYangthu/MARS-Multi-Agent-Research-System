@@ -23,10 +23,11 @@ from app.harness.tools.search.cvf import cvf_search_tool as cvf_search_tool
 from app.harness.tools.search.neurips import neurips_search_tool as neurips_search_tool
 from app.harness.tools.search.openalex import openalex_search_tool as openalex_search_tool
 from app.harness.tools.search.source_fetch import fetch_sources_tool as fetch_sources_tool
+from app.harness.tools.search.policy import search_policy
+from app.harness.agent_loop.trace import atomic_json
 from app.harness.tools.registry import ToolContext, ToolResult
 from app.settings import get_settings, repo_root
 
-_ARXIV_MIN_INTERVAL_SECONDS = 3.0
 _ARXIV_LOCK = asyncio.Lock()
 _LAST_ARXIV_CALL = 0.0
 _MAX_SOURCE_DOWNLOAD_BYTES = 12 * 1024 * 1024
@@ -139,13 +140,24 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
     if ids:
         params = {"id_list": ",".join(ids), "start": "0", "max_results": str(len(ids))}
     url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)
+    # A provider outage applies to the whole invocation, not just one query.
+    # Keep cached successes available, and try this provider afresh on a new run.
+    unavailable = ctx.extra.get("arxiv_metadata_unavailable")
+    if isinstance(unavailable, dict):
+        return await _arxiv_failure(query, args, ctx, unavailable, ids=ids, skipped=True)
     try:
         await _respect_arxiv_rate_limit()
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=search_policy().arxiv.request_timeout_seconds) as client:
             response = await client.get(url)
             response.raise_for_status()
     except httpx.HTTPError as exc:
-        return ToolResult(ok=False, error=f"arXiv request failed: {type(exc).__name__}: {exc}")
+        failure = {"source": "arxiv", "url": url, "query": query,
+                   "requested_at": datetime.now(timezone.utc).isoformat(), "ok": False,
+                   "error": f"{type(exc).__name__}: {exc}",
+                   "status_code": exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None}
+        if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {408, 429} or exc.response.status_code >= 500:
+            ctx.extra["arxiv_metadata_unavailable"] = failure
+        return await _arxiv_failure(query, args, ctx, failure, ids=ids, skipped=False)
     try:
         hits = _parse_arxiv(response.text, date_from=date_from)
         missing = verify_arxiv_lookup(ids, hits) if ids else []
@@ -185,6 +197,34 @@ async def arxiv_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResul
                        metadata_response_sha256=hashlib.sha256(response.content).hexdigest())
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return ToolResult(ok=True, output=payload, evidence_refs=[str(cache_path)])
+
+
+async def _arxiv_failure(query: str, args: dict[str, Any], ctx: ToolContext,
+                         failure: dict[str, Any], *, ids: list[str] | None, skipped: bool) -> ToolResult:
+    """Return real fallback metadata while preserving the failed request receipt."""
+    receipt_ref = ""
+    if ctx.extra.get("run_root"):
+        target = Path(str(ctx.extra["run_root"])) / ctx.agent / "research/searches"
+        path = target / ("arxiv_failure_" + _cache_key(failure) + ".json")
+        atomic_json(path, failure)
+        receipt_ref = str(path)
+    # Exact-ID lookup and arXiv-specific filters must retain their semantics.
+    eligible = not ids and not any(args.get(key) for key in ("categories", "date_from", "sort_by"))
+    common = {"query": query, "hits": [], "cached": False, "arxiv_failure": failure,
+              "arxiv_request_skipped": skipped, "search_receipt": receipt_ref}
+    if search_policy().arxiv.fallback_to_openalex and eligible and ctx.extra.get("run_root"):
+        fallback = await openalex_search_tool({"query": query, "top_k": min(10, int(args.get("top_k", 5) or 5)),
+                                               "require_pdf": True}, ctx)
+        if fallback.ok:
+            return ToolResult(ok=True, output={**common, **fallback.output,
+                "fallback_from": "arxiv", "fallback_reason": failure["error"],
+                "arxiv_search_receipt": receipt_ref,
+                "selection_policy": "Actual OpenAlex topic metadata with permitted PDFs; not an arXiv API result. Read full text before adopting."},
+                evidence_refs=([receipt_ref] if receipt_ref else []) + fallback.evidence_refs)
+        common["fallback_error"] = fallback.error
+    return ToolResult(ok=False, output=common, error="arXiv metadata unavailable: " + str(failure["error"]) +
+                      "; switch to search.openalex_search or search.web_search; do not repeat this endpoint in this invocation",
+                      evidence_refs=[receipt_ref] if receipt_ref else [])
 
 
 async def web_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -394,8 +434,9 @@ async def _respect_arxiv_rate_limit() -> None:
     global _LAST_ARXIV_CALL
     async with _ARXIV_LOCK:
         elapsed = time.monotonic() - _LAST_ARXIV_CALL
-        if elapsed < _ARXIV_MIN_INTERVAL_SECONDS:
-            await asyncio.sleep(_ARXIV_MIN_INTERVAL_SECONDS - elapsed)
+        interval = search_policy().arxiv.min_interval_seconds
+        if elapsed < interval:
+            await asyncio.sleep(interval - elapsed)
         _LAST_ARXIV_CALL = time.monotonic()
 
 

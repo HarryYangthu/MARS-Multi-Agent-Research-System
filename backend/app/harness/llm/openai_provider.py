@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 from loguru import logger
 
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import (
     Completion,
     Delta,
@@ -208,7 +209,15 @@ class _OpenAICompatProvider(LLMProvider):
                     # The terminal submission has no competing action. DeepSeek
                     # allows a named tool choice only outside thinking mode.
                     kwargs["tool_choice"] = {"type": "function", "function": {"name": function["name"]}}
-        if config.json_mode:
+        if config.json_mode and glm_thinking:
+            # Verified GLM-5.3 JSON mode removes literal `json` from string
+            # values. Keep exact output and downstream JSON/schema checks;
+            # request JSON text instead of altering the returned evidence.
+            kwargs["messages"].append({"role": "system", "content":
+                "Output exactly one valid JSON object. Do not include Markdown code fences, "
+                "preambles, or text outside the object. Preserve every character in string values, "
+                "including complete filenames ending in .json or .jsonl."})
+        elif config.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if stream:
             kwargs["stream"] = True
@@ -295,11 +304,32 @@ class _OpenAICompatProvider(LLMProvider):
     ) -> Completion:
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config)
+        record_provider_request(config, self.name, request_kwargs)
         resp = await self._request_with_retries(
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
         )
         return self._completion_from_response(resp, config)
+
+    async def complete_wire(self, payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
+        """Forward an owned external harness request under guarded_complete.
+
+        Preserve the external harness's tool/history wire format. The caller
+        must reserve the entire payload and enforce model/tools/output limits.
+        SDK retries remain disabled; attempts use the same accounting observer.
+        Credentials never leave this selected provider.
+        """
+        from openai.types.chat import ChatCompletion
+
+        client = self._get_client()
+        record_provider_request(config, self.name, payload)
+        response = await self._request_with_retries(
+            lambda: client.post("/chat/completions", body=payload, cast_to=ChatCompletion,
+                                options={"timeout": config.request_timeout_seconds}), config=config)
+        result = response.model_dump(exclude_none=True)
+        if not isinstance(result, dict):
+            raise ValueError("Invalid upstream completion envelope")
+        return result
 
     def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
         """Pure SDK-envelope parsing; it performs no model/service execution."""
@@ -363,6 +393,7 @@ class _OpenAICompatProvider(LLMProvider):
     ) -> AsyncIterator[Delta]:
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, request_kwargs)
         stream = await self._request_with_retries(
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
@@ -397,6 +428,7 @@ class ZhipuProvider(_OpenAICompatProvider):
             return await super().complete(messages, config)
         client = self._get_client()
         kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, kwargs)
 
         async def consume() -> Completion:
             state = VisibleStreamAccumulator()

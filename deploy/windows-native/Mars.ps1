@@ -34,6 +34,8 @@ function Assert-ServicesStopped {
 }
 
 function Set-NativeEnvironment {
+    # Explicit bundled Git; do not depend on another application's PATH ordering.
+    $env:MARS_GIT_EXECUTABLE = $git
     $env:PATH = (Split-Path $node) + ';' + (Split-Path $git) + ';' + (Split-Path $python) + ';' + $env:PATH
     $env:UV_CACHE_DIR = Join-Path $runtime 'cache/uv'
     $env:UV_PYTHON_INSTALL_DIR = Join-Path $runtime 'tools/python'

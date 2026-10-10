@@ -59,8 +59,10 @@ async def run_agent_node(
     if not isinstance(saved_extra, dict):
         raise ValueError("Agent request authority has invalid options")
     if load_run_research_contract(run, saved_extra if authority is not None else None) is None:
-        await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
-            resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
+        from app.bridge.research_branch import research_branch_scope
+        with research_branch_scope(run, node_key):
+            await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
+                resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
         return
     if revision_reason:
         raise ValueError("Contract revisions require a new bound graph attempt; legacy revision dispatch is unavailable")
@@ -129,7 +131,19 @@ async def _execute_agent_node(
         user_request = user_request_path.read_text(encoding="utf-8")
 
     if research_stage is None:
+        if resume_invocation is not None and not revision_reason:
+            from app.bridge.revision_resume import resume_revision_reason
+            revision_reason = resume_revision_reason(run, node_key, resume_invocation)
         upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+        from app.harness.tools.git_branch import current_git_branch
+        branch = current_git_branch(run.project, run.run_id)
+        if branch is not None:
+            upstream["research_git_branch"] = (
+                f"实际代码目录：{branch.repo_path}\n当前实验分支：{branch.branch}\n"
+                f"基线分支：{branch.baseline_branch}\n基线提交：{branch.baseline_commit}\n"
+                "在现有目录的此实验分支中修改；不得切换分支、修改基线分支或 Git 控制文件。"
+                "受保护路径、接口和允许修改范围继续适用。"
+            )
         admit_handoffs(run, node_key, supplied_context=upstream)
     else:
         upstream, feedback_context = dict(research_stage.upstream), {}
@@ -166,9 +180,22 @@ async def _execute_agent_node(
     if not isinstance(skill_selection, dict):
         raise ValueError("selected_skills_by_agent must be an object")
     selected_skills = skill_selection.get(stage, [])
+    if research_stage is None and stage == "writing" and stage not in skill_selection:
+        from app.storage.report_skill_store import selected_report_skills
+        selected_skills = selected_report_skills(run.project)
     if not isinstance(selected_skills, list) or any(not isinstance(name, str) for name in selected_skills):
         raise ValueError("selected skills must be explicit names")
+    if stage == "writing":
+        if research_stage is not None:
+            selected_skills = list(research_stage.skills)
+        else:
+            from app.bridge.report_skill_binding import frozen_report_skills
+            selected_skills = frozen_report_skills(run, node_key, selected_skills, create=True)
     request_extra["skills"] = selected_skills
+    if stage in {'coding', 'execution'}:
+        from app.execution.handoff_validation import experiment_plan_required, execution_delivery_required
+        request_extra['experiment_plan_required'] = experiment_plan_required(run, node_key)
+        request_extra['execution_delivery_required'] = execution_delivery_required(run, node_key)
     task = research_stage.task if research_stage is not None else bind_task(run, node_key, goal=user_request, upstream=upstream,
                     output_schema=str(agent.output_schema), resume_invocation=resume_invocation,
                     predecessor_task_ids=predecessor_task_ids)
@@ -196,11 +223,17 @@ async def _execute_agent_node(
         extra=request_extra,
         progress_sink=build_agent_progress_sink(run=run, node_key=node_key, bus=bus),
     )
+    if stage == "coding":
+        from app.bridge.coding_approval import coding_candidate_errors
+        request.candidate_validator = lambda text: coding_candidate_errors(run, text)
+    if research_stage is None and branch is not None and request.progress_sink is not None:
+        await request.progress_sink({"kind": "action", "phase": "workspace",
+            "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
     failure_phase = "build_context"
     try:
         context = await agent.build_context(request)
 
-        if revision_reason and resume_invocation is None:
+        if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
             failure_phase = "resource_revision"
             RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
 
@@ -241,6 +274,10 @@ async def _execute_agent_node(
         _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
                            status="invalid", failure=failure))
         raise ArtifactValidationError(validation)
+    if stage == "coding":
+        issues = coding_candidate_errors(run, artifact.text)
+        if issues:
+            raise ValueError(issues[0])
     ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
     _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
             artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
@@ -390,8 +427,17 @@ def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> No
     if not blocks:
         run.write_event("agent_events", {"event": "coding.patch_not_provided", "version": version})
         return
-    # Copy the actual proposal for review; application still requires ToolRegistry.
-    target.write_text("\n".join(block.rstrip() for block in blocks) + "\n", encoding="utf-8")
+    from app.harness.runtime.project_scope import validated_diff_paths
+    diff = "".join(block.rstrip("\r\n") + "\n" for block in blocks)
+    try:
+        validated_diff_paths(diff)
+    except ValueError as exc:
+        run.write_event("agent_events", {"event": "coding.patch_not_executable", "version": version,
+                                        "reason": str(exc)})
+        return
+    # Explanatory snippets stay in Markdown; only executable patches are archived.
+    # Application still requires ToolRegistry and does not replace write verification.
+    target.write_text(diff, encoding="utf-8")
 
 
 def load_agent_handoff_context(
@@ -400,6 +446,9 @@ def load_agent_handoff_context(
     """Load actual approved upstream documents without silently truncating them."""
     identity = parse_node_key(node_key)
     stage, attempt = identity.stage, identity.attempt
+    if stage == "writing":
+        from app.bridge.report_revision_context import report_revision_reason
+        revision_reason = report_revision_reason(run, revision_reason)
     # Pick up upstream approved artifacts as handoff.
     from app.bridge.research_context import load_research_context
 
@@ -465,10 +514,24 @@ def load_agent_handoff_context(
                     "Preserve unaffected content, verify the specific feedback against actual evidence, "
                     "and avoid restarting broad research without an identified gap.\n"
                     + _handoff_summary(text=current.path.read_text(), source_ref=current.path.relative_to(run.root).as_posix()))
+            else:
+                from app.bridge.idea_revision_context import failed_idea_revision_context
+                upstream.update(failed_idea_revision_context(run.root, run.project))
         upstream["human_revision_request"] = (
             "Human reviewer rejected the current draft and requested a revised "
             f"version. Feedback: {revision_reason}"
         )
+    if stage in {"coding", "execution"}:
+        from app.bridge.repository_handoff import attach_repository_handoff
+        attach_repository_handoff(run.project, upstream)
+        if selected_data_source and not upstream.get("data_description", "").strip():
+            upstream["data_description"] = selection_summary(selected_data_source)
+        if stage == "execution" and not upstream.get("data_description", "").strip():
+            from app.bridge.repository_handoff import baseline_data_description
+            from app.harness.tools.project_repo import load_project_repo
+            description = baseline_data_description(load_project_repo(run.project), upstream)
+            if description:
+                upstream["data_description"] = description
     return upstream, feedback_context
 
 
@@ -521,6 +584,8 @@ def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
             "This PNG is the generated loss curve panel from the completed "
             "Execution Agent batch. Cite it as visual evidence when discussing convergence."
         )
+    from app.bridge.execution_evidence_handoff import execution_job_evidence
+    out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project)
     return out
 
 
@@ -671,89 +736,37 @@ async def _run_execution_batch(
         write_metrics_json,
         write_run_log,
     )
-    from app.execution.simulation_runner import JobSpec
-    from app.harness.tools.config import load_execution_config
-    from app.harness.schema.frontmatter_parser import parse as parse_fm
 
     import json
 
     from app.bridge.tensorboard_service import get_tensorboard_manager
     from app.execution.tensorboard_writer import ExecutionScalars
 
+    from app.bridge.execution_confirmation import require_confirmation
+    confirmed = require_confirmation(run, node_key)
     attempt = parse_node_key(node_key).attempt
+    from app.bridge.execution_batch_plan import prepare_execution
+    prepared = prepare_execution(run, node_key)
+    plan_source = prepared.plan_source
+    planned_before_intent = prepared.planned_before_intent
+    intent_count = prepared.intent_count
+    intent_wants_sweep = prepared.intent_wants_sweep
+    selected_data_source = prepared.selected_data_source
+    backend = prepared.configured_backend
+    runtime_backend = prepared.runtime_backend
+    max_concurrency = prepared.max_concurrency
+    configured_max_concurrency = prepared.configured_max_concurrency
+    batch_steps = prepared.batch_steps
+    specs = prepared.specs
+    for spec in specs:
+        spec.config["confirmation_token"] = confirmed["inputs_token"]
+
+    async def check_inputs() -> None:
+        import asyncio
+        current = await asyncio.to_thread(require_confirmation, run, node_key)
+        if current["token"] != confirmed["token"]:
+            raise ValueError("执行输入已变化；尚未启动后续作业。")
     scalars = ExecutionScalars(run.subdir("execution") / "tensorboard" / f"attempt_{attempt}")
-    approved_execution_path = run.subdir("execution") / "run_log.approved.md"
-    plan_path = run.subdir("experiment") / "experiment_plan.approved.md"
-    intent_text = _execution_intent_text(run)
-    intent_count = requested_experiment_count(intent_text)
-    intent_wants_sweep = wants_execution_sweep(intent_text)
-    plan_source = "none"
-    # Parse ablations as (name, config) so the execution backend gets supported knobs.
-    abl_specs: list[tuple[str, dict[str, Any]]] = []
-    if approved_execution_path.exists():
-        try:
-            md = parse_fm(approved_execution_path.read_text(encoding="utf-8")).metadata
-            planned = md.get("planned_experiments", []) or []
-            if isinstance(planned, list):
-                for i, item in enumerate(planned):
-                    if not isinstance(item, dict):
-                        continue
-                    cfg = item.get("config", {})
-                    abl_specs.append(
-                        (
-                            str(item.get("name") or f"experiment_{i + 1:02d}"),
-                            dict(cfg) if isinstance(cfg, dict) else {},
-                        )
-                    )
-            if abl_specs:
-                plan_source = "execution_run_log"
-        except Exception:
-            abl_specs = []
-    if plan_path.exists():
-        try:
-            md = parse_fm(plan_path.read_text(encoding="utf-8")).metadata
-            ablations = md.get("ablations", []) or []
-            if isinstance(ablations, list) and not abl_specs:
-                for i, a in enumerate(ablations):
-                    if isinstance(a, dict):
-                        cfg = a.get("config", {})
-                        abl_specs.append(
-                            (str(a.get("name") or f"ablation_{i}"),
-                             dict(cfg) if isinstance(cfg, dict) else {}),
-                        )
-                if abl_specs:
-                    plan_source = "experiment_plan"
-        except Exception:
-            abl_specs = []
-    planned_before_intent = len(abl_specs)
-    if not abl_specs:
-        raise RuntimeError("no valid approved experiment configurations; execution was not started")
-    elif intent_count is not None and len(abl_specs) > intent_count:
-        abl_specs = abl_specs[:intent_count]
-        plan_source = f"{plan_source}_intent_capped"
-    selected_data_source = _load_selected_data_source(run)
-    if selected_data_source:
-        data_path = str(selected_data_source.get("stored_path") or "")
-        data_source_id = str(selected_data_source.get("id") or "")
-        fs_mhz = selected_data_source.get("fs_mhz")
-        channel_count = selected_data_source.get("channel_count")
-        injected_specs: list[tuple[str, dict[str, Any]]] = []
-        for name, cfg in abl_specs:
-            next_cfg = dict(cfg)
-            if data_path:
-                next_cfg["data_path"] = data_path
-            if data_source_id:
-                next_cfg["data_source_id"] = data_source_id
-            if fs_mhz not in (None, ""):
-                next_cfg["fs_mhz"] = fs_mhz
-            if channel_count not in (None, ""):
-                next_cfg["channel_count"] = channel_count
-            injected_specs.append((name, next_cfg))
-        abl_specs = injected_specs
-    execution_raw = load_execution_config().get("execution", {})
-    execution_cfg = execution_raw if isinstance(execution_raw, dict) else {}
-    backend = str(execution_cfg.get("backend", "local_command") or "local_command")
-    runtime_backend = get_settings().mars_execution_backend
     async def _publish(channel: str, payload: dict[str, Any]) -> None:
         try:
             scalars.record(payload)
@@ -771,34 +784,6 @@ async def _run_execution_batch(
                 )
         run.write_event("websocket_events", {"channel": channel, **payload})
 
-    configured_max_concurrency = _positive_int(execution_cfg.get("max_concurrency"), 16)
-    max_concurrency = configured_max_concurrency
-    batch_steps = _positive_int(execution_cfg.get("batch_steps"), 120)
-    if backend == "paper_static":
-        paper_cfg_raw = execution_cfg.get("paper_static", {})
-        paper_cfg = paper_cfg_raw if isinstance(paper_cfg_raw, dict) else {}
-        max_concurrency = min(
-            max_concurrency,
-            _positive_int(paper_cfg.get("max_concurrency"), 1),
-        )
-        batch_steps = _positive_int(paper_cfg.get("default_max_iters"), 1)
-        experiment_limit = _positive_int(paper_cfg.get("batch_experiments"), 1)
-        abl_specs = abl_specs[:experiment_limit]
-    max_concurrency = min(max_concurrency, max(1, len(abl_specs)))
-
-    specs = [
-        JobSpec(
-            run_id=run.run_id,
-            experiment_id=name,
-            project=run.project,
-            config={**cfg, "label": name, "attempt": attempt},
-            seed=_planned_seed(name, cfg),
-            run_root=run.root,
-            plot_every_steps=int(cfg.get("plot_every_steps", 5)),
-        )
-        for i, (name, cfg) in enumerate(abl_specs)
-    ]
-
     display = get_tensorboard_manager()
     try:
         activation = await display.activate(run, attempt)
@@ -812,6 +797,7 @@ async def _run_execution_batch(
             specs,
             config=BatchConfig(max_concurrency=max_concurrency, steps=batch_steps),
             bus_publish=_publish,
+            check_inputs=check_inputs,
         )
         phase = "failed" if outcome.failures else "completed"
     finally:

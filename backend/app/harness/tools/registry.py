@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 import uuid
@@ -99,6 +100,7 @@ class ToolPolicy:
     redaction: tuple[str, ...] = ()
     process_backend: str = "local_process"
     require_isolation: bool = False
+    repeatable_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,17 @@ class ToolRegistry:
         child._tools = dict(self._tools)
         child._specs = dict(self._specs)
         child._gates = list(self._gates)
+        return child
+
+    def with_timeout(self, name: str, seconds: float) -> "ToolRegistry":
+        """Host-owned dispatch deadline on a private fork; model input cannot set it."""
+        if isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("tool timeout must be positive and finite")
+        if name not in self._tools:
+            raise ValueError("unknown tool: " + name)
+        child = self.fork()
+        spec = child._specs[name]
+        child._specs[name] = replace(spec, policy=replace(spec.policy, timeout_seconds=seconds))
         return child
 
     def constrain_input_schema(self, name: str, constraint: dict[str, Any], *,
@@ -388,6 +401,10 @@ class ToolRegistry:
             result = ToolResult(ok=False, error="tool execution cancelled", status="cancelled")
             _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
             raise
+        except TimeoutError:
+            result = ToolResult(ok=False, status="timeout",
+                error=f"tool '{tool_name}' exceeded its dispatch deadline ({spec.policy.timeout_seconds:g}s); active work was cancelled and cleaned up",
+                metadata={"timeout_seconds": spec.policy.timeout_seconds, "timeout_scope": "tool_dispatch"})
         except Exception as exc:
             if execution is not None:
                 result = ToolResult(ok=False, error="contract tool refused: " + type(exc).__name__,
@@ -450,6 +467,7 @@ def _install_mcp_tools(reg: ToolRegistry) -> None:
 
 
 def _install_default_tools(reg: ToolRegistry) -> None:
+    from app.harness.tools.code_inspection import read_code_fragment, repo_list_tool, repo_search_tool
     from app.harness.tools.code import (
         apply_patch_tool,
         delete_file_tool,
@@ -506,6 +524,9 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.context_material import read_material_tool
     reg.register("context.read_material", read_material_tool)
     reg.register("code.repo_reader", repo_reader_tool)
+    reg.register("code.repo_read_lines", read_code_fragment)
+    reg.register("code.repo_list", repo_list_tool)
+    reg.register("code.repo_search", repo_search_tool)
     reg.register("code.patch_generator", patch_generator_tool)
     reg.register("code.apply_patch", apply_patch_tool)
     reg.register("code.write_file", write_file_tool)
@@ -781,6 +802,7 @@ def _spec_from_config(spec: ToolSpec) -> ToolSpec:
         redaction=cfg.redaction or spec.policy.redaction,
         process_backend=cfg.process_backend,
         require_isolation=cfg.require_isolation or spec.policy.require_isolation,
+        repeatable_read=cfg.repeatable_read or spec.policy.repeatable_read,
     )
     return ToolSpec(
         name=spec.name,

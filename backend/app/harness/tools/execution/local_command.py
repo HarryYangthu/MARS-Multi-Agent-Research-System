@@ -129,6 +129,8 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
 
 
 async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution.simulation_runner") -> LocalCommandResult:
+    from app.harness.schema.experiment_contract import budget
+    steps = budget(job.config)[1] if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else job.steps
     argv, required, timeout = _command(job, tool_name)
     invocation_id = uuid.uuid4().hex
     safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in job.experiment_id) or "experiment"
@@ -139,7 +141,7 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
     request: dict[str, Any] = {
         "schema": "local_command_request.v1", "invocation_id": invocation_id,
         "run_id": job.run_id, "experiment_id": job.experiment_id, "project": job.project,
-        "config": job.config, "seed": job.seed, "steps": job.steps, "output_dir": str(output_dir),
+        "config": job.config, "seed": job.seed, "steps": steps, "output_dir": str(output_dir),
     }
     atomic_write_json(request_path, request)
     request_sha256 = _file_hash(request_path)
@@ -188,6 +190,7 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
         "schema": "local_command_receipt.v1", "invocation_id": invocation_id,
         "run_id": job.run_id, "experiment_id": job.experiment_id,
         "status": status, "returncode": code, "duration_seconds": duration,
+        "pid": process.pid if process is not None else None,
         "argv": list(argv), "command_files": command_files, "execution_backend": "local_process", "os_isolated": False,
         "request_sha256": request_sha256,
         "result_sha256": _file_hash(result_path) if result_path.is_file() and not result_path.is_symlink() else None,

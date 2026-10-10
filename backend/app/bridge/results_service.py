@@ -348,7 +348,9 @@ class ResultReader:
             if value["status"] == "recorded":
                 value["source_id"] = self.source("derived_contract_resource_summary", contract.evidence_bytes())
             return value
+        from app.harness.llm.usage_policy import token_usage_mode
         result: dict[str, Any] = {"status": "missing", "model_requests": None, "input_tokens": None,
+            "token_usage_mode": token_usage_mode(),
             "billed_output_tokens": None, "cost": None, "currency": None, "usage_complete": None,
             "logical_records": None, "observed_sdk_attempts": None, "observed_attempts_complete": None,
             "charged_sdk_attempts": None, "reserved_sdk_attempts": None, "calls_with_unknown_attempt_count": None,
@@ -450,6 +452,12 @@ def collect_run_results(run: RunHandle) -> dict[str, Any]:
     reader = ResultReader(run, load_results_policy())
     state, raw_state, history = reader.state()
     experiments, metrics, curves = reader.jobs()
+    from app.bridge.paper_static_results import collect_paper_jobs
+    paper_experiments, paper_metrics, paper_curves = collect_paper_jobs(reader,
+        existing_jobs=len(experiments), existing_metrics=len(metrics))
+    experiments.extend(paper_experiments)
+    metrics.extend(paper_metrics)
+    curves.extend(paper_curves)
     metrics.extend(reader.unverified_metrics(metrics))
     question: str | None = None
     hypotheses: list[str] = []

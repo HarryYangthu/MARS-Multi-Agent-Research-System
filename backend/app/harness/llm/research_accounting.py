@@ -145,6 +145,7 @@ class ContractModelBudget:
         observed_usage = ({key: usage[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
                           if valid else None)
         receipt: dict[str, object] = {"schema": "runtime.contract_model_receipt.v1",
+            "token_usage_mode": self.scope.ledger.token_mode,
             "run_id": self.scope.ledger.journal.run_id, "task_sha256": self.scope.ledger.task_sha256,
             "invocation_id": self.scope.invocation_id, "reservation_id": reservation.request_id,
             "identity": self.identities[reservation.request_id], "outcome": outcome,

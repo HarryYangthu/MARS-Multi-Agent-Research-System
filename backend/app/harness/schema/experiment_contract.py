@@ -1,0 +1,204 @@
+"""Executable handoff semantics shared by generated and human-approved artifacts.
+
+Schema parsing deliberately remains compatible with historical documents. Admission
+of new work is stricter: a runnable matrix has concrete seeds and budget units.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import PurePath
+from typing import Any
+
+from app.harness.schema.frontmatter_parser import parse
+
+
+def document_metadata(text: str) -> dict[str, Any]:
+    if text.startswith('[upstream artifact: '):
+        text = text.split('\n', 1)[1]
+    return parse(text).metadata
+
+
+def document_hash(text: str) -> str:
+    if text.startswith('[upstream artifact: '):
+        text = text.split('\n', 1)[1]
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def budget(config: dict[str, Any]) -> tuple[str, int]:
+    if 'budget_steps' in config:
+        if config.get('budget_unit', 'steps') != 'steps':
+            raise ValueError('steps 与 epochs 预算混用；不得把训练步数换成训练轮数')
+        value = config['budget_steps']
+        if 'max_iters' in config and (type(config['max_iters']) is not int or config['max_iters'] != value):
+            raise ValueError('同一 steps 预算的数值别名不一致')
+        unit = 'steps'
+    elif config.get('budget_unit') == 'steps' and 'max_iters' in config:
+        value, unit = config['max_iters'], 'steps'
+    elif config.get('budget_unit') == 'epochs' and 'max_iters' in config:
+        value, unit = config['max_iters'], 'epochs'
+    else:
+        raise ValueError('缺少明确预算：steps 使用 budget_steps，epochs 使用 budget_unit 与 max_iters')
+    if type(value) is not int or value < 1:
+        raise ValueError('预算必须是正整数')
+    return unit, value
+
+
+def experiment_errors(metadata: dict[str, Any]) -> list[str]:
+    rows = metadata.get('ablations')
+    if not isinstance(rows, list) or not rows:
+        return ['/ablations: 缺少可执行实验矩阵']
+    errors: list[str] = []
+    names: set[str] = set()
+    paths: set[str] = set()
+    for index, row in enumerate(rows):
+        prefix = f'/ablations/{index}'
+        if not isinstance(row, dict) or not isinstance(row.get('config'), dict):
+            errors.append(prefix + ': 缺少配置对象')
+            continue
+        name = row.get('name')
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', name):
+            errors.append(prefix + '/name: 名称必须是安全且唯一的文件标识')
+        else:
+            path = re.sub(r'[^A-Za-z0-9_-]', '_', name)
+            if name in names or path in paths:
+                errors.append(prefix + '/name: 实验名称或输出路径重复')
+            names.add(name)
+            paths.add(path)
+        config = row['config']
+        for key in ('cfg', 'config_path'):
+            if key not in config:
+                continue
+            value = config[key]
+            if (not isinstance(value, str) or not value or value != value.strip()
+                    or any(char in value for char in '\r\n\0') or '://' in value
+                    or (PurePath(value).suffix and not re.fullmatch(r'\.[\w-]+', PurePath(value).suffix))):
+                errors.append(prefix + '/config/' + key + ': 配置文件字段必须是纯文件路径；说明放入 role，不能拼接在路径后')
+        if 'cfg' in config and 'config_path' in config and config['cfg'] != config['config_path']:
+            errors.append(prefix + '/config/config_path: 必须与 cfg 指向同一个配置文件')
+        if type(config.get('seed')) is not int or config['seed'] < 0:
+            errors.append(prefix + '/config/seed: 请从真实基线证据解析为非负整数，不能写“同基线种子”')
+        try:
+            budget(config)
+        except ValueError as exc:
+            errors.append(prefix + '/config: ' + str(exc))
+    if metadata.get('estimated_runs') != len(rows):
+        errors.append('/estimated_runs: 必须与批准矩阵数量一致')
+    return errors
+
+
+def coding_job_errors(coding: dict[str, Any], *, project: str) -> list[str]:
+    """Validate a self-contained delivery without inventing an experiment document."""
+    errors: list[str] = []
+    if coding.get('schema') != 'code_spec.v1' or coding.get('project') != project:
+        errors.append('/coding: 运行交付格式或项目身份不一致')
+    jobs = coding.get('execution_jobs')
+    if not isinstance(jobs, list) or not jobs:
+        return errors + ['/execution_jobs: 缺少运行清单，请补齐编码交付后继续']
+    errors.extend(error.replace('/ablations', '/execution_jobs') for error in
+                  experiment_errors({'ablations': jobs, 'estimated_runs': len(jobs)}))
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict) or not isinstance(job.get('config'), dict):
+            continue
+        config = job['config']
+        if not (config.get('command_id') or config.get('entrypoint') and config.get('config_path')):
+            errors.append(f'/execution_jobs/{index}/config: 缺少实际运行入口与配置文件或登记命令')
+    return errors
+
+
+def delivery_experiments(plan_text: str, coding: dict[str, Any], *, project: str,
+                         plan_required: bool = False) -> list[dict[str, Any]]:
+    """One intake contract: an available design constrains the coding delivery."""
+    if plan_required and not plan_text:
+        raise ValueError('本任务的实验设计交付缺失；请恢复已批准方案，不能绕过已有研究约束')
+    errors = handoff_errors(plan_text, coding) if plan_text else coding_job_errors(coding, project=project)
+    if coding.get('project') != project:
+        errors.append('/project: 编码交付与当前任务不属于同一项目')
+    if errors:
+        raise ValueError('运行交接未通过：' + '；'.join(errors))
+    jobs = coding['execution_jobs']
+    if not plan_text:
+        return [{'name': job['name'], 'config': dict(job['config'])} for job in jobs]
+    bindings = {job['name']: job['config'] for job in jobs}
+    return [{'name': row['name'], 'config': {**row['config'], **bindings[row['name']]}}
+            for row in document_metadata(plan_text)['ablations']]
+
+
+def delivery_execution_errors(plan_text: str, coding_text: str, execution: dict[str, Any], *,
+                              project: str, plan_required: bool = False) -> list[str]:
+    """Prevent stale or edited execution manifests from changing approved delivery."""
+    try:
+        expected = delivery_experiments(plan_text, document_metadata(coding_text),
+                                        project=project, plan_required=plan_required)
+    except ValueError as exc:
+        return [str(exc)]
+    if execution.get('planned_experiments') != expected:
+        return ['/planned_experiments: 执行清单与批准编码交付不一致；请重新核对，未启动作业']
+    if not plan_text and execution.get('coding_spec_sha256') != document_hash(coding_text):
+        return ['/coding_spec_sha256: 编码交付已变化，请重新生成运行清单并确认配置']
+    return []
+
+
+def execution_handoff_errors(plan_text: str, coding: dict[str, Any], execution: dict[str, Any]) -> list[str]:
+    """An execution document may not introduce a second experiment protocol."""
+    errors = handoff_errors(plan_text, coding)
+    if errors:
+        return errors
+    rows = document_metadata(plan_text)['ablations']
+    bindings = {job['name']: job['config'] for job in coding['execution_jobs']}
+    expected = {row['name']: {**row['config'], **bindings[row['name']]} for row in rows}
+    jobs = execution.get('planned_experiments')
+    if not isinstance(jobs, list) or len(jobs) != len(expected):
+        return ['/planned_experiments: 执行清单数量与批准实验不一致']
+    seen: set[str] = set()
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict) or not isinstance(job.get('name'), str):
+            errors.append(f'/planned_experiments/{index}: 缺少实验身份')
+            continue
+        name = job['name']
+        if name not in expected or name in seen:
+            errors.append(f'/planned_experiments/{index}: 执行清单名称与批准实验不一致')
+        elif job.get('config') != expected[name]:
+            errors.append(f'/planned_experiments/{index}/config: 执行清单改写了批准参数或编码入口；请回到对应阶段修正')
+        seen.add(name)
+    return errors
+
+
+def handoff_errors(plan_text: str, coding: dict[str, Any]) -> list[str]:
+    plan = document_metadata(plan_text)
+    errors = experiment_errors(plan)
+    if coding.get('project') != plan.get('project'):
+        errors.append('/project: 编码交付与实验方案不属于同一项目')
+    if coding.get('experiment_plan_sha256') != document_hash(plan_text):
+        errors.append('/experiment_plan_sha256: 编码交付必须绑定当前批准方案的完整 SHA-256，期望 ' + document_hash(plan_text) + '；方案更新后重新校验')
+    rows = plan.get('ablations', [])
+    jobs = coding.get('execution_jobs')
+    if not isinstance(jobs, list) or not jobs:
+        return errors + ['/execution_jobs: 每组实验必须交付明确的实际入口和配置绑定']
+    names = [row.get('name') for row in rows if isinstance(row, dict)]
+    job_names = [job.get('name') for job in jobs if isinstance(job, dict)]
+    if errors or not all(isinstance(name, str) for name in job_names):
+        return errors + ['/execution_jobs: 请先完成有效实验矩阵与逐项配置绑定']
+    if len(jobs) != len(names) or len(job_names) != len(jobs) or set(job_names) != set(names):
+        return errors + ['/execution_jobs: 实验名称和数量必须逐项对应批准矩阵']
+    by_name = {row['name']: row['config'] for row in rows if isinstance(row, dict) and isinstance(row.get('config'), dict)}
+    for index, job in enumerate(jobs):
+        config = job.get('config')
+        if not isinstance(config, dict):
+            errors.append(f'/execution_jobs/{index}/config: 缺少配置对象')
+            continue
+        if not (config.get('command_id') or config.get('entrypoint') and config.get('config_path')):
+            errors.append(f'/execution_jobs/{index}/config: 缺少登记命令或实际入口与配置文件')
+        approved = by_name.get(job['name'], {})
+        for key, value in config.items():
+            if key in approved and value != approved[key]:
+                errors.append(f'/execution_jobs/{index}/config/{key}: 编码交付改写了批准参数')
+        merged = {**approved, **config}
+        if type(merged.get('seed')) is not int or merged['seed'] < 0:
+            errors.append(f'/execution_jobs/{index}/config/seed: 实际种子必须是非负整数')
+        try:
+            if budget(merged) != budget(approved):
+                errors.append(f'/execution_jobs/{index}/config: 实际预算与批准方案不一致')
+        except ValueError as exc:
+            errors.append(f'/execution_jobs/{index}/config: ' + str(exc))
+    return errors

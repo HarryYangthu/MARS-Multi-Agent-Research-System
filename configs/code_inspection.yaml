@@ -1,0 +1,11 @@
+# Host budgets for task-directed, read-only repository inspection.
+page_size: 40
+max_results: 100
+max_scanned_entries: 20000
+max_depth: 16
+max_file_bytes: 1000000
+max_search_bytes: 8000000
+max_read_lines: 160
+max_read_chars: 12000
+snippet_chars: 300
+exclude_directories: [node_modules, .git, .mars, .venv, venv, __pycache__, data, runs, dist, build]

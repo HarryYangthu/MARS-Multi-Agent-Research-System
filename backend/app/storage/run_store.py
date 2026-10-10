@@ -137,6 +137,7 @@ class RunStore:
         config_hash: str = "",
         user_request: str = "",
         data_source: dict[str, Any] | None = None,
+        experiment_id: str = "",
         now: datetime | None = None,
     ) -> RunHandle:
         ts = _ts(now)
@@ -165,6 +166,8 @@ class RunStore:
         }
         if data_source:
             meta["data_source"] = data_source
+        if experiment_id:
+            meta["experiment_id"] = experiment_id
         if user_request or data_source:
             enriched_request = user_request
             if data_source:
