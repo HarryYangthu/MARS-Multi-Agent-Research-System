@@ -6,22 +6,65 @@ from typing import Any
 
 import yaml
 
-from app.harness.schema.experiment_contract import budget, document_metadata, handoff_errors
+from app.harness.schema.experiment_contract import budget, delivery_experiments
 from app.harness.tools.config import load_execution_config
 from app.harness.tools.project_repo import load_project_repo
 from app.settings import get_settings
+from app.storage.run_store import RunHandle
 
 
-def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: str) -> list[str]:
-    errors = handoff_errors(plan_text, coding)
-    if errors:
-        return errors
-    plan = document_metadata(plan_text)
-    rows = {row['name']: row['config'] for row in plan['ablations']}
+def experiment_plan_required(run: RunHandle, node_key: str) -> bool:
+    """Use the authoritative dependency graph, never infer a task type from a file."""
+    from app.harness.runtime.state_machine import NodeState
+    from app.storage.run_state_store import RunStateStore
+    snapshot = RunStateStore(run).load()
+    if snapshot is None or node_key not in snapshot.graph.nodes:
+        return False
+    pending = list(snapshot.graph.predecessors(node_key))
+    seen: set[str] = set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        if (snapshot.graph.metadata(key).get('stage') == 'experiment'
+                and snapshot.graph.state(key) != NodeState.SKIPPED):
+            return True
+        pending.extend(snapshot.graph.predecessors(key))
+    return False
+
+
+def execution_delivery_required(run: RunHandle, node_key: str) -> bool:
+    from app.harness.runtime.state_machine import NodeState
+    from app.storage.run_state_store import RunStateStore
+    snapshot = RunStateStore(run).load()
+    if snapshot is None or node_key not in snapshot.graph.nodes:
+        return False
+    pending = list(snapshot.graph.successors(node_key))
+    seen: set[str] = set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        if (snapshot.graph.metadata(key).get('stage') == 'execution'
+                and snapshot.graph.state(key) != NodeState.SKIPPED):
+            return True
+        pending.extend(snapshot.graph.successors(key))
+    return False
+
+
+def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: str,
+                          plan_required: bool = False) -> list[str]:
+    try:
+        jobs = delivery_experiments(plan_text, coding, project=project, plan_required=plan_required)
+    except ValueError as exc:
+        return [str(exc)]
+    errors: list[str] = []
     backend = get_settings().mars_execution_backend
     policy = load_execution_config()['execution']
-    for index, job in enumerate(coding['execution_jobs']):
-        config = {**rows[job['name']], **job['config']}
+    for index, job in enumerate(jobs):
+        config = job['config']
         prefix = f'/execution_jobs/{index}/config'
         if config.get('backend', backend) != backend:
             errors.append(prefix + ': 编码入口与当前执行方式不同，请在编码交付前核对')
@@ -33,6 +76,8 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                 from app.execution.paper_static_adapter import approved_config_path, _override_args
                 root = load_project_repo(project).root.resolve()
                 path = approved_config_path(config, policy.get('paper_static', {}), root)
+                if config.get('entrypoint') != 'train_static.py':
+                    raise ValueError('当前训练适配器的入口是 train_static.py，交付入口不一致')
                 if not (root / 'train_static.py').is_file():
                     raise ValueError('交付的训练入口不存在')
                 raw = yaml.safe_load(path.read_text())

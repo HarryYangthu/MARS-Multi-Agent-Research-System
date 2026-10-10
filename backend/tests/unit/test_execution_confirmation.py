@@ -40,8 +40,8 @@ def test_data_summary_uses_resolved_adapter_inputs() -> None:
 async def test_real_execution_preflight_failure_persists_for_recovery_after_reload(
     execution: tuple[Orchestrator, RunSession, Path, Path],
 ) -> None:
-    # The standalone fixture has no bound research repository. Actual execution
-    # preflight must fail and remain understandable after its owner is gone.
+    # The real command only prints Python's version and produces no measurements.
+    # That must fail rather than become a successful research job after reload.
     from app.bridge.execution_batch_deadline import execution_failure_hint
     from app.harness.runtime.task_contract import FailureEnvelope
     orch, session, _, _ = execution
@@ -54,8 +54,8 @@ async def test_real_execution_preflight_failure_persists_for_recovery_after_relo
     failure = FailureEnvelope.model_validate_json(failure_path.read_text())
     assert failure.code == 'execution_batch_failed' and not failure.outcome_known
     hint, evidence = execution_failure_hint(session.run, 'execution')
-    assert 'no real repository configured' in hint and evidence['task_id'] == f'{session.run.run_id}:execution'
-    assert not (session.run.root / 'execution/batch_summary.json').exists()
+    assert 'actual execution batch failed' in hint and evidence['task_id'] == f'{session.run.run_id}:execution'
+    assert (session.run.root / 'execution/batch_summary.json').exists()
     assert not any(row['status'] == 'completed' for row in job_states_for_test(session.run.root))
 
 
@@ -77,10 +77,13 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
     monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(tool_path))
     monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(configuration))
     monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
     reset_settings_cache()
+    from app.harness.project_workspace import open_folder
+    project = open_folder(str(tmp_path / 'project'), create=True).name
     store = RunStore(tmp_path / 'runs')
     orch = Orchestrator(run_store=store, registry=AgentRegistry())
-    session = orch.create_session(RunRequest(task='configuration-confirmation', project='regression',
+    session = orch.create_session(RunRequest(task='configuration-confirmation', project=project,
         entrypoint='execution', standalone=True, auto_approve=False))
     data = tmp_path / 'input.json'
     data.write_text('[1,2,3]')
@@ -118,12 +121,12 @@ def test_confirmation_rechecks_coding_binding_after_approved_plan_changes(
     store = ArtifactStore(session.run)
     rows = [{'name': name, 'config': {'seed': 2026, 'budget_steps': 50, 'data_path': str(data)}}
             for name in ('baseline', 'candidate')]
-    plan = {'schema': 'experiment_plan.v1', 'project': 'regression', 'agent': 'experiment',
+    plan = {'schema': 'experiment_plan.v1', 'project': session.run.project, 'agent': 'experiment',
         'variables': {'independent': ['method'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
         'ablations': rows, 'estimated_runs': 2}
     text = dumps(plan, 'Explicit human-authored protocol.')
     store.approve(store.write(text=text))
-    code = {'schema': 'code_spec.v1', 'project': 'regression', 'agent': 'coding', 'target_lang': 'python',
+    code = {'schema': 'code_spec.v1', 'project': session.run.project, 'agent': 'coding', 'target_lang': 'python',
         'baseline_compat': {'preserved': True}, 'files_changed': [], 'experiment_plan_sha256': document_hash(text),
         'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'python-environment'}} for row in rows]}
     store.approve(store.write(text=dumps(code, 'Host binding only; no measurements are asserted.')))
@@ -166,7 +169,8 @@ def test_confirmation_is_durable_idempotent_and_invalidated_by_changes(
         configuration.write_text(yaml.safe_dump(raw))
     else:
         path = session.run.root / 'execution/run_log.approved.md'
-        path.write_text(path.read_text() + '\nAdditional human note.\n')
+        store = ArtifactStore(session.run)
+        store.approve(store.write(text=path.read_text() + '\nAdditional human note.\n'))
     after = execution_preview(session.run, 'execution')
     assert after['token'] != view['token'] and not after['confirmed']
     with pytest.raises(ValueError, match='变化'):
@@ -208,7 +212,11 @@ def test_explicit_backend_wins_over_yaml_and_missing_plan_still_blocks(
 def test_credential_values_never_reach_preview(execution: tuple[Orchestrator, RunSession, Path, Path]) -> None:
     _, session, _, _ = execution
     path = session.run.root / 'execution/run_log.approved.md'
-    path.write_text(path.read_text().replace('budget_steps: 50', 'budget_steps: 50\n    api_key: test-private-credential'))
+    from app.harness.schema.frontmatter_parser import parse
+    document = parse(path.read_text())
+    document.metadata['planned_experiments'][0]['config']['api_key'] = 'test-private-credential'
+    store = ArtifactStore(session.run)
+    store.approve(store.write(text=dumps(document.metadata, document.body)))
     view = execution_preview(session.run, 'execution')
     assert 'test-private-credential' not in json.dumps(view)
     assert '[已隐藏]' in json.dumps(view, ensure_ascii=False)
@@ -313,7 +321,7 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
     from app.harness.tools.git_branch import git
     monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
     reset_settings_cache()
-    project = open_folder(str(tmp_path / 'project'), create=True)
+    project = open_folder(str(tmp_path / 'git-project'), create=True)
     source = tmp_path / 'code'
     source.mkdir()
     git(source, 'init', '-b', 'baseline')

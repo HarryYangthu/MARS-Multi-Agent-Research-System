@@ -4,7 +4,7 @@ from typing import Any
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
 from app.harness.agent_loop.trace import digest
 from app.harness.schema.frontmatter_parser import dumps, parse
-from app.harness.schema.experiment_contract import handoff_errors
+from app.harness.schema.experiment_contract import delivery_experiments, document_hash
 
 class ExecutionAgent(BaseAgent):
     name = "execution"
@@ -44,6 +44,7 @@ class ExecutionAgent(BaseAgent):
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
         documents: dict[str, dict[str, Any]] = {}
         plan_text = ''
+        coding_text = ''
         for text in context.upstream.values():
             if text.startswith("[upstream artifact: "):
                 text = text.split("\n", 1)[1]
@@ -57,43 +58,18 @@ class ExecutionAgent(BaseAgent):
                 documents[schema] = metadata
                 if schema == 'experiment_plan.v1':
                     plan_text = text
-        errors = handoff_errors(plan_text, documents.get('code_spec.v1', {})) if plan_text else ['缺少批准实验方案']
-        if errors:
-            raise ValueError('；'.join(errors))
-        rows = documents.get("experiment_plan.v1", {}).get("ablations", [])
-        if not isinstance(rows, list) or not rows:
-            raise ValueError("缺少已批准实验矩阵；执行管理器不会自行设计实验")
-        jobs = documents.get("code_spec.v1", {}).get("execution_jobs", [])
-        if not isinstance(jobs, list):
-            raise ValueError("编码交付的 execution_jobs 必须是清单")
-        by_name: dict[str, dict[str, Any]] = {}
-        for job in jobs:
-            if not isinstance(job, dict) or not isinstance(job.get("config"), dict):
-                raise ValueError("编码交付缺少明确的作业配置")
-            name = str(job.get("name", ""))
-            if not name or name in by_name:
-                raise ValueError("编码交付的作业名称为空或重复")
-            by_name[name] = job["config"]
-        experiments: list[dict[str, Any]] = []
-        for row in rows:
-            if not isinstance(row, dict) or not isinstance(row.get("config"), dict):
-                raise ValueError("批准实验缺少配置")
-            name = str(row.get("name", ""))
-            config = dict(row["config"])
-            binding = by_name.pop(name, {})
-            for key, value in binding.items():
-                if key in config and config[key] != value:
-                    raise ValueError(f"{name} 的编码交付改写了批准参数 {key}；请回到实验设计核对")
-                config[key] = value
-            experiments.append({"name": name, "config": config})
-        if by_name or len({item["name"] for item in experiments}) != len(experiments):
-            raise ValueError("编码作业与批准实验矩阵不一致")
+                else:
+                    coding_text = text
+        experiments = delivery_experiments(plan_text, documents.get('code_spec.v1', {}),
+            project=request.project, plan_required=bool(request.extra.get('experiment_plan_required')))
         metadata = {"schema": self.output_schema, "project": request.project, "agent": self.name,
             "run_id": str(request.extra["run_id"]), "status": "interrupted", "execution_phase": "planned",
             "runtime_mode": "deterministic", "intake_invocation": request.extra.get("invocation_id", ""), "is_mock": False,
             "metrics": {"planned_experiments": len(experiments)}, "planned_experiments": experiments,
+            "execution_source": 'experiment_plan' if plan_text else 'coding_delivery',
+            "coding_spec_sha256": document_hash(coding_text),
             "fingerprint_hash": "sha256:" + digest(request.upstream_artifacts)}
-        body = ("# 仿真执行清单\n\n直接接收已批准实验矩阵与编码交付，未调用模型、未启动实验。\n\n"
+        body = ("# 仿真执行清单\n\n接收实际编码运行交付；有实验方案时同时核验其约束。未调用模型、未启动实验。\n\n"
                 "核对运行环境、数据、随机种子、预算单位与配置文件后启动。"
                 "执行管理器不改方案、代码、指标或预算；结果来自真实作业收据。\n\n"
                 + "\n".join(f"- {item['name']}" for item in experiments))

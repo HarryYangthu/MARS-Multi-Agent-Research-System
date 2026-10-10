@@ -87,6 +87,58 @@ def experiment_errors(metadata: dict[str, Any]) -> list[str]:
     return errors
 
 
+def coding_job_errors(coding: dict[str, Any], *, project: str) -> list[str]:
+    """Validate a self-contained delivery without inventing an experiment document."""
+    errors: list[str] = []
+    if coding.get('schema') != 'code_spec.v1' or coding.get('project') != project:
+        errors.append('/coding: 运行交付格式或项目身份不一致')
+    jobs = coding.get('execution_jobs')
+    if not isinstance(jobs, list) or not jobs:
+        return errors + ['/execution_jobs: 缺少运行清单，请补齐编码交付后继续']
+    errors.extend(error.replace('/ablations', '/execution_jobs') for error in
+                  experiment_errors({'ablations': jobs, 'estimated_runs': len(jobs)}))
+    for index, job in enumerate(jobs):
+        if not isinstance(job, dict) or not isinstance(job.get('config'), dict):
+            continue
+        config = job['config']
+        if not (config.get('command_id') or config.get('entrypoint') and config.get('config_path')):
+            errors.append(f'/execution_jobs/{index}/config: 缺少实际运行入口与配置文件或登记命令')
+    return errors
+
+
+def delivery_experiments(plan_text: str, coding: dict[str, Any], *, project: str,
+                         plan_required: bool = False) -> list[dict[str, Any]]:
+    """One intake contract: an available design constrains the coding delivery."""
+    if plan_required and not plan_text:
+        raise ValueError('本任务的实验设计交付缺失；请恢复已批准方案，不能绕过已有研究约束')
+    errors = handoff_errors(plan_text, coding) if plan_text else coding_job_errors(coding, project=project)
+    if coding.get('project') != project:
+        errors.append('/project: 编码交付与当前任务不属于同一项目')
+    if errors:
+        raise ValueError('运行交接未通过：' + '；'.join(errors))
+    jobs = coding['execution_jobs']
+    if not plan_text:
+        return [{'name': job['name'], 'config': dict(job['config'])} for job in jobs]
+    bindings = {job['name']: job['config'] for job in jobs}
+    return [{'name': row['name'], 'config': {**row['config'], **bindings[row['name']]}}
+            for row in document_metadata(plan_text)['ablations']]
+
+
+def delivery_execution_errors(plan_text: str, coding_text: str, execution: dict[str, Any], *,
+                              project: str, plan_required: bool = False) -> list[str]:
+    """Prevent stale or edited execution manifests from changing approved delivery."""
+    try:
+        expected = delivery_experiments(plan_text, document_metadata(coding_text),
+                                        project=project, plan_required=plan_required)
+    except ValueError as exc:
+        return [str(exc)]
+    if execution.get('planned_experiments') != expected:
+        return ['/planned_experiments: 执行清单与批准编码交付不一致；请重新核对，未启动作业']
+    if not plan_text and execution.get('coding_spec_sha256') != document_hash(coding_text):
+        return ['/coding_spec_sha256: 编码交付已变化，请重新生成运行清单并确认配置']
+    return []
+
+
 def execution_handoff_errors(plan_text: str, coding: dict[str, Any], execution: dict[str, Any]) -> list[str]:
     """An execution document may not introduce a second experiment protocol."""
     errors = handoff_errors(plan_text, coding)

@@ -44,4 +44,10 @@ def coding_candidate_errors(run: RunHandle, text: str) -> list[str]:
             return ["/files_changed: 没有真实写入记录；先完成受治理的代码写入，不能只提交补丁说明。"]
     except (OSError, ValueError) as exc:
         return ["/files_changed: " + str(exc)]
+    from app.execution.handoff_validation import coding_handoff_errors, execution_delivery_required, experiment_plan_required
+    validation = validate_document(text, expected_schema='code_spec.v1')
+    if validation.metadata.get('execution_jobs') or execution_delivery_required(run, 'coding'):
+        plan = run.root / 'experiment/experiment_plan.approved.md'
+        return coding_handoff_errors(plan.read_text() if plan.is_file() else '', validation.metadata,
+            project=run.project, plan_required=experiment_plan_required(run, 'coding'))
     return []

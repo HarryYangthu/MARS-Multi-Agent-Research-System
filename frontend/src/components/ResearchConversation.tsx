@@ -188,7 +188,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
         {conversation?.linked_run_id && !activity.error && !pollError && showCompletedCodeChanges(activity.run) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
-        {conversation?.linked_run_id && (!activity.run || pendingReviewStage(activity.run) === null) ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
+        {conversation?.linked_run_id && (!activity.run || pendingReviewStage(activity.run) === null) ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} onChanged={activity.refresh} /> : null}
         <div ref={bottom} />
       </div>
     </div>

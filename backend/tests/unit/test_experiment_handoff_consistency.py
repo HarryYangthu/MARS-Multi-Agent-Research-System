@@ -89,7 +89,7 @@ def test_matrix_count_and_normalized_paths_are_part_of_contract() -> None:
 def test_execution_cannot_introduce_a_different_protocol(change: str) -> None:
     text = dumps(plan(), 'Approved protocol.')
     coding = code(text)
-    execution = {'planned_experiments': [{'name': 'baseline',
+    execution: dict[str, Any] = {'planned_experiments': [{'name': 'baseline',
         'config': {'seed': 2026, 'budget_steps': 50, 'command_id': 'registered'}}]}
     assert not execution_handoff_errors(text, coding, execution)
     job = execution['planned_experiments'][0]
@@ -123,12 +123,15 @@ def test_human_approval_cannot_bypass_seed_validation_or_mutate_approved_pointer
 
 
 @pytest.mark.asyncio
-async def test_api_rejects_incomplete_approval_with_actionable_response_before_any_driver(tmp_path: Path) -> None:
+async def test_api_rejects_incomplete_approval_with_actionable_response_before_any_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
+    reset_settings_cache()
+    project = open_folder(str(tmp_path / 'project'), create=True).name
     store = RunStore(tmp_path)
     orch = Orchestrator(run_store=store, registry=AgentRegistry())
-    session = orch.create_session(SessionRequest(task='api-admission', project='regression',
+    session = orch.create_session(SessionRequest(task='api-admission', project=project,
         entrypoint='experiment', standalone=True))
-    bad = plan()
+    bad = plan(project)
     bad['ablations'][0]['config']['seed'] = '同基线种子'
     artifact = ArtifactStore(session.run).write(text=dumps(bad, 'Incomplete experiment draft.'))
     previous = dependencies._run_store, dependencies._orchestrator
@@ -145,18 +148,22 @@ async def test_api_rejects_incomplete_approval_with_actionable_response_before_a
         assert orch.owned_tasks.active(session.run.run_id) is None
     finally:
         dependencies._run_store, dependencies._orchestrator = previous
+        reset_settings_cache()
 
 
 @pytest.mark.asyncio
-async def test_stale_review_cannot_approve_a_newer_document(tmp_path: Path) -> None:
+async def test_stale_review_cannot_approve_a_newer_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.hitl.review_session import ReviewSession, get_registry
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
+    reset_settings_cache()
+    project = open_folder(str(tmp_path / 'project'), create=True).name
     store = RunStore(tmp_path)
     orch = Orchestrator(run_store=store, registry=AgentRegistry())
-    session = orch.create_session(SessionRequest(task='stale-review', project='regression',
+    session = orch.create_session(SessionRequest(task='stale-review', project=project,
         entrypoint='experiment', standalone=True))
     artifacts = ArtifactStore(session.run)
-    older = artifacts.write(text=dumps(plan(), 'Older document shown in the browser.'))
-    newer = artifacts.write(text=dumps(plan(), 'Changed document not yet reviewed.'))
+    older = artifacts.write(text=dumps(plan(project), 'Older document shown in the browser.'))
+    newer = artifacts.write(text=dumps(plan(project), 'Changed document not yet reviewed.'))
     review = ReviewSession(session.run, 'experiment', newer)
     registry = get_registry()
     await registry.register(review)
@@ -174,6 +181,7 @@ async def test_stale_review_cannot_approve_a_newer_document(tmp_path: Path) -> N
     finally:
         await registry.unregister(session.run.run_id, 'experiment')
         dependencies._run_store, dependencies._orchestrator = previous
+        reset_settings_cache()
 
 
 def test_epoch_budget_is_rejected_by_step_only_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,6 +235,7 @@ def test_backend_precedence_is_shared_by_settings_and_tool_configuration(tmp_pat
     for path in ('configs', 'templates/artifacts', 'backend/app/harness/schema/schemas'):
         (runtime / path).mkdir(parents=True)
     (runtime / 'configs/agents.yaml').write_text((repo_root() / 'configs/agents.yaml').read_text())
+    (runtime / 'configs/local_runtime.yaml').write_text((repo_root() / 'configs/local_runtime.yaml').read_text())
     (runtime / 'configs/execution.yaml').write_text(yaml.safe_dump({'execution': {'backend': 'paper_static'}}))
     environment = {key:value for key,value in os.environ.items() if key not in {'MARS_EXECUTION_BACKEND', 'MARS_EXECUTION_CONFIG_PATH'}}
     environment.update(MARS_RUNTIME_ROOT=str(runtime), PYTHONPATH=str(repo_root() / 'backend'))

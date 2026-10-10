@@ -41,10 +41,20 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
     intent_count = requested_experiment_count(intent_text)
     intent_wants_sweep = wants_execution_sweep(intent_text)
     coding_path = run.subdir('coding') / 'code_spec.approved.md'
-    if plan_path.is_file() and coding_path.is_file() and approved_execution_path.is_file():
-        from app.harness.schema.experiment_contract import execution_handoff_errors
-        errors = execution_handoff_errors(plan_path.read_text(), parse_fm(coding_path.read_text()).metadata,
-                                          parse_fm(approved_execution_path.read_text()).metadata)
+    from app.execution.handoff_validation import coding_handoff_errors, experiment_plan_required
+    from app.harness.schema.experiment_contract import delivery_experiments, delivery_execution_errors
+    required = experiment_plan_required(run, node_key)
+    plan_text = plan_path.read_text() if plan_path.is_file() else ''
+    if required and not plan_text:
+        raise ValueError('本任务的实验设计交付缺失，请恢复已批准方案')
+    coding_text = coding_path.read_text() if coding_path.is_file() else ''
+    coding = parse_fm(coding_text).metadata if coding_text else {}
+    has_delivery = bool(coding_text and (plan_text or 'execution_jobs' in coding))
+    if has_delivery:
+        errors = coding_handoff_errors(plan_text, coding, project=run.project, plan_required=required)
+        if not errors and approved_execution_path.is_file():
+            errors = delivery_execution_errors(plan_text, coding_text,
+                parse_fm(approved_execution_path.read_text()).metadata, project=run.project, plan_required=required)
         if errors:
             raise ValueError('编码交付与执行清单未通过一致性核验：' + '；'.join(errors))
     plan_source = "none"
@@ -87,6 +97,11 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
                     plan_source = "experiment_plan"
         except Exception:
             abl_specs = []
+    if not abl_specs and has_delivery:
+        rows = delivery_experiments(plan_text, coding, project=run.project, plan_required=required)
+        abl_specs = [(row['name'], row['config']) for row in rows]
+        plan_source = 'coding_delivery'
+        deterministic = True
     planned_before_intent = len(abl_specs)
     if not abl_specs:
         raise RuntimeError("no valid approved experiment configurations; execution was not started")

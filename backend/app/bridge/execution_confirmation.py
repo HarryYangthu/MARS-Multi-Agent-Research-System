@@ -106,15 +106,6 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     if files['experiment/experiment_plan.approved.md']:
         if not files['coding/code_spec.approved.md']:
             blockers.append('缺少批准的编码交付，无法核验实验约定。')
-        else:
-            from app.execution.handoff_validation import coding_handoff_errors
-            try:
-                blockers.extend(coding_handoff_errors(
-                    (run.root / 'experiment/experiment_plan.approved.md').read_text(),
-                    parse((run.root / 'coding/code_spec.approved.md').read_text()).metadata,
-                    project=run.project))
-            except (OSError, ValueError, RuntimeError) as exc:
-                blockers.append('批准交接无法核验：' + str(exc))
     experiments: list[dict[str, Any]] = []
     prepared = None
     try:
@@ -123,7 +114,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         experiments = [{'name': spec.experiment_id, 'seed': spec.seed, 'config': spec.config}
                        for spec in prepared.specs]
         if not prepared.plan_source.startswith('execution_run_log'):
-            blockers.append('执行产物中没有可用的批准实验清单，不能直接用上游方案替代执行计划。')
+            blockers.append('运行清单尚待接收确认；此处展示编码交付或已有实验配置，尚未启动仿真。')
         if len(experiments) != prepared.planned_before_intent:
             blockers.append(f'批准方案有 {prepared.planned_before_intent} 组实验，当前默认配置只会执行 {len(experiments)} 组。请核对实验数量。')
     except (OSError, ValueError, RuntimeError) as exc:
@@ -132,8 +123,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             message = '批准方案缺少明确的随机种子，请填写非负整数，不能仅写“同基线种子”。'
         elif message == 'no valid approved experiment configurations; execution was not started':
             message = '没有可用的批准实验配置，尚未启动仿真。'
-        elif '编码交付' in message:
-            message = '编码交付与批准方案不一致，请修正配置绑定、随机种子和预算，再生成执行清单。'
+        elif '编码交付' in message or '交接' in message or '交付缺失' in message:
+            pass  # Preserve the exact field and responsible delivery for repair.
         else:
             message = '实验清单或配置无法核验，请检查已批准的执行计划。'
         blockers.append('执行计划尚不可启动：' + message)

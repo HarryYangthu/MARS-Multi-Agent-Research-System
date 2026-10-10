@@ -192,6 +192,10 @@ async def _execute_agent_node(
             from app.bridge.report_skill_binding import frozen_report_skills
             selected_skills = frozen_report_skills(run, node_key, selected_skills, create=True)
     request_extra["skills"] = selected_skills
+    if stage in {'coding', 'execution'}:
+        from app.execution.handoff_validation import experiment_plan_required, execution_delivery_required
+        request_extra['experiment_plan_required'] = experiment_plan_required(run, node_key)
+        request_extra['execution_delivery_required'] = execution_delivery_required(run, node_key)
     task = research_stage.task if research_stage is not None else bind_task(run, node_key, goal=user_request, upstream=upstream,
                     output_schema=str(agent.output_schema), resume_invocation=resume_invocation,
                     predecessor_task_ids=predecessor_task_ids)

@@ -52,6 +52,10 @@ def inspect_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[st
     if stage not in {"experiment", "coding", "execution", "writing"}:
         return []
     plan_path = run.root / 'experiment/experiment_plan.approved.md'
+    if stage in {'coding', 'execution'} and not plan_path.is_file():
+        from app.execution.handoff_validation import experiment_plan_required
+        if experiment_plan_required(run, node_key):
+            raise ValueError('上游交接未通过：本任务的实验设计交付缺失，请恢复已批准方案')
     if stage in {'coding', 'execution'} and plan_path.is_file():
         from app.harness.schema.experiment_contract import experiment_errors, document_metadata
         plan_text = plan_path.read_text()

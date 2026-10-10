@@ -33,7 +33,7 @@ class CodingAgent(BaseAgent):
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
         "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
-        "experiment_plan_sha256 必须是所依据的完整批准实验文档的 SHA-256；"
+        "有批准实验方案时 experiment_plan_sha256 必须绑定该完整文档；没有方案时按用户任务交付运行清单，不得捏造方案哈希。"
         "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
         "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
         "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
@@ -110,12 +110,13 @@ class CodingAgent(BaseAgent):
                 upstream = parse(text).metadata
                 if upstream.get("schema") == "experiment_plan.v1":
                     plans.append(text)
-        if plans:
+        if plans or metadata.get('execution_jobs') or request.extra.get('execution_delivery_required'):
             from app.execution.handoff_validation import coding_handoff_errors
-            if len(plans) != 1:
+            if len(plans) > 1:
                 errors.append('/upstream: 必须有唯一的批准实验方案')
             else:
-                errors.extend(coding_handoff_errors(plans[0], metadata, project=request.project))
+                errors.extend(coding_handoff_errors(plans[0] if plans else '', metadata, project=request.project,
+                    plan_required=bool(request.extra.get('experiment_plan_required'))))
         return errors
 
     def load_post_training(
