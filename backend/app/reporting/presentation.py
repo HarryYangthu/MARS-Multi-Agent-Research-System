@@ -57,7 +57,8 @@ def native_table(rows: list[list[str]]) -> str:
     body = ''.join('<a:tr h="760000">' + ''.join(
         f'<a:tc><a:txBody><a:bodyPr wrap="square"/><a:lstStyle/>{paragraphs([value], 1400, "FFFFFF" if index == 0 else "18243A")}</a:txBody><a:tcPr><a:solidFill><a:srgbClr val="{ "18243A" if index == 0 else "EEF2F6"}"/></a:solidFill></a:tcPr></a:tc>'
         for value in [*row, *[""] * (cols - len(row))]) + '</a:tr>' for index, row in enumerate(rows))
-    return f'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Editable results table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="700000" y="1500000"/><a:ext cx="10800000" cy="{760000 * len(rows)}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1" bandRow="1"/><a:tblGrid>{''.join(f'<a:gridCol w="{w}"/>' for w in widths)}</a:tblGrid>{body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>'
+    grid = "".join(f'<a:gridCol w="{width}"/>' for width in widths)
+    return f'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Editable results table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="700000" y="1500000"/><a:ext cx="10800000" cy="{760000 * len(rows)}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1" bandRow="1"/><a:tblGrid>{grid}</a:tblGrid>{body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>'
 
 
 def write_deck(path: Path, pack: dict[str, Any], blocks: list[dict[str, Any]], plain: Callable[[dict[str, Any]], str], table_rows: Callable[[dict[str, Any]], list[list[str]]]) -> None:
