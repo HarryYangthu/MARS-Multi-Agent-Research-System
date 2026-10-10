@@ -1,6 +1,6 @@
 import type { ChatMessageView, RunDetail, RunActivityView, WorkLogView } from "./api";
 
-export type Activity = { id: string; timestamp: string; agent: string; title: string; detail: string; status: string; ended_at?: string | null; startsStage?: boolean; endsStage?: boolean };
+export type Activity = { id: string; timestamp: string; agent: string; title: string; detail: string; status: string; kind?: string; ended_at?: string | null; startsStage?: boolean; endsStage?: boolean };
 export type CommanderActivity = Omit<Activity, "agent" | "detail"> & { kind: string };
 export const agentLabel = (name: string): string => ({ commander: "总控", idea: "研究", idea_research: "调研", experiment: "实验设计", coding: "编码", execution: "执行", writing: "报告" }[name] || name);
 export const statusLabel = (state: string): string => ({ pending: "待开始", running: "处理中", waiting_review: "等待审核", waiting_feedback: "等待反馈", waiting_execution_confirmation: "等待核对仿真配置", approved: "已批准", done: "已完成", completed: "已完成", failed: "失败", error: "失败", interrupted: "已中断", paused: "已暂停", stopped: "已停止", cancelled: "已取消", skipped: "已跳过", created: "已创建", unknown: "状态未知", success: "成功", idle: "待命", rejected: "已驳回", blocked: "受阻" }[state] || state);
@@ -15,9 +15,12 @@ export function runActivities(worklog: WorkLogView, observation: RunActivityView
   for (const event of observation.timeline) {
     const source = record(event.source), payload = record(event.payload), kind = text(event.kind);
     if (source.component !== "agent_loop" || !titles[kind]) continue;
+    // The work log describes concrete file/query work. Prefer that record to a
+    // duplicate raw tool event; full raw events live in Agent details.
+    if (worklog.items.some(item => item.agent === text(source.agent))) continue;
     const status = kind === "model_error" || kind === "resource_budget_exhausted" || payload.ok === false || payload.valid === false ? "failed" : ["model_request", "tool_dispatch"].includes(kind) ? "running" : kind === "interrupted" ? "interrupted" : kind === "stopped" ? "stopped" : "completed";
     const detail = [text(payload.model), text(payload.tool)].filter(Boolean).join(" · ");
-    items.push({ id: text(event.event_id), timestamp: text(event.timestamp), agent: text(source.agent), title: titles[kind], detail, status });
+    items.push({ id: text(event.event_id), timestamp: text(event.timestamp), agent: text(source.agent), title: titles[kind], detail, status, kind });
   }
   return [...new Map(items.map(item => [item.id, item])).values()].sort((a,b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
 }

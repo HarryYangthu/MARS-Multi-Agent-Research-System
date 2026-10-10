@@ -63,6 +63,14 @@ def get_report_skills(run_id: str) -> dict[str, Any]:
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.get("/{run_id}/images")
+def preview_report_image(run_id: str, path: str) -> FileResponse:
+    try:
+        return FileResponse(report_service.report_image_path(_run(run_id), path))
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise HTTPException(404, "图片未保存或不属于此任务") from exc
+
+
 @router.post("/{run_id}/skills/import")
 def import_report_skill(run_id: str, body: SkillImport) -> dict[str, Any]:
     try:

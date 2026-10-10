@@ -16,7 +16,8 @@ import asyncio
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from uuid import uuid4
 from typing import Any
 
 from loguru import logger
@@ -170,6 +171,8 @@ class Commander:
         return await self._decide_llm(session)
 
     async def _decide_llm(self, session: CommanderSession) -> Decision:
+        from app.harness.agent_loop.trace import LoopTrace
+        root = repo_root() / "conversations" / session.conv_id
         messages = self._build_messages(session)
         manifest_path = None
         if session.context_version >= 3:
@@ -197,9 +200,22 @@ class Commander:
             atomic_json(root / "context/commander_state.json", session.context_compaction)
             manifest_path = record_manifest(root, agent="commander", node=session.conv_id, project=session.project,
                 messages=messages, tools=self._llm_config.tools, manifest=manifest)
+        trace = LoopTrace(root / "agent_traces/commander" / uuid4().hex, "full",
+                          correlation={"trace_id": session.conv_id, "node_id": "commander"})
+        if manifest_path is not None:
+            trace.emit("context_packed", json.loads(manifest_path.read_text()))
+        trace.emit("model_request", {"model": self._llm_config.model}, visible=[m.to_wire() for m in messages])
+        previous_observer = self._llm_config.attempt_observer
+
+        def observe(kind: str, data: dict[str, Any]) -> None:
+            if previous_observer is not None:
+                previous_observer(kind, data)
+            trace.emit(kind, {key: value for key, value in data.items() if key != "wire_payload"},
+                       visible=data.get("wire_payload"))
+
         try:
             completion = await asyncio.wait_for(
-                guarded_complete(self._provider, messages, self._llm_config,
+                guarded_complete(self._provider, messages, replace(self._llm_config, attempt_observer=observe),
                     run_root=repo_root() / "conversations" / session.conv_id,
                     active_model_time=True,
                     correlation={"trace_id": session.conv_id, "node_id": "commander"}),
@@ -211,7 +227,11 @@ class Commander:
             if manifest_path is not None:
                 from app.harness.context.runtime_manifest import record_usage
                 record_usage(manifest_path, completion.raw.get("usage"))
+            trace.emit("model_response", {"model": self._llm_config.model, "usage": completion.raw.get("usage")}, visible=completion.text)
             return _parse_decision(completion.text)
+        except Exception as error:
+            trace.emit("model_error", {"error_type": type(error).__name__})
+            raise
         finally:
             await self._provider.close()
 

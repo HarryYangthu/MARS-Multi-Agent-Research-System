@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app.bridge.paper_static_results import collect_paper_jobs, metric_unit
+from app.bridge.paper_static_results import admitted_curves, collect_paper_jobs, metric_unit
 from app.bridge.results_service import ResultReader, collect_run_results, load_results_policy
 from app.storage.run_store import RunStore
 
@@ -22,6 +22,18 @@ def test_paper_units_are_backend_measurement_units_not_ambiguous_plan_prose() ->
     assert metric_unit("APE") == "dB"  # Gain, not angular error.
     assert metric_unit("optimizer_steps") == "optimizer updates"
     assert metric_unit("loss") is None
+
+
+def test_curve_labels_follow_observed_quantities_without_loss_to_res_conversion() -> None:
+    log = "epoch: 1 PIM: 25.18 RES: 7.49 APE: 18.53"
+    ratio = 10 ** (-18.53 / 10)
+    curves = dict(admitted_curves(log, [ratio]))
+    assert curves["RES"] == [7.49]
+    assert curves["APE"] == [18.53]
+    assert curves["cancellation_residual_ratio"] == [ratio]
+    assert "training_loss" not in curves
+    assert admitted_curves(log, [0.5]) == [("saved_curve_unclassified", [0.5])]
+    assert admitted_curves('mars.progress {"optimizer_step": 1, "training_loss": 0.5}', [0.5]) == [("training_loss", [0.5])]
 
 
 @pytest.mark.parametrize("path_kind", ["outside", "symlink", "wrong_experiment"])

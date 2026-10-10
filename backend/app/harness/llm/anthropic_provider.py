@@ -7,6 +7,7 @@ import json
 import os
 from typing import Any
 
+from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import (
     Completion,
     Delta,
@@ -145,6 +146,7 @@ class AnthropicProvider(LLMProvider):
         self, messages: list[Message], config: LLMConfig
     ) -> Completion:
         kwargs = self._request_kwargs(messages, config)
+        record_provider_request(config, self.name, kwargs)
         client = self._get_client()
         response = await request_with_retries(lambda: client.messages.create(**kwargs), config)
         return self._completion_from_response(response, config)
@@ -155,6 +157,7 @@ class AnthropicProvider(LLMProvider):
         if config.tools:
             raise ValueError("stream() is text-only; use complete() for native tool calls")
         kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, kwargs)
         client = self._get_client()
 
         async def attempt() -> AsyncIterator[Delta]:

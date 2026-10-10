@@ -43,6 +43,7 @@ services:
         required: false
     environment:
       - MARS_RUNTIME_MODE=production
+      - BACKEND_PORT=8000
       - REDIS_URL=redis://redis:6379/0
       - CHROMADB_PATH=/app/knowledge/.chromadb
     ports:
@@ -73,10 +74,10 @@ services:
     profiles:
       - self-hosted-frontend
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: frontend/Dockerfile.prod
       args:
-        BACKEND_URL: ${BACKEND_URL:-http://127.0.0.1:8000}
+        BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
         NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://127.0.0.1:8000}
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://127.0.0.1:8000}
     restart: unless-stopped
@@ -86,6 +87,9 @@ services:
     env_file:
       - path: .env.production
         required: false
+    environment:
+      FRONTEND_PORT: 3000
+      MARS_HOST: 0.0.0.0
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     networks:

@@ -84,6 +84,10 @@ class LoopTrace:
             atomic_json(self.root / "checkpoint.json", state)
 
     def record_attempt(self, state: dict[str, Any], kind: str, data: dict[str, Any]) -> None:
+        if kind == "provider_request":
+            public = {key: value for key, value in data.items() if key != "wire_payload"}
+            self.emit(kind, {"request": state["counts"]["model_requests"], **public}, visible=data.get("wire_payload"))
+            return
         if kind == "sdk_attempt_started":
             state["counts"]["sdk_attempts"] += 1
         elif kind == "sdk_attempt_failed":

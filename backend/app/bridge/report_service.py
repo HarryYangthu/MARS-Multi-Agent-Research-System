@@ -33,6 +33,22 @@ def export_bundle(run: RunHandle, *, formats: tuple[str, ...] = ()) -> dict[str,
     return generate_report_bundle(run, actor="api", formats=formats)
 
 
+def report_image_path(run: RunHandle, reference: str) -> Path:
+    """Resolve local Markdown images within this run, without serving arbitrary files."""
+    from urllib.parse import unquote
+    reference = unquote(reference)
+    if reference.startswith("../"):
+        reference = reference[3:]  # Report documents reside in writing/.
+    elif reference.startswith("./"):
+        reference = reference[2:]
+    if reference.split("/", 1)[0] not in {"idea", "experiment", "coding", "execution", "writing"}:
+        raise ValueError("图片不属于此任务的研究产物")
+    path = safe_scope_path(run.root, reference, must_exist=True)
+    if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"} or path.stat().st_size > 10 * 1024 * 1024:
+        raise ValueError("图片格式或大小不支持预览")
+    return path
+
+
 def download_path(run: RunHandle, filename: str, manifest: str | None = None) -> Path:
     from app.harness.schema.frontmatter_parser import parse
     if Path(filename).name != filename:

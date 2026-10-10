@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, type ChatMessageView, type Conversation } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { activeActivityGroups, conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
+import { toolWork } from "@/lib/workProgress";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { RunRecoveryControl } from "./RunRecoveryControl";
 import { CodeChangesCard } from "./CodeChangesCard";
@@ -16,7 +17,6 @@ import { openRunConversation } from "@/lib/runConversation";
 import { latestStages, pendingReviewStage } from "@/lib/runReview";
 import { showCompletedCodeChanges } from "@/lib/completedCodeChanges";
 import { validateConversationScope } from "@/lib/conversationHistory";
-import { ConversationHistoryDialog, useConversationHistory } from "./ConversationHistory";
 
 const storageKey = (project: string, experimentId?: string): string =>
   experimentId ? `mars.commander.conv.${project}.exp.${experimentId}` : `mars.commander.conv.${project}`;
@@ -30,7 +30,7 @@ function remember(project: string, id: string | null, experimentId?: string): vo
   } catch { /* The current conversation still works without browser storage. */ }
 }
 
-export function ResearchConversation({ project, name, experimentId, initialRunId, initialConversationId }: { project: string; name: string; experimentId?: string; initialRunId?: string; initialConversationId?: string }): JSX.Element {
+export function ResearchConversation({ project, name, experimentId, initialRunId, initialConversationId, fresh = false }: { project: string; name: string; experimentId?: string; initialRunId?: string; initialConversationId?: string; fresh?: boolean }): JSX.Element {
   const router = useRouter();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
@@ -39,8 +39,6 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const history = useConversationHistory();
   const [pending, setPending] = useState<{ text: string; after: number; startedAt: string } | null>(null);
   const sending = useRef(false);
   const alive = useRef(true);
@@ -48,15 +46,16 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const follow = useRef(!initialRunId);
   const activity = useResearchActivity(conversation?.linked_run_id, project);
   const processing = busy || conversation?.processing === true;
-  const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
-  const entries = conversationEntries(conversation?.messages ?? [], [...publicActivities, ...activity.activities]);
+  const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.kind === "model" ? "分析研究任务" : item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
+  const toolActivities: Activity[] = (conversation?.messages ?? []).filter(message => message.role === "tool").map((message, index) => ({ id: `tool:${index}`, timestamp: message.timestamp, agent: "commander", title: `${toolWork(message.tool_name || "任务工具")} · ${message.tool_result?.ok === false ? "未完成" : "已返回结果"}`, detail: "", status: message.tool_result?.ok === false ? "failed" : "completed" }));
+  const entries = conversationEntries((conversation?.messages ?? []).filter(message => message.role !== "tool"), [...publicActivities, ...toolActivities]);
   const groups = groupConversationEntries(entries);
   const latestUser = [...(conversation?.messages ?? [])].reverse().find(message => message.role === "user");
   const pendingSaved = pending && conversation?.messages.slice(pending.after).some(message => message.role === "user" && message.content === pending.text);
   const commanderStartedAt = pending && !pendingSaved ? pending.startedAt : latestUser?.timestamp;
   const liveGroups = activeActivityGroups(groups, activity.run, processing, commanderStartedAt);
   const hasCommanderProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent === "commander"));
-  const hasRunProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent !== "commander"));
+  
   const runProcessing = activity.run && latestStages(activity.run).some(stage => stage.state === "running");
   const lastEntry = entries.at(-1)?.id;
   const current = [...publicActivities].reverse().find(item => item.status === "running")?.title;
@@ -66,7 +65,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     alive.current = true;
     let active = true;
     setLoading(true);
-    const id = initialConversationId || savedConversation(project, experimentId);
+    const id = initialConversationId || (fresh ? null : savedConversation(project, experimentId));
     if (!id && !initialRunId) { setLoading(false); return () => { alive.current = false; }; }
     void (initialConversationId ? getConversation(initialConversationId) : initialRunId ? openRunConversation(initialRunId, project, experimentId) : getConversation(id!)).then((value) => {
       if (!active) return;
@@ -78,7 +77,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       if (active) { setError("暂时无法恢复历史对话，请重新读取或新开对话。"); setNeedsRefresh(true); }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; alive.current = false; };
-  }, [project, experimentId, initialRunId, initialConversationId]);
+  }, [project, experimentId, initialRunId, initialConversationId, fresh]);
 
   // Read actual persisted/in-flight Commander messages, including tool receipts.
   // Polling never sends the user's message again.
@@ -125,7 +124,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       if (!alive.current) return;
       setConversation(current);
       const updated = await sendChatMessage(current.conv_id, text);
-      if (alive.current) { setConversation(updated); setPending(null); }
+      if (alive.current) { setConversation(updated); setPending(null); if (fresh) router.replace(`/runs/new?${new URLSearchParams({ project, conversation: updated.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`); }
     } catch (cause: unknown) {
       if (alive.current) {
         const saved = cause instanceof ChatMessageFailure && cause.messageSaved;
@@ -141,8 +140,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
       <div className="flex gap-3 text-xs text-slate-400">
-        <Link href="/runs" className="hover:text-white">研究记录</Link>
-        <button type="button" disabled={busy} onClick={() => { setHistoryOpen(true); void history.refresh(); }} className="hover:text-white disabled:opacity-40">历史对话</button>
+        <Link href={`/projects/${encodeURIComponent(project)}/research`} className="hover:text-white">所有研究</Link>
         <button type="button" disabled={processing || loading} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); setDraft(""); setError(""); setNeedsRefresh(false); if (initialRunId || initialConversationId) { const params = new URLSearchParams({ project }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); } }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
@@ -164,12 +162,11 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
         })}
         {showPending ? <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7">{pending.text}</div> : null}
         {processing && !hasCommanderProgress ? <ActivityGroup activities={[]} processing startedAt={commanderStartedAt} /> : null}
-        {runProcessing && !hasRunProgress ? <ActivityGroup activities={[]} processing research /> : null}
+        {conversation?.linked_run_id && activity.activities.length ? <ActivityGroup activities={runProcessing ? activity.activities.slice(Math.max(0, activity.activities.findLastIndex(item => item.startsStage))) : activity.activities} processing={!!runProcessing} research /> : null}
         {pollError ? <p role="status" className="text-xs text-amber-300">{pollError}</p> : null}
         {conversation?.linked_run_id ? <ResearchRunWorkspace key={`workspace:${conversation.linked_run_id}`} run={activity.run} stale={!!activity.error || !!pollError} onChanged={activity.refresh} /> : null}
         {conversation?.linked_run_id && !activity.error && !pollError && showCompletedCodeChanges(activity.run) ? <CodeChangesCard key={`code:${conversation.linked_run_id}`} runId={conversation.linked_run_id} project={project} /> : null}
         {conversation?.linked_run_id && (!activity.run || pendingReviewStage(activity.run) === null) ? <RunRecoveryControl key={conversation.linked_run_id} runId={conversation.linked_run_id} project={project} disabled={processing} /> : null}
-        {conversation?.linked_run_id ? <Link href={`/runs/${encodeURIComponent(conversation.linked_run_id)}?view=advanced`} className="text-xs text-slate-400 hover:text-indigo-300">查看详细运行记录 →</Link> : null}
         <div ref={bottom} />
       </div>
     </div>
@@ -187,7 +184,6 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     </div>
     <ResearchAgentPanel run={activity.run} runId={conversation?.linked_run_id} activities={activity.activities} processing={processing} current={current} error={activity.error} updated={activity.updated} />
     </div>
-    {historyOpen ? <ConversationHistoryDialog project={project} name={name} experimentId={experimentId} rows={history.rows} loading={history.loading} error={history.error} currentId={conversation?.conv_id} onClose={() => setHistoryOpen(false)} onSelect={() => {}} onRefresh={history.refresh} /> : null}
   </section>;
 }
 

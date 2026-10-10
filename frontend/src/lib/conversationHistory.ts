@@ -2,6 +2,7 @@ import { boundedFetch } from "./clientPolicy";
 import type { Conversation } from "./api";
 
 export type ConversationSummary = {
+  summary?: string;
   conv_id: string;
   project: string;
   experiment_id: string;
@@ -27,7 +28,7 @@ export function parseConversationSummaries(value: unknown): ConversationSummary[
         (row.linked_run_id !== null && typeof row.linked_run_id !== "string")) {
       throw new Error("对话记录格式不正确，请重新读取。");
     }
-    return { conv_id: row.conv_id, project: row.project, experiment_id: typeof row.experiment_id === "string" ? row.experiment_id : "",
+    return { ...(typeof row.summary === "string" ? { summary: row.summary } : {}), conv_id: row.conv_id, project: row.project, experiment_id: typeof row.experiment_id === "string" ? row.experiment_id : "",
       state: row.state, processing: row.processing, linked_run_id: row.linked_run_id as string | null,
       created_at: row.created_at, updated_at: row.updated_at, message_count: row.message_count };
   });

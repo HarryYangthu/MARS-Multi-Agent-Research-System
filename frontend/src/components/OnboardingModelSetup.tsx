@@ -65,12 +65,12 @@ export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: b
       })) });
       setConfig(value); setKey("");
       onStatus(value.agents.filter((row) => row.enabled).every((row) => row.api_key_configured && !!row.model));
-      setMessage("模型配置已保存。密钥已交给本地服务保存，输入框已清空；尚未进行模型连接验证。");
+      setMessage("模型配置已保存。密钥已交给本地服务保存，输入框已清空；适用于本机所有项目；尚未进行模型连接验证。");
     } catch { setError("保存未能确认，请重新读取配置核对。API Key 不会写入浏览器存储。"); }
     finally { setBusy(false); }
   }
   return <div className="space-y-4">
-    <p className="text-sm leading-6 text-slate-400">先连接你要使用的模型服务。默认配置是智谱 GLM-5.3；从服务商控制台获取 API Key 后在这里填写。</p>
+    <p className="text-sm leading-6 text-slate-400">模型连接为本机所有项目共享。已配置的连接会自动复用，无需为每个项目重复填写。默认使用智谱 GLM-5.3。</p>
     {config ? <form onSubmit={(event) => void save(event)} className="space-y-4">
       <fieldset disabled={busy} className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm">服务商<select className={INPUT} value={provider} onChange={(event) => { const next = event.target.value; setProvider(next); setUrl(config.provider_defaults[next]?.base_url || ""); setModel(""); setKey(""); setMessage(""); setConnection(null); }}>{config.providers.map((item) => <option key={item} value={item}>{item === "zhipu" ? "智谱（GLM）" : item}</option>)}</select></label>
@@ -78,7 +78,7 @@ export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: b
         <label className="text-sm sm:col-span-2">API 地址<input required type="url" className={INPUT} value={url} onChange={(event) => { setUrl(event.target.value); setConnection(null); }} placeholder="使用服务商提供的 API Base URL" /></label>
         <label className="text-sm sm:col-span-2">API Key<input type="password" autoComplete="off" spellCheck={false} className={INPUT} value={key} onChange={(event) => { setKey(event.target.value); setConnection(null); }} placeholder={savedCredential ? "已保存密钥，留空继续使用；填写则替换" : "粘贴你的 API Key"} /></label>
       </fieldset>
-      <p className="text-xs leading-5 text-slate-400">保存会将以上连接应用到当前 {enabled.length} 个已启用的研究角色，保留各角色的其他参数。配置保存在本机，API 调用时会向你选择的服务商发送研究内容。</p>
+      <p className="text-xs leading-5 text-slate-400">保存会更新本机所有项目使用的 {enabled.length} 个已启用的研究角色，保留各角色的其他参数。配置保存在本机，API 调用时会向你选择的服务商发送研究内容。</p>
       <div className="flex flex-wrap gap-3"><button className={`${BUTTON} bg-mars-accent text-white`} disabled={busy || !enabled.length}>{busy && !testing ? "正在保存…" : "保存 API 配置"}</button><button type="button" className={BUTTON} disabled={busy} onClick={() => void testConnection()}>{testing ? "正在测试连接…" : "测试连接"}</button><Link className={BUTTON} href="/config/agents">逐角色高级配置</Link></div>
     </form> : !error ? <p role="status">正在读取模型配置…</p> : null}
     <p className="text-xs leading-5 text-slate-400">测试使用当前填写的配置；Key 留空时使用此服务商已保存的密钥。仅发送一条简短测试消息，可能产生少量 API 费用，最长等待约 30 秒。</p>

@@ -29,6 +29,13 @@ SUMMARY_RETAIN_MESSAGES = 12
 SUMMARY_TRIGGER_TOKENS = 5600
 
 
+def research_summary(content: str) -> str:
+    """Use an explicit research question when present, without rewriting history."""
+    goal = re.search(r"(?:研究目标|研究问题|研究内容|任务目标|目标)\s*[:：]\s*([^\n]+)", content)
+    text = goal.group(1) if goal else content
+    return " ".join(text.split())[:80]
+
+
 def _now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
@@ -121,6 +128,7 @@ class CommanderSession:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "message_count": len(self.messages),
+            "summary": next((research_summary(m.content) for m in self.messages if m.role == "user"), ""),
             "activities": [asdict(item) for item in self.activities],
             "processing": self.processing,
         }

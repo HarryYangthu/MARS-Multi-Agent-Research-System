@@ -66,7 +66,7 @@ function ExperimentLab(): JSX.Element {
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold">实验台</h1>
-            <p className="mt-1 text-xs text-slate-400">训练曲线、验证指标与实验对比。Execution 开始执行后自动展示对应运行。</p>
+            <p className="mt-1 text-xs text-slate-400">训练曲线、验证指标与多实验对比。关闭实验台即可返回研究对话。</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-xs text-slate-400">
@@ -79,7 +79,7 @@ function ExperimentLab(): JSX.Element {
                 {runs.map((run) => <option key={run.run_id} value={run.run_id}>{run.task} · {run.run_id}</option>)}
               </select>
             </label>
-            {runId ? <Link href={`/runs/${runId}?agent=execution`} className="text-xs text-mars-accent hover:underline">查看执行详情 →</Link> : null}
+            {runId ? <Link href={`/runs/${runId}?view=advanced&agent=execution`} className="text-xs text-mars-accent hover:underline">查看执行详情 →</Link> : null}
             <button type="button" onClick={exitLab} aria-label="关闭实验台，返回上一界面" title="关闭实验台，返回上一界面" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-2xl leading-none text-slate-400 hover:bg-mars-panel hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"><span aria-hidden="true">×</span></button>
           </div>
         </header>

@@ -159,7 +159,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 
 PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app \
-  --host 127.0.0.1 --port 8000
+  --host 127.0.0.1 --port 8010
 ```
 
 In another shell:
@@ -167,12 +167,12 @@ In another shell:
 ```bash
 cd frontend
 npm install --legacy-peer-deps
-NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000 \
-NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8000 \
-npm run dev -- -p 3000
+NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8010 \
+NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8010 \
+npm run dev -- -p 3001
 ```
 
-Open `http://127.0.0.1:3000`. If port `3000` is occupied, use `-p 3001`.
+Open `http://127.0.0.1:3001`. Local defaults are shared in `configs/local_runtime.yaml`. Override `BACKEND_PORT` / `FRONTEND_PORT` when starting `scripts/dev.sh`; the API proxy follows the backend port.
 
 ## Useful Commands
 

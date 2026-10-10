@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.execution.paper_static_adapter import _metrics_from_summary, _parse_step_line
+from app.execution.paper_static_adapter import _metrics_from_summary, _parse_step_line, _parse_epoch_line
 from app.execution.paper_static_protocol import static_summary_errors
 from app.harness.agent_loop.trace import digest
 from app.harness.schema.experiment_contract import budget
@@ -29,6 +29,18 @@ def metric_unit(name: str) -> str | None:
     if name in {"parameter_counts", "channels"}:
         return "count"
     return None
+
+
+def admitted_curves(log: str, points: list[float]) -> list[tuple[str, list[float]]]:
+    """Label saved curves only from matching actual observations, never from loss-to-dB guesses."""
+    updates = [row for line in log.splitlines() if (row := _parse_step_line(line)) is not None]
+    epochs = [row for line in log.splitlines() if (row := _parse_epoch_line(line)) is not None]
+    if updates and points == [row["loss"] for row in updates]:
+        return [("training_loss", points)]
+    if epochs and points == [row["cancellation_residual_ratio"] for row in epochs]:
+        return [("cancellation_residual_ratio", points), *[
+            (name, [row[name] for row in epochs]) for name in ("RES", "APE", "PIM")]]
+    return [("saved_curve_unclassified", points)] if points else []
 
 
 def collect_paper_jobs(reader: ResultReader, *, existing_jobs: int = 0, existing_metrics: int = 0
@@ -141,9 +153,9 @@ def collect_paper_jobs(reader: ResultReader, *, existing_jobs: int = 0, existing
                 metrics.append({"experiment_id": public_text(name), "job_id": experiment["job_id"], "name": key,
                     "value": value, "unit": metric_unit(key), "direction": None, "role": role,
                     "verification": "verified_local_receipt", "source_id": source_id})
-            if points:
-                curves.append({"experiment_id": public_text(name), "job_id": experiment["job_id"], "metric": "training_loss",
-                    "points": points, "source_id": source_id})
+            for metric, values in admitted_curves(files["log"].decode("utf-8"), points):
+                curves.append({"experiment_id": public_text(name), "job_id": experiment["job_id"], "metric": metric,
+                    "points": values, "source_id": source_id})
             reader.limitations.append("paper_static 为原项目训练协议；APE 是抵消增益 dB，训练损失依赖损失函数，各种损失值不能直接横向比较。")
             completed_epochs = finite_number(summary.get('epochs'))
             if unit == 'steps' and completed_epochs is not None and completed_epochs < 1:

@@ -30,6 +30,7 @@ assert.equal(new URL(existingConversationUrl(summary), "http://localhost").searc
 
 assert.deepEqual(parseConversationSummaries([{ ...summary, activities: [{ title: "not part of history projection" }] }]), [summary]);
 assert.deepEqual(parseConversationSummaries([]), []);
+assert.equal(parseConversationSummaries([{ ...summary, summary: "优化基线学习率" }])[0].summary, "优化基线学习率");
 for (const invalid of [null, {}, "[]", [null], [{ ...summary, project: "" }], [{ ...summary, conv_id: "" }],
   [{ ...summary, updated_at: "invalid" }], [{ ...summary, message_count: -1 }], [{ ...summary, message_count: 1.5 }],
   [{ ...summary, experiment_id: 2 }], [{ ...summary, processing: "yes" }], [{ ...summary, linked_run_id: {} }]]) {

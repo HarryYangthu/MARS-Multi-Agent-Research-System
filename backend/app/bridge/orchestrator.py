@@ -145,6 +145,8 @@ class Orchestrator:
             raise ValueError("production mode cannot create auto-approved runs")
         if research_contract is None:
             assert_ready_for_run(project=request.project)
+            from app.bridge.project_execution_config import require_project_execution
+            require_project_execution(request.project)
         from app.harness.context.folder_context import load_folder_context
         from app.harness.agent_loop.trace import atomic_json
         # A contract-backed project is not an alias for mutable global project

@@ -27,13 +27,13 @@ export function useConversationHistory(): { rows: ConversationSummary[]; loading
 
 export function ProjectConversationActions({ project, rows, loading, error, onSelect, onHistory, buttonClass }: {
   project: string; rows: ConversationSummary[]; loading: boolean; error: string;
-  onSelect: () => void; onHistory: () => void; buttonClass: string;
+  onSelect: () => void; onHistory?: () => void; buttonClass: string;
 }): JSX.Element {
   const latest = projectConversations(rows, project)[0];
   return <>
     {latest && !loading && !error ? <Link href={existingConversationUrl(latest)} onClick={onSelect} className={`${buttonClass} border-indigo-400/40 text-indigo-100`}>继续对话</Link>
       : <button type="button" disabled className={buttonClass} title={error ? "请从历史对话中重新读取" : loading ? "正在读取历史对话" : "暂无历史对话"}>继续对话</button>}
-    <button type="button" onClick={onHistory} className={buttonClass}>历史对话</button>
+    {onHistory ? <button type="button" onClick={onHistory} className={buttonClass}>历史对话</button> : null}
   </>;
 }
 

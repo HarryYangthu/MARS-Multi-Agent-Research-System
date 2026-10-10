@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
 import { SimpleRunDetail } from "@/components/SimpleRunDetail";
 import { RunConversationRedirect } from "@/components/RunConversationRedirect";
+import { AgentInspection } from "@/components/AgentInspection";
 
 const AdvancedRunWorkbench = dynamic(() => import("@/components/AdvancedRunWorkbench"), {
   loading: () => <p className="p-8 text-sm text-slate-400">正在打开高级视图…</p>,
@@ -13,7 +14,8 @@ function RunView(): JSX.Element {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
   if (!params?.id) return <p className="p-8 text-sm text-slate-400">正在读取任务…</p>;
-  if (search?.get("view") === "advanced") return <AdvancedRunWorkbench />;
+  if (search?.get("view") === "advanced") return <AgentInspection runId={params.id} />;
+  if (search?.get("view") === "workbench") return <AdvancedRunWorkbench />;
   if (search?.get("view") === "document") return <SimpleRunDetail key={params.id} runId={params.id} initialAgent={search?.get("agent") ?? ""} />;
   return <RunConversationRedirect key={params.id} runId={params.id} />;
 }

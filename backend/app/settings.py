@@ -7,6 +7,7 @@ from typing import Literal, Mapping
 
 from pydantic import Field, SecretStr, PrivateAttr, TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
 
 ExecutionBackend = Literal['pim_cpu', 'paper_static', 'local_command', 'docker_command', 'remote_gpu']
 
@@ -27,6 +28,21 @@ REPO_ROOT = resolve_runtime_root(
     os.environ.get("MARS_RUNTIME_ROOT", ""), Path(__file__).resolve().parents[2]
 )
 LOCAL_ENV_FILES = (REPO_ROOT / ".env", REPO_ROOT / ".env.local")
+
+
+def local_service_defaults() -> tuple[str, int, int]:
+    """Share source defaults with the frontend; explicit environment wins."""
+    raw = yaml.safe_load((REPO_ROOT / "configs/local_runtime.yaml").read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("host"), str):
+        raise ValueError("Invalid local runtime configuration")
+    for field_name in ("backend_port", "frontend_port"):
+        value = raw.get(field_name)
+        if type(value) is not int or not 1 <= value <= 65535:
+            raise ValueError("Invalid local runtime port")
+    return raw["host"], raw["backend_port"], raw["frontend_port"]
+
+
+_LOCAL_HOST, _LOCAL_BACKEND_PORT, _LOCAL_FRONTEND_PORT = local_service_defaults()
 
 
 class Settings(BaseSettings):
@@ -58,9 +74,9 @@ class Settings(BaseSettings):
     chromadb_path: str = str(REPO_ROOT / "knowledge" / ".chromadb")
 
     # === Service ===
-    backend_host: str = "0.0.0.0"
-    backend_port: int = 8000
-    frontend_port: int = 3000
+    backend_host: str = _LOCAL_HOST
+    backend_port: int = _LOCAL_BACKEND_PORT
+    frontend_port: int = _LOCAL_FRONTEND_PORT
     mars_cors_origins: str = "*"
     mars_desktop_session_token: SecretStr = Field(default=SecretStr(""), repr=False)
 

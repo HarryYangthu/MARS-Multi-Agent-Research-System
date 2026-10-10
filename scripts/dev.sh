@@ -35,18 +35,25 @@ fi
 
 # 4. Backend
 export PYTHONPATH="$ROOT/backend"
-echo "[dev] starting backend on :8000"
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+read -r MARS_BACKEND_PORT MARS_FRONTEND_PORT < <(.venv/bin/python -c 'import yaml; c=yaml.safe_load(open("configs/local_runtime.yaml")); print(c["backend_port"], c["frontend_port"])')
+export BACKEND_PORT="${BACKEND_PORT:-$MARS_BACKEND_PORT}"
+export FRONTEND_PORT="${FRONTEND_PORT:-$MARS_FRONTEND_PORT}"
+export BACKEND_URL="http://127.0.0.1:$BACKEND_PORT"
+export NEXT_PUBLIC_BACKEND_URL="$BACKEND_URL"
+export NEXT_PUBLIC_WS_URL="ws://127.0.0.1:$BACKEND_PORT"
+echo "[dev] starting backend on :$BACKEND_PORT"
+uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT" --reload &
 BACKEND_PID=$!
 
 # 5. Frontend
+FRONTEND_PID=""
 if [ -d frontend ]; then
   cd frontend
   if [ ! -d node_modules ]; then
     echo "[dev] installing frontend deps"
     npm install --legacy-peer-deps
   fi
-  echo "[dev] starting frontend on :3000"
+  echo "[dev] starting frontend on :$FRONTEND_PORT"
   npm run dev &
   FRONTEND_PID=$!
   cd "$ROOT"

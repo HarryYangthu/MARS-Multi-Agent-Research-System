@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "node scripts/serve.cjs dev",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "node scripts/serve.cjs start",
     "lint": "next lint",
     "typecheck": "node scripts/clean-next-types.cjs && tsc --noEmit",
     "test:context": "tsc --outDir .tmp/context-workbench --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/context-workbench-smoke.ts src/lib/contextWorkbench.ts && node .tmp/context-workbench/scripts/context-workbench-smoke.js"

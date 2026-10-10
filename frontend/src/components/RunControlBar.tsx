@@ -31,7 +31,7 @@ type OwnerControl = {
   research_stop?: { status: string; run_stop_confirmed?: boolean; unconfirmed?: string[] } | null;
 };
 
-export function RunControlBar({ runId, run, onChange, showSimpleLink = true }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void; showSimpleLink?: boolean }): JSX.Element {
+export function RunControlBar({ runId, run, onChange, showSimpleLink = true, compact = false }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void; showSimpleLink?: boolean; compact?: boolean }): JSX.Element | null {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
@@ -39,6 +39,7 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true }: {
   const [controlError, setControlError] = useState(false);
   const mutation = useRef<AbortController | null>(null);
   const change = useRef(onChange);
+  const finished = ["completed", "done", "failed", "stopped", "cancelled"].includes(run?.status || "");
   useEffect(() => { change.current = onChange; }, [onChange]);
   useEffect(() => {
     const controller = new AbortController();
@@ -58,12 +59,12 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true }: {
       } catch {
         if (!controller.signal.aborted) setControlError(true);
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(() => void refresh(), CLIENT_POLICY.controlRefreshMs);
+        if (!controller.signal.aborted && !finished) timer = setTimeout(() => void refresh(), CLIENT_POLICY.controlRefreshMs);
       }
     }
     void refresh();
     return () => { controller.abort(); mutation.current?.abort(); clearTimeout(timer); };
-  }, [runId]);
+  }, [runId, finished]);
   const cancelled = run?.termination?.type === "cancelled";
   const statusLabel = cancelled
     ? (run?.termination?.cleanup_complete ? "用户已停止" : "停止清理待确认")
@@ -94,13 +95,14 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true }: {
     } finally { if (!controller.signal.aborted) setBusy(""); }
   }
   const button = "rounded border border-mars-border px-3 py-1.5 text-xs hover:bg-mars-panel2 disabled:opacity-50";
-  return <section aria-label="任务控制" className="border-b border-mars-border bg-mars-panel px-4 py-3">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3 text-sm"><Link href="/runs" className="text-slate-400 hover:text-white">← 研究任务</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div><div className="flex flex-wrap gap-2">
+  if (compact && !controlError && !message && !control?.available_actions.includes("stop") && !control?.stopping) return null;
+  return <section aria-label="任务控制" className="rounded-lg border border-mars-border bg-mars-panel px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">{!compact ? <div className="flex flex-wrap items-center gap-3 text-sm"><Link href={run ? `/projects/${encodeURIComponent(run.project)}/research` : "/projects"} className="text-slate-400 hover:text-white">← 项目研究</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div> : null}<div className="flex flex-wrap gap-2">
       {showSimpleLink ? <Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>简洁视图</Link> : null}
-      {run ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>结果与导出</Link> : null}
+      {run && !compact ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>结果与导出</Link> : null}
       {run && !run.read_only && run.status === "created" ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("start")}>启动任务</button> : null}
       {control?.available_actions.includes("stop") ? <button type="button" className={`${button} border-rose-400/50 text-rose-200`} disabled={!!busy} onClick={() => void act("stop")}>{busy === "stop" ? "正在请求停止…" : control.stopping ? "核对停止状态" : "停止任务"}</button> : null}
-      {run && !run.read_only && ["failed", "stopped"].includes(run.status || "") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("resume")}>检查并恢复</button> : null}
+      {run && !compact && !run.read_only && ["failed", "stopped"].includes(run.status || "") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("resume")}>检查并恢复</button> : null}
       {run?.available_actions?.includes("migrate_state") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("migrate-state")}>{busy ? "正在校验…" : "校验并迁移历史记录"}</button> : null}
     </div></div>
     {run?.read_only ? <p className="mt-2 text-xs leading-5 text-amber-200">{READ_ONLY[run.read_only_reason || ""] || "此记录没有可供当前服务使用的可信执行状态。已保存产物仍可查看。"}</p> : null}

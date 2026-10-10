@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 from loguru import logger
 
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import (
     Completion,
     Delta,
@@ -303,6 +304,7 @@ class _OpenAICompatProvider(LLMProvider):
     ) -> Completion:
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config)
+        record_provider_request(config, self.name, request_kwargs)
         resp = await self._request_with_retries(
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
@@ -320,6 +322,7 @@ class _OpenAICompatProvider(LLMProvider):
         from openai.types.chat import ChatCompletion
 
         client = self._get_client()
+        record_provider_request(config, self.name, payload)
         response = await self._request_with_retries(
             lambda: client.post("/chat/completions", body=payload, cast_to=ChatCompletion,
                                 options={"timeout": config.request_timeout_seconds}), config=config)
@@ -390,6 +393,7 @@ class _OpenAICompatProvider(LLMProvider):
     ) -> AsyncIterator[Delta]:
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, request_kwargs)
         stream = await self._request_with_retries(
             lambda: client.chat.completions.create(**request_kwargs),
             config=config,
@@ -424,6 +428,7 @@ class ZhipuProvider(_OpenAICompatProvider):
             return await super().complete(messages, config)
         client = self._get_client()
         kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, kwargs)
 
         async def consume() -> Completion:
             state = VisibleStreamAccumulator()

@@ -152,8 +152,9 @@ async def run_paper_static_simulation(
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 stdout_lines.append(line)
                 progress = _parse_step_line(line)
-                parsed = progress or _parse_epoch_line(line)
+                parsed = progress if unit == "steps" else _parse_epoch_line(line)
                 if parsed is not None:
+                    curve_metric = "training_loss" if unit == "steps" else "cancellation_residual_ratio"
                     step = int(parsed.get("optimizer_step", len(loss_curve)))
                     loss_curve.append(parsed["loss"])
                     if "paper_RES_db" in parsed:
@@ -162,7 +163,7 @@ async def run_paper_static_simulation(
                         ape_db_curve.append(parsed["paper_APE_db"])
                     from app.execution.curve_parser import write_curve
                     write_curve(run_root=run_root, experiment_id=spec.experiment_id,
-                                metric_name="loss", values=loss_curve)
+                                metric_name=curve_metric, values=loss_curve)
                     if bus_publish is not None:
                         await bus_publish(
                             channel,
@@ -170,7 +171,7 @@ async def run_paper_static_simulation(
                                 "event": "execution.curve_point",
                                 "experiment_id": spec.experiment_id,
                                 "step": step,
-                                "metric": "loss",
+                                "metric": curve_metric,
                                 "value": parsed["loss"],
                                 "paper_metrics": parsed,
                             },
@@ -203,8 +204,6 @@ async def run_paper_static_simulation(
     summary_path = _summary_path(output_root=output_root, done_path=done_path)
     summary = _read_json(summary_path) if summary_path is not None else {}
     metrics = _metrics_from_summary(summary)
-    if not metrics and loss_curve:
-        metrics = {"loss": loss_curve[-1], "RES": 10.0 * math.log10(loss_curve[-1])}
     has_measurements = summary_path is not None and bool(metrics) and all(math.isfinite(value) for value in metrics.values())
     protocol_errors = static_summary_errors(summary, unit=unit, count=max_iters, seed=spec.seed)
     if protocol_errors:

@@ -24,6 +24,8 @@ from app.api import capabilities as capabilities_api
 from app.api import config as config_api
 from app.api import context as context_api
 from app.api import data_sources as data_sources_api
+from app.api import data_pipeline as data_pipeline_api
+from app.api import execution_config as execution_config_api
 from app.api import diagnoses as diagnoses_api
 from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
@@ -161,6 +163,8 @@ def create_app() -> FastAPI:
     app.include_router(capabilities_api.router)
     app.include_router(context_api.router)
     app.include_router(data_sources_api.router)
+    app.include_router(data_pipeline_api.router)
+    app.include_router(execution_config_api.router)
     app.include_router(diagnoses_api.router)
     app.include_router(discovery_api.router)
     app.include_router(agents_api.router)

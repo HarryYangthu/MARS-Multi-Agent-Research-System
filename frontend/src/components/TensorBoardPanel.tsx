@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { openTensorBoard, type TensorBoardSession } from "@/lib/tensorboard";
+import { ExperimentComparison } from "./ExperimentComparison";
 
 export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   project: string; runId?: string; fullHeight?: boolean;
@@ -10,6 +11,7 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<"tensorboard" | "compare">("tensorboard");
   useEffect(() => {
     let alive = true;
     setSession(null); setError(""); setLoading(true);
@@ -34,12 +36,13 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
           <p className="mt-1 text-xs text-slate-400">{runId ? "当前运行的训练指标与实验结果；首条指标写入后即可查看。" : "项目已保存的实验记录，可在 TensorBoard 中选择实验进行对比。"}</p>
         </div>
         <div className="flex items-center gap-3 text-xs">
-          <span className="text-slate-400">每 30 秒更新</span>
+          {view === "tensorboard" ? <span className="text-slate-400">每 30 秒更新</span> : null}
           {session ? <a href={session.url + "#scalars"} target="_blank" rel="noreferrer" className="text-mars-accent hover:underline">独立打开 ↗</a> : null}
           <button className="rounded border border-mars-border px-3 py-1.5 hover:bg-mars-subtle" onClick={() => setRetry((value) => value + 1)}>{error ? "重试" : "重新加载"}</button>
         </div>
       </header>
-      {loading ? <div role="status" className="flex flex-1 items-center justify-center text-sm text-slate-400">正在打开 TensorBoard…</div>
+      {runId ? <nav aria-label="实验台视图" className="flex gap-2 border-b border-mars-border px-4 py-3">{([['tensorboard', 'TensorBoard'], ['compare', '多实验对比']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} onClick={() => setView(key)} className={`rounded-lg px-3 py-2 text-xs ${view === key ? "bg-mars-accent text-white" : "border border-mars-border text-slate-400"}`}>{label}</button>)}</nav> : null}
+      {view === "compare" && runId ? <div className="min-h-0 flex-1 overflow-y-auto p-5"><ExperimentComparison runId={runId} /></div> : loading ? <div role="status" className="flex flex-1 items-center justify-center text-sm text-slate-400">正在打开 TensorBoard…</div>
         : error ? <div role="alert" className="flex flex-1 items-center justify-center p-8 text-sm text-amber-200">{error}</div>
         : session ? <iframe key={`${session.key}-${retry}`} src={session.url + "#scalars"} title={runId ? `TensorBoard · ${runId}` : "TensorBoard · 项目实验记录"} className="min-h-0 w-full flex-1 border-0 bg-white" /> : null}
     </section>

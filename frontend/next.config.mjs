@@ -8,10 +8,11 @@ if (!clientPolicy || policyFields.some((key) => !Number.isSafeInteger(clientPoli
 }
 
 /** @type {import('next').NextConfig} */
+const localRuntime = YAML.parse(readFileSync(new URL("../configs/local_runtime.yaml", import.meta.url), "utf8"));
 const backendUrl =
   process.env.BACKEND_URL ||
   process.env.NEXT_PUBLIC_BACKEND_URL ||
-  "http://127.0.0.1:8000";
+  `http://${localRuntime.host}:${localRuntime.backend_port}`;
 
 const nextConfig = {
   env: Object.fromEntries(policyFields.map((key) => [`NEXT_PUBLIC_MARS_${key.toUpperCase()}`, String(clientPolicy[key])])),

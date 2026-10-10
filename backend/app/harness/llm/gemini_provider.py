@@ -8,6 +8,7 @@ import uuid
 
 import httpx
 
+from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import Completion, Delta, LLMCompletionError, LLMConfig, LLMProvider, Message, ToolCall
 from app.harness.llm.provider_base import public_endpoint_url
 from app.harness.llm.retry import request_with_retries, stream_with_retries
@@ -163,6 +164,7 @@ class GeminiProvider(LLMProvider):
 
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
         body = self._request_body(messages, config)
+        record_provider_request(config, self.name, body)
         client = self._get_client()
 
         async def send() -> dict[str, Any]:
@@ -181,6 +183,7 @@ class GeminiProvider(LLMProvider):
         if config.tools:
             raise ValueError("stream() is text-only; use complete() for native tool calls")
         body = self._request_body(messages, config)
+        record_provider_request(config, self.name, body)
         async for delta in stream_with_retries(lambda: self._stream_once(body, config), config):
             yield delta
 

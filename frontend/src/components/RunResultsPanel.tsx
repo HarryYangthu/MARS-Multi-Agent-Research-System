@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { downloadResultExport, getResults, type RunResults } from "@/lib/results";
 import { isUncertainRequestError } from "@/lib/clientPolicy";
+import { ExperimentComparison } from "./ExperimentComparison";
 import { ReportsPanel } from "./ReportsPanel";
 
 const OUTCOME: Record<RunResults["outcome"]["status"], string> = {
@@ -15,7 +16,7 @@ const VERIFICATION = { verified_local_receipt: "本地执行回执已核验", un
 const button = "rounded-md border border-mars-border bg-mars-panel2 px-4 py-2 text-sm hover:bg-mars-subtle disabled:opacity-50";
 
 function displayNumber(value: number | null): string {
-  return value === null || !Number.isFinite(value) ? "未知" : new Intl.NumberFormat("zh-CN", { maximumSignificantDigits: 7 }).format(value);
+  return value === null || !Number.isFinite(value) ? "未知" : new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value);
 }
 
 export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
@@ -56,7 +57,7 @@ export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
   }
 
   return <>
-    <div className="flex flex-wrap items-center justify-between gap-3"><Link href="/results" className="text-sm text-slate-400 hover:text-white">← 全部结果</Link><div className="flex gap-2"><Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>任务详情</Link><button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className={button}>刷新结果</button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link href={data ? `/projects/${encodeURIComponent(data.identity.project)}/research` : "/projects"} className="text-sm text-slate-400 hover:text-white">← 项目研究</Link><div className="flex gap-2"><Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>任务详情</Link><button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className={button}>刷新结果</button></div></div>
     {loading ? <p role="status" className="py-12 text-center text-slate-400">正在核对任务状态与结果产物…</p> : null}
     {error ? <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-amber-100">{error}</div> : null}
     {data ? <>
@@ -66,18 +67,20 @@ export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
         <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-400"><p>执行回执核验：{data.evidence.verified_jobs} / {data.evidence.total_jobs} 项作业</p><p>状态来源：{data.state.authority === "sqlite" ? "已保存的任务状态" : data.state.authority === "legacy_json" ? "历史记录" : data.state.authority === "invalid" ? "状态损坏" : "状态缺失"}</p>{data.state.read_only ? <p>结果页仅读取已保存产物</p> : null}</div>
         {exportMessage ? <p role={exportError ? "alert" : "status"} className={`mt-4 text-sm ${exportError ? "text-amber-200" : "text-emerald-200"}`}>{exportMessage}</p> : null}
       </section>
+      <ExperimentComparison runId={runId} results={data} />
       <ReportsPanel key={`reports:${runId}`} runId={runId} />
       <section aria-labelledby="facts-title" className="grid gap-4 lg:grid-cols-3">
         <Statements title="已记录的事实" id="facts-title" values={data.conclusions.facts} empty="尚无可呈现的事实结论。" />
         <Statements title="待验证的假设" values={data.conclusions.hypotheses} empty="尚未记录假设。" />
         <Statements title="分析与解释" values={data.conclusions.interpretations} empty="尚未记录分析解释。" />
       </section>
-      <section aria-labelledby="metrics-title" className="space-y-3"><h2 id="metrics-title" className="text-lg font-semibold">实验指标</h2>
+      <details className="rounded-lg border border-mars-border p-5"><summary className="cursor-pointer text-sm font-medium">完整实验指标（{data.metrics.length} 条）</summary><section aria-labelledby="metrics-title" className="mt-4 space-y-3"><h2 id="metrics-title" className="sr-only">实验指标</h2>
         {data.metrics.length === 0 ? <Empty>没有可用的实验指标。研究可能尚未执行，或指标产物缺失。</Empty> : <div className="overflow-x-auto rounded-lg border border-mars-border"><table className="w-full min-w-[780px] text-left text-sm"><caption className="sr-only">基线、候选与消融指标记录</caption><thead className="bg-mars-panel text-xs text-slate-400"><tr>{["实验", "类型", "指标", "数值", "单位 / 方向", "证据"].map((label) => <th key={label} scope="col" className="p-3">{label}</th>)}</tr></thead><tbody>{data.metrics.map((metric, index) => <tr key={`${metric.experiment_id}-${metric.name}-${index}`} className="border-t border-mars-border"><th scope="row" className="max-w-56 break-all p-3 font-normal">{metric.experiment_id}</th><td className="p-3">{ROLE[metric.role]}</td><td className="break-all p-3">{metric.name}</td><td className="p-3 font-mono tabular-nums">{displayNumber(metric.value)}</td><td className="p-3 text-slate-400">{metric.unit || "单位未声明"}<br />{metric.direction === "minimize" ? "越小越好" : metric.direction === "maximize" ? "越大越好" : "方向未声明"}</td><td className="p-3 text-xs text-slate-400">{VERIFICATION[metric.verification]}{metric.source_id ? <a href={`#source-${metric.source_id}`} className="mt-1 block text-indigo-200 hover:underline">来源详情</a> : null}</td></tr>)}</tbody></table></div>}
       </section>
-      {data.curves.length > 0 ? <section className="space-y-3" aria-labelledby="curves-title"><h2 id="curves-title" className="text-lg font-semibold">已记录的曲线</h2><div className="grid gap-4 lg:grid-cols-2">{data.curves.map((curve, index) => <Curve key={`${curve.job_id}-${curve.metric}-${index}`} curve={curve} />)}</div></section> : null}
-      {data.statistics.length > 0 ? <section className="space-y-3"><h2 className="text-lg font-semibold">统计信息</h2><div className="grid gap-3 md:grid-cols-2">{data.statistics.map((item, index) => <div key={`${item.experiment_id}-${item.metric}-${index}`} className="rounded-lg border border-mars-border p-4 text-sm"><p className="break-all">{item.experiment_id} · {item.metric}</p><p className="mt-2 text-slate-400">记录数 {item.n}，均值 {displayNumber(item.mean)}，标准差 {displayNumber(item.standard_deviation)}</p><p className="mt-1 text-xs text-slate-500">{item.independent_repeats ? "已标注独立重复；统计结论仍需结合实验条件。" : "未核验为独立重复，不能据此声称统计显著性。"}</p></div>)}</div></section> : null}
-      <section className="space-y-3"><h2 className="text-lg font-semibold">用量记录</h2><dl className="grid grid-cols-2 gap-4 rounded-lg border border-mars-border bg-mars-panel p-5 md:grid-cols-5">{[["逻辑调用记录", displayNumber(data.resources.logical_records)], ["SDK 尝试（已记录）", displayNumber(data.resources.observed_sdk_attempts)], ["输入 token", displayNumber(data.resources.input_tokens)], ["计费输出 token", displayNumber(data.resources.billed_output_tokens)], [data.resources.authority === "sqlite" ? "模型费用（未核验价目）" : "模型费用（账本估算）", data.resources.cost === null || data.resources.currency === null ? "未知" : `${displayNumber(data.resources.cost)} ${data.resources.currency}`]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-400">{label}</dt><dd className="mt-2 font-mono text-lg tabular-nums">{value}</dd></div>)}</dl><p className="text-xs text-slate-500">{data.resources.usage_complete === true ? "当前记录的 token 用量完整。" : "用量记录完整性尚未确认；未知数据不会按零计算。"} {data.resources.observed_attempts_complete === true ? "SDK 尝试次数记录完整。" : "SDK 尝试次数可能不完整；已记录次数不是总调用量。"}</p></section>
+      </details>
+      {data.curves.length > 0 ? <details className="rounded-lg border border-mars-border p-5"><summary id="curves-title" className="cursor-pointer text-sm">所有单实验曲线</summary><div className="grid gap-4 lg:grid-cols-2">{data.curves.map((curve, index) => <Curve key={`${curve.job_id}-${curve.metric}-${index}`} curve={curve} />)}</div></details> : null}
+      {data.statistics.length > 0 ? <details className="rounded-lg border border-mars-border p-5"><summary className="cursor-pointer text-sm">详细统计记录（{data.statistics.length} 条）</summary><p className="mt-3 text-xs text-slate-500">单条测量不构成独立重复；以下记录不作为统计显著性证明。</p><div className="grid gap-3 md:grid-cols-2">{data.statistics.map((item, index) => <div key={`${item.experiment_id}-${item.metric}-${index}`} className="rounded-lg border border-mars-border p-4 text-sm"><p className="break-all">{item.experiment_id} · {item.metric}</p><p className="mt-2 text-slate-400">记录数 {item.n}，均值 {displayNumber(item.mean)}，标准差 {displayNumber(item.standard_deviation)}</p><p className="mt-1 text-xs text-slate-500">{item.independent_repeats ? "已标注独立重复；统计结论仍需结合实验条件。" : "未核验为独立重复，不能据此声称统计显著性。"}</p></div>)}</div></details> : null}
+      <details className="space-y-3 rounded-lg border border-mars-border p-5"><summary className="cursor-pointer text-sm">用量与预算记录</summary><section className="space-y-3"><h2 className="text-lg font-semibold">用量记录</h2><dl className="grid grid-cols-2 gap-4 rounded-lg border border-mars-border bg-mars-panel p-5 md:grid-cols-5">{[["逻辑调用记录", displayNumber(data.resources.logical_records)], ["SDK 尝试（已记录）", displayNumber(data.resources.observed_sdk_attempts)], ["输入 token", displayNumber(data.resources.input_tokens)], ["计费输出 token", displayNumber(data.resources.billed_output_tokens)], [data.resources.authority === "sqlite" ? "模型费用（未核验价目）" : "模型费用（账本估算）", data.resources.cost === null || data.resources.currency === null ? "未知" : `${displayNumber(data.resources.cost)} ${data.resources.currency}`]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-400">{label}</dt><dd className="mt-2 font-mono text-lg tabular-nums">{value}</dd></div>)}</dl><p className="text-xs text-slate-500">{data.resources.usage_complete === true ? "当前记录的 token 用量完整。" : "用量记录完整性尚未确认；未知数据不会按零计算。"} {data.resources.observed_attempts_complete === true ? "SDK 尝试次数记录完整。" : "SDK 尝试次数可能不完整；已记录次数不是总调用量。"}</p></section>
       {data.resources.authority === "sqlite" ? <section className="space-y-3" aria-labelledby="charged-title">
         <h2 id="charged-title" className="text-lg font-semibold">合同预算记账</h2>
         {data.resources.status === "invalid" ? <p role="status" className="text-sm text-amber-200">合同账本或身份记录暂不可核验，未使用旧账本替代。</p> : <>
@@ -96,6 +99,7 @@ export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
           {data.resources.clock_uncertain ? <p role="status" className="text-sm text-amber-200">账本发现时钟异常，剩余额度采用保守值，需要恢复核验。</p> : null}
         </>}
       </section> : null}
+      </details>
       <Statements title="局限与缺失" values={data.limitations} empty="当前未记录额外局限；这不代表研究已经通过科学或复现验收。" />
       <section className="rounded-lg border border-mars-border p-5"><h2 className="text-lg font-medium">离线阅读与复现</h2><p className="mt-2 text-sm leading-6 text-slate-400">报告可供审阅。独立环境复跑尚未通过；导出包不包含原始私有数据、完整仓库或凭据。</p>{data.reproduction.external_requirements.length > 0 ? <ul className="mt-3 list-inside list-disc space-y-2 text-sm text-slate-400">{data.reproduction.external_requirements.map((value, index) => <li key={index}>{value}</li>)}</ul> : null}</section>
       <details className="rounded-lg border border-mars-border p-5"><summary className="cursor-pointer text-sm font-medium">高级：证据来源与完整性记录（{data.sources.length}）</summary><div className="mt-4 space-y-3">{data.sources.map((source) => <dl id={`source-${source.id}`} key={source.id} className="space-y-1 border-t border-mars-border pt-3 text-xs"><dt className="text-slate-300">{source.id} · {source.kind}</dt><dd className="break-all font-mono text-slate-500">SHA-256 {source.sha256}</dd><dd className="text-slate-500">{source.bytes} 字节</dd></dl>)}</div></details>

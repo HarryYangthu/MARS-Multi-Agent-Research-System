@@ -1,0 +1,4 @@
+schema: local_runtime.v1
+host: 127.0.0.1
+backend_port: 8010
+frontend_port: 3001

@@ -319,6 +319,31 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         selection=payload.data_source,
         project=payload.project,
     )
+    # Project execution target: selecting GPU must never silently fall back to
+    # local simulation. Unmet prerequisites or a non-remote runtime block the
+    # run here with the exact reasons instead of starting a local replacement.
+    from app.bridge.project_execution_config import execution_config_status
+    try:
+        execution_status = execution_config_status(payload.project)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="项目执行配置无法核对，请检查项目配置；尚未创建研究任务。") from exc
+    if execution_status["device"] == "remote_gpu":
+        blockers = [*execution_status["missing"], *execution_status["findings"]]
+        if blockers:
+            raise HTTPException(status_code=422, detail={
+                "code": "gpu_execution_not_ready",
+                "message": "项目已配置使用 GPU，但远端执行前置条件未满足；未发起本地仿真。",
+                "missing": execution_status["missing"],
+                "findings": execution_status["findings"]})
+        if not execution_status["remote_capable_runtime"]:
+            raise HTTPException(status_code=422, detail={
+                "code": "gpu_runtime_not_selected",
+                "message": "项目已配置使用 GPU，但当前执行后端未启用 remote_gpu；未发起本地仿真。请先启用远端 GPU 执行后端。",
+                "runtime_backend": execution_status["runtime_backend"]})
+        remote = execution_status.get("remote_gpu", {})
+        context = dict(payload.execution_context or {})
+        context["execution.target"] = f"remote_gpu@{remote.get('host', '')}"
+        payload = payload.model_copy(update={"execution_context": context})
     orch = get_orchestrator()
     request_extra: dict[str, Any] = payload.idea_request_extra()
     if payload.idea_mode is not None:

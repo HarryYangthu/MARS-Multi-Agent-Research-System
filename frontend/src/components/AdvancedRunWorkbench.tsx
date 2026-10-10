@@ -965,7 +965,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
           </Link>
           <div className="flex items-center gap-2">
             <Link
-              href={`/runs/${runId}/multi`}
+              href={`/lab?run=${encodeURIComponent(runId)}&returnTo=${encodeURIComponent(`/runs/${runId}?view=workbench`)}`}
               className="text-xs text-mars-accent hover:underline"
             >
               多实验视图 &rarr;
