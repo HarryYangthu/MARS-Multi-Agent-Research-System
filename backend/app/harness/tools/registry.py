@@ -467,6 +467,7 @@ def _install_mcp_tools(reg: ToolRegistry) -> None:
 
 
 def _install_default_tools(reg: ToolRegistry) -> None:
+    from app.harness.tools.code_inspection import read_code_fragment, repo_list_tool, repo_search_tool
     from app.harness.tools.code import (
         apply_patch_tool,
         delete_file_tool,
@@ -523,6 +524,9 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.context_material import read_material_tool
     reg.register("context.read_material", read_material_tool)
     reg.register("code.repo_reader", repo_reader_tool)
+    reg.register("code.repo_read_lines", read_code_fragment)
+    reg.register("code.repo_list", repo_list_tool)
+    reg.register("code.repo_search", repo_search_tool)
     reg.register("code.patch_generator", patch_generator_tool)
     reg.register("code.apply_patch", apply_patch_tool)
     reg.register("code.write_file", write_file_tool)

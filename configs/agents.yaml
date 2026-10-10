@@ -24,6 +24,9 @@ commander:
   loop:
     max_tool_steps: 12
   tools:
+  - code.repo_list
+  - code.repo_search
+  - code.repo_read_lines
   - run.create
   - run.start
   - run.status

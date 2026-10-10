@@ -1,6 +1,7 @@
 import type { Activity } from "./researchActivity";
 
 const TOOLS: Record<string, string> = {
+  "code.repo_read_lines": "读取相关代码片段", "code.repo_list": "查看项目代码目录", "code.repo_search": "搜索相关代码与配置",
   "code.repo_reader": "读取项目代码", "context.read_material": "阅读研究资料", "context.readback": "查阅已保存的材料",
   "search.fetch_sources": "下载论文和资料", "search.web": "检索相关资料", "search.search_papers": "检索相关论文",
   "create_and_start_run": "启动研究流程", "run.recover": "恢复研究任务", "artifact.write": "保存阶段成果",

@@ -32,6 +32,7 @@ TEXT_SUFFIXES: frozenset[str] = frozenset(
         ".txt",
         ".yaml",
         ".yml",
+        ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".r", ".jl", ".ps1",
     }
 )
 

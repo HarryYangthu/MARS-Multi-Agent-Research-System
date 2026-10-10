@@ -121,6 +121,7 @@ backend/app/bridge/cli_research_report.py
 backend/app/bridge/cli_research_service.py
 backend/app/bridge/code_workspace_resolver.py
 backend/app/bridge/commander.py
+backend/app/bridge/commander_code.py
 backend/app/bridge/conversation_edit.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py
@@ -331,6 +332,7 @@ backend/app/harness/skills/__init__.py
 backend/app/harness/skills/registry.py
 backend/app/harness/tools/__init__.py
 backend/app/harness/tools/code/__init__.py
+backend/app/harness/tools/code_inspection.py
 backend/app/harness/tools/config.py
 backend/app/harness/tools/execution/__init__.py
 backend/app/harness/tools/execution/local_command.py
@@ -412,6 +414,7 @@ configs/skills/baseline_change_review.md
 configs/skills/evidence_research.md
 configs/tensorboard.yaml
 configs/tools.yaml
+configs/code_inspection.yaml
 configs/windows_native.yaml
 configs/workflow.yaml
 
@@ -666,3 +669,4 @@ frontend/src/lib/workProgress.ts
 configs/git_runtime.yaml
 backend/app/harness/runtime/git_runtime.py
 docs/git-runtime.md
+docs/commander-code-inspection.md

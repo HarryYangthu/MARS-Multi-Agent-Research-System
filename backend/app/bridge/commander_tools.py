@@ -18,6 +18,7 @@ from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.discovery_types import DiscoveryRunSpec
+from app.bridge.commander_code import execute_code_inspection
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
 from app.harness.tools.config import tool_config
@@ -488,7 +489,33 @@ async def _read_context_material(args: dict[str, Any], ctx: ToolContext) -> dict
     return {"ok": result.ok, "output": result.output, "error": result.error}
 
 
+async def _repo_list(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    return await execute_code_inspection("code.repo_list", args, ctx)
+
+
+async def _repo_search(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    return await execute_code_inspection("code.repo_search", args, ctx)
+
+
+async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    if set(args) - {"path", "start_line", "end_line"}:
+        return {"ok": False, "error": "Code reads accept only path and start_line/end_line; use the connected project."}
+    return await execute_code_inspection("code.repo_read_lines", args, ctx)
+
+
 TOOLS: dict[str, ToolSpec] = {
+    "code.repo_list": ToolSpec(name="code.repo_list",
+        description="List the connected project's source paths, without reading contents. Browse relevant directories or filter filenames. Read-only; no shell. Paginate with next_offset; narrow the path if scan_limited.",
+        parameters={"path": "relative directory, default .", "glob": "optional filename glob", "depth": "1 by default, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        handler=_repo_list),
+    "code.repo_search": ToolSpec(name="code.repo_search",
+        description="Search literal text (case-insensitive) in selected source files. Returns path, line, snippet and SHA256, not whole files. Use task-related names, config keys or functions. Never scan unrelated code unnecessarily.",
+        parameters={"query": "literal text, not regex", "path": "relative directory, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        handler=_repo_search),
+    "code.repo_read_lines": ToolSpec(name="code.repo_read_lines",
+        description="Read only a relevant source/config line range from the connected repository. Returns exact source, line numbers and SHA256. Maximum 160 lines/12000 characters per call. Use search results to pick ranges; no execution or modification.",
+        parameters={"path": "exact project-relative file path", "start_line": "first line, 1-based", "end_line": "last line, inclusive; at most 160 lines"},
+        handler=_repo_read),
     "context.read_material": ToolSpec(name="context.read_material",
         description="Read original run-local context material. Follow next_offset for further pages.",
         parameters={"ref": "exact SHA256 ref from context", "char_offset": "optional character offset"},
