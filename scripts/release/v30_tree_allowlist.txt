@@ -434,6 +434,7 @@ frontend/package.json
 frontend/postcss.config.mjs
 frontend/scripts/clean-next-types.cjs
 frontend/scripts/context-workbench-smoke.ts
+frontend/scripts/message-draft-smoke.ts
 frontend/src/app/config/agents/page.tsx
 frontend/src/app/config/page.tsx
 frontend/src/app/config/yaml/page.tsx
@@ -463,6 +464,7 @@ frontend/src/components/IdeaRunMaterials.tsx
 frontend/src/components/ProjectContextFiles.tsx
 frontend/src/components/ProjectSwitcher.tsx
 frontend/src/components/ReportsPanel.tsx
+frontend/src/components/ResearchConversation.tsx
 frontend/src/components/ResearchPdfPreview.tsx
 frontend/src/components/RuntimeOpsPanel.tsx
 frontend/src/components/SidebarToggleButton.tsx
@@ -502,6 +504,7 @@ frontend/src/lib/contextWorkbench.ts
 frontend/src/lib/dashboard.ts
 frontend/src/lib/dataSourceSelection.ts
 frontend/src/lib/i18n.tsx
+frontend/src/lib/messageDraft.ts
 frontend/src/lib/project.tsx
 frontend/src/lib/socket.ts
 frontend/src/lib/tensorboard.ts
