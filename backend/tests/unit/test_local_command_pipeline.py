@@ -143,6 +143,14 @@ async def test_bridge_executes_manual_approved_plan_and_preserves_seed(
         await _run_execution_batch(run=run, node_key="execution")
         metrics = json.loads((run.root / "execution/metrics.json").read_text())
         assert metrics[0]["metrics"]["mse"] == 0
+        from app.bridge.execution_confirmation import renew_execution_confirmation
+        renew_execution_confirmation(run, 'execution')
+        renewed = execution_preview(run, 'execution')
+        assert not renewed['confirmed'] and renewed['token'] != preview['token']
+        save_confirmation(run, 'execution', renewed['token'])
+        await _run_execution_batch(run=run, node_key='execution')
+        reused = json.loads((run.root / 'execution/metrics.json').read_text())
+        assert reused[0]['fingerprint_hash'] == metrics[0]['fingerprint_hash']
     jobs = list((run.root / "execution/local_commands/actual-comparison").glob("*/job.json"))
     assert len(jobs) == 1 and json.loads(jobs[0].read_text())["seed"] == 0
     summary = json.loads((run.root / "execution/batch_summary.json").read_text())

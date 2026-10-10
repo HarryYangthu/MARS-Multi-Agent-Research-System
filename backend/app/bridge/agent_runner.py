@@ -759,7 +759,7 @@ async def _run_execution_batch(
     batch_steps = prepared.batch_steps
     specs = prepared.specs
     for spec in specs:
-        spec.config["confirmation_token"] = confirmed["token"]
+        spec.config["confirmation_token"] = confirmed["inputs_token"]
 
     async def check_inputs() -> None:
         import asyncio

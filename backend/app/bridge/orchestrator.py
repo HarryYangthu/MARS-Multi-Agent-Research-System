@@ -1518,13 +1518,16 @@ class Orchestrator:
             if self._stopping(session):
                 return
             retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
+            if retry_existing_execution and parse_node_key(node_key).stage == 'execution':
+                from app.bridge.execution_confirmation import renew_execution_confirmation
+                renew_execution_confirmation(session.run, node_key)
             await self._transition(session, node_key, NodeState.RUNNING)
             if (retry_existing_execution and parse_node_key(node_key).stage == 'execution'
                     and (session.run.subdir('execution') / 'run_log.approved.md').is_file()
                     and self._has_interrupted_execution_jobs(session)):
                 # Execution retries run the already-approved deterministic intake.
-                # Regenerating its invocation would invalidate confirmations and
-                # force completed jobs to run again despite unchanged inputs.
+                # Keep completed measurement identities while requiring a fresh
+                # confirmation decision before recovering cleaned interrupted jobs.
                 await self._transition(session, node_key, NodeState.WAITING_REVIEW)
                 await self._transition(session, node_key, NodeState.APPROVED)
                 await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={

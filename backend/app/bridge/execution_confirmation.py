@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+import uuid
 
 from app.bridge.execution_batch_plan import prepare_execution
 from app.bridge.node_key import parse_node_key
@@ -41,6 +42,34 @@ def _receipt_path(run: RunHandle, token: str) -> Path:
     if len(token) != 64 or any(char not in '0123456789abcdef' for char in token):
         raise ValueError('配置核对标识无效')
     return run.root / 'execution/confirmations' / (token + '.json')
+
+
+def _confirmation_revision_path(run: RunHandle, node_key: str) -> Path:
+    if parse_node_key(node_key).stage != 'execution':
+        raise ValueError('配置确认必须属于执行阶段')
+    return run.root / 'execution/confirmation_revisions' / (node_key + '.json')
+
+
+def renew_execution_confirmation(run: RunHandle, node_key: str) -> None:
+    """Explicit retry requires a fresh decision without changing measurement inputs."""
+    with path_lock(run.root / 'execution/.confirmation.lock'):
+        atomic_write_json(_confirmation_revision_path(run, node_key), {
+            'schema': 'execution.confirmation_revision.v1', 'run_id': run.run_id,
+            'project': run.project, 'node': node_key, 'revision': uuid.uuid4().hex})
+
+
+def _confirmation_token(run: RunHandle, node_key: str, inputs_token: str) -> str:
+    path = _confirmation_revision_path(run, node_key)
+    if not path.is_file():
+        return inputs_token  # Preserve existing receipts for the initial decision.
+    raw = json.loads(path.read_text())
+    revision = raw.get('revision') if isinstance(raw, dict) else None
+    if (not isinstance(raw, dict) or raw.get('schema') != 'execution.confirmation_revision.v1'
+            or raw.get('run_id') != run.run_id or raw.get('project') != run.project
+            or raw.get('node') != node_key or not isinstance(revision, str)
+            or len(revision) != 32 or any(char not in '0123456789abcdef' for char in revision)):
+        raise ValueError('执行重试的配置确认记录无法校验')
+    return digest([inputs_token, revision])
 
 
 def _public_config(value: Any) -> Any:
@@ -313,9 +342,10 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     files['data:' + spec.experiment_id] = digest([str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ino])
                 else:
                     blockers.append(f'{spec.experiment_id} 的数据路径不可访问。')
-    token = digest({'run': run.run_id, 'project': run.project, 'node': node_key, 'files': files,
+    inputs_token = digest({'run': run.run_id, 'project': run.project, 'node': node_key, 'files': files,
         'runtime': settings.mars_execution_backend, 'config': config, 'defaults': defaults,
         'experiments': experiments, 'policy': ledger['configuration_sha256'], 'environment': environment_hash})
+    token = _confirmation_token(run, node_key, inputs_token)
     path = _receipt_path(run, token)
     confirmed = False
     if path.exists():
@@ -327,6 +357,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             raise ValueError('仿真配置确认记录无法校验')
     from app.execution.job_journal import job_states
     return {'jobs': job_states(run.root), 'runtime_mode': 'deterministic', 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
+        'inputs_token': inputs_token,
         'confirmed': confirmed, 'defaults': defaults, 'experiments': _public_config(experiments),
         'source_configs': source_configs, 'blockers': list(dict.fromkeys(blockers)),
         'warnings': warnings, 'budget': budget_view}

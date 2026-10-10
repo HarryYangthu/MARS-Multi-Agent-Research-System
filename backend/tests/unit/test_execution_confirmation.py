@@ -117,6 +117,27 @@ def test_preview_and_execution_share_all_prepared_experiments(execution: tuple[O
     assert view['defaults']['batch_steps'] == 50
 
 
+def test_explicit_retry_renews_only_the_confirmation_decision(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.bridge.execution_confirmation import renew_execution_confirmation
+    _, session, _, _ = execution
+    first = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', first['token'])
+    original = session.run.root / 'execution/confirmations' / (first['token'] + '.json')
+    receipt = original.read_bytes()
+    renew_execution_confirmation(session.run, 'execution')
+    second = execution_preview(session.run, 'execution')
+    assert not second['confirmed'] and second['token'] != first['token']
+    assert second['inputs_token'] == first['inputs_token'] == first['token']
+    assert execution_preview(session.run, 'execution')['token'] == second['token']
+    with pytest.raises(ValueError, match='变化'):
+        save_confirmation(session.run, 'execution', first['token'])
+    save_confirmation(session.run, 'execution', second['token'])
+    assert require_confirmation(session.run, 'execution')['confirmed']
+    assert original.read_bytes() == receipt
+
+
 def test_confirmation_rechecks_coding_binding_after_approved_plan_changes(
     execution: tuple[Orchestrator, RunSession, Path, Path],
 ) -> None:

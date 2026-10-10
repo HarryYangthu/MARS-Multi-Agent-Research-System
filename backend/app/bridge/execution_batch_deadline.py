@@ -47,7 +47,7 @@ def prepare_interrupted_execution_retry(run: RunHandle, node_key: str) -> None:
     view = require_confirmation(run, node_key)
     prepared = prepare_execution(run, node_key)
     for spec in prepared.specs:
-        spec.config['confirmation_token'] = view['token']
+        spec.config['confirmation_token'] = view['inputs_token']
     rearm_interrupted_jobs(prepared.specs, steps=prepared.batch_steps)
 
 
