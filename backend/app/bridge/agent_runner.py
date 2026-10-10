@@ -219,6 +219,9 @@ async def _execute_agent_node(
         extra=request_extra,
         progress_sink=build_agent_progress_sink(run=run, node_key=node_key, bus=bus),
     )
+    if stage == "coding":
+        from app.bridge.coding_approval import coding_candidate_errors
+        request.candidate_validator = lambda text: coding_candidate_errors(run, text)
     if research_stage is None and branch is not None and request.progress_sink is not None:
         await request.progress_sink({"kind": "action", "phase": "workspace",
             "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
@@ -267,6 +270,10 @@ async def _execute_agent_node(
         _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
                            status="invalid", failure=failure))
         raise ArtifactValidationError(validation)
+    if stage == "coding":
+        issues = coding_candidate_errors(run, artifact.text)
+        if issues:
+            raise ValueError(issues[0])
     ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
     _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
             artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
@@ -416,8 +423,17 @@ def _write_patch_diff(*, run: RunHandle, version: str, artifact_text: str) -> No
     if not blocks:
         run.write_event("agent_events", {"event": "coding.patch_not_provided", "version": version})
         return
-    # Copy the actual proposal for review; application still requires ToolRegistry.
-    target.write_text("\n".join(block.rstrip() for block in blocks) + "\n", encoding="utf-8")
+    from app.harness.runtime.project_scope import validated_diff_paths
+    diff = "".join(block.rstrip("\r\n") + "\n" for block in blocks)
+    try:
+        validated_diff_paths(diff)
+    except ValueError as exc:
+        run.write_event("agent_events", {"event": "coding.patch_not_executable", "version": version,
+                                        "reason": str(exc)})
+        return
+    # Explanatory snippets stay in Markdown; only executable patches are archived.
+    # Application still requires ToolRegistry and does not replace write verification.
+    target.write_text(diff, encoding="utf-8")
 
 
 def load_agent_handoff_context(

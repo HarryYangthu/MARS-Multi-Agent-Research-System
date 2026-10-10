@@ -12,7 +12,7 @@ import yaml
 from app.api import dependencies
 from app.api.artifacts import _apply_patch_or_raise, approve_artifact
 from app.bridge.agent_registry import AgentRegistry
-from app.bridge.coding_approval import verify_written_code
+from app.bridge.coding_approval import coding_candidate_errors, verify_written_code
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.research_branch import research_branch_scope
 from app.harness.project_workspace import open_folder
@@ -84,6 +84,84 @@ async def test_written_implementation_ignores_older_unapplied_patch(research: tu
 
 
 @pytest.mark.asyncio
+async def test_identical_rewrite_requires_reuse_declaration_and_never_replays_patch(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    _, session, source = research
+    run = session.run
+    await write(run, content="VALUE = 1\n")
+    store = ArtifactStore(run)
+    store.write(text=spec(run, [("main.py", "added")]))
+    (run.root / "coding/patch.v1.diff").write_text("-VALUE = 1\n+VALUE = 999\n")
+    receipts = sorted((run.root / "coding/tool_applications").glob("*.json"))
+    with pytest.raises(HTTPException, match="复用"):
+        await _apply_patch_or_raise(run.run_id, "v1")
+    corrected = store.write(text=spec(run, []))
+    assert corrected.version == "v2"
+    # A patch reference must not change which Markdown version is verified.
+    await _apply_patch_or_raise(run.run_id, "v1", artifact_version="v2")
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
+    assert sorted((run.root / "coding/tool_applications").glob("*.json")) == receipts
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_host_validation_returns_actual_net_files_before_review(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, source = research
+    run = session.run
+    await write(run, content="VALUE = 1\n")
+    request = AgentRequest(project=run.project, user_request="Reuse the verified implementation",
+                           candidate_validator=lambda text: coding_candidate_errors(run, text))
+    with research_branch_scope(run, "coding"):
+        errors = await CodingAgent().validate_candidate(request, spec(run, [("main.py", "added")]), [])
+        assert any('"files_changed": []' in error and "复用" in error for error in errors)
+        assert await CodingAgent().validate_candidate(request, spec(run, []), []) == []
+        # Identical content is still verified; a later external edit must block.
+        (source / "main.py").write_text("VALUE = 9\n")
+        assert coding_candidate_errors(run, spec(run, []))
+
+
+@pytest.mark.asyncio
+async def test_legacy_explanatory_patch_fails_without_tool_dispatch(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    _, session, source = research
+    run = session.run
+    ArtifactStore(run).write(text=spec(run, [("main.py", "modified")]))
+    (run.root / "coding/patch.v1.diff").write_text(" ...\n-VALUE = 1\n+VALUE = 2\n")
+    with pytest.raises(HTTPException, match="只是代码变更说明") as caught:
+        await _apply_patch_or_raise(run.run_id, "v1")
+    assert caught.value.status_code == 409
+    assert not list((run.root / "coding/tool_applications").glob("*.json"))
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_real_code_checks_use_the_selected_git_in_child_commands(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.harness.runtime.git_runtime import resolve_git
+    _, session, source = research
+    # Real test executable, actual Git selection and actual governed subprocess.
+    selected = resolve_git().executable
+    with research_branch_scope(session.run, "coding"):
+        (source / "test_git_runtime.py").write_text(
+            "from pathlib import Path\nimport shutil, subprocess\n"
+            "def test_actual_child_git():\n"
+            f"    assert Path(shutil.which('git')).resolve() == Path({selected!r}).resolve()\n"
+            "    assert subprocess.run(['git', '--version'], capture_output=True).returncode == 0\n")
+        result = await get_registry().dispatch("code.test_runner", {"command_id": "pytest_quick"},
+            ToolContext(run_id=session.run.run_id, project=session.run.project, agent="coding",
+                        extra={"run_root": str(session.run.root)}))
+    assert result.ok, result.output
+    assert "1 passed" in str(result.output)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["external_edit", "partial", "extra", "wrong_type", "wrong_project"])
 async def test_partial_or_changed_code_is_not_approved(research: tuple[Orchestrator, RunSession, Path], case: str) -> None:
     _, session, source = research
@@ -131,7 +209,9 @@ async def test_real_approval_after_clean_shutdown_advances_original_run(research
     ref = ArtifactStore(run).write(text=spec(run, [("main.py", "modified")]))
     session.graph.restore_state("coding", NodeState.WAITING_REVIEW)
     orch._persist_state(session, status="waiting_review")
-    assert orch._spawn_owned(session, "review-lifecycle", lambda: asyncio.Event().wait())
+    async def wait_for_shutdown() -> None:
+        await asyncio.Event().wait()
+    assert orch._spawn_owned(session, "review-lifecycle", wait_for_shutdown)
     await orch.shutdown_owned_runs()
     recovered = Orchestrator(run_store=orch.run_store, registry=AgentRegistry())
     dependencies._orchestrator = recovered

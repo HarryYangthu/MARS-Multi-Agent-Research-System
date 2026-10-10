@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,6 +37,7 @@ class RunRequest:
     extra: dict[str, Any] = field(default_factory=dict)
     progress_sink: ProgressSink | None = field(default=None, repr=False, compare=False)
     runtime: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    candidate_validator: Callable[[str], list[str]] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -407,6 +408,8 @@ class BaseAgent(ABC):
             if submission_schema is not None:
                 errors.extend("/" + "/".join(str(p) for p in error.absolute_path) + ": " + error.message
                               for error in Draft202012Validator(submission_schema).iter_errors(validation.metadata))
+            if request.candidate_validator is not None:
+                errors.extend(request.candidate_validator(text))
         selection = request.runtime.get("skill_selection")
         if selection is not None:
             from app.harness.skills import skill_acceptance_errors

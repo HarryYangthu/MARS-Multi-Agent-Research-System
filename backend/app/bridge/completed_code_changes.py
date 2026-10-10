@@ -175,6 +175,7 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
     if browser is not None and browser.repo.project != project:
         raise ValueError("代码工程所属项目不匹配")
     items: list[dict[str, Any]] = []
+    unchanged: list[dict[str, Any]] = []
     for path, change in sorted(changes.items()):
         try:
             if not change.valid:
@@ -190,6 +191,9 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
                 if change.after is None or current["version"] != hashlib.sha256(change.after.encode()).hexdigest():
                     raise ValueError("current file differs from the completed write")
             if change.before == change.after:
+                unchanged.append({"path": path, "sha256": hashlib.sha256(change.after.encode()).hexdigest()
+                                  if change.after is not None else None,
+                                  "exists": change.after is not None})
                 continue
             item = _net_diff(path, change.before, change.after, policy["context_lines"])
             lines = item.pop("lines")
@@ -203,4 +207,5 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
             warnings.append(f"{path} 与写入记录不一致或不可读取，未作为已完成改动展示。")
     if change_id is not None:
         raise KeyError("代码改动已更新或无法核对，请刷新后重试")
-    return {"run_id": run.run_id, "project": project, "items": items, "warnings": warnings}
+    return {"run_id": run.run_id, "project": project, "items": items, "warnings": warnings,
+            "write_records": len(records), "unchanged": unchanged}

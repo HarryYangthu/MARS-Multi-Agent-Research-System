@@ -92,6 +92,16 @@ def test_patch_export_copies_only_the_actual_proposed_diff(tmp_path: Path) -> No
     assert not (tmp_path / "example.py").exists()
 
 
+def test_explanatory_or_mixed_diff_is_not_exported_as_executable_patch(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task="non-executable-diff", project="pimc", entrypoint="coding")
+    snippet = "```diff\n model:\n   ...\n-  kernel: 17\n+  kernel: 22\n```\n"
+    valid = "```diff\n--- a/example.py\n+++ b/example.py\n@@ -1 +1 @@\n-old\n+new\n```\n"
+    for version, body in (("v1", snippet), ("v2", valid + snippet)):
+        _write_patch_diff(run=run, version=version, artifact_text=body)
+        assert not (run.subdir("coding") / f"patch.{version}.diff").exists()
+    assert "coding.patch_not_executable" in (run.root / "events/agent_events.jsonl").read_text()
+
+
 def test_complex_tensor_ledger_cannot_report_only_its_element_count() -> None:
     from app.agents.idea.research import parameter_errors
     # Authored arithmetic inputs reproduce the live count-unit failure; no agent output is supplied.

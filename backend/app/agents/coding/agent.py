@@ -39,6 +39,9 @@ class CodingAgent(BaseAgent):
         "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
         "同一数值的两种字段是预算别名，不能改写批准数值或改成 epochs。"
         "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
+        "files_changed 只列本任务成功写入记录形成的净改动；相同内容重写是复用，不能声明新增。"
+        "全部复用时 files_changed=[]，正文列出复用文件、指纹及真实检查；不要为了登记制造改动。"
+        "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
         "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
     )
 

@@ -99,6 +99,21 @@ async def test_reverted_edits_are_not_changes(tmp_path: Path) -> None:
         assert (await get_registry().dispatch("code.write_file", {"path": "value.py", "content": content}, ctx)).ok
     view = completed_code_changes(run, project=run.project, repository=browser)
     assert not view["items"] and not view["warnings"]
+    assert view["write_records"] == 2 and view["unchanged"][0]["path"] == "value.py"
+
+
+@pytest.mark.asyncio
+async def test_noop_is_verified_reuse_and_retry_retains_task_net_addition(tmp_path: Path) -> None:
+    run, root, ctx, browser = setup(tmp_path)
+    (root / "existing.py").write_text("VALUE = 1\n")
+    for path in ("existing.py", "new.py", "new.py"):
+        result = await get_registry().dispatch("code.write_file", {"path": path, "content": "VALUE = 1\n"}, ctx)
+        assert result.ok
+    view = completed_code_changes(run, project=run.project, repository=browser)
+    assert not view["warnings"] and view["write_records"] == 3
+    assert [(item["path"], item["change"]) for item in view["items"]] == [("new.py", "added")]
+    assert [item["path"] for item in view["unchanged"]] == ["existing.py"]
+    assert len(view["unchanged"][0]["sha256"]) == 64
 
 
 @pytest.mark.asyncio

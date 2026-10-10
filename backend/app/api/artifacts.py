@@ -389,7 +389,7 @@ def _extract_diff_paths(diff: str) -> list[str]:
     return paths
 
 
-async def _apply_patch_or_raise(run_id: str, version: str) -> None:
+async def _apply_patch_or_raise(run_id: str, version: str, *, artifact_version: str | None = None) -> None:
     from app.bridge.coding_approval import verify_written_code
     from app.bridge.research_branch import research_branch_scope
 
@@ -403,7 +403,7 @@ async def _apply_patch_or_raise(run_id: str, version: str) -> None:
     # legacy patch application; the project's baseline stays read-only.
     try:
         with research_branch_scope(run, "coding"):
-            spec = _resolve(run_id, "coding", "code_spec", normalized)
+            spec = _resolve(run_id, "coding", "code_spec", artifact_version or normalized)
             text = spec.read_text(encoding="utf-8")
             if verify_written_code(run, text):
                 return
@@ -430,13 +430,19 @@ async def _apply_unwritten_patch(run_id: str, normalized: str) -> None:
     if _patch_application_succeeded(patch_path, normalized):
         return
     diff = patch_path.read_text(encoding="utf-8")
+    from app.harness.runtime.project_scope import validated_diff_paths
+    try:
+        paths = validated_diff_paths(diff)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="该片段只是代码变更说明，不是可执行补丁。"
+                            "请先核对实际写入记录并修正编码方案；未修改代码或批准任务。") from exc
     result = await get_tool_registry().dispatch(
         "code.apply_patch",
         {
             "version": normalized,
             "patch_path": str(patch_path),
             "diff": diff,
-            "files": [{"path": p} for p in _extract_diff_paths(diff)],
+            "files": [{"path": p} for p in paths],
         },
         ToolContext(
             run_id=run_id,
@@ -476,12 +482,12 @@ async def get_patch(run_id: str, version: str) -> PatchView:
 @router.post("/{run_id}/coding/patch/{version}/approve", response_model=ArtifactView)
 async def approve_patch(run_id: str, version: str) -> ArtifactView:
     _ensure_writable_run(run_id)
-    _ensure_current_review(run_id, 'coding', version)
     normalized = version if version.startswith("v") else f"v{version}"
     review = get_review_registry().get(run_id, "coding")
     candidate = review.artifact_ref.version if review is not None else normalized
+    _ensure_current_review(run_id, 'coding', 'code_spec', candidate)
     _check_handoff_before_approval(run_id, 'coding', 'code_spec', candidate)
-    await _apply_patch_or_raise(run_id, version)
+    await _apply_patch_or_raise(run_id, version, artifact_version=candidate)
     review = get_review_registry().get(run_id, "coding")
     if review is not None:
         bus = get_event_bus()
@@ -689,7 +695,7 @@ async def approve_artifact(
                 status_code=409,
                 detail="coding approval requires a patch reference in coding_backend.diff",
             )
-        await _apply_patch_or_raise(run_id, patch_version)
+        await _apply_patch_or_raise(run_id, patch_version, artifact_version=version)
     review = get_review_registry().get(run_id, agent_dir)
     if review is None:
         # No active review; promote inline.
