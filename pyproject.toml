@@ -92,5 +92,6 @@ module = [
   "openai.*",
   "matplotlib.*",
   "tensorboard.*",
+  "torch.*",  # Optional PIMC extra; the core installation does not include PyTorch.
 ]
 ignore_missing_imports = true
