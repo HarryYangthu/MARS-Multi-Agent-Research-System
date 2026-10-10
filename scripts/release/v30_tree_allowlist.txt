@@ -656,3 +656,6 @@ frontend/src/components/ProjectGpuConfig.tsx
 frontend/src/lib/agentInspection.ts
 frontend/src/lib/projectResearch.ts
 frontend/src/lib/workProgress.ts
+configs/git_runtime.yaml
+backend/app/harness/runtime/git_runtime.py
+docs/git-runtime.md

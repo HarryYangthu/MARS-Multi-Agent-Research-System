@@ -30,7 +30,7 @@ class ZCodeClient:
 
     async def start(self) -> None:
         self.process = await start_process((*self.command, "app-server"), cwd=self.cwd, env=self.env,
-                                           stream_limit=self.max_line_bytes)
+                                           stream_limit=self.max_line_bytes, replace_environment=True)
         self.reader = asyncio.create_task(self._read())
         self.stderr_reader = asyncio.create_task(self._stderr())
         await self.call("runtime/capabilities", {})

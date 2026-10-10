@@ -1,0 +1,13 @@
+# Host-owned Git discovery. An explicit MARS_GIT_EXECUTABLE always takes priority.
+# Windows native startup selects its bundled MinGit; source installs search PATH.
+probe_timeout_seconds: 5
+command_timeout_seconds: 15
+cache_seconds: 30
+fallback_paths:
+  darwin:
+    - /opt/homebrew/bin/git
+    - /usr/local/bin/git
+  win32:
+    - '{ProgramFiles}/Git/cmd/git.exe'
+    - '{LOCALAPPDATA}/Programs/Git/cmd/git.exe'
+  linux: []

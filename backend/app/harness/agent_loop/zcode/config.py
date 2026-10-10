@@ -97,6 +97,7 @@ def model_config(model: str, max_tokens: int, endpoint: str, token: str, *, cont
 
 
 def runtime_environment(root: Path, *, provider: dict[str, Any]) -> dict[str, str]:
+    from app.harness.runtime.git_runtime import git_child_environment
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     builtin = root / "builtin.json"
     personal = root / "provider.json"
@@ -106,12 +107,11 @@ def runtime_environment(root: Path, *, provider: dict[str, Any]) -> dict[str, st
                                                 "templateModelRules", "builtinProviderModelRules")}}})
     atomic_json(personal, provider)
     personal.chmod(0o600)
-    return {"ZCODE_HOME": str(root), "ZCODE_DATA_BASE_DIR": str(root),
+    return {**git_child_environment(), "ZCODE_HOME": str(root), "ZCODE_DATA_BASE_DIR": str(root),
             "ZCODE_STORAGE_DIR": str(root / "storage"), "ZCODE_LOG_DIR": str(root / "logs"),
             "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE": str(builtin),
             "ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE": str(builtin),
-            "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE": str(personal), "ZCODE_MODEL_TELEMETRY_ENABLED": "false",
-            "PATH": os.environ.get("PATH", "")}
+            "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE": str(personal), "ZCODE_MODEL_TELEMETRY_ENABLED": "false"}
 
 
 def runtime_identity(command: tuple[str, ...]) -> dict[str, str]:

@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from app.harness.project_workspace import project_root
+from app.harness.runtime.git_runtime import GitRuntimeError, git_environment, resolve_git
 from app.harness.runtime.project_scope import current_project_scope, validated_diff_paths
 from app.harness.tools.config import check_commands, command_timeout_seconds, tool_config
 from app.harness.tools.registry import ToolContext, ToolResult
@@ -428,7 +429,11 @@ def _command_allowed(
 
 
 async def _git_apply(root: Path, diff: str, *, check_only: bool, isolated: bool = False) -> ToolResult:
-    argv = ["git", "apply", "--whitespace=nowarn"]
+    try:
+        executable = resolve_git().executable
+    except GitRuntimeError as exc:
+        return ToolResult(ok=False, error=str(exc), output={"code": exc.reason["code"]})
+    argv = [executable, "apply", "--whitespace=nowarn"]
     if isolated:
         # Candidate directories may live below the MARS git checkout. Do not
         # discover its index/worktree or honor ambient GIT_WORK_TREE routing.
@@ -438,6 +443,8 @@ async def _git_apply(root: Path, diff: str, *, check_only: bool, isolated: bool 
     process = await start_process(
         argv,
         cwd=str(root),
+        env=git_environment(),
+        replace_environment=True,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

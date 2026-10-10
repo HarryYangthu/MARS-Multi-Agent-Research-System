@@ -1,0 +1,31 @@
+name: Portable Git runtime
+on:
+  pull_request:
+    paths: ['backend/app/harness/runtime/git_runtime.py', 'backend/app/harness/tools/git_branch.py', 'backend/app/harness/tools/code/**', 'backend/app/harness/tools/process_runtime.py', 'backend/app/harness/discovery/source_commit.py', 'backend/app/harness/runtime/readiness.py', 'backend/tests/unit/test_git_runtime.py', 'configs/git_runtime.yaml', 'deploy/windows-native/**', '.github/workflows/git-runtime.yml']
+  push:
+    paths: ['backend/app/harness/runtime/git_runtime.py', 'backend/app/harness/tools/git_branch.py', 'backend/app/harness/tools/code/**', 'backend/app/harness/tools/process_runtime.py', 'backend/app/harness/discovery/source_commit.py', 'backend/app/harness/runtime/readiness.py', 'backend/tests/unit/test_git_runtime.py', 'configs/git_runtime.yaml', 'deploy/windows-native/**', '.github/workflows/git-runtime.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  git-runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Real Git branch, patch, history and environment checks
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest -q backend/tests/unit/test_git_runtime.py
+      - name: Native Windows launcher checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./deploy/windows-native/Test-NativeScripts.ps1

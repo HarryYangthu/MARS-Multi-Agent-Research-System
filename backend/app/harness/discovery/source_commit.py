@@ -7,6 +7,8 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
+from app.harness.runtime.git_runtime import run_git
+
 
 def _git_environment(environment: Mapping[str, str]) -> dict[str, str]:
     # Repository snapshots must not inherit config injection, signing, filters or hooks.
@@ -18,10 +20,10 @@ def _git_environment(environment: Mapping[str, str]) -> dict[str, str]:
 
 def _git(git_dir: Path, environment: Mapping[str, str], *args: str,
          check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(["git", "--git-dir", str(git_dir),
+    result = run_git(["--git-dir", str(git_dir),
         "-c", f"core.hooksPath={os.devnull}", "-c", "commit.gpgSign=false",
         "-c", "gc.auto=0", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", *args],
-        cwd=git_dir.parent, env=_git_environment(environment), capture_output=True, text=True, timeout=30)
+        cwd=git_dir.parent, environment=_git_environment(environment), check=check, timeout=30)
     if check and result.returncode:
         raise ValueError("Local source history failed: " + result.stderr.strip())
     return result
@@ -74,8 +76,8 @@ def archive_source_commit(*, source_root: Path, git_dir: Path, paths: Sequence[s
         return _git(git_dir, environment, *args, check=check)
 
     if not git_dir.exists():
-        initialized = subprocess.run(["git", "init", "--bare", "--quiet", str(git_dir)],
-            cwd=source_root, env=_git_environment(environment), capture_output=True, text=True, timeout=30)
+        initialized = run_git(["init", "--bare", "--quiet", str(git_dir)],
+            cwd=source_root, environment=_git_environment(environment), timeout=30)
         if initialized.returncode:
             raise ValueError("Cannot initialize local source history: " + initialized.stderr.strip())
     if parent_git_dir is not None and parent_commit is not None:

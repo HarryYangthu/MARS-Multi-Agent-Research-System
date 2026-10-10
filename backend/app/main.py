@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -63,6 +64,7 @@ from app.bridge.discovery_service import DiscoveryService
 from app.bridge.extension_runtime import get_extension_runtime
 from app.bridge.idea_selection import IdeaSelectionCoordinator
 from app.harness.tools.registry import get_registry as get_tool_registry
+from app.harness.runtime.readiness import check_git_readiness
 from app.settings import get_settings
 
 
@@ -88,6 +90,10 @@ def register_default_agents() -> None:
 
 @asynccontextmanager
 async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    git_check = await asyncio.to_thread(check_git_readiness)
+    _app.state.git_readiness = git_check
+    if not git_check.ready:
+        logger.warning("Git readiness: {}", git_check.message)
     try:
         yield
     finally:

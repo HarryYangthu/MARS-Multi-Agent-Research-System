@@ -11,14 +11,13 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import subprocess
 
 from filelock import FileLock, Timeout
 
 from app.harness.agent_loop.trace import atomic_json
+from app.harness.runtime.git_runtime import GitRuntimeError, run_git
 
 
 class GitWorkspaceError(ValueError):
@@ -28,19 +27,10 @@ class GitWorkspaceError(ValueError):
 
 
 def git(root: Path, *arguments: str) -> str:
-    environment = {key: value for key, value in os.environ.items() if key not in {
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
-    }}
-    environment["GIT_TERMINAL_PROMPT"] = "0"
     try:
-        result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True,
-            text=True, timeout=15, env=environment)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise GitWorkspaceError("Git 不可用或操作超时；未覆盖代码。") from exc
-    if result.returncode:
-        # Do not surface arbitrary hook output, repository content or credentials.
-        raise GitWorkspaceError("Git 操作未成功，请检查仓库状态和访问权限；未强制切换或重置。")
+        result = run_git(("-C", str(root), *arguments))
+    except GitRuntimeError as exc:
+        raise GitWorkspaceError(str(exc), exc.reason["code"]) from exc
     return result.stdout.rstrip("\r\n")
 
 
