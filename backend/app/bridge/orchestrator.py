@@ -71,6 +71,8 @@ class RunRequest:
     standalone: bool = False
     user_request: str = ""
     auto_approve: bool = False  # Phase 4: when False, wait for HITL approve
+    review_mode: Literal["manual", "commander"] = "manual"
+    review_generation: int = 0
     data_source: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -113,6 +115,146 @@ class Orchestrator:
         self._resume_invocations: dict[tuple[str, str], str] = {}
 
     # --------------------------------------------------------------- create
+
+    def set_review_mode(self, run_id: str, *, project: str, enabled: bool) -> None:
+        """Changing reviewers never starts or retries a failed research stage."""
+        session = self.session(run_id)
+        if session.run.project != project or session.read_only:
+            raise ValueError("任务不属于当前项目，或当前任务不可修改。")
+        mode: Literal["manual", "commander"] = "commander" if enabled else "manual"
+        unchanged = session.request.review_mode == mode and not session.request.auto_approve
+        if unchanged and (self.owned_tasks.active(run_id) is not None or NodeState.WAITING_REVIEW not in session.graph.all_states().values()):
+            return
+        if not unchanged:
+            snapshot = RunStateStore(session.run).load()
+            session.request.review_mode = mode
+            session.request.review_generation += 1
+            session.request.auto_approve = False
+            self._persist_state(session, status=snapshot.status if snapshot else "created")
+            session.run.write_event("agent_events", {"event": "commander.review_mode_changed", "agent": "commander", "actor": "user",
+                "review_mode": mode, "generation": session.request.review_generation, "timestamp": datetime.now(timezone.utc).isoformat()})
+        if self.owned_tasks.active(run_id) is None:
+            waiting = [node for node, state in session.graph.all_states().items() if state == NodeState.WAITING_REVIEW]
+            if len(waiting) == 1 and not any(state in {NodeState.RUNNING, NodeState.FAILED} for state in session.graph.all_states().values()):
+                node = waiting[0]
+                if session.termination is not None:
+                    self._release_review_stop(session, agent=parse_node_key(node).stage, operation="review_wait")
+                async def attach_review() -> None:
+                    from app.harness.llm.accounting import run_resource_scope
+                    with run_resource_scope(session.run.root):
+                        await self._await_hitl_or_auto(session, node)
+                        if not self._stopping(session):
+                            await self._complete_approved_node(session, node)
+                            await self._run(run_id)
+                self._spawn_owned(session, "managed_review", attach_review)
+            elif enabled and session.waiting_for_feedback and not self._stopping(session) and session.request.extra.get("stop_after") != "execution":
+                completed = [node for node, state in session.graph.all_states().items()
+                             if parse_node_key(node).stage == "execution" and state == NodeState.DONE]
+                if completed:
+                    latest = max(completed, key=lambda key: parse_node_key(key).attempt)
+                    async def attach_feedback() -> None:
+                        from app.harness.llm.accounting import run_resource_scope
+                        with run_resource_scope(session.run.root):
+                            session.waiting_for_feedback = False
+                            await self._after_execution(session, latest)
+                            if not self._stopping(session) and not session.waiting_for_feedback:
+                                await self._run(run_id)
+                    self._spawn_owned(session, "managed_feedback_review", attach_feedback)
+
+    async def _managed_artifact_review(self, session: RunSession, node_key: str, review: Any) -> None:
+        from app.bridge.managed_review import review_once, finish_review, review_policy, revision_count, review_state
+        from app.bridge.evaluation_service import build_artifact_evaluation_summary
+        from app.bridge.coding_approval import verify_written_code
+        from app.bridge.research_branch import research_branch_scope
+        from app.hitl.approval import approve, request_revision
+        from app.harness.schema.validator import validate_document
+        from app.storage.artifact_store import SCHEMA_TO_AGENT
+        from app.harness.context.folder_context import load_folder_context
+
+        generation = session.request.review_generation
+        state = review_state(session.run) or {}
+        if state.get("host_failure") and state.get("node") == node_key and state.get("generation") == generation:
+            return
+
+        def eligible() -> bool:
+            return (session.request.review_mode == "commander" and session.request.review_generation == generation
+                    and not self._stopping(session) and not session.read_only
+                    and not any(event.is_set() for event in (review.approval_event, review.rejection_event, review.regenerate_event)))
+
+        if not eligible():
+            return
+        ref = review.artifact_ref
+        text = ref.path.read_text(encoding="utf-8")
+        schema = next(key for key, value in SCHEMA_TO_AGENT.items() if value == (ref.agent_dir, ref.stem))
+        validation = validate_document(text, expected_schema=schema)
+        evaluation = build_artifact_evaluation_summary(run=session.run, ref=ref, node_key=node_key)
+        blocker = ""
+        if not validation.valid or validation.metadata.get("project") != session.run.project:
+            blocker = "方案格式或项目身份校验未通过，请接管审核。"
+        elif evaluation.get("blocking") or (not evaluation.get("policy", {}).get("auto_approval_allowed") and evaluation.get("policy", {}).get("gate") != "revise"):
+            blocker = "产物检查尚未满足托管审批标准，请查看检查证据并处理阻塞。"
+        if ref.agent_dir == "coding" and not blocker:
+            try:
+                with research_branch_scope(session.run, node_key):
+                    if not verify_written_code(session.run, text):
+                        blocker = "缺少真实代码写入记录，主控未执行或批准旧补丁，请接管审核。"
+            except (OSError, ValueError, RuntimeError) as error:
+                blocker = f"真实代码核对未通过：{error}"
+        upstream = {str(path.relative_to(session.run.root)): path.read_text(encoding="utf-8")
+                    for directory in ("idea", "experiment", "coding", "execution")
+                    for path in session.run.subdir(directory).glob("*.approved.md") if directory != ref.agent_dir}
+        artifact_ref = ref.path.relative_to(session.run.root).as_posix()
+        folder_context = load_folder_context(session.run.project, session.run.root)
+        tool_log = session.run.root / "events/tool_calls.jsonl"
+        code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
+                       if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
+                   "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
+                   "project_context": folder_context, "actual_code_checks": code_checks,
+                   "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
+                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+        decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
+                                     eligible=eligible, bus=session.bus, blocker=blocker)
+        if decision is None or not eligible():
+            return
+        if decision.decision == "approve" and not evaluation.get("policy", {}).get("auto_approval_allowed"):
+            from app.bridge.managed_review import ReviewDecision
+            findings = "；".join(str(item.get("message", "")) for item in evaluation.get("top_findings", []))
+            original_identity = decision._identity
+            decision = ReviewDecision(decision="revise", reason="主控模型建议批准，但产物检查仍要求修正，尚未放行：" + findings,
+                                      evidence_refs=["artifact_evaluation"])
+            decision._identity = original_identity
+        from app.storage.artifact_store import ArtifactStore
+        current_ref = ArtifactStore(session.run).latest(agent_dir=ref.agent_dir, stem=ref.stem)
+        if current_ref is None or current_ref.path != ref.path or load_folder_context(session.run.project, session.run.root) != folder_context:
+            await finish_review(session.run, session.bus, "needs_user", "审核期间当前方案版本或项目约束已变化，请重新核对。", identity=decision._identity)
+            return
+        if ref.path.read_text(encoding="utf-8") != text or any((session.run.root / path).read_text(encoding="utf-8") != value for path, value in upstream.items()):
+            await finish_review(session.run, session.bus, "needs_user", "审核期间方案或上游依据已变化，请重新核对。", identity=decision._identity)
+            return
+        if decision.decision == "approve":
+            # Repeat host checks at the write boundary. LLM judgement cannot
+            # override a changed checkout, evaluation or immutable candidate.
+            current = build_artifact_evaluation_summary(run=session.run, ref=ref, node_key=node_key)
+            if current != evaluation:
+                await finish_review(session.run, session.bus, "needs_user", "审核期间检查证据已变化，请重新核对。", identity=decision._identity)
+                return
+            if ref.agent_dir == "coding":
+                with research_branch_scope(session.run, node_key):
+                    if not verify_written_code(session.run, text):
+                        raise ValueError("真实代码写入记录未通过复核")
+                    await approve(session=review, bus=session.bus, actor="commander")
+            else:
+                await approve(session=review, bus=session.bus, actor="commander")
+            await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
+        elif decision.decision == "revise":
+            if revision_count(session.run, node_key) >= review_policy().max_revisions_per_node:
+                await finish_review(session.run, session.bus, "needs_user", "已达到主控返工次数上限，请接管审核。" + decision.reason, identity=decision._identity)
+                return
+            await request_revision(session=review, bus=session.bus, actor="commander", reason=decision.reason)
+            await finish_review(session.run, session.bus, "revision_requested", decision.reason, identity=decision._identity)
+        else:
+            await finish_review(session.run, session.bus, "needs_user", decision.reason, identity=decision._identity)
 
     def create_session(self, request: RunRequest, *, research_contract: FrozenResearchTask | None = None,
                        on_run_allocated: Callable[[RunHandle], None] | None = None) -> RunSession:
@@ -821,7 +963,20 @@ class Orchestrator:
             ):
                 if self._stopping(session):
                     return
-                await asyncio.sleep(0.05)
+                if session.request.review_mode == "commander":
+                    try:
+                        await self._managed_artifact_review(session, node_key, review)
+                    except (OSError, ValueError, RuntimeError) as error:
+                        from app.bridge.managed_review import record_state
+                        await record_state(session.run, session.bus, {"node": node_key, "kind": "artifact", "status": "needs_user",
+                            "generation": session.request.review_generation, "host_failure": True,
+                            "reason": f"托管审核无法完成，请接管审核：{error}"})
+                from app.bridge.managed_review import review_policy
+                try:
+                    interval = review_policy().poll_interval_seconds if session.request.review_mode == "commander" else 0.05
+                except (OSError, ValueError):
+                    interval = 0.05  # Keep the existing human-review wait alive on a bad managed policy.
+                await asyncio.sleep(interval)
 
             if self._stopping(session):
                 return
@@ -980,9 +1135,40 @@ class Orchestrator:
                     if session.request.auto_approve:
                         await asyncio.to_thread(save_confirmation, session.run, node_key, view['token'], actor='auto_approve')
                         return True
+                if session.request.review_mode == "commander":
+                    from app.bridge.managed_review import review_once, finish_review
+                    generation = session.request.review_generation
+                    token = view.get('token')
+                    def eligible() -> bool:
+                        return (session.request.review_mode == "commander" and session.request.review_generation == generation
+                                and not self._stopping(session) and not session.read_only
+                                and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
+                    decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
+                        payload={"goal": session.request.user_request, "configuration": view,
+                                 "evidence_refs": ["execution_configuration"]},
+                        generation=generation, eligible=eligible, bus=session.bus,
+                        blocker="；".join(view['blockers']))
+                    if decision and eligible():
+                        current = execution_preview(session.run, node_key)
+                        if current['confirmed']:
+                            return True
+                        if current['token'] != token or current['blockers']:
+                            await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
+                        elif decision.decision == "approve":
+                            save_confirmation(session.run, node_key, str(token), actor="commander")
+                            await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
+                            return True
+                        else:
+                            await finish_review(session.run, session.bus, "needs_user", decision.reason, identity=decision._identity)
             except (OSError, ValueError, RuntimeError):
                 # A changed/unreadable input never becomes permission to launch.
                 view = {'blockers': ['仿真配置无法核验，请刷新配置核对窗口。']}
+                if session.request.review_mode == "commander":
+                    from app.bridge.managed_review import record_state, review_state
+                    state = review_state(session.run) or {}
+                    if state.get("node") != node_key or state.get("generation") != session.request.review_generation or state.get("status") != "needs_user":
+                        await record_state(session.run, session.bus, {"node": node_key, "kind": "execution_configuration",
+                            "generation": session.request.review_generation, "status": "needs_user", "reason": view['blockers'][0]})
             if not announced:
                 self._persist_state(session, status='waiting_execution_confirmation')
                 await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
@@ -994,12 +1180,14 @@ class Orchestrator:
             await asyncio.sleep(interval)
         return False
 
-    def _release_review_stop(self, session: RunSession, *, agent: str, operation: Literal["approval", "revision"]) -> bool:
+    def _release_review_stop(self, session: RunSession, *, agent: str, operation: Literal["approval", "revision", "review_wait"]) -> bool:
         """Explicit action on a durable review never replays interrupted generation."""
         from app.harness.schema.validator import validate_document
         from app.storage.artifact_store import ArtifactStore, SCHEMA_TO_AGENT
 
         termination = session.termination
+        if operation == "review_wait" and (termination or {}).get("reason") != "server_shutdown":
+            return False
         run_id = session.run.run_id
         node_key = self._latest_node_for_stage(session, agent)
         allowed = {NodeState.WAITING_REVIEW, NodeState.APPROVED} if operation == "approval" else {NodeState.WAITING_REVIEW}
@@ -1265,6 +1453,11 @@ class Orchestrator:
             attempt=parse_node_key(node_key).attempt,
         )
         if getattr(decision, "requires_human", False):
+            if session.request.review_mode == "commander":
+                from app.bridge.managed_review import record_state
+                await record_state(session.run, session.bus, {"node": node_key, "kind": "feedback", "status": "needs_user",
+                    "generation": session.request.review_generation,
+                    "reason": "仿真结果的原因归属不明确，需要你确认下一步方向；主控未自行扩展实验。"})
             session.waiting_for_feedback = True
             await self._publish_state(
                 session,
@@ -1286,7 +1479,23 @@ class Orchestrator:
         if not decision.should_continue:
             self._persist_state(session, status="running")
             return
-        if not session.request.auto_approve:
+        managed_continue = False
+        if session.request.review_mode == "commander":
+            from dataclasses import asdict
+            from app.bridge.managed_review import review_once, finish_review
+            generation = session.request.review_generation
+            def eligible() -> bool:
+                return (session.request.review_mode == "commander" and session.request.review_generation == generation
+                        and not self._stopping(session) and not session.read_only)
+            documents = {str(path.relative_to(session.run.root)): path.read_text(encoding="utf-8")
+                         for path in session.run.subdir("diagnosis").glob("*.md")}
+            review_decision = await review_once(run=session.run, node=node_key, kind="feedback",
+                payload={"goal": session.request.user_request, "diagnosis": asdict(decision), "documents": documents,
+                         "evidence_refs": ["diagnosis", *documents]}, generation=generation, eligible=eligible, bus=session.bus)
+            if review_decision and eligible():
+                managed_continue = review_decision.decision == "approve"
+                await finish_review(session.run, session.bus, "approved" if managed_continue else "needs_user", review_decision.reason, identity=review_decision._identity)
+        if not session.request.auto_approve and not managed_continue:
             session.waiting_for_feedback = True
             await self._publish_state(
                 session,
@@ -1607,6 +1816,8 @@ class Orchestrator:
                 standalone=bool(snapshot.request.get("standalone", False)),
                 user_request=str(snapshot.request.get("user_request", "")),
                 auto_approve=bool(snapshot.request.get("auto_approve", False)),
+                review_mode="commander" if snapshot.request.get("review_mode") == "commander" else "manual",
+                review_generation=int(snapshot.request.get("review_generation", 0)),
                 extra=(
                     dict(snapshot.request.get("extra", {}))
                     if isinstance(snapshot.request.get("extra"), dict)
@@ -1743,6 +1954,8 @@ class Orchestrator:
                     "standalone": session.request.standalone,
                     "user_request": session.request.user_request,
                     "auto_approve": session.request.auto_approve,
+                    "review_mode": session.request.review_mode,
+                    "review_generation": session.request.review_generation,
                     "extra": dict(session.request.extra),
                 },
                 status=status,

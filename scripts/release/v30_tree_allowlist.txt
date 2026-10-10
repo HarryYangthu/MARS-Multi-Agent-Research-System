@@ -687,3 +687,7 @@ backend/app/storage/artifact_handoff.py
 configs/skills/imported/f7ecc96802d44685b630665fb9ec732f7790a06b5cd51701b5018542bd1226a2/SKILL.md
 frontend/src/app/projects/[name]/page.tsx
 frontend/src/components/AinativePanel.tsx
+backend/app/bridge/managed_review.py
+configs/commander_review.yaml
+frontend/src/lib/managedReview.ts
+docs/commander-managed-review.md

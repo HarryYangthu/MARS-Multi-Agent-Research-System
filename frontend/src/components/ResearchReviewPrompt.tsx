@@ -5,6 +5,7 @@ import type { ArtifactView, RunDetail } from "@/lib/api";
 import { agentLabel } from "@/lib/researchActivity";
 import { artifactBody, pendingReviewStage, reviewPromptIdentity } from "@/lib/runReview";
 import { ArtifactReviewDocument } from "./ArtifactReviewDocument";
+import { managedReviewPending, managedReviewReason } from "@/lib/managedReview";
 
 export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run: RunDetail | null; artifact: ArtifactView | null; stale: boolean; onChanged: () => Promise<void> }): JSX.Element | null {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -16,6 +17,8 @@ export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run:
   const [notice, setNotice] = useState("");
   const [reviewed, setReviewed] = useState("");
   const stage = run ? pendingReviewStage(run) : null;
+  const managedPending = managedReviewPending(run, stage || "", "artifact");
+  const managedReason = managedReviewReason(run, stage || "", "artifact");
   const identity = run && stage && artifact?.run_id === run.run_id && artifact.agent_dir === stage
     ? reviewPromptIdentity(run, stage, artifact) : "";
 
@@ -26,7 +29,9 @@ export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run:
   }, [stage]);
 
   useEffect(() => {
-    if (!identity || stale || presented.current.has(identity)) return;
+    if (managedPending) { dialog.current?.close(); setOpened(false); return; }
+    const presentation = `${identity}:${run?.review_mode || "manual"}`;
+    if (!identity || stale || presented.current.has(presentation)) return;
     const element = dialog.current;
     if (!element) return;
     if (!element.open) {
@@ -35,8 +40,8 @@ export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run:
       if (content.current) content.current.scrollTop = 0;
       title.current?.focus({ preventScroll: true });
     }
-    presented.current.add(identity);
-  }, [identity, stale]);
+    presented.current.add(presentation);
+  }, [identity, stale, managedPending, run?.review_mode]);
 
   function close(): void { if (!busy) dialog.current?.close(); }
   function open(): void {
@@ -53,8 +58,8 @@ export function ResearchReviewPrompt({ run, artifact, stale, onChanged }: { run:
   return <>
     {notice ? <p role="status" className="text-sm text-indigo-200">{notice}</p> : null}
     {reviewed !== identity || !identity ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
-      <div><p className="text-sm text-amber-200">{agentLabel(stage)}方案等待审核</p><p className="mt-1 text-xs text-slate-400">审核通过后继续下一阶段。</p></div>
-      <button type="button" disabled={!identity || stale} onClick={open} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white hover:brightness-110 disabled:opacity-40">审核方案</button>
+      <div><p className="text-sm text-amber-200">{managedPending ? "主控正在审核" : run.review_mode === "commander" ? "需要你接管审核" : `${agentLabel(stage)}方案等待审核`}</p><p className="mt-1 text-xs text-slate-400">{run.review_mode === "commander" ? managedReason || "主控将核对方案与检查证据，通过后继续下一阶段。" : "审核通过后继续下一阶段。"}</p></div>
+      <button type="button" disabled={!identity || stale} onClick={open} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white hover:brightness-110 disabled:opacity-40">{managedPending ? "查看 / 接管审核" : "审核方案"}</button>
     </div> : null}
     <dialog ref={dialog} aria-labelledby="research-review-title" aria-describedby="research-review-description" onClose={() => setOpened(false)} onCancel={event => { if (busy) event.preventDefault(); }} className="max-h-[90dvh] w-[min(960px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-mars-border bg-mars-bg p-0 text-slate-200 shadow-2xl backdrop:bg-black/70">
       <div className="flex max-h-[90dvh] flex-col">

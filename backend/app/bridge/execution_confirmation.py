@@ -352,7 +352,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         receipt = json.loads(path.read_text())
         confirmed = (receipt.get('schema') == 'execution.confirmation' and receipt.get('run_id') == run.run_id
             and receipt.get('project') == run.project and receipt.get('node') == node_key
-            and receipt.get('token') == token and receipt.get('actor') in {'user', 'auto_approve'})
+            and receipt.get('token') == token and receipt.get('actor') in {'user', 'auto_approve', 'commander'})
         if not confirmed:
             raise ValueError('仿真配置确认记录无法校验')
     from app.execution.job_journal import job_states
@@ -364,7 +364,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
 
 
 def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str = 'user') -> dict[str, Any]:
-    if actor not in {'user', 'auto_approve'}:
+    if actor not in {'user', 'auto_approve', 'commander'}:
         raise ValueError('确认来源无效')
     with path_lock(run.root / 'execution/.confirmation.lock'):
         view = execution_preview(run, node_key)

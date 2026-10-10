@@ -50,6 +50,9 @@ export type TrashRunSummary = RunSummary & {
 export type GraphNode = { key: string; kind: string; state: string; metadata: Record<string, unknown> };
 export type GraphEdge = { src: string; dst: string };
 export type RunDetail = RunSummary & {
+  review_mode?: "manual" | "commander";
+  review_generation?: number;
+  managed_review?: { status?: string; reason?: string; node?: string; kind?: string; trace_ref?: string; generation?: number } | null;
   states: Record<string, string>;
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; entrypoints: string[] };
   status?: string | null;

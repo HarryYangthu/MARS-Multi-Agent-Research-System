@@ -90,6 +90,10 @@ class RunStateStore:
         for key in ("task", "project", "entrypoint"):
             if key in raw["request"] and raw["request"][key] != raw[key]:
                 raise RunStateIntegrityError("run request identity mismatch")
+        request = raw["request"]
+        if ("review_mode" in request and request["review_mode"] not in ("manual", "commander")
+                or "review_generation" in request and (type(request["review_generation"]) is not int or request["review_generation"] < 0)):
+            raise RunStateIntegrityError("invalid reviewer preference")
         graph = raw.get("graph")
         if not isinstance(graph, dict) or any(not isinstance(graph.get(key), list) for key in ("nodes", "edges", "entrypoints")):
             raise RunStateIntegrityError("invalid run graph structure")

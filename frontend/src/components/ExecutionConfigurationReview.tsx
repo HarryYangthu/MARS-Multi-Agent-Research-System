@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { confirmExecutionConfiguration, setExecutionBoundary, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
 import { executionExperimentFields } from "@/lib/executionReviewPresentation";
+import type { RunDetail } from "@/lib/api";
+import { managedReviewPending, managedReviewReason } from "@/lib/managedReview";
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
@@ -22,8 +24,8 @@ function display(value: unknown): string {
   return typeof value === "string" ? backends[value] || value : JSON.stringify(value);
 }
 
-export function ExecutionConfigurationReview({ runId, project, stale, onChanged }: {
-  runId: string; project: string; stale: boolean; onChanged: () => Promise<void>;
+export function ExecutionConfigurationReview({ runId, project, stale, onChanged, run = null }: {
+  runId: string; project: string; stale: boolean; onChanged: () => Promise<void>; run?: RunDetail | null;
 }): JSX.Element | null {
   const [view, setView] = useState<ExecutionConfiguration | null>(null);
   const [error, setError] = useState("");
@@ -56,11 +58,14 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged 
   }, [runId, project]);
   const token = view?.token || "";
   const launchReady = Boolean(view?.visible && view.launch_ready && !view.confirmed);
+  const managedPending = managedReviewPending(run, "execution", "execution_configuration");
+  const managedReason = managedReviewReason(run, "execution", "execution_configuration");
   useEffect(() => {
+    if (managedPending) { dialog.current?.close(); return; }
     if (!token || !launchReady || stale || error || presented.current.has(token)) return;
     if (!dialog.current?.open) { dialog.current?.showModal(); heading.current?.focus({ preventScroll: true }); }
     presented.current.add(token);
-  }, [token, launchReady, stale, error]);
+  }, [token, launchReady, stale, error, managedPending]);
   useEffect(() => {
     if (uncertain && view?.token && (view.token !== uncertain || view.confirmed)) {
       setUncertain(""); setBusy(false); submitting.current = false; dialog.current?.close();
@@ -113,7 +118,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged 
   const id = `execution-config-${runId}`;
   return <>
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-400/25 bg-indigo-400/5 px-4 py-3">
-      <div><p className="text-sm text-indigo-100">{view.confirmed ? "仿真配置已确认" : "启动仿真前核对配置"}</p><p className="mt-1 text-xs text-slate-400">{view.experiments.length} 组实验 · {display(view.defaults.device)}{view.blockers.length ? ` · ${view.blockers.length} 项待解决` : " · 沿用已有配置"}</p></div>
+      <div><p className="text-sm text-indigo-100">{view.confirmed ? "仿真配置已确认" : managedPending ? "主控正在核对仿真配置" : "启动仿真前核对配置"}</p><p className="mt-1 text-xs text-slate-400">{view.experiments.length} 组实验 · {display(view.defaults.device)}{view.blockers.length ? ` · ${view.blockers.length} 项待解决` : " · 沿用已有配置"}</p>{run?.review_mode === "commander" && !view.confirmed && managedReason ? <p role="status" className="mt-1 text-xs text-amber-200">{managedReason}</p> : null}</div>
       <button type="button" disabled={stale || Boolean(error)} onClick={() => { if (!dialog.current?.open) dialog.current?.showModal(); heading.current?.focus({ preventScroll: true }); }} className="rounded-lg border border-indigo-400/40 px-3 py-2 text-xs text-indigo-200 disabled:opacity-40">核对仿真配置</button>
     </div>
     {notice || error ? <p role="status" className="text-xs text-amber-200">{error || notice}</p> : null}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRouter } from "next/navigation";
-import { ChatMessageFailure, createConversation, getConversation, sendChatMessage } from "@/lib/api";
+import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { activeActivityGroups, conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { toolWork } from "@/lib/workProgress";
@@ -39,6 +39,9 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const { text: draft, editing } = messageDraft;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [modeSaving, setModeSaving] = useState(false);
+  const modeVersion = useRef(0);
+  const changingMode = useRef(false);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
@@ -50,7 +53,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const follow = useRef(!initialRunId);
   const activity = useResearchActivity(conversation?.linked_run_id, project);
   const processing = busy || conversation?.processing === true;
-  const editDisabled = processing || loading || needsRefresh;
+  const editDisabled = processing || loading || needsRefresh || modeSaving;
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.kind === "model" ? "分析研究任务" : item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
   const toolActivities: Activity[] = (conversation?.messages ?? []).filter(message => message.role === "tool").map((message, index) => ({ id: `tool:${message.id || index}`, turn_id: message.turn_id, timestamp: message.timestamp, agent: "commander", title: `${toolWork(message.tool_name || "任务工具")} · ${message.tool_result?.ok === false ? "未完成" : "已返回结果"}`, detail: "", status: message.tool_result?.ok === false ? "failed" : "completed" }));
   const entries = conversationEntries((conversation?.messages ?? []).filter(message => message.role !== "tool"), [...publicActivities, ...toolActivities]);
@@ -93,9 +96,10 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     let active = true;
     let reading = false;
     const timer = setInterval(() => {
-      if (reading) return;
+      if (reading || changingMode.current) return;
       reading = true;
-      void getConversation(id).then((value) => { if (active) { setConversation(value); setPollError(""); } })
+      const version = modeVersion.current;
+      void getConversation(id).then((value) => { if (active && version === modeVersion.current && !changingMode.current) { setConversation(value); setPollError(""); } })
         .catch(() => { if (active) setPollError("对话进度更新失败，正在重试。"); })
         .finally(() => { reading = false; });
     }, CLIENT_POLICY.controlRefreshMs);
@@ -106,7 +110,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   async function refresh(): Promise<void> {
     const id = initialConversationId || conversation?.conv_id || savedConversation(project, experimentId);
-    if (sending.current) return;
+    if (sending.current || changingMode.current) return;
     if (!id && !initialRunId) { setNeedsRefresh(false); setError(""); setPending(null); return; }
     setLoading(true);
     try {
@@ -132,9 +136,28 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     composer.current?.focus();
   }
 
+  async function toggleManaged(): Promise<void> {
+    if (changingMode.current || processing || loading || needsRefresh) return;
+    changingMode.current = true; modeVersion.current += 1; setModeSaving(true); setError("");
+    try {
+      const current = conversation || await createConversation(project, experimentId);
+      if (!alive.current) return;
+      remember(project, current.conv_id, experimentId);
+      setConversation(current);
+      const updated = await setConversationAutoMode(current.conv_id, !current.auto_mode);
+      if (alive.current) {
+        setConversation(updated);
+        await activity.refresh();
+        if (!initialConversationId && !initialRunId) router.replace(`/runs/new?${new URLSearchParams({ project, conversation: updated.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`);
+      }
+    } catch (cause: unknown) {
+      if (alive.current) { setError(`${cause instanceof Error ? cause.message : "审批方式未能确认保存"}。请重新读取对话核对。`); setNeedsRefresh(true); }
+    } finally { changingMode.current = false; modeVersion.current += 1; if (alive.current) setModeSaving(false); }
+  }
+
   async function send(): Promise<void> {
     const text = draft.trim();
-    if (!text || sending.current || conversation?.processing || loading || needsRefresh) return;
+    if (!text || sending.current || changingMode.current || conversation?.processing || loading || needsRefresh) return;
     follow.current = true; sending.current = true; setBusy(true); setError("");
     setPending({ text, after: conversation?.messages.length ?? 0, startedAt: new Date().toISOString(),
       ...(editing ? { replaceId: editing.messageId, expectedTimestamp: editing.originalTimestamp } : {}) }); updateDraft({ type: "submitted" });
@@ -161,11 +184,15 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   return <section aria-label="研究对话" className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
       <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
-      <div className="flex gap-3 text-xs text-slate-400">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+        <button type="button" role="switch" aria-checked={conversation?.auto_mode === true} aria-label="主控托管" aria-describedby="managed-mode-description" disabled={processing || loading || modeSaving || needsRefresh} onClick={() => void toggleManaged()} className="flex items-center gap-2 rounded-lg border border-mars-border px-3 py-2 text-slate-200 hover:border-indigo-400/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-300 disabled:opacity-40">
+          主控托管<span className={`relative h-4 w-8 rounded-full ${conversation?.auto_mode ? "bg-mars-accent" : "bg-slate-600"}`} aria-hidden="true"><span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${conversation?.auto_mode ? "translate-x-[18px]" : "translate-x-0.5"}`} /></span><span>{modeSaving ? "保存中…" : conversation?.auto_mode ? "开" : "关"}</span>
+        </button>
         <Link href={`/projects/${encodeURIComponent(project)}/research`} className="hover:text-white">所有研究</Link>
-        <button type="button" disabled={processing || loading} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); if (initialRunId || initialConversationId) { const params = new URLSearchParams({ project }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); } }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <button type="button" disabled={processing || loading || modeSaving} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); if (initialRunId || initialConversationId) { const params = new URLSearchParams({ project }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); } }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
+    <p id="managed-mode-description" className="border-b border-mars-border px-4 py-2 text-xs text-slate-500 sm:px-6">{conversation?.auto_mode ? "主控代替人工审核方案与仿真配置；需要你决定时会暂停并说明原因。" : "当前由你审批各阶段方案；开启主控托管后，由主控审核并推进流程。"}</p>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
     <div className="flex min-h-[65vh] min-w-0 flex-1 flex-col lg:min-h-0">
     <div onScroll={event => { const el = event.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
@@ -204,12 +231,12 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
             if (event.key === "Escape" && editing && !processing && !event.nativeEvent.isComposing) { event.preventDefault(); updateDraft({ type: "cancel" }); }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
         </div>
       </div>
     </form>
     </div>
-    <ResearchAgentPanel run={activity.run} runId={conversation?.linked_run_id} activities={activity.activities} processing={processing} current={current} error={activity.error} updated={activity.updated} />
+    <ResearchAgentPanel run={activity.run} runId={conversation?.linked_run_id} activities={activity.activities} processing={processing || (activity.run?.review_mode === "commander" && activity.run.managed_review?.status === "reviewing")} current={current} error={activity.error} updated={activity.updated} />
     </div>
   </section>;
 }

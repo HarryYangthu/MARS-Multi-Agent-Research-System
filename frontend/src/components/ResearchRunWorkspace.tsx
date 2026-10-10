@@ -43,7 +43,8 @@ export function ResearchRunWorkspace({ run, stale, onChanged }: { run: RunDetail
     {notice ? <p role="status" className="text-sm text-indigo-200">{notice}</p> : null}
     {stage ? <ArtifactReviewDocument key={`${run.run_id}:${stage}`} run={run} stage={stage} state={state} stale={stale} advanced={`/runs/${encodeURIComponent(run.run_id)}?view=workbench&agent=${stage}`} onChanged={onChanged} onNotice={setNotice} onArtifact={receiveArtifact} expanded reviewActions={false} initiallyCollapsed /> : <p className="text-sm text-slate-400">暂无阶段文档。</p>}
     <ResearchReviewPrompt run={run} artifact={pendingArtifact} stale={stale} onChanged={onChanged} />
-    <ExecutionConfigurationReview key={run.run_id} runId={run.run_id} project={run.project} stale={stale} onChanged={onChanged} />
+    <ExecutionConfigurationReview key={run.run_id} run={run} runId={run.run_id} project={run.project} stale={stale} onChanged={onChanged} />
+    {run.managed_review?.kind === "feedback" && run.managed_review.reason ? <p role="status" className="rounded-lg border border-mars-border p-3 text-xs text-slate-300">主控复核：{run.managed_review.reason}</p> : null}
     {stage === "writing" || stages.some(item => item.stage === "writing" && item.state === "done") ? <ReportsPanel key={`reports:${run.run_id}`} runId={run.run_id} refreshKey={`${run.status}:${stages.find(item => item.stage === "writing")?.state}`} /> : null}
   </section>;
 }

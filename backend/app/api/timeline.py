@@ -222,6 +222,17 @@ def _agent_event_worklog(
     )
     agent = str(payload.get("agent") or payload.get("node") or "")
     event = str(payload.get("event") or "")
+    if event == "commander.managed_review":
+        status = str(payload.get("status") or "")
+        titles = {"reviewing": "主控核对方案与检查证据", "approved": "主控批准并推进流程",
+                  "revision_requested": "主控提出修改并安排返工", "needs_user": "主控请求你接管审核", "cancelled": "停止主控审核"}
+        if status not in titles:
+            return None
+        return WorkLogItem(id=f"agent:{index}:managed-review", timestamp=timestamp, agent="commander", kind="review",
+                           status="running" if status == "reviewing" else "completed", title=titles[status], detail=reason)
+    if event == "commander.review_mode_changed":
+        return WorkLogItem(id=f"agent:{index}:review-mode", timestamp=timestamp, agent="commander", kind="review",
+                           status="completed", title="开启主控托管" if payload.get("review_mode") == "commander" else "恢复人工审批", detail="")
     if event == "agent.progress":
         kind = str(payload.get("kind") or "")
         titles = {"started": "准备研究背景", "candidate": "形成候选方案", "validation": "检查方案与证据",

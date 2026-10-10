@@ -78,7 +78,7 @@ class CommanderSession:
     state: ConversationState = ConversationState.IDLE
     linked_run_id: str | None = None
     experiment_id: str = ""           # Project experiment this conversation belongs to
-    auto_mode: bool = False           # False = semi-auto (ask before each pull-back)
+    auto_mode: bool = False           # Compatibility wire name: True = Commander reviews, False = human reviews.
     metric_targets: dict[str, float] = field(default_factory=dict)
     rolling_summary: str = ""
     summary_updated_at: str | None = None
@@ -218,15 +218,13 @@ class CommanderSessionStore:
         self._persist(session)
 
     def _persist(self, session: CommanderSession) -> None:
+        from app.harness.persistence import atomic_write_text
         d = self._directory() / session.conv_id
         d.mkdir(parents=True, exist_ok=True)
-        (d / "session.json").write_text(
+        atomic_write_text(d / "session.json",
             json.dumps(session.to_meta(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        with (d / "messages.jsonl").open("w", encoding="utf-8") as fh:
-            for m in session.messages:
-                fh.write(json.dumps(m.to_dict(), ensure_ascii=False) + "\n")
+        atomic_write_text(d / "messages.jsonl", "".join(json.dumps(m.to_dict(), ensure_ascii=False) + "\n" for m in session.messages))
 
     def _load(self, conv_id: str) -> CommanderSession | None:
         d = self._directory() / conv_id

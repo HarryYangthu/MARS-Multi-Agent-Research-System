@@ -84,6 +84,7 @@ def _msg_view(m: ChatMessage) -> MessageView:
 
 
 def _conv_view(s: CommanderSession) -> ConversationView:
+    s.auto_mode = _managed_mode(s)
     return ConversationView(
         conv_id=s.conv_id,
         project=s.project,
@@ -97,6 +98,15 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         active_turn_id=s.active_turn_id,
         activities=[asdict(item) for item in s.activities],
     )
+
+
+def _managed_mode(session: CommanderSession) -> bool:
+    if session.linked_run_id:
+        try:
+            return get_orchestrator().session(session.linked_run_id).request.review_mode == "commander"
+        except (KeyError, ValueError, OSError):
+            return False
+    return session.auto_mode
 
 
 @router.post("/conversations", response_model=ConversationView)
@@ -193,6 +203,13 @@ async def set_auto_mode(conv_id: str, payload: AutoModePayload) -> ConversationV
     session = store.get(conv_id)
     if session is None:
         raise HTTPException(status_code=404, detail="conversation not found")
+    if session.processing:
+        raise HTTPException(status_code=409, detail="主控正在处理消息，请稍后切换审批方式。")
+    if session.linked_run_id:
+        try:
+            get_orchestrator().set_review_mode(session.linked_run_id, project=session.project, enabled=payload.auto_mode)
+        except (KeyError, ValueError, OSError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail="审批方式未能保存，请重新读取对话核对。") from error
     session.auto_mode = payload.auto_mode
     store.persist(session)
     return _conv_view(session)

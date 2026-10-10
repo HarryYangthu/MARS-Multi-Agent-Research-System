@@ -265,6 +265,9 @@ class RunDetail(RunSummary):
     states: dict[str, str]
     graph: dict[str, Any]
     status: str | None = None
+    review_mode: str = "manual"
+    review_generation: int = 0
+    managed_review: dict[str, Any] | None = None
     termination: dict[str, Any] | None = None
     read_only: bool = False
     read_only_reason: str | None = None
@@ -488,6 +491,7 @@ async def list_trashed_runs(project: str = "") -> list[TrashRunSummary]:
 
 @router.get("/{run_id}", response_model=RunDetail)
 async def get_run(run_id: str) -> RunDetail:
+    from app.bridge.managed_review import review_state
     _ensure_active_run(run_id)
     session = _execution_session(run_id)
     try:
@@ -504,6 +508,9 @@ async def get_run(run_id: str) -> RunDetail:
         states={k: s.value for k, s in session.graph.all_states().items()},
         graph=session.graph.to_dict(),
         status=snapshot.status if snapshot else None,
+        review_mode=session.request.review_mode,
+        review_generation=session.request.review_generation,
+        managed_review=review_state(session.run),
         termination=session.termination,
         read_only=session.read_only,
         read_only_reason=session.read_only_reason,

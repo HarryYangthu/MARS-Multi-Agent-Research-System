@@ -94,7 +94,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         entrypoint=entrypoint,  # type: ignore[arg-type]
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
-        auto_approve=ctx.session.auto_mode,
+        review_mode="commander" if ctx.session.auto_mode else "manual",
         extra=({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {}),
     )
     rsession = ctx.orchestrator.create_session(request)
@@ -118,7 +118,8 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         "ok": True,
         "run_id": run_id,
         "entrypoint": entrypoint,
-        "auto_approve": ctx.session.auto_mode,
+        "auto_approve": False,
+        "review_mode": request.review_mode,
         "states": {k: s.value for k, s in rsession.graph.all_states().items()},
     }
 
@@ -141,6 +142,7 @@ async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         "run_id": run_id,
         "entrypoint": rsession.request.entrypoint,
         "auto_approve": rsession.request.auto_approve,
+        "review_mode": rsession.request.review_mode,
         "states": {k: s.value for k, s in rsession.graph.all_states().items()},
     }
 
@@ -155,7 +157,9 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
         return {"ok": False, "error": f"run {run_id} not found"}
     states = {k: s.value for k, s in rsession.graph.all_states().items()}
     waiting = [k for k, v in states.items() if v == "waiting_review"]
-    return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting}
+    from app.bridge.managed_review import review_state
+    return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting,
+            "review_mode": rsession.request.review_mode, "managed_review": review_state(rsession.run)}
 
 
 async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -329,13 +333,20 @@ async def _approve_node(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any
     agent = str(args.get("agent", ""))
     if not (run_id and agent):
         return {"ok": False, "error": "run_id and agent required"}
+    if ctx.orchestrator.session(run_id).request.review_mode == "commander":
+        return {"ok": False, "error": "托管模式由独立主控审核流程审批；需要人工接管时请在审核界面处理。"}
     from app.hitl.review_session import get_registry as get_review_registry
 
     review = get_review_registry().get(run_id, agent)
     if review is None:
         return {"ok": False, "error": f"no pending review for {agent} on {run_id}"}
     from app.hitl.approval import approve as approve_review
-
+    if agent == "coding":
+        from app.bridge.coding_approval import verify_written_code
+        from app.bridge.research_branch import research_branch_scope
+        with research_branch_scope(review.run, "coding"):
+            if not verify_written_code(review.run, review.artifact_ref.path.read_text(encoding="utf-8")):
+                return {"ok": False, "error": "真实代码核对未通过，请在审核界面处理。"}
     await approve_review(session=review, bus=ctx.orchestrator.bus, actor="commander")
     return {"ok": True, "run_id": run_id, "agent": agent, "action": "approved"}
 

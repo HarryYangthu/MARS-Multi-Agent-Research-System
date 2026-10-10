@@ -1,0 +1,6 @@
+# Source defaults; a desktop workspace may override this file in its configs/.
+poll_interval_seconds: 0.25
+max_revisions_per_node: 2
+max_input_characters: 60000
+max_output_tokens: 8192
+timeout_seconds: 180
