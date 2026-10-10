@@ -173,6 +173,10 @@ class FocusedIdeaAgent(IdeaAgent):
     async def build_context(self, request: RunRequest) -> ContextPack:
         root = Path(str(request.extra["run_root"]))
         snapshot = self._request_snapshot(request)
+        if any(snapshot["research_quality"][key] > 0 for key in
+               ("min_candidates", "min_read_papers", "min_method_directions")):
+            from app.harness.tools.search.readiness import require_literature_access
+            require_literature_access()
         bind_focused_snapshot(root, snapshot,
             invocation=request.extra.get("invocation_id") or request.runtime.get("invocation_id"),
             resume=request.extra.get("resume_invocation"),
