@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, Iterator
 
 import httpx
@@ -76,6 +77,28 @@ def test_private_config_contains_only_loopback_token_and_runtime_hash(tmp_path: 
     assert runtime_identity((str(binary),)) != first
 
 
+def test_private_home_preserves_personal_plugins_and_discards_startup_overrides(tmp_path: Path) -> None:
+    personal_home = tmp_path / "personal"
+    personal_config = personal_home / ".zcode/cli/config.json"
+    personal_config.parent.mkdir(parents=True)
+    original = json.dumps({"plugins": {"enabledPlugins": {"personal-plugin": True}}})
+    personal_config.write_text(original)
+    with environment({"HOME": str(personal_home), "USERPROFILE": str(personal_home),
+                      "ZCODE_PLUGIN_ROOT": str(personal_home / "plugins"), "ZCODE_ENV": "beta",
+                      "NODE_OPTIONS": "--trace-warnings"}):
+        private_root = tmp_path / "invocation"
+        env = runtime_environment(private_root, provider={})
+        assert os.environ["HOME"] == str(personal_home)
+        assert env["HOME"] == env["USERPROFILE"] == str(private_root / "home")
+        assert env["APPDATA"].startswith(env["HOME"])
+        assert env["XDG_CONFIG_HOME"].startswith(env["HOME"])
+        assert not {"ZCODE_PLUGIN_ROOT", "ZCODE_ENV", "NODE_OPTIONS"} & env.keys()
+        owned = json.loads((Path(env["HOME"]) / ".zcode/cli/config.json").read_text())
+        assert owned["plugins"]["enabled"] is False
+        assert owned["mcp"]["servers"] == {}
+        assert personal_config.read_text() == original
+
+
 @pytest.mark.asyncio
 async def test_official_runtime_actual_stdio_handshake_and_process_cleanup(tmp_path: Path) -> None:
     config = ZCodeConfig.load()
@@ -94,6 +117,13 @@ async def test_official_runtime_actual_stdio_handshake_and_process_cleanup(tmp_p
     finally:
         await client.close()
     assert client.process is not None and client.process.returncode is not None
+    # ZCode uses Node's real homedir for CLI settings and its session database.
+    # Verify that the child, not the parent Python process, resolves it privately.
+    if Path(command[0]).stem == "node":
+        env = runtime_environment(tmp_path, provider=provider)
+        result = subprocess.run([command[0], "-e", "process.stdout.write(require('node:os').homedir())"],
+                                env=env, check=True, capture_output=True, text=True)
+        assert result.stdout == env["HOME"]
 
 
 @pytest.mark.asyncio

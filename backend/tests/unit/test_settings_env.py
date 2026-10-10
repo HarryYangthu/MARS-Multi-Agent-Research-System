@@ -31,3 +31,11 @@ def test_offline_and_custom_source_policy_remain_explicit_env_overrides(tmp_path
     configured = settings.Settings(_env_file=env_file)  # type: ignore[call-arg]
     assert not configured.mars_enable_network_tools
     assert configured.mars_web_search_allowlist == "openreview.net"
+
+
+def test_zcode_is_default_and_explicit_coding_engine_selection_is_preserved(tmp_path: Path) -> None:
+    assert settings.Settings.model_fields["mars_coding_backend"].default == "zcode"
+    env_file = tmp_path / ".env.local"
+    env_file.write_text("MARS_CODING_BACKEND=native_llm\n")
+    configured = settings.Settings(_env_file=env_file)  # type: ignore[call-arg]
+    assert configured.mars_coding_backend == "native_llm"

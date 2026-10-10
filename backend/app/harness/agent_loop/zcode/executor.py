@@ -11,7 +11,7 @@ from typing import Any
 
 from app.harness.agent_loop.executor import LoopInput, LoopResult, generation_fingerprint
 from app.harness.agent_loop.trace import LoopTrace, audit_trace, digest, canonical
-from app.harness.agent_loop.zcode.config import ZCodeConfig, check_user_extensions, model_config, runtime_environment, runtime_identity
+from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
 from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, wire_tools
 from app.harness.agent_loop.zcode.protocol import ZCodeClient, ZCodeProtocolError
 
@@ -34,8 +34,7 @@ class ZCodeLoopExecutor:
                 or request.final_schema is None):
             raise ValueError("ZCode requires a structured ReAct task; configured reviews must not be bypassed")
         command = self.config.resolve_command()
-        check_user_extensions()
-        fingerprint = digest({"backend": "zcode", "contract": 1,
+        fingerprint = digest({"backend": "zcode", "contract": 2,
             "generation": generation_fingerprint(request.config, request.provider),
             "messages": [m.to_wire() for m in request.messages], "tools": wire_tools(request),
             "final_schema": request.final_schema, "policy": request.policy.fingerprint_data(),

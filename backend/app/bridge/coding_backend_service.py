@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
-from app.harness.agent_loop.zcode.config import ZCodeConfig, check_user_extensions
+from app.harness.agent_loop.zcode.config import ZCodeConfig
 from app.settings import get_settings, set_runtime_env
 
 
@@ -13,7 +13,6 @@ def coding_backend_status() -> dict[str, Any]:
     reason = ""
     try:
         ZCodeConfig.load().resolve_command()
-        check_user_extensions()
         installed = True
     except (ValueError, OSError) as exc:
         reason = str(exc)

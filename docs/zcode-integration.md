@@ -9,7 +9,9 @@
 3. 在「设置 → 编码引擎」选择 ZCode。设置写入本机 `.env.local`，重启后保留；已有编码调用恢复时仍使用原引擎。
 4. 接入已有 Git 代码仓和资料，审核实验设计后开始编码。MARS 在原仓库中创建任务分支，ZCode 经 MARS 工具读取、修改和检查代码，完成后进入人工审核。
 
-CLI 和前端共享编码 Agent。CLI 可通过 `MARS_CODING_BACKEND=zcode` 选择该引擎；其他研究启动参数见 [CLI 文档](cli-research.md)。安装包的默认值仍为 `native_llm`，缺少 ZCode 时不会伪造完成或悄悄更换引擎。
+CLI 和前端共享编码 Agent，默认引擎为 `zcode`；已有 `.env.local` 中的明确选择仍然有效，可在设置页修改。其他研究启动参数见 [CLI 文档](cli-research.md)。缺少 ZCode 时明确提示安装，不会伪造完成或悄悄更换引擎。
+
+每次编码调用使用独立的 ZCode 配置、用户目录和存储，禁用个人插件、技能、记忆与自动子任务；MARS 的工具连接由会话明确提供。个人 ZCode 的插件和登录配置不会被修改。用户目录隔离适配 Unix 的 `HOME` 和 Windows 的 `USERPROFILE`，属于配置隔离，不是操作系统安全沙箱。旧调用保持原引擎；要将失败的原生编码改为 ZCode，应发起新的编码重试，而非恢复旧检查点。
 
 当前模型转发要求支持实际用量统计的 OpenAI 兼容 Provider；其他 Provider 会明确失败，不会绕过 MARS 预算直接调用。
 

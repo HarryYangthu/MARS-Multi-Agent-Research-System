@@ -109,7 +109,7 @@ class Settings(BaseSettings):
         "opencode",
         "codex",
         "claude_code",
-    ] = "native_llm"
+    ] = "zcode"
     mars_log_level: str = "INFO"
     mars_default_project: str = "pimc"
     mars_folder_projects_registry: str = ""

@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import json
-import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -56,25 +54,6 @@ class ZCodeConfig:
         raise ValueError("ZCode 未安装：请安装官方 CLI 或在 configs/zcode.yaml 设置 command；没有调用模型。")
 
 
-def check_user_extensions() -> None:
-    """The official CLI discovers user config; fail closed on executable extensions.
-
-    Session allowlists control tools, but cannot control startup hooks/plugins.
-    Until upstream exposes a no-user-config flag, reject those settings rather
-    than silently running user hooks in a MARS background task.
-    """
-    path = Path.home() / ".zcode/cli/config.json"
-    if not path.is_file():
-        return
-    data = json.loads(path.read_text())
-    if not isinstance(data, dict):
-        raise ValueError("ZCode user configuration is invalid")
-    for key in ("hooks", "plugins", "mcp"):
-        section = data.get(key)
-        if section:
-            raise ValueError("ZCode 的用户配置含启动扩展。请使用没有 hooks、plugins、MCP 的专用运行环境；MARS 未启动编码。")
-
-
 def model_config(model: str, max_tokens: int, endpoint: str, token: str, *, context_window: int) -> dict[str, Any]:
     """Only a short-lived loopback token is written, never the upstream API key."""
     return {"schemaVersion": 1, "config": {
@@ -97,8 +76,26 @@ def model_config(model: str, max_tokens: int, endpoint: str, token: str, *, cont
 
 
 def runtime_environment(root: Path, *, provider: dict[str, Any]) -> dict[str, str]:
+    """Own the CLI's home as well as provider/storage paths for this invocation.
+
+    ZCode's CLI config and session database use os.homedir(), independently
+    of ZCODE_HOME. A private child home prevents personal startup extensions
+    from loading, without inspecting or changing the user's ZCode settings.
+    This is configuration isolation, not an OS sandbox.
+    """
     from app.harness.runtime.git_runtime import git_child_environment
+    root = root.resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cli_home = root / "home"
+    cli_home.mkdir(exist_ok=True, mode=0o700)
+    cli_config = cli_home / ".zcode/cli/config.json"
+    # These are host permissions, not model-selectable runtime options. The
+    # only MCP server is supplied explicitly through session/create below.
+    atomic_json(cli_config, {"plugins": {"enabled": False, "dirs": [], "enabledPlugins": {}},
+                            "skills": {"enabled": False}, "memory": {"use": False},
+                            "features": {"subagent": False, "memory": False, "skill": False},
+                            "mcp": {"servers": {}}})
+    cli_config.chmod(0o600)
     builtin = root / "builtin.json"
     personal = root / "provider.json"
     atomic_json(builtin, {"schemaVersion": 1, "revision": 1, "config": {
@@ -107,7 +104,16 @@ def runtime_environment(root: Path, *, provider: dict[str, Any]) -> dict[str, st
                                                 "templateModelRules", "builtinProviderModelRules")}}})
     atomic_json(personal, provider)
     personal.chmod(0o600)
-    return {**git_child_environment(), "ZCODE_HOME": str(root), "ZCODE_DATA_BASE_DIR": str(root),
+    # Set home paths only in the child's explicit environment. Windows Node
+    # resolves homedir through USERPROFILE; Unix uses HOME. Application/XDG
+    # paths also stay private instead of inheriting ambient extension roots.
+    env = {key: value for key, value in git_child_environment().items()
+           if not key.upper().startswith("ZCODE_") and key.upper() not in {"NODE_OPTIONS", "NODE_PATH"}}
+    return {**env, "HOME": str(cli_home), "USERPROFILE": str(cli_home),
+            "APPDATA": str(cli_home / "AppData/Roaming"), "LOCALAPPDATA": str(cli_home / "AppData/Local"),
+            "XDG_CONFIG_HOME": str(cli_home / ".config"), "XDG_DATA_HOME": str(cli_home / ".local/share"),
+            "XDG_CACHE_HOME": str(cli_home / ".cache"),
+            "ZCODE_HOME": str(root), "ZCODE_DATA_BASE_DIR": str(root),
             "ZCODE_STORAGE_DIR": str(root / "storage"), "ZCODE_LOG_DIR": str(root / "logs"),
             "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE": str(builtin),
             "ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE": str(builtin),
