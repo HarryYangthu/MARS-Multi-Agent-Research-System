@@ -34,7 +34,8 @@ jobs:
           python-version: "3.11"
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip uv==0.11.1
+          uv lock --check
           pip install -e ".[dev]"
           pip install -e projects/synthetic_regression
       - name: Pytest

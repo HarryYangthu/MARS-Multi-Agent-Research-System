@@ -300,7 +300,7 @@ async def test_real_refused_connection_keeps_conservative_reservation_in_ancesto
     assert row["status"] == "failed" and not row["usage_complete"]
     assert row["charged_tokens"] == row["reserved_tokens"] and row["usage"] is None
     assert not (tmp_path / "child/resources/model_budget.v1.json").exists()
-    assert attempts == ["sdk_attempt_started", "sdk_attempt_failed"]
+    assert attempts == ["provider_request", "sdk_attempt_started", "sdk_attempt_failed"]
 
 
 def test_conversation_active_clock_excludes_idle_and_preserves_legacy_usage(tmp_path: Path) -> None:

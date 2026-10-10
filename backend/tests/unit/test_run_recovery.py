@@ -208,7 +208,7 @@ def test_deterministic_execution_retry_does_not_need_a_model_reservation(tmp_pat
     registry = AgentRegistry()
     registry.register('execution', ExecutionAgent())
     orch = Orchestrator(run_store=RunStore(tmp_path), registry=registry)
-    session = orch.create_session(RunRequest(task='deterministic recovery', project='regression',
+    session = orch.create_session(RunRequest(task='deterministic recovery', project='pimc',
         entrypoint='execution', standalone=True))
     session.graph.restore_state('execution', NodeState.FAILED)
     budget = RunModelBudget(session.run.root)
@@ -218,6 +218,6 @@ def test_deterministic_execution_retry_does_not_need_a_model_reservation(tmp_pat
             LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
         budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
     before = budget.path.read_bytes()
-    view = recovery_status(orch, session.run.run_id, project='regression')
+    view = recovery_status(orch, session.run.run_id, project='pimc')
     assert view['status'] == 'recoverable' and view['actions'][0]['action'] == 'retry'
     assert budget.path.read_bytes() == before

@@ -141,7 +141,9 @@ def test_recovery_preflights_named_inputs_and_retains_all_upstream_work(tmp_path
     source.write_text(dumps(metadata, metadata['human_summary']))
     failure = run.root / 'input/node_failures/execution.json'
     failure.parent.mkdir(exist_ok=True)
-    failure.write_text(json.dumps({'code': 'handoff_context_missing'}))
+    from app.harness.runtime.task_contract import FailureEnvelope
+    failure.write_text(FailureEnvelope(task_id=f'{run.run_id}:execution', code='handoff_context_missing',
+        message='Caller-authored missing-binding receipt; no simulation result.').model_dump_json())
     original = source.read_bytes()
     paths = set(run.root.rglob('*'))
     blocked = recovery_status(orch, run.run_id, project=run.project)
