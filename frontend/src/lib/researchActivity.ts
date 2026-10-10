@@ -1,6 +1,7 @@
 import type { ChatMessageView, RunDetail, RunActivityView, WorkLogView } from "./api";
+import type { StoredChatMessage } from "./chatMessageEditing";
 
-export type Activity = { id: string; timestamp: string; agent: string; title: string; detail: string; status: string; kind?: string; ended_at?: string | null; startsStage?: boolean; endsStage?: boolean };
+export type Activity = { id: string; timestamp: string; agent: string; title: string; detail: string; status: string; kind?: string; ended_at?: string | null; startsStage?: boolean; endsStage?: boolean; turn_id?: string | null };
 export type CommanderActivity = Omit<Activity, "agent" | "detail"> & { kind: string };
 export const agentLabel = (name: string): string => ({ commander: "总控", idea: "研究", idea_research: "调研", experiment: "实验设计", coding: "编码", execution: "执行", writing: "报告" }[name] || name);
 export const statusLabel = (state: string): string => ({ pending: "待开始", running: "处理中", waiting_review: "等待审核", waiting_feedback: "等待反馈", waiting_execution_confirmation: "等待核对仿真配置", approved: "已批准", done: "已完成", completed: "已完成", failed: "失败", error: "失败", interrupted: "已中断", paused: "已暂停", stopped: "已停止", cancelled: "已取消", skipped: "已跳过", created: "已创建", unknown: "状态未知", success: "成功", idle: "待命", rejected: "已驳回", blocked: "受阻" }[state] || state);
@@ -34,10 +35,29 @@ export function agentNodes(run: RunDetail): { key: string; state: string }[] {
   return run.graph.nodes.filter(node => node.kind === "agent").map(node => ({ key: node.key, state: effectiveNodeState(run.states[node.key] || node.state, run.status) }));
 }
 
-export type ConversationEntry = { kind: "message"; id: string; timestamp: string; message: ChatMessageView } | { kind: "activity"; id: string; timestamp: string; activity: Activity };
-export function conversationEntries(messages: ChatMessageView[], activities: Activity[]): ConversationEntry[] {
-  const entries: ConversationEntry[] = messages.filter(message => message.role !== "system").map((message,index) => ({ kind: "message", id: `message:${index}`, timestamp: message.timestamp, message }));
+export type ConversationEntry = { kind: "message"; id: string; timestamp: string; message: StoredChatMessage } | { kind: "activity"; id: string; timestamp: string; activity: Activity };
+export function conversationEntries(messages: StoredChatMessage[], activities: Activity[]): ConversationEntry[] {
+  const entries: ConversationEntry[] = messages.filter(message => message.role !== "system").map((message,index) => ({ kind: "message", id: message.id || `message:${index}`, timestamp: message.timestamp, message }));
   entries.push(...activities.map(activity => ({ kind: "activity" as const, id: activity.id, timestamp: activity.timestamp, activity })));
+  // A regenerated earlier reply has a new timestamp but keeps its original
+  // place in the dialogue. Its progress belongs to that turn, not the tail.
+  if (messages.some(message => message.role === "user" && message.id)) {
+    const ranks = new Map<string, number>();
+    const messageRanks = new Map<string, number>();
+    let rank = -1;
+    for (const entry of entries) {
+      if (entry.kind !== "message") continue;
+      if (entry.message.role === "user") { rank++; ranks.set(entry.message.turn_id || entry.id, rank); }
+      messageRanks.set(entry.id, rank);
+    }
+    const users = messages.filter(message => message.role === "user");
+    const ownerRank = (entry: ConversationEntry): number => {
+      if (entry.kind === "message") return messageRanks.get(entry.id) ?? -1;
+      const owner = entry.activity.turn_id || [...users].reverse().find(message => message.timestamp <= entry.timestamp)?.id;
+      return owner ? ranks.get(owner) ?? -1 : -1;
+    };
+    return entries.sort((a, b) => ownerRank(a) - ownerRank(b) || (Date.parse(a.timestamp) || 0) - (Date.parse(b.timestamp) || 0));
+  }
   return entries.sort((a,b) => (Date.parse(a.timestamp) || 0) - (Date.parse(b.timestamp) || 0));
 }
 

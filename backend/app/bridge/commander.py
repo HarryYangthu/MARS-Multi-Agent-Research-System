@@ -24,6 +24,7 @@ from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
+from app.bridge.conversation_edit import MessageEditRequest, finish_user_turn_edit, replace_user_turn
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
@@ -89,14 +90,18 @@ class Commander:
     # ----------------------------------------------------------- public API
 
     async def handle_user_message(
-        self, session: CommanderSession, text: str
+        self, session: CommanderSession, text: str, *, edit: MessageEditRequest | None = None,
     ) -> list[ChatMessage]:
         """Process one user turn; returns the messages emitted this turn."""
         if session.processing:
             raise ValueError("conversation is already processing a message")
+        retained = replace_user_turn(session, edit, text) if edit is not None else None
         session.processing = True
         try:
-            session.add(ChatMessage(role="user", content=text))
+            if edit is None:
+                user_message = ChatMessage(role="user", content=text)
+                session.active_turn_id = user_message.id
+                session.add(user_message)
             ctx = ToolContext(
                 orchestrator=self.orchestrator,
                 session=session,
@@ -163,6 +168,9 @@ class Commander:
 
         finally:
             session.interrupt_activities()
+            session.active_turn_id = None
+            if retained is not None:
+                finish_user_turn_edit(session, retained)
             get_session_store().persist(session)
 
     # ----------------------------------------------------------- decision

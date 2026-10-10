@@ -121,6 +121,7 @@ backend/app/bridge/cli_research_report.py
 backend/app/bridge/cli_research_service.py
 backend/app/bridge/code_workspace_resolver.py
 backend/app/bridge/commander.py
+backend/app/bridge/conversation_edit.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py
 backend/app/bridge/commander_observability.py
@@ -435,6 +436,7 @@ frontend/postcss.config.mjs
 frontend/scripts/clean-next-types.cjs
 frontend/scripts/context-workbench-smoke.ts
 frontend/scripts/message-draft-smoke.ts
+frontend/scripts/message-replacement-smoke.ts
 frontend/src/app/config/agents/page.tsx
 frontend/src/app/config/page.tsx
 frontend/src/app/config/yaml/page.tsx
@@ -500,6 +502,8 @@ frontend/src/features/project-pack/api.ts
 frontend/src/features/project-pack/schema.ts
 frontend/src/features/project-pack/types.ts
 frontend/src/lib/api.ts
+frontend/src/lib/chatMessageEditing.ts
+frontend/src/lib/researchActivity.ts
 frontend/src/lib/contextWorkbench.ts
 frontend/src/lib/dashboard.ts
 frontend/src/lib/dataSourceSelection.ts

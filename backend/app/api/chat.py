@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
 from app.bridge.commander_errors import conversation_failure
+from app.bridge.conversation_edit import MessageEditConflict, MessageEditRequest
 from app.bridge.commander_session import (
     ChatMessage,
     CommanderSession,
@@ -28,6 +29,11 @@ class MessagePayload(BaseModel):
     text: str = Field(..., min_length=1)
 
 
+class EditMessagePayload(MessagePayload):
+    expected_content: str
+    expected_timestamp: str
+
+
 class OpenRunConversationPayload(BaseModel):
     project: str = Field(..., min_length=1)
     experiment_id: str | None = Field(default=None, max_length=64)
@@ -38,6 +44,8 @@ class AutoModePayload(BaseModel):
 
 
 class MessageView(BaseModel):
+    id: str
+    turn_id: str | None = None
     role: str
     content: str
     timestamp: str
@@ -57,11 +65,14 @@ class ConversationView(BaseModel):
     metric_targets: dict[str, float]
     messages: list[MessageView]
     processing: bool = False
+    active_turn_id: str | None = None
     activities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _msg_view(m: ChatMessage) -> MessageView:
     return MessageView(
+        id=m.id,
+        turn_id=m.turn_id,
         role=m.role,
         content=m.content,
         timestamp=m.timestamp,
@@ -83,6 +94,7 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         metric_targets=dict(s.metric_targets),
         messages=[_msg_view(m) for m in s.messages],
         processing=s.processing,
+        active_turn_id=s.active_turn_id,
         activities=[asdict(item) for item in s.activities],
     )
 
@@ -146,6 +158,30 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         raise HTTPException(status_code=409, detail={
             'code': code, 'error': message, 'message_saved': True,
         }) from exc
+    finally:
+        store.persist(session)
+    return _conv_view(session)
+
+
+@router.put("/conversations/{conv_id}/messages/{message_id}", response_model=ConversationView)
+async def edit_message(conv_id: str, message_id: str, payload: EditMessagePayload) -> ConversationView:
+    store = get_session_store()
+    session = store.get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    if session.processing:
+        raise HTTPException(status_code=409, detail="conversation is already processing a message")
+    commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
+    try:
+        await commander.handle_user_message(session, payload.text, edit=MessageEditRequest(
+            message_id=message_id, expected_content=payload.expected_content, expected_timestamp=payload.expected_timestamp,
+        ))
+    except MessageEditConflict as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "message_saved": False}) from exc
+    except Exception as exc:
+        failure = conversation_failure(exc)
+        code, message = failure or ("regeneration_failed", "消息已替换，但重新生成回复失败。请重新读取对话核对进度；旧回复没有恢复，系统没有自动重试。")
+        raise HTTPException(status_code=409, detail={"code": code, "error": message, "message_saved": True}) from exc
     finally:
         store.persist(session)
     return _conv_view(session)

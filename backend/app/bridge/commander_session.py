@@ -6,7 +6,7 @@ any), the auto/semi-auto intervention flag, and any user-set metric targets
 
 Persisted under ``conversations/<conv_id>/`` (sibling of ``runs/``):
     session.json    — metadata + current state + linked run + auto_mode
-    messages.jsonl  — append-only dialogue + tool-call trace
+    messages.jsonl  — current dialogue + tool-call trace (edited turns replaced)
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.harness.runtime.conversation_state import ConversationState
 from app.settings import repo_root
@@ -51,6 +51,8 @@ class ChatMessage:
     tool_result: dict[str, Any] | None = None
     # Conversation FSM state at the moment this message was emitted:
     state: str | None = None
+    id: str = field(default_factory=lambda: uuid4().hex)
+    turn_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -66,6 +68,7 @@ class ConversationActivity:
     timestamp: str = field(default_factory=_now)
     status: str = "running"
     ended_at: str | None = None
+    turn_id: str | None = None
 
 
 @dataclass
@@ -86,9 +89,11 @@ class CommanderSession:
     context_compaction: dict[str, Any] = field(default_factory=dict)
     activities: list[ConversationActivity] = field(default_factory=list)
     processing: bool = False
+    active_turn_id: str | None = None
+    edit_cursor: int | None = field(default=None, repr=False)
 
     def begin_activity(self, kind: str, title: str) -> ConversationActivity:
-        activity = ConversationActivity(id=uuid4().hex, kind=kind, title=title)
+        activity = ConversationActivity(id=uuid4().hex, kind=kind, title=title, turn_id=self.active_turn_id)
         self.activities.append(activity)
         return activity
 
@@ -104,13 +109,18 @@ class CommanderSession:
 
     def add(self, msg: ChatMessage) -> ChatMessage:
         msg.state = self.state.value
-        self.messages.append(msg)
-        self._maybe_rollup()
+        msg.turn_id = msg.turn_id or self.active_turn_id
+        if self.edit_cursor is None:
+            self.messages.append(msg)
+            self._maybe_rollup()
+        else:
+            self.messages.insert(self.edit_cursor, msg)
+            self.edit_cursor += 1
         self.updated_at = _now()
         return msg
 
     def context_messages(self) -> list[ChatMessage]:
-        return list(self.messages)
+        return list(self.messages if self.edit_cursor is None else self.messages[:self.edit_cursor])
 
     def to_meta(self) -> dict[str, Any]:
         return {
@@ -131,6 +141,7 @@ class CommanderSession:
             "summary": next((research_summary(m.content) for m in self.messages if m.role == "user"), ""),
             "activities": [asdict(item) for item in self.activities],
             "processing": self.processing,
+            "active_turn_id": self.active_turn_id,
         }
 
     def _maybe_rollup(self) -> None:
@@ -229,7 +240,7 @@ class CommanderSessionStore:
         messages: list[ChatMessage] = []
         msg_path = d / "messages.jsonl"
         if msg_path.exists():
-            for line in msg_path.read_text(encoding="utf-8").splitlines():
+            for index, line in enumerate(msg_path.read_text(encoding="utf-8").splitlines()):
                 line = line.strip()
                 if not line:
                     continue
@@ -246,6 +257,8 @@ class CommanderSessionStore:
                         tool_args=raw.get("tool_args"),
                         tool_result=raw.get("tool_result"),
                         state=raw.get("state"),
+                        id=str(raw.get("id") or uuid5(NAMESPACE_URL, f"mars:{conv_id}:message:{index}:{raw.get('timestamp', '')}").hex),
+                        turn_id=raw.get("turn_id"),
                     )
                 )
         try:
@@ -277,6 +290,17 @@ class CommanderSessionStore:
         )
         # A process restart cannot imply that an old provider/tool call is still live.
         session.interrupt_activities()
+        # Legacy records gain stable turn identities without changing their text.
+        turn_id: str | None = None
+        for message in session.messages:
+            if message.role == "user":
+                turn_id = message.id
+            message.turn_id = message.turn_id or turn_id
+        users = [message for message in session.messages if message.role == "user"]
+        for activity in session.activities:
+            if activity.turn_id is None:
+                owner = next((message for message in reversed(users) if message.timestamp <= activity.timestamp), None)
+                activity.turn_id = owner.id if owner else None
         return session
 
 
