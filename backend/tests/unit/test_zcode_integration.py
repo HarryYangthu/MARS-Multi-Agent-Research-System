@@ -22,6 +22,7 @@ from app.harness.agent_loop.zcode.executor import ZCodeLoopExecutor, session_ide
 from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, stream_envelope
 from app.harness.agent_loop.zcode.protocol import ZCodeClient
 from app.harness.llm.openai_provider import LocalVllmProvider
+from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
 from app.harness.project_workspace import open_folder
 from app.harness.tools.git_branch import git
@@ -182,3 +183,47 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
             finally:
                 await gateway.close()
         assert git(source, "show", "baseline:main.py") == "VALUE = 1"
+
+
+@pytest.mark.asyncio
+async def test_real_gateway_reports_shared_budget_block_without_sending_a_model_request(tmp_path: Path) -> None:
+    root = tmp_path / "run"
+    resource_dir = root / "resources"
+    resource_dir.mkdir(parents=True)
+    configuration = RunModelBudget(root).configuration
+    configuration["limits"]["max_model_requests"] = 1
+    (resource_dir / "model_budget.policy.yaml").write_text(yaml.safe_dump(configuration))
+    budget = RunModelBudget(root)
+    config = LLMConfig("local_vllm", "unavailable", max_tokens=16, max_retries=0)
+    reservation = budget.reserve([Message("user", "Actual reservation")], config, {"invocation_id": "old"})
+    budget.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    before = budget.path.read_bytes()
+
+    async def validate(text: str, history: list[dict[str, Any]]) -> list[str]:
+        return ["No candidate admission in this boundary test"]
+
+    request = LoopInput(messages=[Message("user", "Must be blocked before network")],
+        provider=LocalVllmProvider(base_url="http://127.0.0.1:1"), config=config,
+        registry=get_registry(), tool_context=ToolContext("budget-check", "unbound", "coding",
+            extra={"run_root": str(root)}), tools=(), policy=AgentLoopPolicy(),
+        trace_root=root / "trace", validate=validate, correlation={"invocation_id": "new"})
+    zconfig = ZCodeConfig.load()
+    state = ZCodeLoopExecutor(zconfig)._state(request, "budget-boundary")
+    gateway = ZCodeGateway(request, zconfig, "private-budget-token", state, LoopTrace(request.trace_root, "full"))
+    await gateway.start()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(gateway.endpoint + "/v1/chat/completions",
+                headers={"Authorization": "Bearer private-budget-token"},
+                json={"messages": [{"role": "user", "content": "Not admitted"}]})
+        assert response.status_code == 429
+        error = response.json()["error"]
+        assert error["type"] == "mars_resource_budget"
+        assert error["request_sent"] is False
+        assert "used=1, limit=1, required=1" in error["message"]
+        assert state["status"] == "blocked" and state["usage_complete"] is True
+        assert state["counts"]["sdk_attempts"] == state["counts"]["model_responses"] == 0
+        assert budget.path.read_bytes() == before
+    finally:
+        await gateway.close()
+        await request.provider.close()

@@ -12,6 +12,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 import pytest
+import yaml
 
 from app.harness.llm.accounting import (ModelConcurrencyBusy, ResourceBudgetError,
     ResourceReconciliationRequired, RunModelBudget, guarded_complete, run_resource_scope)
@@ -110,6 +111,38 @@ def test_policy_drift_and_persisted_policy_tampering_fail_closed(tmp_path: Path)
     owner.path.write_text(json.dumps(original))
     with pytest.raises(ResourceBudgetError, match="configuration is corrupt"):
         owner.reserve(_messages(), _config(), {})
+
+
+def test_host_run_policy_requires_revision_and_preserves_history_and_other_runs(tmp_path: Path) -> None:
+    root = tmp_path / "retried"
+    owner = RunModelBudget(root)
+    original_policy = owner.configuration
+    reservation = owner.reserve(_messages(), _config(), {"invocation_id": "original"})
+    owner.settle(reservation, usage=None, complete=False, outcome="cancelled")
+    original = owner.recovery_snapshot()
+    revised_policy = json.loads(json.dumps(original_policy))
+    revised_policy["limits"]["max_model_requests"] += 2
+    (root / "resources/model_budget.policy.yaml").write_text(yaml.safe_dump(revised_policy))
+    updated = RunModelBudget(root)
+    with pytest.raises(ResourceBudgetError, match="policy changed"):
+        updated.recovery_snapshot()
+    updated.begin_revision(invocation_id="fresh", reason="User requested a bounded coding retry")
+    state = updated.recovery_snapshot()
+    assert state["requests"] == original["requests"]
+    assert state["configuration"] == revised_policy
+    assert state["revisions"][-1]["previous_configuration"] == original_policy
+    assert RunModelBudget(tmp_path / "another-run").configuration == original_policy
+    assert RunModelBudget(root).recovery_snapshot() == state
+
+
+def test_host_run_policy_cannot_follow_a_symlink(tmp_path: Path) -> None:
+    policy = tmp_path / "external.yaml"
+    policy.write_text(yaml.safe_dump(_policy()))
+    resource_dir = tmp_path / "run/resources"
+    resource_dir.mkdir(parents=True)
+    (resource_dir / "model_budget.policy.yaml").symlink_to(policy)
+    with pytest.raises(ResourceBudgetError, match="symlink"):
+        RunModelBudget(tmp_path / "run")
 
 
 def test_explicit_revision_adopts_policy_and_renews_time_without_refunding_usage(tmp_path: Path) -> None:

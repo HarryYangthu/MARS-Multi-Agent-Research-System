@@ -14,7 +14,7 @@ from app.harness.agent_loop.executor import LoopInput
 from app.harness.agent_loop.native_protocol import native_specs, wire_name
 from app.harness.agent_loop.trace import LoopTrace, canonical, atomic_json
 from app.harness.agent_loop.zcode.config import ZCodeConfig
-from app.harness.llm.accounting import guarded_complete
+from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.provider_base import Completion, Delta, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import dumps
 
@@ -197,7 +197,7 @@ class ZCodeGateway:
                 # tool metadata and any private history required by the SDK.
                 response = await guarded_complete(WireProvider(self.request.provider, payload),
                     [Message("user", canonical(payload))], config,
-                    run_root=run_root(self.request))
+                    run_root=run_root(self.request), correlation=self.request.correlation)
                 result = response.raw["wire_response"]
                 counts["model_responses"] += 1
                 usage = result.get("usage")
@@ -220,6 +220,14 @@ class ZCodeGateway:
                 self.state["usage_complete"] = False
                 self.save()
                 raise
+            except ResourceBudgetError as exc:
+                self.state["pending"] = None
+                # Admission failed before forwarding; it is neither an upstream
+                # model failure nor evidence of unknown model usage.
+                self.trace.emit("resource_budget_blocked", {"message": str(exc), **exc.reason})
+                self.stop("blocked", "ZCode model admission: " + str(exc))
+                return web.json_response({"error": {"message": str(exc),
+                    "type": "mars_resource_budget", **exc.reason}}, status=429)
             except Exception as exc:
                 self.state["pending"] = None
                 self.state["usage_complete"] = False

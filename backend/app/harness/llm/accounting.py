@@ -162,7 +162,15 @@ class RunModelBudget:
         self.path = self.root / "resources" / "model_budget.v1.json"
         self.lock_path = self.path.with_name("." + self.path.name + ".lock")
         if configuration is None:
-            raw = yaml.safe_load((repo_root() / "configs/resources.yaml").read_text())
+            # A host-authored per-run policy permits a bounded, explicitly
+            # requested retry without increasing the defaults for other runs.
+            # Existing ledgers still require begin_revision before accepting
+            # a different policy; historical charges are never reset.
+            override = self.root / "resources/model_budget.policy.yaml"
+            if override.is_symlink():
+                raise ResourceBudgetError("run resource policy cannot be a symlink")
+            policy_path = override if override.is_file() else repo_root() / "configs/resources.yaml"
+            raw = yaml.safe_load(policy_path.read_text())
         else:
             raw = dict(configuration)
         if not isinstance(raw, dict) or raw.get("schema") != "runtime.resources.v1":
