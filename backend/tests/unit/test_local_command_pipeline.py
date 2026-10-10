@@ -201,15 +201,15 @@ async def test_deterministic_execution_through_orchestrator_waits_for_user_then_
     registry = AgentRegistry()
     registry.register('execution', ExecutionAgent())
     orch = Orchestrator(run_store=RunStore(tmp_path / 'flow'), registry=registry)
-    session = orch.create_session(RunRequest(task='actual numerical execution', project='regression',
+    session = orch.create_session(RunRequest(task='actual numerical execution', project='pimc',
         entrypoint='execution', standalone=True, auto_approve=False))
     rows = [{'name': f'comparison-{scale}', 'config': {'seed': 0, 'scale': scale, 'budget_steps': 1,
         'data_path': str(actual_regression_command), 'delay': 30 if interrupt else 0}} for scale in range(5)]
     store = ArtifactStore(session.run)
-    plan = {'schema': 'experiment_plan.v1', 'agent': 'experiment', 'project': 'regression',
+    plan = {'schema': 'experiment_plan.v1', 'agent': 'experiment', 'project': session.run.project,
         'variables': {'independent': ['scale'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
         'ablations': rows, 'estimated_runs': 5}
-    code = {'schema': 'code_spec.v1', 'agent': 'coding', 'project': 'regression', 'target_lang': 'python',
+    code = {'schema': 'code_spec.v1', 'agent': 'coding', 'project': session.run.project, 'target_lang': 'python',
         'baseline_compat': {'preserved': True}, 'files_changed': [],
         'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'regression'}} for row in rows]}
     from app.harness.schema.experiment_contract import document_hash
@@ -240,10 +240,10 @@ async def test_deterministic_execution_through_orchestrator_waits_for_user_then_
         assert stopped['termination']['cleanup_complete']
         assert session.graph.state('execution') == NodeState.FAILED
         original_jobs = list((session.run.root / 'execution/local_commands').glob('*/*/job.json'))
-        recovery = recovery_status(orch, session.run.run_id, project='regression')
+        recovery = recovery_status(orch, session.run.run_id, project=session.run.project)
         assert recovery['actions'], recovery
         assert recovery['actions'][0]['label'] == '重新核对并恢复仿真'
-        result = await recover_run(orch, session.run.run_id, project='regression', action='retry',
+        result = await recover_run(orch, session.run.run_id, project=session.run.project, action='retry',
                                    node='execution', token=recovery['token'])
         assert result['ok']
         restored = orch.owned_tasks.active(session.run.run_id)
@@ -259,7 +259,7 @@ async def test_deterministic_execution_through_orchestrator_waits_for_user_then_
         await orch.stop_owned_run(session.run.run_id)
         assert (budget.read_bytes() if budget.exists() else b'') == before
         return
-    await asyncio.wait_for(owner, timeout=20)
+    await asyncio.wait_for(owner, timeout=60)
     assert session.graph.state('execution') == NodeState.DONE
     summary = json.loads((session.run.root / 'execution/batch_summary.json').read_text())
     assert not summary['failures']

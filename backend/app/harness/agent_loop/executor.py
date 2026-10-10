@@ -109,10 +109,9 @@ def budget_message(policy: AgentLoopPolicy, counts: dict[str, int]) -> Message:
                  "tool_calls": policy.remaining_tool_calls(counts["tool_dispatches"]),
                  "validation_repairs": None if policy.completion_driven else max(0, policy.max_validation_repairs - counts["validation_repairs"])}
     message = remaining_budget_message(remaining)
-    return Message(message.role, message.content +
-        "\nThese are local loop counters only. The shared run request/time/cost limits "
-        "still apply to every Agent and child task, including completion-driven loops. "
-        "Never interpret an unlimited local counter as permission to bypass the shared run budget.")
+    from app.harness.agent_loop.review_plan import SHARED_BUDGET_NOTICE
+
+    return Message(message.role, message.content + SHARED_BUDGET_NOTICE)
 
 
 def permits_fresh_read(policy: ToolPolicy) -> bool:

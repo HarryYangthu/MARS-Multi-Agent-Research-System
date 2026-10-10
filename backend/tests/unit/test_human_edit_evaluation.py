@@ -89,9 +89,10 @@ async def test_edit_after_restart_is_audited_and_stale_approval_stays_blocked(tm
     from app.bridge.orchestrator import Orchestrator, RunRequest
     store = RunStore(tmp_path)
     orch = Orchestrator(run_store=store, registry=AgentRegistry())
-    session = orch.create_session(RunRequest(task='review-without-memory', project='edit-check',
+    session = orch.create_session(RunRequest(task='review-without-memory', project='pimc',
         entrypoint='experiment', standalone=True))
-    base = ArtifactStore(session.run).write(text=dumps(metadata(), 'An authored protocol, not an executed experiment.'))
+    base = ArtifactStore(session.run).write(text=dumps({**metadata(), 'project': session.run.project},
+        'An authored protocol, not an executed experiment.'))
     original = base.path.read_bytes()
     previous = dependencies._run_store, dependencies._orchestrator
     dependencies._run_store, dependencies._orchestrator = store, orch

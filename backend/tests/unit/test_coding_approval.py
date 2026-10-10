@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+import json
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -157,7 +158,7 @@ async def test_real_code_checks_use_the_selected_git_in_child_commands(
         result = await get_registry().dispatch("code.test_runner", {"command_id": "pytest_quick"},
             ToolContext(run_id=session.run.run_id, project=session.run.project, agent="coding",
                         extra={"run_root": str(session.run.root)}))
-    assert result.ok, result.output
+    assert result.ok, json.dumps(result.output, indent=2)
     assert "1 passed" in str(result.output)
 
 

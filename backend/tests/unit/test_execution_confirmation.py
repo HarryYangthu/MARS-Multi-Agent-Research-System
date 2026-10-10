@@ -48,7 +48,11 @@ async def test_real_execution_preflight_failure_persists_for_recovery_after_relo
     view = execution_preview(session.run, 'execution')
     save_confirmation(session.run, 'execution', view['token'])
     session.graph.restore_state('execution', NodeState.APPROVED)
-    await orch._complete_approved_node(session, 'execution')
+    from app.bridge.tensorboard_service import shutdown_tensorboard
+    try:
+        await orch._complete_approved_node(session, 'execution')
+    finally:
+        await shutdown_tensorboard()
     assert session.graph.state('execution') == NodeState.FAILED
     failure_path = session.run.root / 'input/node_failures/execution.json'
     failure = FailureEnvelope.model_validate_json(failure_path.read_text())

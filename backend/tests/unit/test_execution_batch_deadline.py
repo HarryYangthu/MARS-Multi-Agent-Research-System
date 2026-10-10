@@ -64,7 +64,7 @@ def test_deadline_fork_retains_gates_permissions_and_global_defaults() -> None:
 async def test_real_process_timeout_has_a_cause_and_acknowledged_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pid_path = tmp_path / 'pid.txt'
     script = tmp_path / 'long_process.py'
-    script.write_text(f'import os, time\nfrom pathlib import Path\nPath({str(pid_path)!r}).write_text(str(os.getpid()))\ntime.sleep(10)\n')
+    script.write_text(f'import os, time\nfrom pathlib import Path\nPath({str(pid_path)!r}).write_text(str(os.getpid()))\ntime.sleep(30)\n')
     argv = [sys.executable, str(script)]
     execution_path = tmp_path / 'execution.yaml'
     execution_path.write_text(yaml.safe_dump({'execution': {'command_timeout_seconds': 15,
@@ -78,12 +78,14 @@ async def test_real_process_timeout_has_a_cause_and_acknowledged_cleanup(tmp_pat
     monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
     reset_settings_cache()
     try:
-        registry = get_registry().with_timeout('execution.simulation_runner', 0.5)
+        # Leave room for actual interpreter startup on loaded macOS/Windows
+        # hosts while keeping the dispatch deadline shorter than the command.
+        registry = get_registry().with_timeout('execution.simulation_runner', 5)
         result = await registry.dispatch('execution.simulation_runner',
             {'backend': 'local_command', 'command_id': 'real-delay'},
             ToolContext(run_id='real-timeout', project='regression', agent='bridge', extra={'run_root': str(tmp_path)}))
         assert result.status == 'timeout' and not result.ok
-        assert '0.5s' in str(result.error)
+        assert '5s' in str(result.error)
         assert result.metadata['timeout_scope'] == 'tool_dispatch'
         pid = int(pid_path.read_text())
         with pytest.raises(ProcessLookupError):

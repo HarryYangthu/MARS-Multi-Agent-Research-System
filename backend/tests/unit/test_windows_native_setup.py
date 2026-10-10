@@ -36,6 +36,9 @@ def test_routing_updates_focused_and_pipeline_roles_without_changing_tools(provi
     changed = config.route_agents(original, provider=provider, model_name="chosen-model",
                                   endpoint="http://127.0.0.1:1234/v1", key_env="WINDOWS_API_KEY")
     for role in ("idea", "idea_author", "idea_reviewer", "experiment", "coding", "execution", "writing"):
+        if original[role].get("runtime_mode") == "deterministic":
+            assert changed[role] == original[role] and "model" not in changed[role]
+            continue
         assert changed[role]["model"]["provider"] == provider
         assert changed[role]["model"]["model"] == "chosen-model"
         assert changed[role]["model"]["base_url_env"] == "MARS_WINDOWS_API_BASE_URL"

@@ -9,7 +9,7 @@ import httpx
 import pytest
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-from app.bridge.tensorboard_service import TensorBoardManager, scope_key
+from app.bridge.tensorboard_service import TensorBoardManager, get_tensorboard_manager, scope_key, shutdown_tensorboard
 from app.execution.tensorboard_writer import ExecutionScalars, ScalarWriter
 from app.storage.run_store import RunStore
 
@@ -84,6 +84,22 @@ async def test_missing_directory_cannot_launch_a_viewer(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         await manager.ensure("pimc", None, [tmp_path / "missing"])
     assert manager.sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_other_application_loop_cannot_close_owned_tensorboard(tmp_path: Path) -> None:
+    manager = get_tensorboard_manager()
+    try:
+        session = await manager.ensure("pimc", "loop-ownership", [tmp_path])
+        await asyncio.to_thread(asyncio.run, shutdown_tensorboard())
+        assert get_tensorboard_manager() is manager
+        assert session.process.returncode is None
+        async with httpx.AsyncClient(trust_env=False) as client:
+            response = await client.get(f"http://127.0.0.1:{session.port}{session.prefix}/data/environment")
+        assert response.status_code == 200
+    finally:
+        await shutdown_tensorboard()
+    assert session.process.returncode is not None
 
 
 @pytest.mark.asyncio
