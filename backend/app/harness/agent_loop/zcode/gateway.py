@@ -21,6 +21,20 @@ from app.harness.schema.frontmatter_parser import dumps
 WireCall = Callable[[dict[str, Any], LLMConfig], Awaitable[dict[str, Any]]]
 
 
+def upstream_payload(payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
+    """Buffer upstream output for accounting while preserving SDK tool history."""
+    result = {**payload, "stream": False, "model": config.model, "max_tokens": config.max_tokens}
+    # DeepSeek rejects streaming-only options when stream is false. Usage still
+    # arrives in the complete response before stream_envelope forwards it.
+    result.pop("stream_options", None)
+    result.pop("max_completion_tokens", None)
+    if config.thinking_enabled is not None:
+        result["thinking"] = {"type": "enabled" if config.thinking_enabled else "disabled"}
+    if config.reasoning_effort:
+        result["reasoning_effort"] = config.reasoning_effort
+    return result
+
+
 class WireProvider(LLMProvider):
     """Budget-visible real forwarding provider, not another model configuration."""
     budget_attempts_observable = True
@@ -38,12 +52,7 @@ class WireProvider(LLMProvider):
         return self.selected.base_url
 
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
-        payload = {**self.payload, "stream": False, "model": config.model, "max_tokens": config.max_tokens}
-        payload.pop("max_completion_tokens", None)
-        if config.thinking_enabled is not None:
-            payload["thinking"] = {"type": "enabled" if config.thinking_enabled else "disabled"}
-        if config.reasoning_effort:
-            payload["reasoning_effort"] = config.reasoning_effort
+        payload = upstream_payload(self.payload, config)
         response = await self.method(payload, config)
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
