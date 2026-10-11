@@ -8,6 +8,49 @@ import pytest
 from app.harness.llm.failure_hint import checkpoint_failure_hint, provider_failure_hint
 
 
+@pytest.mark.parametrize('phase,label', [('act', '方案生成'), ('reflect', '独立评审')])
+def test_truncation_hint_uses_terminal_metadata_without_exposing_content(phase: str, label: str) -> None:
+    # Rendering inputs only, not a simulated provider or execution.
+    reason = {'code': 'output_truncated', 'finish_reason': 'length', 'empty_final': True}
+    events: list[dict[str, Any]] = [
+        {'kind': 'model_request', 'phase': phase, 'provider': 'deepseek', 'max_tokens': 8192,
+         'visible': 'PRIVATE PROMPT'},
+        {'kind': 'sdk_attempt_succeeded'},
+        {'kind': 'model_response', 'rejected': True, 'reason': reason},
+        {'kind': 'model_error', 'reason': reason, 'message': 'PRIVATE ERROR'},
+        {'kind': 'finished', 'status': 'model_error'},
+    ]
+    hint = provider_failure_hint(events, status='model_error')
+    assert label in hint and 'DeepSeek' in hint and '8192 token' in hint and '被截断' in hint
+    assert 'PRIVATE' not in hint
+    assert provider_failure_hint(events, status='passed') == ''
+    for following in [{'kind': 'completion_recovery'}, {'kind': 'model_response'},
+                      {'kind': 'model_request'}, {'kind': 'sdk_attempt_started'}]:
+        assert provider_failure_hint(events + [following], status='model_error') == ''
+
+
+def test_truncation_hint_requires_a_matching_rejected_response() -> None:
+    reason = {'code': 'output_truncated', 'finish_reason': 'length'}
+    request = {'kind': 'model_request', 'phase': 'reflect', 'provider': 'deepseek'}
+    error = {'kind': 'model_error', 'reason': reason}
+    assert provider_failure_hint([request, error], status='model_error') == ''
+    assert provider_failure_hint([request, {'kind': 'model_response', 'rejected': False,
+                                           'reason': reason}, error], status='model_error') == ''
+
+
+def test_actual_truncation_archive_explains_review_without_modifying_evidence() -> None:
+    configured = os.environ.get('MARS_TEST_TRUNCATION_TRACE')
+    if not configured:
+        pytest.skip('requires a real completed truncation trace')
+    import hashlib
+    root = Path(configured)
+    path = root / 'events.jsonl'
+    before = hashlib.sha256(path.read_bytes()).digest()
+    hint = checkpoint_failure_hint(root, status='model_error')
+    assert '独立评审' in hint and '8192 token' in hint and '被截断' in hint
+    assert hashlib.sha256(path.read_bytes()).digest() == before
+
+
 def test_timeout_hint_requires_a_terminal_timeout_and_keeps_outcome_uncertainty() -> None:
     events: list[dict[str, Any]] = [{'kind': 'model_request', 'provider': 'zhipu'},
               {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APITimeoutError'}},

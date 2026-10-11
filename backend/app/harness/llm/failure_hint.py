@@ -25,6 +25,10 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ''
     index = requests[-1]
     provider = events[index].get('provider')
+    tail = events[index + 1:]
+    hint = _truncation_hint(events[index], tail)
+    if hint:
+        return hint
     attempts = [event for event in events[index + 1:]
                 if event.get('kind') in {'sdk_attempt_failed', 'sdk_attempt_succeeded'}]
     if not attempts or attempts[-1].get('kind') != 'sdk_attempt_failed':
@@ -41,6 +45,30 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ('GLM 账户余额不足或无可用资源包（1113）。请补充额度或在设置中更换可用 API 后继续恢复；'
                 '进度和累计调用预算已保留，系统不会自动重复调用。')
     return ''
+
+
+def _truncation_hint(request: dict[str, Any], tail: list[dict[str, Any]]) -> str:
+    terminal = [event for event in tail if event.get('kind') in {
+        'model_error', 'model_response', 'completion_recovery', 'sdk_attempt_started'}]
+    if not terminal or terminal[-1].get('kind') != 'model_error':
+        return ''
+    reason = terminal[-1].get('reason')
+    if (not isinstance(reason, dict) or reason.get('code') != 'output_truncated'
+            or reason.get('finish_reason') != 'length'):
+        return ''
+    responses = [event for event in tail if event.get('kind') == 'model_response']
+    if (not responses or responses[-1].get('rejected') is not True
+            or responses[-1].get('reason') != reason):
+        return ''
+    review = request.get('phase') == 'reflect'
+    phase = '独立评审' if review else '方案生成'
+    provider = {'deepseek': 'DeepSeek', 'zhipu': 'GLM'}.get(str(request.get('provider')), '模型')
+    limit = request.get('max_tokens')
+    budget = f'（本次配置为 {limit} token）' if type(limit) is int and limit > 0 else ''
+    output = '未取得完整评审结论' if review else '未取得完整输出'
+    return (f'{phase}阶段的 {provider} 回复达到长度上限后被截断{budget}，{output}。'
+            '推理内容也占用输出额度；请提高对应 Agent 的输出上限并重启服务，再重试当前阶段。'
+            '已有进度和草稿保留，仍需完成校验与独立评审。')
 
 
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:

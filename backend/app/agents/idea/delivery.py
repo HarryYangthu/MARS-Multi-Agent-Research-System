@@ -158,6 +158,10 @@ def progress_sink(request: RunRequest, invocation: str) -> ProgressSink:
 
     async def emit(event: dict[str, Any]) -> None:
         message = progress_message(event)
+        if event['kind'] == 'finished' and event.get('status') in {'model_error', 'protocol_exhausted'}:
+            from app.harness.llm.failure_hint import checkpoint_failure_hint
+            trace_root = target.parent.parent / 'agent_traces' / 'idea' / invocation
+            message = checkpoint_failure_hint(trace_root, status=event['status']) or message
         if event["kind"] == "started":
             labels = {"background": "研究背景", "baseline_code": "基线代码", "data_description": "数据说明",
                       "analysis_results": "已有分析", "metric_definition": "指标定义", "literature_notes": "参考资料"}
