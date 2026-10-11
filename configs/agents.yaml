@@ -162,6 +162,8 @@ experiment:
   debate:
     enabled: false
   loop:
+    protocol: native_tools
+    native_observation_history: true
     input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8

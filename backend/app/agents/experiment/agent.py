@@ -11,6 +11,7 @@ class ExperimentAgent(BaseAgent):
     name = "experiment"
     project_knowledge_enabled = True
     output_schema = "experiment_plan.v1"
+    native_structured_delivery = True
     agent_brief = (
         "你负责把假设转化为可执行的实验方案。先用 knowledge.baseline_match 检查是否有"
         "可复用的历史 run,用 knowledge.experiment_memory 借鉴既有实验设计,再定义自变量/"
