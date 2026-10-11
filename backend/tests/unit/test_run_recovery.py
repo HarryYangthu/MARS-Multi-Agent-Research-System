@@ -111,6 +111,8 @@ def test_unowned_running_stage_cannot_be_restarted_without_checkpoint(tmp_path: 
     session.graph.restore_state('idea', NodeState.RUNNING)
     view = recovery_status(orch, session.run.run_id, project='pimc')
     assert view['status'] == 'blocked' and not view['actions']
+    assert '当前服务未持有' in view['message']
+    assert session.graph.state('idea') == NodeState.RUNNING
 
 
 def test_unknown_model_reservation_is_not_replayed_or_refunded(tmp_path: Path) -> None:

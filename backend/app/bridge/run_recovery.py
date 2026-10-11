@@ -213,6 +213,9 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             return finish('recoverable', provider_hint)
         return finish('recoverable', '从检查点继续；重试会重新执行当前阶段并保留原任务记录。'
                       if resumable else '检查点不能直接续跑，可在原任务中重试失败阶段。')
+    if 'running' in states.values():
+        return finish('blocked', '历史记录仍标为执行中，但当前服务未持有此任务的运行进程。'
+                      '请先核对原实验进程和作业回执；当前检查点不能直接续跑，系统未重复启动。')
     return finish('blocked', '当前检查点无法安全恢复，请打开任务详情核对执行记录。')
 
 

@@ -593,7 +593,7 @@ def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
 
 
 @router.get("/{run_id}/observability")
-async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
+def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -601,7 +601,7 @@ async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]
 
 
 @router.get("/{run_id}/health")
-async def get_run_health(run_id: str) -> dict[str, Any]:
+def get_run_health(run_id: str) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
