@@ -15,7 +15,7 @@ from app.harness.agent_loop.native_protocol import native_specs, wire_name
 from app.harness.agent_loop.trace import LoopTrace, canonical, atomic_json
 from app.harness.agent_loop.zcode.config import ZCodeConfig
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
-from app.harness.llm.provider_base import Completion, Delta, LLMConfig, LLMProvider, Message
+from app.harness.llm.provider_base import Completion, Delta, LLMCompletionError, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import dumps
 
 WireCall = Callable[[dict[str, Any], LLMConfig], Awaitable[dict[str, Any]]]
@@ -54,6 +54,7 @@ class WireProvider(LLMProvider):
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
         payload = upstream_payload(self.payload, config)
         response = await self.method(payload, config)
+        validate_wire_completion(response, provider=self.name, model=config.model)
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ValueError("Upstream completion has no choices")
@@ -66,6 +67,39 @@ class WireProvider(LLMProvider):
         result = await self.complete(messages, config)
         reason = result.raw["wire_response"]["choices"][0].get("finish_reason")
         yield Delta(text=result.text, finish_reason=reason, usage=result.raw.get("usage"))
+
+
+def validate_wire_completion(response: dict[str, Any], *, provider: str, model: str) -> None:
+    """Reject incomplete output before the external runtime can execute tools."""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("Upstream completion has no choices")
+    for choice in choices:
+        message = choice.get("message", {})
+        empty = not (str(message.get("content") or "").strip() or message.get("tool_calls"))
+        finish = choice.get("finish_reason")
+        if finish == "length" or empty:
+            usage = response.get("usage")
+            raise LLMCompletionError(code="output_truncated" if finish == "length" else "empty_final_content",
+                provider=provider, model=model, finish_reason=finish, empty_final=empty,
+                usage=usage if isinstance(usage, dict) else None)
+
+
+def record_completion_usage(state: dict[str, Any], usage: Any) -> None:
+    if isinstance(usage, dict):
+        for key in state["usage"]:
+            state["usage"][key] += int(usage.get(key) or 0)
+    else:
+        state["usage_complete"] = False
+
+
+def record_rejected_completion(state: dict[str, Any], trace: LoopTrace, error: LLMCompletionError) -> None:
+    """Record the real rejected response and its usage without partial content."""
+    state["counts"]["model_responses"] += 1
+    record_completion_usage(state, error.usage)
+    state.update(pending=None, last_model_error=error.reason)
+    trace.emit("model_response", {"rejected": True, "reason": error.reason, "usage": error.usage})
+    trace.emit("model_error", {"error_type": type(error).__name__, "reason": error.reason})
 
 
 def wire_tools(request: LoopInput) -> list[dict[str, Any]]:
@@ -195,7 +229,9 @@ class ZCodeGateway:
             self.state["pending"] = "model"
             public_messages = [{k: m[k] for k in ("role", "content", "tool_calls", "tool_call_id") if k in m}
                                for m in payload["messages"] if isinstance(m, dict)]
-            self.trace.emit("model_request", {"backend": "zcode", "model": self.request.config.model},
+            self.trace.emit("model_request", {"backend": "zcode", "model": self.request.config.model,
+                            "provider": self.request.config.provider, "max_tokens": self.request.config.max_tokens,
+                            "phase": "act"},
                             visible={"messages": public_messages, "tools": tools})
             self.save()
             await self.progress("action", tool="model", reason="ZCode 调用模型")
@@ -210,11 +246,7 @@ class ZCodeGateway:
                 result = response.raw["wire_response"]
                 counts["model_responses"] += 1
                 usage = result.get("usage")
-                if isinstance(usage, dict):
-                    for key in self.state["usage"]:
-                        self.state["usage"][key] += int(usage.get(key) or 0)
-                else:
-                    self.state["usage_complete"] = False
+                record_completion_usage(self.state, usage)
                 self.state["pending"] = None
                 # Do not save upstream reasoning_content in the MARS trace.
                 visible = [{"content": c.get("message", {}).get("content"),
@@ -229,6 +261,11 @@ class ZCodeGateway:
                 self.state["usage_complete"] = False
                 self.save()
                 raise
+            except LLMCompletionError as exc:
+                record_rejected_completion(self.state, self.trace, exc)
+                self.stop("model_error", "ZCode model gateway: " + str(exc))
+                return web.json_response({"error": {"message": str(exc),
+                    "type": "mars_completion_rejected", "code": exc.reason["code"]}}, status=502)
             except ResourceBudgetError as exc:
                 self.state["pending"] = None
                 # Admission failed before forwarding; it is neither an upstream

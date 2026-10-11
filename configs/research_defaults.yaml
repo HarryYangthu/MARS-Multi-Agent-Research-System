@@ -15,8 +15,8 @@ budget:
   billed_output_tokens: 128000
   model_cost_cny: 20.0
   request_input_tokens: 48000
-  request_output_tokens: 8192
-  coding_output_tokens: 16384
+  request_output_tokens: 32768
+  coding_output_tokens: 32768
   training_job_seconds: 600
   concurrent_training_jobs: 1
   max_gpus: 1

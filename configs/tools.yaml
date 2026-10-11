@@ -416,7 +416,13 @@ tools:
 
   code.patch_generator:
     enabled: true
-    description: Generate or normalize unified diffs.
+    description: >-
+      Generate a unified diff without modifying files. Prefer path plus complete
+      content so the host computes hunk line counts. The diff argument accepts
+      strictly valid unified diffs only, never prose or abbreviated hunks. After a
+      hunk length/syntax error, use path+content or code.write_file with complete
+      file content instead of repeatedly guessing counts. A generated diff must
+      be applied with code.apply_patch before claiming the file was changed.
     mutation_level: write
     allowed_agents: [coding]
     timeout_seconds: 10

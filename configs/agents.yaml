@@ -6,13 +6,13 @@ commander:
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
-    max_tokens: 8192
+    max_tokens: 32768
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -44,7 +44,7 @@ idea:
     provider: zhipu
     model: glm-5.3
     temperature: 0.7
-    max_tokens: 8192
+    max_tokens: 32768
     top_p: 1.0
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
@@ -104,7 +104,7 @@ idea_research:
     provider: zhipu
     model: glm-5.3
     temperature: 0.2
-    max_tokens: 8192
+    max_tokens: 32768
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
     thinking:
@@ -149,13 +149,13 @@ experiment:
     provider: zhipu
     model: glm-5.3
     temperature: 0.3
-    max_tokens: 8192
+    max_tokens: 32768
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -179,13 +179,13 @@ coding:
     provider: zhipu
     model: glm-5.3
     temperature: 0.1
-    max_tokens: 8192
+    max_tokens: 32768
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -233,6 +233,9 @@ execution:
   tools:
   - execution.log_streamer
   - execution.metrics_collector
+  model:
+    max_tokens: 32768
+    request_timeout_seconds: 360
 writing:
   enabled: true
   output_schema: report.v1
@@ -241,13 +244,13 @@ writing:
     provider: zhipu
     model: glm-5.3
     temperature: 0.4
-    max_tokens: 8192
+    max_tokens: 32768
     api_key_env: ZHIPU_API_KEY
     base_url: https://open.bigmodel.cn/api/paas/v4
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 360
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -283,7 +286,7 @@ idea_author:
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 180
+    request_timeout_seconds: 360
     retry:
       max_retries: 1
       base_delay_seconds: 1
@@ -304,7 +307,7 @@ idea_reviewer:
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 240
+    request_timeout_seconds: 360
     retry:
       max_retries: 0
       base_delay_seconds: 1

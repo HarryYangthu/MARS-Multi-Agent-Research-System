@@ -24,13 +24,13 @@ source_domains: [arxiv.org, export.arxiv.org, openreview.net, proceedings.neurip
 research_author:
   thinking_enabled: true
   reasoning_effort: low
-  max_tokens: 8192
+  max_tokens: 32768
   request_timeout_seconds: 360
   max_retries: 1
 generation:
   thinking_enabled: true
   reasoning_effort: low
-  max_tokens: 8192
+  max_tokens: 32768
   request_timeout_seconds: 360
   max_retries: 1
 coding_loop:
