@@ -81,6 +81,8 @@ jobs:
       - name: Research activity, review prompt and code marker checks
         working-directory: frontend
         run: |
+          npx tsc --outDir .tmp/training-charts --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/training-charts-smoke.ts
+          node .tmp/training-charts/scripts/training-charts-smoke.js
           npx tsc --outDir .tmp/research-activity --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/research-activity-smoke.ts
           node .tmp/research-activity/scripts/research-activity-smoke.js
           npx tsc --outDir .tmp/conversation-history --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/conversation-history-smoke.ts

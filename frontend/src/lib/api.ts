@@ -1354,16 +1354,18 @@ export async function getWorkspaceFile(
   runId: string,
   agentDir: string,
   path: string,
+  signal?: AbortSignal,
 ): Promise<WorkspaceFileView> {
   const url = apiUrl(`${BASE}/api/artifacts/${runId}/${agentDir}/workspace-file`);
   url.searchParams.set("path", path);
-  return jsonOrThrow(await fetch(url));
+  return jsonOrThrow(await boundedFetch(url, { signal, cache: "no-store" }));
 }
 export async function getWorkspaceTree(
   runId: string,
   agentDir: string,
+  signal?: AbortSignal,
 ): Promise<WorkspaceTreeView> {
-  return jsonOrThrow(await fetch(`${BASE}/api/artifacts/${runId}/${agentDir}/workspace-tree`));
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/artifacts/${runId}/${agentDir}/workspace-tree`, { signal, cache: "no-store" }));
 }
 export async function diffVersions(
   runId: string,

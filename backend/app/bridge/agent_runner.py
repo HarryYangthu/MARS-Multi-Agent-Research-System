@@ -7,6 +7,7 @@ already inside the registry by the time this runs.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -831,6 +832,14 @@ async def _run_execution_batch(
             title=f"{len(batch_plot_curves)}-experiment measured loss",
         )
     write_metrics_json(run_root=run.root, results=outcome.results)
+
+    # Derived figures never change job status, approvals, or original evidence.
+    # Optional plotting dependencies may be absent for non-PIM research projects.
+    try:
+        from app.execution.research_figures import render_research_figures
+        await asyncio.to_thread(render_research_figures, run.subdir("execution"))
+    except Exception as exc:
+        logger.warning("Research figure export unavailable: {}", exc)
 
     # Hand-summary for the front-end log panel.
     summary = {
