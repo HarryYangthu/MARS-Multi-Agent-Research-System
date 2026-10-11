@@ -86,6 +86,119 @@ def receipt_path(run_root: Path) -> Path:
     return run_root / "input" / "research_branch.json"
 
 
+def changes_path(run_root: Path) -> Path:
+    return run_root / "input" / "research_changes.json"
+
+
+def _owner_path(root: Path, name: str) -> Path:
+    return _git_root(root) / "mars-research-branches" / (hashlib.sha256(name.encode()).hexdigest() + ".json")
+
+
+def branch_owner(root: Path) -> tuple[GitBranch, Path] | None:
+    """A branch name alone never grants ownership of another task's files."""
+    path = _owner_path(root, _branch(root))
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        run_root = Path(raw["run_root"])
+        if not run_root.is_absolute() or run_root.is_symlink():
+            raise ValueError("root")
+        frozen = raw.get("binding")
+        saved = GitBranch(**frozen) if isinstance(frozen, dict) else _load(root, run_root, raw["project"], raw["run_id"])
+        if saved is None or saved.branch != _branch(root):
+            raise ValueError("receipt")
+        if (saved.repo_path != str(root.resolve()) or saved.branch != branch_name(saved.project, saved.run_id)
+                or saved.project != raw["project"] or saved.run_id != raw["run_id"]):
+            raise ValueError("identity")
+        # A deleted/trashed run must not orphan its clean Git branch or turn
+        # that candidate into the baseline for the next task.
+        if receipt_path(run_root).exists() and _load(root, run_root, saved.project, saved.run_id) != saved:
+            raise ValueError("receipt changed")
+        saved.validate(saved.project, saved.run_id)
+        return saved, run_root
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise GitWorkspaceError("现有编码分支的任务记录无法校验，请核对关联。",
+                                "git_workspace_identity_changed") from exc
+
+
+def changed_files(root: Path, base: str = "HEAD") -> set[str]:
+    changed = set(filter(None, git(root, "diff", "--name-only", "--no-renames", "-z", base).split("\0")))
+    changed.update(filter(None, git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
+    return changed
+
+
+def _file_hash(root: Path, name: str) -> str | None:
+    from app.harness.runtime.project_scope import forbidden_source_path, safe_scope_path
+    if forbidden_source_path(name):
+        raise GitWorkspaceError("编码提交不能包含 Git 控制文件、凭据或运行配置。")
+    target = safe_scope_path(root, name)
+    if not target.exists():
+        return None
+    if not target.is_file():
+        raise GitWorkspaceError("编码提交只允许普通文件。")
+    return hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def _changes(branch: GitBranch, run_root: Path) -> dict[str, str | None]:
+    path = changes_path(run_root)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if (raw.get("schema_id") != "research.git_changes.v1" or raw.get("project") != branch.project
+                or raw.get("run_id") != branch.run_id or raw.get("repo_path") != branch.repo_path
+                or raw.get("branch") != branch.branch or not isinstance(raw.get("files"), dict)):
+            raise ValueError("identity")
+        files = raw["files"]
+        if any(not isinstance(name, str) or value is not None and
+               (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None)
+               for name, value in files.items()):
+            raise ValueError("hash")
+        return dict(files)
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
+        raise GitWorkspaceError("编码写入记录无法校验，未自动提交。", "git_workspace_identity_changed") from exc
+
+
+def record_changed_files(project: str, run_id: str, names: list[str]) -> None:
+    """Called by governed file mutations, while the host holds the repository lock."""
+    branch = current_git_branch(project, run_id)
+    if branch is None:
+        return
+    owner = branch_owner(branch.root)
+    if owner is None or owner[0] != branch:
+        raise GitWorkspaceError("编码分支缺少任务归属记录。", "git_workspace_identity_changed")
+    files = _changes(branch, owner[1])
+    files.update({name: _file_hash(branch.root, name) for name in names})
+    atomic_json(changes_path(owner[1]), {"schema_id": "research.git_changes.v1",
+        "project": project, "run_id": run_id, "repo_path": branch.repo_path, "branch": branch.branch, "files": files})
+
+
+def checkpoint_changes(branch: GitBranch, run_root: Path, *, strict: bool = False) -> tuple[str | None, list[str], list[str]]:
+    """Save verified writes locally. A commit is not approval to execute them."""
+    branch.validate(branch.project, branch.run_id)
+    pending = changed_files(branch.root)
+    records = _changes(branch, run_root)
+    verified = sorted(name for name in pending if name in records and _file_hash(branch.root, name) == records[name])
+    remaining = sorted(pending - set(verified))
+    if strict and remaining:
+        raise GitWorkspaceError("代码与本任务写入记录不一致，请核对后再执行；未提交其他改动。",
+                                "git_workspace_unreviewed_changes")
+    if not verified:
+        return None, [], remaining
+    paths = [":(literal)" + name for name in verified]
+    git(branch.root, "add", "--", *paths)
+    git(branch.root, "-c", "user.name=MARS", "-c", "user.email=mars@localhost", "-c", "commit.gpgsign=false",
+        "commit", "-m", f"Coding checkpoint: {branch.run_id}", "--", *paths)
+    commit = git(branch.root, "rev-parse", "HEAD")
+    atomic_json(run_root / "coding" / "git_checkpoints" / (commit + ".json"), {
+        "schema_id": "research.git_checkpoint.v1", "project": branch.project, "run_id": branch.run_id,
+        "repo_path": branch.repo_path, "branch": branch.branch, "commit": commit, "files": verified,
+        "approved": False, "remaining": remaining,
+    })
+    return commit, verified, remaining
+
+
 def _load(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch | None:
     path = receipt_path(run_root)
     if not path.exists():
@@ -118,8 +231,11 @@ def _inspect(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
         if current == expected:
             saved.validate(project, run_id)
             return saved  # Interrupted work on this very branch is retained.
-    if git(root, "status", "--porcelain=v1", "--untracked-files=all"):
-        raise GitWorkspaceError("代码仓有未提交改动，请先提交或自行保存；系统不会自动暂存、丢弃或携带到其他任务。",
+    owner = branch_owner(root)
+    pending = changed_files(root)
+    records = _changes(*owner) if owner is not None else {}
+    if any(name not in records or _file_hash(root, name) != records[name] for name in pending):
+        raise GitWorkspaceError("代码仓有非本任务记录的未提交改动，请先核对；已记录的编码改动会自动提交，不会混入其他文件。",
                                 "git_workspace_dirty")
     if saved is not None:
         return saved
@@ -127,7 +243,9 @@ def _inspect(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
     branches = git(root, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{expected}").splitlines()
     if expected in branches:
         raise GitWorkspaceError("同名实验分支已存在但缺少任务记录，请先核对。", "git_workspace_identity_changed")
-    return GitBranch(project, run_id, str(root.resolve()), expected, current, git(root, "rev-parse", "HEAD"))
+    baseline_branch, baseline_commit = ((owner[0].baseline_branch, owner[0].baseline_commit) if owner is not None
+                                       else (current, git(root, "rev-parse", "HEAD")))
+    return GitBranch(project, run_id, str(root.resolve()), expected, baseline_branch, baseline_commit)
 
 
 @contextmanager
@@ -162,6 +280,9 @@ def prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch:
         # Persist intent before switch, so a crash can resume without adoption.
         atomic_json(path, {"schema_id": "research.git_branch.v1", **asdict(branch)})
     if _branch(root) != branch.branch:
+        previous = branch_owner(root)
+        if previous is not None:
+            checkpoint_changes(*previous)
         exists = branch.branch in git(root, "for-each-ref", "--format=%(refname:short)",
                                        f"refs/heads/{branch.branch}").splitlines()
         if exists:
@@ -169,6 +290,8 @@ def prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch:
         else:
             git(root, "switch", "-c", branch.branch, branch.baseline_commit)
     branch.validate(project, run_id)
+    atomic_json(_owner_path(root, branch.branch), {"run_root": str(run_root.resolve()),
+        "project": project, "run_id": run_id, "binding": asdict(branch)})
     return branch
 
 

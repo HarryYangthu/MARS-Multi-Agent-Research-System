@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from dataclasses import asdict
 
 from app.bridge.node_key import parse_node_key
-from app.harness.tools.git_branch import GitWorkspaceError, bind_git_branch, git, preflight, prepare, receipt_path, repository_lock
+from app.harness.tools.git_branch import (
+    GitWorkspaceError, bind_git_branch, changed_files, changes_path, checkpoint_changes, git, preflight, prepare,
+    receipt_path, repository_lock,
+)
 from app.harness.tools.project_repo import load_project_repo, resolve_allowed_path
 from app.harness.schema.frontmatter_parser import parse
 from app.storage.run_store import RunHandle
@@ -64,7 +67,32 @@ def research_branch_scope(run: RunHandle, node_key: str) -> Iterator[None]:
         with bind_git_branch(branch):
             if stage == "execution":
                 checkpoint_approved_code(run)
-            yield
+            try:
+                yield
+            finally:
+                # Persist partial work on failures/stops as well as on success.
+                # Saving a local commit never approves a scientific handoff.
+                if stage == "coding":
+                    import sys
+                    interrupted = sys.exc_info()[0] is not None
+                    try:
+                        # An external branch switch revokes the write grant.
+                        if git(branch.root, "branch", "--show-current") == branch.branch:
+                            commit, files, remaining = checkpoint_changes(branch, run.root)
+                            if commit is not None:
+                                run.write_event("agent_events", {"event": "coding.git_checkpoint", "agent": "coding",
+                                    "branch": branch.branch, "commit": commit, "files": files,
+                                    "interrupted": interrupted, "approved": False,
+                                    "message": "编码改动已自动提交到本任务分支。"})
+                            if remaining:
+                                run.write_event("agent_events", {"event": "coding.git_unrecorded_changes", "agent": "coding",
+                                    "branch": branch.branch, "files": remaining,
+                                    "message": "这些文件没有匹配的编码写入记录，已保留且未混入自动提交。"})
+                    except (OSError, ValueError) as exc:
+                        run.write_event("agent_events", {"event": "coding.git_checkpoint_failed", "agent": "coding",
+                            "branch": branch.branch, "message": str(exc)})
+                        if not interrupted:
+                            raise
 
 
 def checkpoint_approved_code(run: RunHandle) -> None:
@@ -72,8 +100,9 @@ def checkpoint_approved_code(run: RunHandle) -> None:
     repo = load_project_repo(run.project)
     if repo.git_branch is None:
         return
-    changed = set(filter(None, git(repo.root, "diff", "--name-only", "--no-renames", "-z", "HEAD").split("\0")))
-    changed.update(filter(None, git(repo.root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
+    # Check the entire candidate against its baseline, including auto-saved
+    # commits. A clean checkout alone does not imply human/Commander approval.
+    changed = changed_files(repo.root, repo.git_branch.baseline_commit)
     if not changed:
         return
     approved = run.root / "coding" / "code_spec.approved.md"
@@ -87,11 +116,20 @@ def checkpoint_approved_code(run: RunHandle) -> None:
                                 "git_workspace_unreviewed_changes")
     for name in changed:
         resolve_allowed_path(repo, name, for_write=True)
-    # A path-limited commit neither publishes nor merges; repository/global
-    # author preferences remain unchanged. Disable signing for local checkpoints.
-    paths = [":(literal)" + name for name in sorted(changed)]
-    git(repo.root, "add", "--", *paths)
-    git(repo.root, "-c", "user.name=MARS", "-c", "user.email=mars@localhost",
-        "-c", "commit.gpgsign=false", "commit", "-m", f"Research checkpoint: {run.run_id}", "--", *paths)
-    run.write_event("agent_events", {"event": "coding.git_checkpoint", "agent": "coding",
-        "branch": repo.git_branch.branch, "commit": git(repo.root, "rev-parse", "HEAD"), "files": sorted(changed)})
+    pending = changed_files(repo.root)
+    if not pending:
+        return
+    if changes_path(run.root).exists():
+        commit, files, _ = checkpoint_changes(repo.git_branch, run.root, strict=True)
+    else:
+        # Existing human-authored deliveries may predate governed write records.
+        # Preserve their explicitly approved, path-limited checkpoint behavior.
+        files = sorted(pending)
+        paths = [":(literal)" + name for name in files]
+        git(repo.root, "add", "--", *paths)
+        git(repo.root, "-c", "user.name=MARS", "-c", "user.email=mars@localhost",
+            "-c", "commit.gpgsign=false", "commit", "-m", f"Research checkpoint: {run.run_id}", "--", *paths)
+        commit = git(repo.root, "rev-parse", "HEAD")
+    if commit is not None:
+        run.write_event("agent_events", {"event": "coding.git_checkpoint", "agent": "coding",
+            "branch": repo.git_branch.branch, "commit": commit, "files": files, "approved": True})

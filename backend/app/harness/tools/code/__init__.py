@@ -158,6 +158,7 @@ async def write_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     rollback_ref = _write_rollback(ctx, "code.write_file", snapshots)
+    _record_branch_write(ctx, [rel])
     return ToolResult(
         ok=True,
         output={
@@ -191,6 +192,7 @@ async def delete_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         return ToolResult(ok=True, output={"dry_run": True, "path": rel})
     target.unlink()
     rollback_ref = _write_rollback(ctx, "code.delete_file", snapshots)
+    _record_branch_write(ctx, [rel])
     return ToolResult(ok=True, output={"deleted": rel}, rollback_ref=rollback_ref, evidence_refs=[rel])
 
 
@@ -272,6 +274,7 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         rollback_ref=rollback_ref,
     )
     _write_patch_result(ctx, version, payload)
+    _record_branch_write(ctx, files)
     return ToolResult(
         ok=True,
         output={"applied": True, "files": [{"path": p} for p in files]},
@@ -335,6 +338,7 @@ async def rollback_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRes
         elif target.exists():
             target.unlink()
         restored.append(rel)
+    _record_branch_write(ctx, restored)
     return ToolResult(
         ok=True,
         output={"rolled_back": restored},
@@ -634,6 +638,11 @@ def _snapshot(rel: str, target: Path) -> FileSnapshot:
         return FileSnapshot(path=rel, existed=False, sha256="", content="")
     text = target.read_text(encoding="utf-8", errors="replace")
     return FileSnapshot(path=rel, existed=True, sha256=_sha_text(text), content=text)
+
+
+def _record_branch_write(ctx: ToolContext, files: list[str]) -> None:
+    from app.harness.tools.git_branch import record_changed_files
+    record_changed_files(ctx.project, ctx.run_id, files)
 
 
 def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapshot]) -> str | None:

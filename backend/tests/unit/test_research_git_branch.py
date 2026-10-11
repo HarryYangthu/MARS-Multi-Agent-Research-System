@@ -100,15 +100,20 @@ def test_detached_head_requires_branch_selection(research: tuple[RunHandle, Path
 @pytest.mark.asyncio
 async def test_retry_retains_partial_changes_on_same_branch(research: tuple[RunHandle, Path]) -> None:
     run, source = research
+    baseline = git(source, "rev-parse", "baseline")
     with pytest.raises(RuntimeError, match="interrupted"):
         with research_branch_scope(run, "coding"):
             assert (await write_file_tool({"path": "main.py", "content": "VALUE = 9\n"}, ctx(run))).ok
             raise RuntimeError("interrupted")
     original_receipt = receipt_path(run.root).read_bytes()
+    commit = git(source, "rev-parse", "HEAD")
+    assert commit != baseline
+    assert git(source, "status", "--porcelain") == ""
     assert coding_workspace_blocker(run) == ""
     with research_branch_scope(run, "coding_attempt_2"):
         assert (source / "main.py").read_text() == "VALUE = 9\n"
     assert receipt_path(run.root).read_bytes() == original_receipt
+    assert git(source, "rev-parse", "HEAD") == commit
     assert git(source, "branch", "--show-current") == branch_name(run.project, run.run_id)
 
 
@@ -216,13 +221,15 @@ async def test_execution_commits_only_approved_changes_on_run_branch(research: t
     base = git(source, "rev-parse", "HEAD")
     with research_branch_scope(run, "coding"):
         assert (await write_file_tool({"path": "main.py", "content": "VALUE = 2\n"}, ctx(run))).ok
+    saved = git(source, "rev-parse", "HEAD")
+    assert saved != base and git(source, "status", "--porcelain") == ""
     with pytest.raises(GitWorkspaceError, match="尚未审核"):
         with research_branch_scope(run, "execution"):
             pytest.fail("should not enter")
     (run.root / "coding/code_spec.approved.md").write_text("---\nfiles_changed:\n- path: main.py\n  type: modified\n---\nApproved by test author, no model invoked.\n")
     with research_branch_scope(run, "execution"):
         assert git(source, "status", "--porcelain") == ""
-        assert git(source, "rev-parse", "HEAD") != base
+        assert git(source, "rev-parse", "HEAD") == saved
     assert git(source, "rev-parse", "baseline") == base
     assert git(source, "show", "baseline:main.py") == "VALUE = 1"
 
@@ -238,3 +245,117 @@ async def test_unreviewed_changes_are_not_committed(research: tuple[RunHandle, P
         with research_branch_scope(run, "execution"):
             pytest.fail("should not enter")
     assert git(source, "rev-parse", "HEAD") == before
+
+
+@pytest.mark.asyncio
+async def test_new_task_uses_baseline_and_old_task_resumes_its_saved_commit(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    baseline = git(source, "rev-parse", "HEAD")
+    with research_branch_scope(run, "coding"):
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 7\n"}, ctx(run))).ok
+    saved = git(source, "rev-parse", "HEAD")
+    other = replace(run, run_id="research_2", root=run.root.parent / "run2")
+    other.root.mkdir()
+    assert coding_workspace_blocker(other) == ""
+    with research_branch_scope(other, "coding"):
+        assert git(source, "rev-parse", "HEAD") == baseline
+        assert (source / "main.py").read_text() == "VALUE = 1\n"
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 8\n"}, ctx(other))).ok
+    with research_branch_scope(run, "coding_attempt_2"):
+        assert git(source, "rev-parse", "HEAD") == saved
+        assert (source / "main.py").read_text() == "VALUE = 7\n"
+    assert git(source, "rev-parse", "baseline") == baseline
+    branches = git(source, "for-each-ref", "--format=%(refname:short)", "refs/heads/mars/").splitlines()
+    assert set(branches) == {branch_name(run.project, run.run_id), branch_name(other.project, other.run_id)}
+
+
+@pytest.mark.asyncio
+async def test_crash_recovery_saves_recorded_work_before_switch_without_polling_mutation(research: tuple[RunHandle, Path]) -> None:
+    from app.harness.tools.git_branch import bind_git_branch, prepare, repository_lock
+    run, source = research
+    baseline = git(source, "rev-parse", "HEAD")
+    # Real governed write with no stage-finalizer, representing process death.
+    with repository_lock(source):
+        branch = prepare(source, run.root, run.project, run.run_id)
+        with bind_git_branch(branch):
+            assert (await write_file_tool({"path": "main.py", "content": "VALUE = 9\n"}, ctx(run))).ok
+    assert git(source, "status", "--porcelain")
+    other = replace(run, run_id="research_2", root=run.root.parent / "run2")
+    other.root.mkdir()
+    assert coding_workspace_blocker(other) == ""
+    assert git(source, "rev-parse", "HEAD") == baseline  # Read-only polling.
+    with research_branch_scope(other, "coding"):
+        assert (source / "main.py").read_text() == "VALUE = 1\n"
+    saved = git(source, "rev-parse", branch.branch)
+    assert saved != baseline
+    assert git(source, "show", branch.branch + ":main.py") == "VALUE = 9"
+
+
+@pytest.mark.asyncio
+async def test_external_changes_are_preserved_and_never_included_in_auto_commit(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    with research_branch_scope(run, "coding"):
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 2\n"}, ctx(run))).ok
+        (source / "user_notes.txt").write_text("private notes\n")
+        git(source, "add", "user_notes.txt")
+    assert git(source, "show", "HEAD:main.py") == "VALUE = 2"
+    assert git(source, "ls-tree", "HEAD", "user_notes.txt") == ""
+    assert "A  user_notes.txt" in git(source, "status", "--porcelain")
+    assert (source / "user_notes.txt").read_text() == "private notes\n"
+    other = replace(run, run_id="research_2", root=run.root.parent / "run2")
+    other.root.mkdir()
+    assert "非本任务记录" in coding_workspace_blocker(other)
+
+
+@pytest.mark.asyncio
+async def test_external_overwrite_of_recorded_file_is_not_saved(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    base = git(source, "rev-parse", "HEAD")
+    with research_branch_scope(run, "coding"):
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 2\n"}, ctx(run))).ok
+        (source / "main.py").write_text("EXTERNAL = True\n")
+    assert git(source, "rev-parse", "HEAD") == base
+    assert (source / "main.py").read_text() == "EXTERNAL = True\n"
+    (run.root / "coding/code_spec.approved.md").write_text("---\nfiles_changed:\n- path: main.py\n  type: modified\n---\nApproved prior implementation.\n")
+    with pytest.raises(GitWorkspaceError, match="写入记录不一致"):
+        with research_branch_scope(run, "execution"):
+            pytest.fail("external overwrite must not execute")
+    assert git(source, "rev-parse", "HEAD") == base
+
+
+@pytest.mark.asyncio
+async def test_add_delete_and_rollback_are_saved_and_noop_retry_creates_no_commit(research: tuple[RunHandle, Path]) -> None:
+    from app.harness.tools.code import delete_file_tool
+    run, source = research
+    with research_branch_scope(run, "coding"):
+        assert (await write_file_tool({"path": "configs/new config.yaml", "content": "enabled: true\n"}, ctx(run))).ok
+    assert git(source, "show", "HEAD:configs/new config.yaml") == "enabled: true"
+    with research_branch_scope(run, "coding_attempt_2"):
+        assert (await delete_file_tool({"path": "configs/new config.yaml"}, ctx(run))).ok
+    assert git(source, "ls-tree", "HEAD", "configs/new config.yaml") == ""
+    with research_branch_scope(run, "coding_attempt_3"):
+        written = await write_file_tool({"path": "main.py", "content": "VALUE = 99\n"}, ctx(run))
+        assert written.ok
+        assert (await rollback_patch_tool({"rollback_ref": written.rollback_ref}, ctx(run))).ok
+    saved = git(source, "rev-parse", "HEAD")
+    with research_branch_scope(run, "coding_attempt_4"):
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 1\n"}, ctx(run))).ok
+    assert git(source, "rev-parse", "HEAD") == saved
+
+
+@pytest.mark.asyncio
+async def test_deleted_previous_task_does_not_orphan_branch_or_replace_baseline(research: tuple[RunHandle, Path]) -> None:
+    import shutil
+    run, source = research
+    baseline = git(source, "rev-parse", "HEAD")
+    with research_branch_scope(run, "coding"):
+        assert (await write_file_tool({"path": "main.py", "content": "VALUE = 7\n"}, ctx(run))).ok
+    saved = git(source, "rev-parse", "HEAD")
+    shutil.rmtree(run.root)
+    other = replace(run, run_id="research_2", root=run.root.parent / "run2")
+    other.root.mkdir()
+    assert coding_workspace_blocker(other) == ""
+    with research_branch_scope(other, "coding"):
+        assert git(source, "rev-parse", "HEAD") == baseline
+    assert git(source, "rev-parse", branch_name(run.project, run.run_id)) == saved
+    assert not run.root.exists()
