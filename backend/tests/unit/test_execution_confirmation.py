@@ -110,6 +110,7 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
 def test_preview_and_execution_share_all_prepared_experiments(execution: tuple[Orchestrator, RunSession, Path, Path]) -> None:
     _, session, _, _ = execution
     view = execution_preview(session.run, 'execution')
+    assert view['budget']['unit'] == 'model_requests'
     plan = prepare_execution(session.run, 'execution')
     assert not view['blockers'] and not view['confirmed']
     assert [(row['name'], row['seed'], row['config']) for row in view['experiments']] == [

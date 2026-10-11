@@ -339,7 +339,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                             else digest([str(source), stat.st_size, stat.st_mtime_ns, stat.st_ino]))
     budget = RunModelBudget(run.root)
     ledger = budget.recovery_snapshot()
-    budget_view = {'used': sum(charged_model_attempts(row) for row in ledger['requests'].values()),
+    budget_view = {'unit': 'model_requests',
+                   'used': sum(charged_model_attempts(row) for row in ledger['requests'].values()),
                    'limit': ledger['configuration']['limits']['max_model_requests'], 'required': 0}
     if not files['execution/run_log.approved.md']:
         blockers.append('执行计划尚未生成并审核通过；此处先展示已有配置。')
