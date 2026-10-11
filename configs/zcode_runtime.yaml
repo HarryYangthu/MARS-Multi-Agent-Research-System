@@ -1,0 +1,14 @@
+# Official ZCode 3.15.1 app-server JavaScript component; executed by Windows Node.
+# Upstream stages the same JS bundle into each remote platform's glm component.
+# No Linux Node, PTY, search binary, desktop application or WSL is installed.
+# Source manifest: https://cdn-zcode.z.ai/zcode/electron/releases/3.15.1/manifest-linux-x64.json
+# Packaging source: zai-org/ZCode@aac4755666d09fdcd70272fcf063c077a639015f
+schema_version: 1
+release: 3.15.1
+url: https://cdn-zcode.z.ai/zcode/electron/releases/components/linux-x64/glm/v0.13.3%2B83f7afdb369b.tar.gz
+sha256: 83f7afdb369b09ad0e127711f8fa037f8d7b4b61afb4c67ea69d0e168c8abc6f
+entrypoint: zcode.cjs
+entrypoint_sha256: b816e38656e70fb585fe2ab1ea010da89cda928dac1ccb5d83255fd18796da6e
+max_download_bytes: 67108864
+max_unpack_bytes: 134217728
+max_members: 5000

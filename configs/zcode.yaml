@@ -1,5 +1,5 @@
 # ZCode runs as an owned process. All model and project operations go through MARS.
-command: [] # Optional argv prefix, e.g. ["/opt/zcode/bin/zcode"]. Never a shell string.
+command: [] # Windows launcher manages a pinned local runtime; explicit argv overrides it.
 rpc_timeout_seconds: 30
 active_timeout_seconds: 900
 max_model_calls: 24

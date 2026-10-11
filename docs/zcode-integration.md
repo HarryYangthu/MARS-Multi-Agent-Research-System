@@ -4,7 +4,7 @@
 
 ## 使用
 
-1. 安装 [官方 ZCode](https://github.com/zai-org/ZCode)。运行环境必须支持 `app-server`。MARS 优先使用 PATH 上的 `zcode`；macOS 也会查找官方应用内的运行入口，需要 Node.js。
+1. Windows 原生入口会自动安装项目内的固定版本 ZCode，并用自带 Node 验证真实 `app-server` 握手，后续复用，无需另外安装桌面版。其他部署环境安装 [官方 ZCode](https://github.com/zai-org/ZCode)。入口优先级为：显式 `configs/zcode.yaml` 命令、项目管理的 Windows 运行时、PATH 上的 `zcode`、macOS 应用内入口。
 2. 在 MARS 的「模型连接」中配置编码 Agent 的模型、服务地址和 API 凭据。当前本机验证使用 GLM-5.3。ZCode 无需另填上游 API Key。
 3. 在「设置 → 编码引擎」选择 ZCode。设置写入本机 `.env.local`，重启后保留；已有编码调用恢复时仍使用原引擎。
 4. 接入已有 Git 代码仓和资料，审核实验设计后开始编码。MARS 在原仓库中创建任务分支，ZCode 经 MARS 工具读取、修改和检查代码，完成后进入人工审核。
@@ -16,6 +16,10 @@ CLI 和前端共享编码 Agent，默认引擎为 `zcode`；已有 `.env.local` 
 当前模型转发要求支持实际用量统计的 OpenAI 兼容 Provider；其他 Provider 会明确失败，不会绕过 MARS 预算直接调用。
 
 `configs/zcode.yaml` 控制运行入口和限额。其他团队可设置明确的参数列表，例如 `command: ["/path/to/node", "/path/to/zcode.cjs"]`，MARS 会追加 `app-server`。不要填写带 shell 操作符的命令字符串。部署容器或另一台机器时，需要在后端所在环境安装运行入口。
+
+Windows 自动安装清单为 `configs/zcode_runtime.yaml`，详细缓存、校验和版本更新规则见
+[Windows 安装说明](../deploy/windows-native/README.md#zcode-随项目管理)。首次需要联网下载；
+配置模型后不需要在每次启动时重新配置 ZCode。自动安装不等于已经验证真实模型编码任务。
 
 ## 执行边界
 

@@ -31,6 +31,8 @@
 - 后端依赖和开发检查工具：按照 `uv.lock` 导出的版本安装。
 - PIMC CPU 依赖：PyTorch CPU、SciPy、Matplotlib，以及 TensorBoard。
 - 前端：按照 `frontend/package-lock.json` 安装，随后执行类型检查。
+- ZCode 编码引擎：从官方 CDN 下载固定版本组件并检查 SHA256，使用项目自带的 Windows Node 运行。
+  安装和启动时均进行真实 `app-server` 协议握手，不调用模型或消耗 API 额度。
 - 缺少 Microsoft C++ 运行库时，从微软下载并检查数字签名后安装；Windows 可能要求管理员确认。
 
 工具、虚拟环境和下载缓存放在 `local/windows/`，不会复用拷贝过来的 Mac `.venv`，
@@ -40,6 +42,22 @@ PyPI、npm、download.pytorch.org；不是离线安装包。重装会重建这�
 启动时将 Python 指向 Windows 虚拟环境，同时统一前后端地址、Socket.IO 和 CORS。
 单机使用一个后端进程，事件总线可使用内置进程内实现，无需另装 Redis 服务。
 脚本不会下载模型权重、自动充值 API 账号或生成示例研究结果。
+
+### ZCode 随项目管理
+
+首次安装自动准备 ZCode，后续启动复用 `local/windows/tools/zcode/` 和下载缓存，
+无需单独安装 ZCode 桌面应用、配置全局 PATH、登录 ZCode 或重复填写模型 Key。
+编码模型继续来自 MARS「模型连接」中的 Coding Agent 设置，包括已配置的 DeepSeek。
+已有 `configs/zcode.yaml` 的显式 `command` 保持最高优先级，只验证该入口，不覆盖团队配置。
+
+固定版本、官方地址、归档及入口校验值在 `configs/zcode_runtime.yaml`。
+目前使用 ZCode 3.15.1 的通用 JavaScript app-server 组件；官方将同一 JS 组件放入各平台
+的远程资源目录，下载地址虽含 `linux-x64`，实际仅由 Windows `node.exe` 执行该 JS。
+不会安装或执行 Linux Node、PTY、搜索程序，也不依赖 WSL。保留组件附带的版权声明。
+升级时更新清单并验证 Windows 协议；仅升级 ZCode 无需重建 Python 环境。
+
+入口损坏会触发本地修复；下载校验或协议检查失败会明确中止启动。
+「已安装」表示入口可解析；启动器另外执行真实握手，完整模型编码任务仍需单独验收。
 
 运行时版本、端口、下载地址与 SHA256 在 `configs/windows_native.yaml`。启动前校验
 工具压缩包，校验失败会停止；不会关闭 TLS 校验。发行来源：
