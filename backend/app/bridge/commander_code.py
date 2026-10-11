@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.harness.tools.project_repo import load_project_repo
 from app.harness.tools.registry import ToolContext as HarnessContext, get_registry
+from app.bridge.commander_session import get_session_store
 from app.settings import repo_root
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ def repository_summary(project: str) -> str:
 async def execute_code_inspection(name: str, args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     context = HarnessContext(run_id=ctx.session.conv_id, project=ctx.session.project, agent="commander",
         session_id=ctx.session.conv_id,
-        extra={"run_root": str(repo_root() / "conversations" / ctx.session.conv_id)})
+        extra={"run_root": str(get_session_store().session_directory(ctx.session))})
     result = await get_registry().dispatch(name, args, context)
     return {"ok": result.ok, "output": result.output, "error": result.error,
             "evidence_refs": result.evidence_refs, "status": result.status}

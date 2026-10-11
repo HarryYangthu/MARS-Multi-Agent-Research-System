@@ -2341,3 +2341,11 @@ export async function saveExecutionConfig(project: string, payload: { device: "l
 export async function getExecutionConfigStatus(project: string, signal?: AbortSignal): Promise<ExecutionConfigStatus> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/execution-config/status`, { signal, cache: "no-store" }));
 }
+
+export async function saveProjectModelReference(project: string, rows: AgentLlmConfigRow[]): Promise<void> {
+  const references = rows.map(({ agent, enabled, provider, model, api_key_env, base_url_env, temperature, max_tokens }) =>
+    ({ agent, enabled, provider, model, api_key_env, base_url_env, temperature, max_tokens }));
+  await jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/model-reference`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(references),
+  }));
+}

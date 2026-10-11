@@ -217,7 +217,7 @@ def _verify_created_run(store: RunStore, intent: CreationIntent) -> ResearchRunC
     """Read the actual authority without recovery, projection repair or live preflight."""
     if intent.run_id is None:
         raise ResearchContractIntegrityError("Creation allocation was not recorded")
-    root = store.runs_root / intent.run_id
+    root = store.resolve_root(intent.run_id)
     if root.is_symlink() or (root / "run_meta.json").is_symlink():
         raise ResearchContractIntegrityError("Creation run metadata cannot be a symbolic link")
     run = store.get(intent.run_id)

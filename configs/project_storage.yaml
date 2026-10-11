@@ -1,0 +1,28 @@
+project_storage:
+  checkpoint_keys: [init_checkpoint, pretrained_checkpoint]
+  checkpoint_suffixes: [.pth, .pt, .ckpt]
+  max_checkpoint_bytes: 1073741824
+  directories:
+    context: context
+    code: code
+    data: data
+    runs: runs
+    conversations: conversations
+  code_excludes:
+    - .git
+    - .mars
+    - .DS_Store
+    - '.env*'
+    - __pycache__
+    - '*.pyc'
+    - .pytest_cache
+    - .zcode
+    - .workbuddy
+    - .ssh
+    - .venv
+    - venv
+    - node_modules
+    - runs
+    - outputs
+    - data
+    - datasets

@@ -97,7 +97,7 @@ def source_path(project: str, source_id: str) -> Path:
     if profile['project'] != project:
         raise ValueError('数据不属于当前项目')
     path = Path(profile['stored_path']).resolve(strict=True)
-    if not path.is_relative_to(store.base.resolve()):
+    if not path.is_relative_to(store.profile_path(source_id).parent.resolve()):
         raise ValueError('数据必须位于上传存储目录')
     return path
 

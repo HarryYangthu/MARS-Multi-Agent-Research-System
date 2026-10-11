@@ -180,14 +180,14 @@ class Commander:
 
     async def _decide_llm(self, session: CommanderSession) -> Decision:
         from app.harness.agent_loop.trace import LoopTrace
-        root = repo_root() / "conversations" / session.conv_id
+        root = get_session_store().session_directory(session)
         messages = self._build_messages(session)
         manifest_path = None
         if session.context_version >= 3:
             from app.harness.context.runtime_pack import Material, message_key, pack_messages
             from app.harness.context.runtime_policy import freeze_policy, input_budget
             from app.harness.context.runtime_manifest import record_manifest
-            root = repo_root() / "conversations" / session.conv_id
+            root = get_session_store().session_directory(session)
             policy = freeze_policy(root)
             materials = {}
             for m in messages:
@@ -224,7 +224,7 @@ class Commander:
         try:
             completion = await asyncio.wait_for(
                 guarded_complete(self._provider, messages, replace(self._llm_config, attempt_observer=observe),
-                    run_root=repo_root() / "conversations" / session.conv_id,
+                    run_root=get_session_store().session_directory(session),
                     active_model_time=True,
                     correlation={"trace_id": session.conv_id, "node_id": "commander"}),
                 timeout=llm_call_deadline_seconds(

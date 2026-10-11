@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
@@ -151,14 +152,38 @@ class CodeFolderPayload(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
 
 
+class ProjectModelReference(BaseModel):
+    agent: str
+    enabled: bool
+    provider: str
+    model: str
+    api_key_env: str = ""
+    base_url_env: str = ""
+    temperature: float
+    max_tokens: int
+
+
+@router.put("/{name}/model-reference")
+async def save_model_reference(name: str, payload: list[ProjectModelReference]) -> dict[str, str]:
+    from app.bridge.project_onboarding import save_model_references
+    try:
+        folder = folder_project(name)
+        if folder is None:
+            raise ValueError("请先创建或打开一个文件夹项目")
+        save_model_references(folder, [row.model_dump() for row in payload])
+        return {"path": ".mars/model_connections.yaml"}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.put("/{name}/code-folder", response_model=ProjectSummary)
-def import_code_folder(name: str, payload: CodeFolderPayload) -> ProjectSummary:
+async def import_code_folder(name: str, payload: CodeFolderPayload) -> ProjectSummary:
     from app.bridge.project_onboarding import bind_code_folder
     try:
         folder = folder_project(name)
         if folder is None:
             raise ValueError("请先创建或打开一个文件夹项目")
-        bind_code_folder(folder, payload.path)
+        await asyncio.to_thread(bind_code_folder, folder, payload.path)
         return _summary(folder.metadata_root, folder.name)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

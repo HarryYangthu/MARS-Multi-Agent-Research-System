@@ -691,3 +691,6 @@ backend/app/bridge/managed_review.py
 configs/commander_review.yaml
 frontend/src/lib/managedReview.ts
 docs/commander-managed-review.md
+
+configs/project_storage.yaml
+backend/app/harness/project_storage.py

@@ -29,9 +29,9 @@ export function ProjectCodeFolder({ project, onBusy }: { project: ProjectSummary
     try {
       const value = await importProjectCodeFolder(project.name, path.trim());
       setCodePath(value.repo_path); setReadOnly(!!value.repo_read_only); setEditing(false);
-      setMessage("基线代码仓已关联");
+      setMessage("基线代码已导入项目文件夹");
       await refreshProjects();
-    } catch { setError("未能确认代码关联，请检查文件夹路径；也可重新打开项目配置核对。"); }
+    } catch { setError("代码导入未能完成，请核对文件夹、访问权限和 Git。原代码仓保留。"); }
     finally { setBusy(false); }
   }
 
@@ -41,11 +41,11 @@ export function ProjectCodeFolder({ project, onBusy }: { project: ProjectSummary
       {!editing ? <button type="button" className={BUTTON} onClick={() => { setEditing(true); setMessage(""); void browse(path); }}>选择文件夹</button> : null}
     </div>
     <p className="break-all text-xs text-slate-300">{codePath || "未关联"}</p>
-    <p className="text-xs leading-5 text-slate-400">编码时自动在此 Git 仓库创建实验分支，复用当前目录；原分支保留，任务重试会继续使用同一分支。</p>
+    <p className="text-xs leading-5 text-slate-400">选择外部代码仓后，会在本项目 code/ 下建立独立代码副本。后续编码在该副本的实验分支上进行；原代码仓保留。虚拟环境、历史运行目录和密钥文件不导入。</p>
     {editing ? <div className="space-y-3">
       <label className="block text-sm">仿真基线仓库文件夹<div className="mt-2 flex gap-2"><input aria-label="仿真基线仓库路径" className="min-w-0 flex-1 rounded border border-mars-border bg-mars-bg px-3 py-2" value={path} disabled={busy} onChange={(event) => setPath(event.target.value)} /><button type="button" className={BUTTON} disabled={busy} onClick={() => void browse(path)}>浏览</button></div></label>
       {folders ? <div className="rounded border border-mars-border p-3"><div className="flex items-center justify-between gap-2"><p className="break-all text-xs text-slate-400">{folders.path}</p><button type="button" className={`${BUTTON} shrink-0`} disabled={busy || folders.path === folders.parent} onClick={() => void browse(folders.parent)}>上一级</button></div><div className="mt-2 grid max-h-40 gap-1 overflow-auto sm:grid-cols-2">{folders.directories.map((folder) => <button type="button" key={folder.path} disabled={busy} className="truncate rounded p-2 text-left text-sm hover:bg-mars-panel2" onClick={() => void browse(folder.path)}>📁 {folder.name}</button>)}</div>{folders.has_more ? <p className="text-xs text-slate-400">已显示前 300 项</p> : null}</div> : null}
-      <div className="flex flex-wrap gap-2"><button type="button" className={`${BUTTON} bg-mars-accent`} disabled={busy || !path.trim()} onClick={() => void save()}>{busy ? "处理中…" : "确认为仿真基线仓库"}</button><button type="button" className={BUTTON} disabled={busy} onClick={() => setEditing(false)}>取消</button></div>
+      <div className="flex flex-wrap gap-2"><button type="button" className={`${BUTTON} bg-mars-accent`} disabled={busy || !path.trim()} onClick={() => void save()}>{busy ? "处理中…" : "导入到项目文件夹"}</button><button type="button" className={BUTTON} disabled={busy} onClick={() => setEditing(false)}>取消</button></div>
     </div> : null}
     {message ? <p role="status" className="text-sm text-emerald-200">{message}</p> : null}
     {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}

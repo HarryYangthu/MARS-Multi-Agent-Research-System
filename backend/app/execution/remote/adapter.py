@@ -86,6 +86,7 @@ class RemoteProjectAdapter:
     trusted_adapter_argv: tuple[str, ...]
     artifact_root: Path
     workspace_resolver: WorkspaceResolver | None = None
+    artifact_root_resolver: Callable[[AdapterRequest], Path] | None = None
     remote_worker_python: str = "python3"
     adapter_timeout_seconds: float = 900.0
     max_wait_seconds: float = 960.0
@@ -297,7 +298,8 @@ class RemoteProjectAdapter:
         )
 
     def _fetch_destination(self, request: AdapterRequest, job_id: str) -> Path:
-        root = self.artifact_root.expanduser().resolve()
+        configured_root = self.artifact_root_resolver(request) if self.artifact_root_resolver else self.artifact_root
+        root = configured_root.expanduser().resolve()
         if not request.output_dir:
             return root / job_id
         requested = Path(request.output_dir).expanduser()

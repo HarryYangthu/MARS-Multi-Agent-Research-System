@@ -19,6 +19,8 @@ from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.harness.runtime.conversation_state import ConversationState
+from app.harness.project_storage import project_storage_root, storage_roots
+from app.harness.runtime.project_scope import safe_scope_path
 from app.settings import repo_root
 
 Role = Literal["user", "assistant", "system", "tool"]
@@ -167,14 +169,34 @@ def _conversations_root() -> Path:
 class CommanderSessionStore:
     """In-memory registry with best-effort disk persistence."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, project_storage: bool | None = None) -> None:
         self._sessions: dict[str, CommanderSession] = {}
         self._root = root
+        self.project_storage = root is None if project_storage is None else project_storage
 
     def _directory(self) -> Path:
         root = self._root if self._root is not None else _conversations_root()
         root.mkdir(parents=True, exist_ok=True)
         return root
+
+    def _roots(self) -> list[Path]:
+        return storage_roots(self._directory(), "conversations") if self.project_storage else [self._directory()]
+
+    def _find(self, conv_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", conv_id) or conv_id in {".", ".."}:
+            raise ValueError("Invalid conversation identifier")
+        for root in self._roots():
+            target = safe_scope_path(root, conv_id + "/session.json").parent
+            if (target / "session.json").is_file():
+                return target
+        return self._directory() / conv_id
+
+    def session_directory(self, session: CommanderSession) -> Path:
+        existing = self._find(session.conv_id)
+        if (existing / "session.json").is_file():
+            return existing
+        root = project_storage_root(session.project, "conversations", self._directory()) if self.project_storage else self._directory()
+        return safe_scope_path(root, session.conv_id + "/session.json").parent
 
     # ------------------------------------------------------------- create
 
@@ -182,8 +204,8 @@ class CommanderSessionStore:
         ts = (now or datetime.now(tz=timezone.utc)).strftime("%Y-%m-%dT%H%M%S")
         conv_id = f"conv_{ts}"
         # collision guard
-        if conv_id in self._sessions or (self._directory() / conv_id).exists():
-            conv_id = f"conv_{ts}_{len(self._sessions)}"
+        while conv_id in self._sessions or (self._find(conv_id) / "session.json").exists():
+            conv_id = f"conv_{ts}_{uuid4().hex[:12]}"
         session = CommanderSession(conv_id=conv_id, project=project, experiment_id=experiment_id)
         self._sessions[conv_id] = session
         self._persist(session)
@@ -204,7 +226,7 @@ class CommanderSessionStore:
         out: dict[str, CommanderSession] = {}
         root = self._directory()
         if root.exists():
-            for entry in sorted(root.iterdir()):
+            for entry in sorted(item for directory in self._roots() for item in directory.iterdir()):
                 if entry.is_dir() and (entry / "session.json").exists():
                     loaded = self._load(entry.name)
                     if loaded is not None:
@@ -219,7 +241,7 @@ class CommanderSessionStore:
 
     def _persist(self, session: CommanderSession) -> None:
         from app.harness.persistence import atomic_write_text
-        d = self._directory() / session.conv_id
+        d = self.session_directory(session)
         d.mkdir(parents=True, exist_ok=True)
         atomic_write_text(d / "session.json",
             json.dumps(session.to_meta(), ensure_ascii=False, indent=2),
@@ -227,7 +249,7 @@ class CommanderSessionStore:
         atomic_write_text(d / "messages.jsonl", "".join(json.dumps(m.to_dict(), ensure_ascii=False) + "\n" for m in session.messages))
 
     def _load(self, conv_id: str) -> CommanderSession | None:
-        d = self._directory() / conv_id
+        d = self._find(conv_id)
         meta_path = d / "session.json"
         if not meta_path.exists():
             return None

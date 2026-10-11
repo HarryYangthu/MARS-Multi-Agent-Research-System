@@ -17,6 +17,9 @@ from uuid import uuid4
 
 import numpy as np
 
+from app.harness.project_storage import project_storage_root, storage_roots
+from app.harness.persistence import atomic_write_json
+from app.harness.runtime.project_scope import safe_scope_path
 from app.settings import repo_root
 
 _SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -30,7 +33,8 @@ _MAX_JSON_PREVIEW_BYTES = 5 * 1024 * 1024
 class DataSourceStore:
     """Store user-selected simulation datasets under ``workspace/uploads``."""
 
-    def __init__(self, base: Path | None = None) -> None:
+    def __init__(self, base: Path | None = None, *, project_storage: bool | None = None) -> None:
+        self.project_storage = base is None if project_storage is None else project_storage
         self.base = base or (repo_root() / "workspace" / "uploads" / "datasets")
         self.base.mkdir(parents=True, exist_ok=True)
 
@@ -38,7 +42,8 @@ class DataSourceStore:
         created = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
         stem = _safe_stem(Path(original_name).stem)
         source_id = _safe_id(f"{created}_{project}_{stem}_{uuid4().hex[:8]}")
-        target_dir = self.base / source_id
+        directory = project_storage_root(project, "data", self.base) if self.project_storage else self.base
+        target_dir = directory / source_id
         target_dir.mkdir(parents=True, exist_ok=False)
         filename = _safe_filename(original_name)
         return source_id, target_dir / filename
@@ -114,6 +119,14 @@ class DataSourceStore:
         data = json.loads(profile_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError(f"invalid data source profile: {profile_path}")
+        # Resolve relative paths against the owned dataset directory after a project move.
+        for key in ("stored_path", "spectrum_path"):
+            if data.get(key):
+                value = Path(str(data[key]))
+                relative = value.name if value.is_absolute() else value.as_posix()
+                candidate = safe_scope_path(profile_path.parent, relative)
+                if candidate.is_file():
+                    data[key] = str(candidate)
         project = str(data.get("project") or "")
         if project:
             data["is_default"] = self.default_id(project) == source_id
@@ -121,18 +134,31 @@ class DataSourceStore:
 
     def list(self, *, project: str = "") -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
+        seen: set[str] = set()
         default_id = self.default_id(project) if project else ""
         if not self.base.exists():
             return out
-        for profile_path in sorted(self.base.glob("*/profile.json")):
+        roots = storage_roots(self.base, "data") if self.project_storage else [self.base]
+        for profile_path in (path for root in roots for path in sorted(root.glob("*/profile.json"))):
             try:
                 profile = json.loads(profile_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(profile, dict):
                 continue
+            for key in ("stored_path", "spectrum_path"):
+                if profile.get(key):
+                    value = Path(str(profile[key]))
+                    relative = value.name if value.is_absolute() else value.as_posix()
+                    candidate = safe_scope_path(profile_path.parent, relative)
+                    if candidate.is_file():
+                        profile[key] = str(candidate)
             if project and str(profile.get("project") or "") != project:
                 continue
+            identifier = str(profile.get("id") or "")
+            if identifier in seen:
+                continue
+            seen.add(identifier)
             if default_id:
                 profile["is_default"] = str(profile.get("id") or "") == default_id
             out.append(profile)
@@ -143,17 +169,15 @@ class DataSourceStore:
         profile = self.load(source_id)
         if str(profile.get("project") or "") != project:
             raise ValueError("data source belongs to a different project")
-        defaults = self._read_defaults()
+        defaults = self._read_defaults(project)
         defaults[project] = source_id
-        self._defaults_path().write_text(
-            json.dumps(defaults, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        atomic_write_json(self._defaults_path(project), defaults)
         profile["is_default"] = True
         return profile
 
     def default_id(self, project: str) -> str:
-        return str(self._read_defaults().get(project) or "")
+        local = self._read_defaults(project).get(project)
+        return str(local or self._read_defaults().get(project) or "")
 
     def default_profile(self, project: str) -> dict[str, Any] | None:
         source_id = self.default_id(project)
@@ -168,10 +192,14 @@ class DataSourceStore:
 
     def save_profile(self, profile: dict[str, Any]) -> None:
         source_id = str(profile.get("id") or "")
-        self.profile_path(source_id).write_text(
-            json.dumps(profile, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        stored = dict(profile)
+        directory = self._source_dir(source_id)
+        for key in ("stored_path", "spectrum_path"):
+            if stored.get(key):
+                path = Path(str(stored[key]))
+                if path.resolve().is_relative_to(directory.resolve()):
+                    stored[key] = path.resolve().relative_to(directory.resolve()).as_posix()
+        atomic_write_json(self.profile_path(source_id), stored)
 
     def profile_path(self, source_id: str) -> Path:
         return self._source_dir(source_id) / "profile.json"
@@ -179,12 +207,13 @@ class DataSourceStore:
     def spectrum_path(self, source_id: str) -> Path:
         return self._source_dir(source_id) / "spectrum.png"
 
-    def _defaults_path(self) -> Path:
-        self.base.mkdir(parents=True, exist_ok=True)
-        return self.base / "_defaults.json"
+    def _defaults_path(self, project: str = "") -> Path:
+        root = project_storage_root(project, "data", self.base) if project and self.project_storage else self.base
+        root.mkdir(parents=True, exist_ok=True)
+        return safe_scope_path(root, "_defaults.json")
 
-    def _read_defaults(self) -> dict[str, str]:
-        path = self._defaults_path()
+    def _read_defaults(self, project: str = "") -> dict[str, str]:
+        path = self._defaults_path(project)
         if not path.is_file():
             return {}
         try:
@@ -199,6 +228,11 @@ class DataSourceStore:
         clean = _safe_id(source_id)
         if not clean:
             raise ValueError("data source id is empty")
+        roots = storage_roots(self.base, "data") if self.project_storage else [self.base]
+        for directory in roots:
+            candidate = safe_scope_path(directory, clean + "/profile.json").parent
+            if candidate.is_dir():
+                return candidate
         target = (self.base / clean).resolve()
         base = self.base.resolve()
         if not target.is_relative_to(base):

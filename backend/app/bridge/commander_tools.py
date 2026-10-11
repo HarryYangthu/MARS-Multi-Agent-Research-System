@@ -494,10 +494,10 @@ async def _discovery_replay(args: dict[str, Any], ctx: ToolContext) -> dict[str,
 
 
 async def _read_context_material(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
-    from app.settings import repo_root
+    from app.bridge.commander_session import get_session_store
     from app.harness.tools.context_material import read_material_tool
     result = await read_material_tool(args, HarnessToolContext(ctx.session.conv_id, ctx.session.project, "commander",
-        extra={"run_root": str(repo_root() / "conversations" / ctx.session.conv_id)}))
+        extra={"run_root": str(get_session_store().session_directory(ctx.session))}))
     return {"ok": result.ok, "output": result.output, "error": result.error}
 
 
