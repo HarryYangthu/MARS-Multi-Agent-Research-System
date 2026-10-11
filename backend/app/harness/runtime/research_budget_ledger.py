@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.harness.runtime.research_contract import ResearchBudget, ResearchTaskContract
 from app.harness.runtime.state_journal import RunStateIntegrityError, StateJournal
-from app.harness.llm.usage_policy import TOKEN_COMPONENTS, TokenUsageMode, token_usage_mode
+from app.harness.llm.usage_policy import TOKEN_COMPONENTS, TokenUsageMode, token_usage_mode, AgentQuotaMode, agent_quota_mode
 
 Count = Annotated[int, Field(strict=True, ge=0)]
 Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -145,6 +145,7 @@ class BudgetAdmission(_Record):
 class BudgetSnapshot(_Record):
     task_sha256: str
     token_usage_mode: TokenUsageMode = 'limited'
+    agent_quota_mode: AgentQuotaMode = 'limited'
     used: dict[str, int | None]
     limits: dict[str, int]
     known_cost_subtotal_micro_cny: int
@@ -205,7 +206,9 @@ def interval_union_us(intervals: list[tuple[int, int]]) -> int:
 
 class ResearchBudgetLedger:
     def __init__(self, journal: StateJournal, *, task_sha256: str, budget: ResearchBudget,
-                 price_reference_sha256: str | None = None, token_mode: TokenUsageMode | None = None) -> None:
+                 price_reference_sha256: str | None = None, token_mode: TokenUsageMode | None = None,
+                 quota_mode: AgentQuotaMode | None = None) -> None:
+        self.quota_mode = quota_mode or agent_quota_mode()
         self.token_mode = token_mode or token_usage_mode()
         identity = _PolicyIdentity(task_sha256=task_sha256, price_reference_sha256=price_reference_sha256)
         self.journal = journal
@@ -215,6 +218,10 @@ class ResearchBudgetLedger:
         self.policy = {"budget": self.budget.model_dump(mode="json"), "price_reference_sha256": price_reference_sha256}
         self.policy_sha256 = _sha(self.policy)
         self.limits = _limits(self.budget)
+
+    def remaining_activity_seconds(self) -> float:
+        """Internal deadline; unlimited is never serialized as non-finite JSON."""
+        return float('inf') if self.quota_mode == 'statistics_only' else self.snapshot().activity_remaining_us / _MICRO
 
     def _binding(self, connection: sqlite3.Connection) -> None:
         payload = StateJournal._read(connection)
@@ -428,7 +435,7 @@ class BudgetTransaction:
                     cost_exact = False
             for key, value in charges.items():
                 used[key] += value
-                if ((self.ledger.token_mode == 'limited' or key not in TOKEN_COMPONENTS)
+                if (self.ledger.quota_mode == 'limited' and (self.ledger.token_mode == 'limited' or key not in TOKEN_COMPONENTS)
                         and (settled is not None or lower is not None) and value > spec.amounts.units().get(key, 0)):
                     overrun = True
             if state in {"unknown", "retained"}:
@@ -466,8 +473,9 @@ class BudgetTransaction:
             reported["model_cost_micro_cny"] = None
         return BudgetSnapshot(task_sha256=self.ledger.task_sha256, used=reported, limits=self.ledger.limits,
             token_usage_mode=self.ledger.token_mode,
+            agent_quota_mode=self.ledger.quota_mode,
             known_cost_subtotal_micro_cny=used["model_cost_micro_cny"],
-            cost_ceiling_enforced=self.ledger.price_reference_sha256 is not None and cost_known,
+            cost_ceiling_enforced=self.ledger.quota_mode == 'limited' and self.ledger.price_reference_sha256 is not None and cost_known,
             cost_usage_exact=cost_known and cost_exact, activity_us=activity,
             activity_remaining_us=max(0, limit - activity), clock_uncertain=uncertain,
             reservation_overrun=overrun, unknown_reservations=tuple(unknown),
@@ -511,7 +519,7 @@ class BudgetTransaction:
             return "clock_reconciliation_required"
         if snapshot.reservation_overrun:
             return "reservation_overrun"
-        if snapshot.activity_remaining_us <= 0:
+        if self.ledger.quota_mode == 'limited' and snapshot.activity_remaining_us <= 0:
             return "research_activity_exhausted"
         previous = [(item, state, settled) for item, state, settled, _ in rows if item.operation_id == spec.operation_id]
         if spec.attempt_index != len(previous):
@@ -535,23 +543,25 @@ class BudgetTransaction:
         if spec.attempt_index > budget.operation_retries or attempts_used + attempts_reserved > budget.operation_retries + 1:
             return "operation_retry_limit"
         if spec.kind == "model":
-            if spec.request_input_tokens > budget.request_input_tokens:
+            if self.ledger.quota_mode == 'limited' and spec.request_input_tokens > budget.request_input_tokens:
                 return "request_input_limit"
             output = budget.coding_output_tokens if spec.output_class == "coding" else budget.request_output_tokens
-            if spec.request_output_tokens > output:
+            if self.ledger.quota_mode == 'limited' and spec.request_output_tokens > output:
                 return "request_output_limit"
             if (self.ledger.price_reference_sha256 is None) != (spec.amounts.model_cost_micro_cny is None):
                 return "model_price_policy_mismatch"
         if spec.kind == "reader" and snapshot.active_readers >= budget.concurrent_readers:
             return "reader_concurrency_limit"
         if spec.kind == "job":
-            if spec.job_duration_us > budget.training_job_seconds * _MICRO:
+            if self.ledger.quota_mode == 'limited' and spec.job_duration_us > budget.training_job_seconds * _MICRO:
                 return "training_job_time_limit"
             if snapshot.active_jobs >= budget.concurrent_training_jobs:
                 return "training_concurrency_limit"
             if snapshot.active_gpus + spec.gpus > budget.max_gpus:
                 return "gpu_allocation_limit"
         for key, amount in spec.amounts.units().items():
+            if self.ledger.quota_mode == 'statistics_only':
+                continue
             if self.ledger.token_mode == 'statistics_only' and key in TOKEN_COMPONENTS:
                 continue
             used = snapshot.known_cost_subtotal_micro_cny if key == "model_cost_micro_cny" else int(snapshot.used[key] or 0)

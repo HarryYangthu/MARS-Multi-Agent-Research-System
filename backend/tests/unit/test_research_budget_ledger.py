@@ -90,6 +90,22 @@ def _settlement(amounts: BudgetAmounts, *, failure: bool = False, evidence: str 
         error_fingerprint=_digest("same-error") if failure else None)
 
 
+def test_statistics_only_contract_preserves_frozen_identity_and_over_quota_usage(tmp_path: Path) -> None:
+    bounded, _ = _setup(tmp_path, budget=_budget(tool_executions=1, research_activity_seconds=1))
+    ledger = ResearchBudgetLedger(bounded.journal, task_sha256=bounded.task_sha256, budget=bounded.budget,
+                                  token_mode='limited', quota_mode='statistics_only')
+    assert ledger.policy_sha256 == bounded.policy_sha256
+    spec = _reserve('over-quota', amounts=BudgetAmounts(tool_executions=3))
+    assert ledger.reserve(spec, now_us=0).admitted
+    ledger.settle(spec.reservation_id, _settlement(BudgetAmounts(tool_executions=4), failure=True), now_us=2_000_000)
+    snapshot = ledger.snapshot(now_us=2_000_000)
+    assert snapshot.used['tool_executions'] == 4
+    assert snapshot.limits['tool_executions'] == 1
+    assert snapshot.agent_quota_mode == 'statistics_only'
+    assert not snapshot.reservation_overrun
+    assert ledger.reserve(_reserve('next-operation'), now_us=3_000_000).admitted
+
+
 def test_read_requires_explicit_extension_and_initialization_is_idempotent(tmp_path: Path) -> None:
     ledger, run = _setup(tmp_path, initialize=False)
     before = ledger.journal.path.read_bytes()
@@ -441,7 +457,8 @@ def test_all_model_requests_across_distinct_operations_share_one_limit(tmp_path:
 def test_per_request_bounds_and_explicit_coding_class(
     tmp_path: Path, input_bound: int, output_bound: int, output_class: str, expected: str | None,
 ) -> None:
-    ledger, _ = _setup(tmp_path)
+    # Test a historical frozen contract independently of deployment defaults.
+    ledger, _ = _setup(tmp_path, budget=_budget(request_output_tokens=8192, coding_output_tokens=16384))
     spec = _reserve("model", kind="model", amounts=BudgetAmounts(model_requests=1),
         request_input_tokens=input_bound, request_output_tokens=output_bound, output_class=output_class)
     admission = ledger.reserve(spec, now_us=0)

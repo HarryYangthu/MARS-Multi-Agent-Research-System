@@ -59,7 +59,7 @@ class ContractModelBudget:
 
     def observe(self, reservation: Reservation, kind: str, data: dict[str, Any]) -> None:
         if kind == "sdk_attempt_started":
-            if self.scope.ledger.snapshot().activity_remaining_us <= 0:
+            if self.scope.ledger.remaining_activity_seconds() <= 0:
                 raise ResourceBudgetError("research activity budget exhausted before SDK attempt")
             if self.errors.get(reservation.request_id, ("", 0))[1] >= self.scope.ledger.budget.repeated_error_limit:
                 raise ResourceBudgetError("identical SDK errors reached the frozen repeated_error_limit")
@@ -146,6 +146,7 @@ class ContractModelBudget:
                           if valid else None)
         receipt: dict[str, object] = {"schema": "runtime.contract_model_receipt.v1",
             "token_usage_mode": self.scope.ledger.token_mode,
+            "agent_quota_mode": self.scope.ledger.quota_mode,
             "run_id": self.scope.ledger.journal.run_id, "task_sha256": self.scope.ledger.task_sha256,
             "invocation_id": self.scope.invocation_id, "reservation_id": reservation.request_id,
             "identity": self.identities[reservation.request_id], "outcome": outcome,

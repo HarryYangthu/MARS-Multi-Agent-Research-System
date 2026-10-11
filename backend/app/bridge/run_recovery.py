@@ -93,7 +93,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         except (ResourceBudgetError, OSError, ValueError):
             return finish('blocked', '资源记录或预算配置无法校验，请先核对记录和配置。')
         evidence.append(raw)
-        evidence.append({'token_usage_mode': model_budget.token_mode})
+        evidence.append({'token_usage_mode': model_budget.token_mode, 'agent_quota_mode': model_budget.quota_mode})
         if any(row.get('status') in {'in_flight', 'reconciliation_required'}
                for row in raw.get('requests', {}).values()):
             return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
@@ -102,7 +102,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         # Do not offer retry when even the next call's SDK retries cannot fit.
         # A completion-driven loop never exempts its Agent from the run budget.
         capacities = [model_request_capacity(raw, getattr(getattr(agent, 'config', None),
-                       'max_retries', MAX_LLM_RETRIES)) for agent in model_agents]
+                       'max_retries', MAX_LLM_RETRIES), quota_mode=model_budget.quota_mode) for agent in model_agents]
         evidence.append([{'used': item.used, 'limit': item.limit, 'required': item.required}
                          for item in capacities])
         for capacity in capacities:
@@ -111,17 +111,17 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     f'下一次调用需预留 {capacity.required} 次（含网络重试）。进度已保留，'
                     '请调整并核对预算后继续；刷新和重试不会清空已有用量。')
         exhausted = False
-        if model_budget.token_mode == 'limited':
+        if model_budget.quota_mode == 'limited' and model_budget.token_mode == 'limited':
             exhausted = exhausted or sum(row['charged_tokens'] for row in rows) >= limits['max_total_tokens']
             for component, limit in (('input', 'max_input_tokens'), ('output', 'max_billed_output_tokens')):
                 exhausted = exhausted or (limit in limits and sum(charged_token_component(row, component)
                                           for row in rows) >= limits[limit])
-        if limits.get('max_cost') is not None:
+        if model_budget.quota_mode == 'limited' and limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
         if exhausted and model_agents:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
-        elapsed_exhausted = (
+        elapsed_exhausted = model_budget.quota_mode == 'limited' and (
             time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
     if legacy:
         for agent in agents:

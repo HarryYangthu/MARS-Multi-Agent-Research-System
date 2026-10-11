@@ -242,3 +242,52 @@ async def test_real_gateway_reports_shared_budget_block_without_sending_a_model_
     finally:
         await gateway.close()
         await request.provider.close()
+
+
+@pytest.mark.asyncio
+async def test_statistics_mode_crosses_gateway_and_run_caps_but_reports_real_connection_failure(tmp_path: Path) -> None:
+    import socket
+
+    # A bound non-listening socket provides a genuine refused connection.
+    with socket.socket() as unavailable, environment({'MARS_AGENT_QUOTA_MODE': 'statistics_only'}):
+        unavailable.bind(('127.0.0.1', 0))
+        port = unavailable.getsockname()[1]
+        root = tmp_path / 'run'
+        resource_dir = root / 'resources'
+        resource_dir.mkdir(parents=True)
+        configuration = RunModelBudget(root).configuration
+        configuration['limits'].update(max_model_requests=1, max_elapsed_seconds=0.000001)
+        (resource_dir / 'model_budget.policy.yaml').write_text(yaml.safe_dump(configuration))
+        budget = RunModelBudget(root)
+        config = LLMConfig('local_vllm', 'unavailable', max_tokens=16, max_retries=0, request_timeout_seconds=0.2)
+        old = budget.reserve([Message('user', 'Historical reservation')], config, {})
+        budget.settle(old, usage=None, complete=False, outcome='failed')
+        old_row = budget.recovery_snapshot()['requests'][old.request_id]
+
+        async def validate(text: str, history: list[dict[str, Any]]) -> list[str]:
+            raise AssertionError('No candidate or successful model response is produced')
+
+        request = LoopInput(messages=[Message('user', 'Verify actual network admission')],
+            provider=LocalVllmProvider(base_url=f'http://127.0.0.1:{port}'), config=config,
+            registry=get_registry(), tool_context=ToolContext('quota-check', 'unbound', 'coding',
+                extra={'run_root': str(root)}), tools=(), policy=AgentLoopPolicy(max_model_calls=1),
+            trace_root=root / 'trace', validate=validate)
+        zconfig = replace(ZCodeConfig.load(), max_model_calls=1)
+        state = ZCodeLoopExecutor(zconfig)._state(request, 'quota-mode-boundary')
+        state['counts']['model_requests'] = 100
+        gateway = ZCodeGateway(request, zconfig, 'private-quota-token', state, LoopTrace(request.trace_root, 'full'))
+        await gateway.start()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(gateway.endpoint + '/v1/chat/completions',
+                    headers={'Authorization': 'Bearer private-quota-token'},
+                    json={'messages': [{'role': 'user', 'content': 'Actual refused connection'}]})
+            assert response.status_code == 502
+            assert state['status'] == 'model_error'
+            assert state['counts']['sdk_attempts'] == 1
+            assert state['counts']['model_responses'] == 0
+            rows = budget.recovery_snapshot()['requests']
+            assert len(rows) == 2 and rows[old.request_id] == old_row
+        finally:
+            await gateway.close()
+            await request.provider.close()

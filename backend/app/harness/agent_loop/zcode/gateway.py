@@ -18,6 +18,8 @@ from app.harness.agent_loop.zcode.config import ZCodeConfig
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.provider_base import Completion, Delta, LLMCompletionError, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import dumps
+from app.harness.llm.usage_policy import AgentQuotaMode, agent_quota_mode
+from app.harness.agent_loop.failure_guard import repeated_failure, clear_failure
 
 WireCall = Callable[[dict[str, Any], LLMConfig], Awaitable[dict[str, Any]]]
 
@@ -103,9 +105,12 @@ def record_rejected_completion(state: dict[str, Any], trace: LoopTrace, error: L
     trace.emit("model_error", {"error_type": type(error).__name__, "reason": error.reason})
 
 
-def invocation_budget(config: ZCodeConfig, policy: AgentLoopPolicy, counts: dict[str, int]) -> dict[str, int]:
+def invocation_budget(config: ZCodeConfig, policy: AgentLoopPolicy, counts: dict[str, int], *,
+                      quota_mode: AgentQuotaMode = 'limited') -> dict[str, int | None]:
     """Expose remaining local allowances; shared run admission still applies."""
-    result = {}
+    if quota_mode == 'statistics_only':
+        return {'model_calls_remaining': None, 'tool_calls_remaining': None}
+    result: dict[str, int | None] = {}
     for name, used, maximum, policy_remaining in (
         ("model_calls", counts["model_requests"], config.max_model_calls,
          policy.remaining_model_calls(counts["model_requests"])),
@@ -157,7 +162,8 @@ def stream_envelope(response: dict[str, Any]) -> str:
 
 class ZCodeGateway:
     def __init__(self, request: LoopInput, config: ZCodeConfig, token: str,
-                 state: dict[str, Any], trace: LoopTrace) -> None:
+                 state: dict[str, Any], trace: LoopTrace, *, quota_mode: AgentQuotaMode | None = None) -> None:
+        self.quota_mode = quota_mode or agent_quota_mode()
         self.request, self.config, self.token = request, config, token
         self.state, self.trace = state, trace
         self.tools = wire_tools(request)
@@ -229,7 +235,7 @@ class ZCodeGateway:
             counts = self.state["counts"]
             if self.state["status"] != "running":
                 raise web.HTTPConflict(text="MARS invocation stopped")
-            if (counts["model_requests"] >= self.config.max_model_calls
+            if self.quota_mode == 'limited' and (counts["model_requests"] >= self.config.max_model_calls
                     or not self.request.policy.allows_model_calls(counts["model_requests"])):
                 self.stop("budget_exhausted", "ZCode model-call limit reached")
                 raise web.HTTPTooManyRequests(text="MARS model budget exhausted")
@@ -334,7 +340,12 @@ class ZCodeGateway:
             self.trace.emit("validation", {"errors": errors}, visible=candidate)
             if errors:
                 self.state["counts"]["validation_repairs"] += 1
-                if self.state["counts"]["validation_repairs"] > self.config.max_validation_repairs:
+                # In statistics mode only unchanged failed submissions stop;
+                # useful revisions never consume a lifetime repair allowance.
+                failed_repeatedly = repeated_failure(self.state, 'validation',
+                    {'candidate': candidate, 'errors': errors}, limit=self.config.max_validation_repairs)
+                if (failed_repeatedly if self.quota_mode == 'statistics_only'
+                        else self.state["counts"]["validation_repairs"] > self.config.max_validation_repairs):
                     self.stop("validation_failed", "Candidate did not pass MARS validation")
                 self.save()
                 return mcp_result({"accepted": False, "errors": errors}, error=True)
@@ -347,7 +358,7 @@ class ZCodeGateway:
         if tool is None:
             return mcp_result({"error": "Tool is outside MARS allowlist"}, error=True)
         counts = self.state["counts"]
-        if (counts["tool_dispatches"] >= self.config.max_tool_calls
+        if self.quota_mode == 'limited' and (counts["tool_dispatches"] >= self.config.max_tool_calls
                 or not self.request.policy.allows_tool_calls(counts["tool_dispatches"])):
             self.stop("budget_exhausted", "ZCode tool-call limit reached")
             return mcp_result({"error": "MARS tool budget exhausted"}, error=True)
@@ -368,7 +379,12 @@ class ZCodeGateway:
         await self.progress("observation", tool=tool, ok=result.ok)
         if result.requires_approval or result.blocked_by_gate:
             self.stop("blocked", result.error or "MARS approval required")
-        budget = invocation_budget(self.config, self.request.policy, counts)
+        elif result.ok:
+            clear_failure(self.state, 'tool')
+        elif repeated_failure(self.state, 'tool', observation, limit=self.request.policy.max_protocol_repairs):
+            self.stop('validation_failed', 'Repeated identical tool failure; diagnostic repair required')
+        self.save()
+        budget = invocation_budget(self.config, self.request.policy, counts, quota_mode=self.quota_mode)
         rendered = canonical({**observation, "invocation_budget": budget})
         if len(rendered) > self.config.max_observation_chars:
             path = self.request.trace_root / "tools" / (str(counts["tool_dispatches"]) + ".json")

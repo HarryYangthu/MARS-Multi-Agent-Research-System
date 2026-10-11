@@ -46,9 +46,10 @@ def _record(read: Callable[[str], bytes], relative: str) -> dict[str, Any]:
 
 
 def _empty() -> dict[str, Any]:
-    from app.harness.llm.usage_policy import token_usage_mode
+    from app.harness.llm.usage_policy import token_usage_mode, agent_quota_mode
     return {"status": "invalid", "authority": "sqlite", "model_requests": None, "logical_records": None,
         "token_usage_mode": token_usage_mode(),
+        "agent_quota_mode": agent_quota_mode(),
         "request_count_scope": "logical_records", "observed_sdk_attempts": None,
         "observed_attempts_complete": None, "charged_sdk_attempts": None, "reserved_sdk_attempts": None,
         "calls_with_unknown_attempt_count": None, "input_tokens": None, "billed_output_tokens": None,
@@ -190,7 +191,7 @@ def read_research_resources(run: RunHandle, *, read: Callable[[str], bytes]) -> 
                 charged_quantities={key: value for key, value in snapshot.used.items() if key != "model_cost_micro_cny"},
                 limits={key: value for key, value in snapshot.limits.items() if key != "model_cost_micro_cny"},
                 research_activity_seconds=snapshot.activity_us / 1_000_000,
-                research_activity_remaining_seconds=snapshot.activity_remaining_us / 1_000_000,
+                research_activity_remaining_seconds=None if snapshot.agent_quota_mode == 'statistics_only' else snapshot.activity_remaining_us / 1_000_000,
                 clock_uncertain=snapshot.clock_uncertain, reservation_overrun=snapshot.reservation_overrun,
                 unknown_reservations=len(snapshot.unknown_reservations),
                 open_activity_reservations=sum(phase in {"reserved", "unknown"} for _, phase, _ in rows),

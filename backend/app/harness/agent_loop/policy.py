@@ -1,10 +1,11 @@
 """Validated budgets; no implicit provider/framework fallback."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from collections.abc import Mapping
 import re
 from typing import Any, Literal
+from app.harness.llm.usage_policy import AgentQuotaMode, agent_quota_mode
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,12 @@ class AgentLoopPolicy:
     def remaining_model_calls(self, used: int) -> int | None:
         """None means no count limit; usage counters still accumulate normally."""
         return None if self.completion_driven or self.max_model_calls is None else max(0, self.max_model_calls - used)
+
+    def effective(self, mode: AgentQuotaMode | None = None) -> AgentLoopPolicy:
+        """Apply the deployment quota policy at the executor boundary."""
+        if (mode or agent_quota_mode()) == 'statistics_only':
+            return replace(self, completion_driven=True, max_model_calls=None, max_active_seconds=0)
+        return self
 
     def allows_model_calls(self, used: int, required: int = 1) -> bool:
         remaining = self.remaining_model_calls(used)

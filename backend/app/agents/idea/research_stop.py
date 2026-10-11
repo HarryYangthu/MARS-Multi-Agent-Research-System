@@ -6,6 +6,7 @@ from pathlib import Path
 from app.agents.idea.publication_count import PUBLICATION_COUNT_CONTRACT, count_report_publications
 from app.agents.idea.research_delegate import TOOL, load_delegated_research
 from app.harness.agent_loop.stop import LoopStop, LoopStopView
+from app.harness.llm.usage_policy import agent_quota_mode
 
 LEAD_STOP_CONTRACT = "idea.lead_research_stop.v3"
 
@@ -17,8 +18,8 @@ def lead_evidence_stop(view: LoopStopView, *, run_root: Path, min_sources: int,
     started = {row["output"]["delegation_id"] for row in view.observations
                if row.get("tool") == TOOL and isinstance(row.get("output"), dict)
                and isinstance(row["output"].get("delegation_id"), str)}
-    exhausted = (not can_delegate or len(started) >= max_delegations
-                 or view.counts["tool_dispatches"] >= max_tool_steps)
+    exhausted = (not can_delegate or agent_quota_mode() == 'limited' and
+                 (len(started) >= max_delegations or view.counts["tool_dispatches"] >= max_tool_steps))
     if not exhausted:
         return None
     reports, _ = load_delegated_research(run_root, view.observations)

@@ -318,7 +318,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     budget = RunModelBudget(run.root)
     ledger = budget.recovery_snapshot()
     budget_view = {'used': sum(charged_model_attempts(row) for row in ledger['requests'].values()),
-                   'limit': ledger['configuration']['limits']['max_model_requests'], 'required': 0}
+                   'limit': None if budget.quota_mode == 'statistics_only' else ledger['configuration']['limits']['max_model_requests'],
+                   'required': 0, 'agent_quota_mode': budget.quota_mode}
     if not files['execution/run_log.approved.md']:
         blockers.append('执行计划尚未生成并审核通过；此处先展示已有配置。')
     else:

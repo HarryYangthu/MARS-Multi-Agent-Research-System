@@ -272,7 +272,8 @@ class ResearchJobService:
                         experiment_id=request.experiment_id, project=self.run.project,
                         argv=(environment["python_executable"], command.arguments[0]), cwd=str(cwd),
                         timeout_seconds=float(self.ledger.budget.training_job_seconds),
-                        not_after_epoch_seconds=(now_us + min(duration_us, remaining.activity_remaining_us)) / 1_000_000,
+                        not_after_epoch_seconds=(now_us + (duration_us if self.ledger.quota_mode == 'statistics_only'
+                            else min(duration_us, remaining.activity_remaining_us))) / 1_000_000,
                         max_output_bytes=self.policy.max_output_bytes, required_metrics=metrics,
                         config=request.config, seed=request.seed, steps=request.steps)
                     binding = _Binding(task_sha256=self.ledger.task_sha256, request=request, spec=spec,

@@ -297,7 +297,7 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
             lock.acquire(timeout=0)
             break
         except Timeout:
-            if time.monotonic() >= deadline or plan.execution.ledger.snapshot().activity_remaining_us <= 0:
+            if time.monotonic() >= deadline or plan.execution.ledger.remaining_activity_seconds() <= 0:
                 with plan.execution.ledger.transaction() as transaction:
                     transaction.observe_clock()
                 return _blocked("contract tool lock wait exhausted")
@@ -309,7 +309,7 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
             path = plan.project.run_file(plan.backup[0], must_exist=True)
             if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != plan.backup[1]:
                 return _blocked("rollback changed after tool preflight")
-        remaining = plan.execution.ledger.snapshot().activity_remaining_us / 1_000_000
+        remaining = plan.execution.ledger.remaining_activity_seconds()
         timeout = min(deadline - time.monotonic(), remaining)
         if timeout <= 0:
             with plan.execution.ledger.transaction() as transaction:
@@ -326,7 +326,7 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
         try:
             # Includes synchronous handler elapsed time in the post-check; asyncio
             # cannot preempt a blocking filesystem syscall or SQLite transaction.
-            timeout = min(deadline - time.monotonic(), plan.execution.ledger.snapshot().activity_remaining_us / 1_000_000)
+            timeout = min(deadline - time.monotonic(), plan.execution.ledger.remaining_activity_seconds())
             if timeout <= 0:
                 raise TimeoutError("activity exhausted after reservation")
             handler_deadline = time.monotonic() + timeout
