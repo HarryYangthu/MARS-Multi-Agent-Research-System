@@ -12,6 +12,7 @@ from aiohttp import web
 
 from app.harness.agent_loop.executor import LoopInput
 from app.harness.agent_loop.native_protocol import native_specs, wire_name
+from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import LoopTrace, canonical, atomic_json
 from app.harness.agent_loop.zcode.config import ZCodeConfig
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
@@ -100,6 +101,20 @@ def record_rejected_completion(state: dict[str, Any], trace: LoopTrace, error: L
     state.update(pending=None, last_model_error=error.reason)
     trace.emit("model_response", {"rejected": True, "reason": error.reason, "usage": error.usage})
     trace.emit("model_error", {"error_type": type(error).__name__, "reason": error.reason})
+
+
+def invocation_budget(config: ZCodeConfig, policy: AgentLoopPolicy, counts: dict[str, int]) -> dict[str, int]:
+    """Expose remaining local allowances; shared run admission still applies."""
+    result = {}
+    for name, used, maximum, policy_remaining in (
+        ("model_calls", counts["model_requests"], config.max_model_calls,
+         policy.remaining_model_calls(counts["model_requests"])),
+        ("tool_calls", counts["tool_dispatches"], config.max_tool_calls,
+         policy.remaining_tool_calls(counts["tool_dispatches"])),
+    ):
+        remaining = max(0, maximum - used)
+        result[name + "_remaining"] = min(remaining, policy_remaining) if policy_remaining is not None else remaining
+    return result
 
 
 def wire_tools(request: LoopInput) -> list[dict[str, Any]]:
@@ -353,12 +368,14 @@ class ZCodeGateway:
         await self.progress("observation", tool=tool, ok=result.ok)
         if result.requires_approval or result.blocked_by_gate:
             self.stop("blocked", result.error or "MARS approval required")
-        rendered = canonical(observation)
+        budget = invocation_budget(self.config, self.request.policy, counts)
+        rendered = canonical({**observation, "invocation_budget": budget})
         if len(rendered) > self.config.max_observation_chars:
             path = self.request.trace_root / "tools" / (str(counts["tool_dispatches"]) + ".json")
             atomic_json(path, observation)
             rendered = canonical({"tool": tool, "ok": result.ok, "status": result.status,
-                                  "preview": rendered[:self.config.max_observation_chars], "raw_ref": str(path)})
+                                  "preview": rendered[:self.config.max_observation_chars], "raw_ref": str(path),
+                                  "invocation_budget": budget})
         return {"content": [{"type": "text", "text": rendered}], "isError": not result.ok}
 
 

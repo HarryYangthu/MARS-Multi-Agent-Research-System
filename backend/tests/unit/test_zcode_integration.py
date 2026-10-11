@@ -19,7 +19,7 @@ from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import LoopTrace
 from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
 from app.harness.agent_loop.zcode.executor import ZCodeLoopExecutor, session_identity
-from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, stream_envelope
+from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, stream_envelope
 from app.harness.agent_loop.zcode.protocol import ZCodeClient
 from app.harness.llm.openai_provider import LocalVllmProvider
 from app.harness.llm.accounting import RunModelBudget
@@ -61,6 +61,19 @@ def test_wire_parser_keeps_actual_tool_ids_finish_and_usage() -> None:
     assert protocol_tool_name("mars_code__repo_reader") == "mcp__mars__mars_code_repo_reader"
     assert session_identity({"session": {"sessionId": "sess_identity"}}) == "sess_identity"
     assert session_identity({"id": "unrelated"}) == ""
+
+
+@pytest.mark.parametrize('completion_driven,models,tools,expected', [
+    (False, 2, 1, {'model_calls_remaining': 1, 'tool_calls_remaining': 1}),
+    (True, 2, 1, {'model_calls_remaining': 3, 'tool_calls_remaining': 3}),
+    (True, 6, 5, {'model_calls_remaining': 0, 'tool_calls_remaining': 0}),
+])
+def test_host_budget_reports_the_stricter_actual_local_limit(
+    completion_driven: bool, models: int, tools: int, expected: dict[str, int],
+) -> None:
+    config = replace(ZCodeConfig.load(), max_model_calls=5, max_tool_calls=4)
+    policy = AgentLoopPolicy(completion_driven=completion_driven, max_model_calls=3, max_tool_steps=2)
+    assert invocation_budget(config, policy, {'model_requests': models, 'tool_dispatches': tools}) == expected
 
 
 def test_private_config_contains_only_loopback_token_and_runtime_hash(tmp_path: Path) -> None:
@@ -169,6 +182,8 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
                     written = await client.post(endpoint, headers=auth,
                         json=call("mars_code__write_file", {"path": "main.py", "content": "VALUE = 2\n"}))
                     assert not written.json()["result"]["isError"]
+                    observation = json.loads(written.json()["result"]["content"][0]["text"])
+                    assert observation['invocation_budget'] == {'model_calls_remaining': 1, 'tool_calls_remaining': 1}
                     assert (source / "main.py").read_text() == "VALUE = 2\n"
                     assert (source / "baseline/reference.py").read_text() == "VALUE = 1\n"
                     # Budget rejects before the unavailable model endpoint; it

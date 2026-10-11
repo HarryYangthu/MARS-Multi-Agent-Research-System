@@ -12,7 +12,7 @@ from typing import Any
 from app.harness.agent_loop.executor import LoopInput, LoopResult, generation_fingerprint
 from app.harness.agent_loop.trace import LoopTrace, audit_trace, digest, canonical
 from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
-from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, wire_tools
+from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, wire_tools
 from app.harness.agent_loop.zcode.protocol import ZCodeClient, ZCodeProtocolError
 
 
@@ -34,7 +34,7 @@ class ZCodeLoopExecutor:
                 or request.final_schema is None):
             raise ValueError("ZCode requires a structured ReAct task; configured reviews must not be bypassed")
         command = self.config.resolve_command()
-        fingerprint = digest({"backend": "zcode", "contract": 2,
+        fingerprint = digest({"backend": "zcode", "contract": 3,
             "generation": generation_fingerprint(request.config, request.provider),
             "messages": [m.to_wire() for m in request.messages], "tools": wire_tools(request),
             "final_schema": request.final_schema, "policy": request.policy.fingerprint_data(),
@@ -87,6 +87,10 @@ class ZCodeLoopExecutor:
             event_task = asyncio.create_task(self._events(client, gateway))
             prompt = ("Continue this exact MARS task using completed observations; verify current files before further edits. "
                       "Do not repeat a completed mutation.\n" if request.resume else self._prompt(request))
+            prompt += ("\nHost invocation budget: " + canonical(invocation_budget(self.config, request.policy, state["counts"]))
+                + ". Tool results report updated remaining allowances. Shared run limits also apply. "
+                "Plan reads and edits within this budget and reserve calls for real tests and validated submission. "
+                "Do not repeat successful reads or writes without a concrete reason; do not skip checks or claim completion to fit the budget.")
             if request.resume and state.get("candidate"):
                 errors = await request.validate(state["candidate"], state["history"])
                 if not errors:

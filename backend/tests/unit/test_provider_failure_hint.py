@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Any
 import os
+import json
 
 import pytest
 
@@ -104,3 +105,27 @@ def test_actual_archived_quota_error_is_explained_without_a_new_api_call() -> No
     if not configured:
         pytest.skip('requires actual native provider failure receipts')
     assert '1113' in checkpoint_failure_hint(Path(configured), status='model_error')
+
+
+def test_budget_hint_requires_a_matching_zcode_terminal_checkpoint(tmp_path: Path) -> None:
+    path = tmp_path / 'checkpoint.json'
+    state = {'backend': 'zcode', 'status': 'budget_exhausted',
+             'error': 'ZCode tool-call limit reached', 'counts': {'tool_dispatches': 40}}
+    path.write_text(json.dumps(state), encoding='utf-8')
+    hint = checkpoint_failure_hint(tmp_path, status='budget_exhausted')
+    assert '工具调用次数上限' in hint and '40 次' in hint and '尚未完成验收' in hint
+    for field, value in [('backend', 'native'), ('status', 'passed'), ('error', 'PRIVATE UNKNOWN ERROR')]:
+        path.write_text(json.dumps({**state, field: value}), encoding='utf-8')
+        assert checkpoint_failure_hint(tmp_path, status='budget_exhausted') == ''
+
+
+def test_actual_zcode_budget_failure_explains_preserved_incomplete_work() -> None:
+    configured = os.environ.get('MARS_TEST_ZCODE_BUDGET_TRACE')
+    if not configured:
+        pytest.skip('requires actual ZCode tool budget exhaustion receipts')
+    root = Path(configured)
+    paths = [root / 'checkpoint.json', root / 'events.jsonl']
+    before = [path.read_bytes() for path in paths]
+    hint = checkpoint_failure_hint(root, status='budget_exhausted')
+    assert '工具调用次数上限' in hint and '40 次' in hint and '人工审核' in hint
+    assert [path.read_bytes() for path in paths] == before

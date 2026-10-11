@@ -72,6 +72,8 @@ def _truncation_hint(request: dict[str, Any], tail: list[dict[str, Any]]) -> str
 
 
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:
+    if status == 'budget_exhausted':
+        return _zcode_budget_hint(root)
     if status not in {'model_error', 'protocol_exhausted'}:
         return ''
     path = root / 'events.jsonl'
@@ -101,3 +103,28 @@ def checkpoint_failure_hint(root: Path, *, status: str) -> str:
         return ''
     except OSError:
         return ''
+
+
+def _zcode_budget_hint(root: Path) -> str:
+    path = root / 'checkpoint.json'
+    try:
+        if path.stat().st_size > 4 * 1024 * 1024:
+            return ''
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return ''
+    if (not isinstance(state, dict) or state.get('backend') != 'zcode'
+            or state.get('status') != 'budget_exhausted' or not isinstance(state.get('counts'), dict)):
+        return ''
+    labels = {'ZCode tool-call limit reached': ('工具调用', 'tool_dispatches'),
+              'ZCode model-call limit reached': ('模型调用', 'model_requests')}
+    item = labels.get(str(state.get('error')))
+    if item is None:
+        return ''
+    label, key = item
+    used = state['counts'].get(key)
+    if type(used) is not int or used < 1:
+        return ''
+    return (f'ZCode 已达到本轮{label}次数上限（已调用 {used} 次），交付尚未完成验收。'
+            '已有代码、检查结果和累计用量已保留；请核对剩余工作后重试当前阶段，'
+            '仍需完成真实测试与人工审核。')
