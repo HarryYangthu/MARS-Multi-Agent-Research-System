@@ -15,6 +15,7 @@ import yaml
 
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, digest
 from app.harness.llm.accounting import guarded_complete
+from app.harness.llm.usage_policy import agent_quota_mode
 from app.harness.llm.model_registry import get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
 from app.harness.runtime.event_bus import EventBus
@@ -140,6 +141,11 @@ async def review_once(
         "只输出 JSON：{\"decision\":\"approve|revise|needs_user\",\"reason\":\"中文审核理由\","
         "\"evidence_refs\":[\"从材料 evidence_refs 选择实际核对的依据\"]}。")),
         Message(role="user", content=content)]
+    if agent_quota_mode() == 'statistics_only':
+        messages.insert(1, Message(role='system', content=(
+            '宿主当前 agent_quota_mode=statistics_only：模型/工具次数、累计时间、费用及返工次数仅统计，'
+            '不得仅因旧配额数值已耗尽而要求用户接管。研究目标、实验参数、真实证据、代码保护和权限仍须核验，'
+            '不改变批准标准；缺少证据或存在实质冲突时仍按实际情况决定。')))
     try:
         provider, config = select_provider(get_agent_config("commander"))
     except Exception as error:

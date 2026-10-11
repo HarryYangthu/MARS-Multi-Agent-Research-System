@@ -248,7 +248,8 @@ class Orchestrator:
                 await approve(session=review, bus=session.bus, actor="commander")
             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
         elif decision.decision == "revise":
-            if revision_count(session.run, node_key) >= review_policy().max_revisions_per_node:
+            from app.harness.llm.usage_policy import agent_quota_mode
+            if agent_quota_mode() == 'limited' and revision_count(session.run, node_key) >= review_policy().max_revisions_per_node:
                 await finish_review(session.run, session.bus, "needs_user", "已达到主控返工次数上限，请接管审核。" + decision.reason, identity=decision._identity)
                 return
             await request_revision(session=review, bus=session.bus, actor="commander", reason=decision.reason)

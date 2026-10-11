@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from app.settings import get_settings, repo_root
+from app.settings import get_settings, repo_root, env_or_local
 
 
 @dataclass(frozen=True)
@@ -177,7 +176,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def _host_config_path(variable: str, filename: str) -> Path:
     """Host-only override, never selected by tool arguments or candidate files."""
-    configured = os.environ.get(variable, "")
+    configured = env_or_local(variable)
     if not configured:
         return repo_root() / "configs" / filename
     path = Path(configured)

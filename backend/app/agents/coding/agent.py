@@ -85,6 +85,16 @@ class CodingAgent(BaseAgent):
             'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
+        from app.harness.tools.config import load_execution_config
+        execution = load_execution_config()['execution']
+        context.upstream['configured_execution_commands'] = json.dumps({
+            'backend': get_settings().mars_execution_backend,
+            'local_commands': execution.get('local_commands', []),
+            'contract': 'local_command reads MARS_JOB_REQUEST JSON and writes MARS_RESULT_PATH as '
+                'local_command_result.v1 with matching invocation_id/run_id/experiment_id, status completed, '
+                'actual finite metrics and evidence_paths relative to the unique output_dir. '
+                'A zero process exit or a unit test is not scientific completion. '
+                'Only the configured command_id may be used in execution_jobs.'})
         from app.harness.schema.experiment_contract import document_hash, document_metadata
         for supplied in request.upstream_artifacts.values():
             text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied

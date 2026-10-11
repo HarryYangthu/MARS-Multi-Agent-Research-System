@@ -29,6 +29,8 @@ from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prom
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.accounting import guarded_complete
+from app.harness.llm.usage_policy import agent_quota_mode
+from app.harness.agent_loop.failure_guard import repeated_failure, clear_failure
 from app.harness.llm.provider_base import (
     LLMConfig,
     LLMProvider,
@@ -109,7 +111,11 @@ class Commander:
             )
             emitted: list[ChatMessage] = []
 
-            for _step in range(self.max_react_steps):
+            limited = agent_quota_mode() == 'limited'
+            steps = 0
+            failure_state: dict[str, Any] = {}
+            while not limited or steps < self.max_react_steps:
+                steps += 1
                 activity = session.begin_activity("model", "总控正在调用模型")
                 get_session_store().persist(session)
                 try:
@@ -163,6 +169,11 @@ class Commander:
                         )
                     )
                     get_session_store().persist(session)
+                    if result.get('ok') is False:
+                        if repeated_failure(failure_state, 'tool', {'tool': tool, 'args': args, 'result': result}, limit=2):
+                            raise RuntimeError('Commander repeated an unchanged tool failure; diagnostic repair required')
+                    else:
+                        clear_failure(failure_state, 'tool')
                 # loop again so the LLM can react to tool results
             return emitted
 
