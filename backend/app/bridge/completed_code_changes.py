@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import difflib
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any
@@ -24,9 +25,10 @@ class FileChange:
     timestamp: str
     record_id: str
     valid: bool = True
+    legacy_text: bool = False
 
 
-def _snapshots(run: RunHandle, record: dict[str, Any], limit: int) -> dict[str, str | None]:
+def _snapshot_data(run: RunHandle, record: dict[str, Any], limit: int) -> dict[str, Any]:
     ref = record.get("rollback_ref")
     if not isinstance(ref, str) or not ref:
         raise ValueError("missing write snapshot")
@@ -37,8 +39,12 @@ def _snapshots(run: RunHandle, record: dict[str, Any], limit: int) -> dict[str, 
     if (data.get("schema") != "tool_rollback.v1" or data.get("run_id") != run.run_id
             or data.get("project") != run.project or data.get("tool") != record["tool"]):
         raise ValueError("snapshot identity mismatch")
+    return dict(data)
+
+
+def _snapshots(data: dict[str, Any], key: str = "snapshots") -> dict[str, str | None]:
     snapshots: dict[str, str | None] = {}
-    for snapshot in data["snapshots"]:
+    for snapshot in data[key]:
         path, content, existed = snapshot["path"], snapshot["content"], snapshot["existed"]
         if not isinstance(path, str) or not isinstance(content, str) or type(existed) is not bool or path in snapshots:
             raise ValueError("invalid snapshot")
@@ -90,8 +96,12 @@ def _patched(before: str | None, item: dict[str, Any]) -> str | None:
     return after
 
 
-def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tuple[str, str | None, str | None]]:
-    snapshots = _snapshots(run, record, limit)
+def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tuple[str, str | None, str | None, bool]]:
+    data = _snapshot_data(run, record, limit)
+    snapshots = _snapshots(data)
+    # Older Windows tools archived text through universal-newline reads. Keep
+    # those immutable receipts usable, explicitly verifying text (not bytes).
+    legacy = os.name == 'nt' and 'text_mode' not in data
     args, tool = record["args"], record["tool"]
     if tool in {"code.write_file", "code.delete_file"}:
         path = PurePosixPath(args["path"].strip()).as_posix()
@@ -99,11 +109,18 @@ def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tupl
         after = None if tool == "code.delete_file" else args["content"]
         if after is not None and not isinstance(after, str):
             raise ValueError("invalid written content")
-        return [(path, before, after)]
+        return [(path, before, after, legacy)]
     files = parse_diff(args["diff"])
     if not files:
         raise ValueError("missing applied patch")
-    return [(item["path"], snapshots[item["path"]], _patched(snapshots[item["path"]], item)) for item in files]
+    after = _snapshots(data, 'after_snapshots') if data.get('text_mode') == 'utf8_exact' else None
+    return [(item["path"], snapshots[item["path"]],
+             after[item['path']] if after is not None else _patched(snapshots[item["path"]], item), legacy)
+            for item in files]
+
+
+def _normalized(text: str | None) -> str | None:
+    return text.replace('\r\n', '\n').replace('\r', '\n') if text is not None else None
 
 
 def _net_diff(path: str, before: str | None, after: str | None, context: int) -> dict[str, Any]:
@@ -151,15 +168,18 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
     for record in records:
         try:
             operations = _operations(run, record, policy["max_record_bytes"])
-            for path, before, after in operations:
+            for path, before, after, legacy in operations:
                 previous = changes.get(path)
                 if previous is not None:
-                    previous.valid = previous.valid and previous.after == before
+                    matches = (_normalized(previous.after) == _normalized(before)
+                               if legacy or previous.legacy_text else previous.after == before)
+                    previous.valid = previous.valid and matches
                     previous.after = after
+                    previous.legacy_text = legacy
                     previous.timestamp = str(record.get("ended_at") or record.get("started_at") or "")
                     previous.record_id = str(record["call_id"])
                 else:
-                    changes[path] = FileChange(before, after, str(record.get("ended_at") or record.get("started_at") or ""), str(record["call_id"]), path not in unverified_paths)
+                    changes[path] = FileChange(before, after, str(record.get("ended_at") or record.get("started_at") or ""), str(record["call_id"]), path not in unverified_paths, legacy)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             args = record.get("args", {})
             affected = ([PurePosixPath(args["path"].strip()).as_posix()] if isinstance(args.get("path"), str)
@@ -188,7 +208,18 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
                 if change.after is not None:
                     raise
             else:
-                if change.after is None or current["version"] != hashlib.sha256(change.after.encode()).hexdigest():
+                actual_digest = current['version']
+                expected_text = change.after
+                if change.legacy_text:
+                    # Reconstruct every page with version checks, never verify a
+                    # prefix of a large source file or mix concurrent versions.
+                    lines = list(current['lines'])
+                    while current['next_start'] is not None:
+                        current = browser.file(path, start=current['next_start'], version=actual_digest)
+                        lines.extend(current['lines'])
+                    actual_digest = hashlib.sha256(str(_normalized(''.join(lines))).encode()).hexdigest()
+                    expected_text = _normalized(expected_text)
+                if expected_text is None or actual_digest != hashlib.sha256(expected_text.encode()).hexdigest():
                     raise ValueError("current file differs from the completed write")
             if change.before == change.after:
                 unchanged.append({"path": path, "sha256": hashlib.sha256(change.after.encode()).hexdigest()
@@ -199,6 +230,7 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
             lines = item.pop("lines")
             fingerprint = hashlib.sha256(json.dumps([path, change.before, change.after, change.record_id]).encode()).hexdigest()
             item.update(id="completed:" + fingerprint, status="applied", source="verified_tool_writes",
+                        verification='legacy_windows_text' if change.legacy_text else 'exact_bytes',
                         timestamp=change.timestamp, truncated=len(lines) > policy["max_preview_lines"])
             if change_id == item["id"]:
                 return {**item, "run_id": run.run_id, "project": project, "lines": lines[:policy["max_preview_lines"]]}

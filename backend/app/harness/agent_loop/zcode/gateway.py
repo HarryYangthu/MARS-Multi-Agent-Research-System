@@ -336,7 +336,19 @@ class ZCodeGateway:
                 return mcp_result({"error": "Body is Markdown only; put frontmatter fields in metadata, without duplicate YAML"}, error=True)
             candidate = dumps(args["metadata"], args["body"])
             await self.progress("candidate")
-            errors = await self.request.validate(candidate, self.state["history"])
+            # Preserve attempted delivery even if the host validator crashes.
+            # This file is diagnostic evidence, never a validated submission.
+            atomic_json(self.request.trace_root / 'submission_attempt.json', args)
+            try:
+                errors = await self.request.validate(candidate, self.state["history"])
+            except Exception as exc:
+                from loguru import logger
+                logger.exception('ZCode host submission validation failed')
+                error = type(exc).__name__ + ': ' + str(exc)[:500]
+                self.trace.emit('validation_error', {'error': error, 'accepted': False})
+                self.stop('validation_failed', 'Host submission validation failed: ' + error)
+                return mcp_result({'accepted': False, 'error': error,
+                    'error_code': 'host_validation_error', 'retry_requires_host_repair': True}, error=True)
             self.trace.emit("validation", {"errors": errors}, visible=candidate)
             if errors:
                 self.state["counts"]["validation_repairs"] += 1

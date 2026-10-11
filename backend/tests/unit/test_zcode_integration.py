@@ -63,6 +63,44 @@ def test_wire_parser_keeps_actual_tool_ids_finish_and_usage() -> None:
     assert session_identity({"id": "unrelated"}) == ""
 
 
+@pytest.mark.asyncio
+async def test_real_mcp_validator_io_failure_preserves_attempt_and_returns_error(tmp_path: Path) -> None:
+    async def validate(text: str, history: list[dict[str, Any]]) -> list[str]:
+        # Actual filesystem failure; no model or successful validator substitute.
+        (tmp_path / 'missing-host-input').read_bytes()
+        return []
+
+    trace_root = tmp_path / 'trace'
+    request = LoopInput(messages=[Message('user', 'Host failure boundary')],
+        provider=LocalVllmProvider(base_url='http://127.0.0.1:1'), config=LLMConfig('local_vllm', 'unavailable'),
+        registry=get_registry(), tool_context=ToolContext('boundary', 'local', 'coding'), tools=(),
+        policy=AgentLoopPolicy(), trace_root=trace_root, validate=validate,
+        final_schema={'type': 'object', 'properties': {'schema': {'type': 'string'}}})
+    config = ZCodeConfig.load()
+    state = ZCodeLoopExecutor(config)._state(request, 'boundary')
+    gateway = ZCodeGateway(request, config, 'host-failure-boundary', state, LoopTrace(trace_root, 'full'))
+    attempted = {'metadata': {'schema': 'code_spec.v1'}, 'body': 'Human-authored boundary input.'}
+    await gateway.start()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(gateway.endpoint + '/mcp',
+                headers={'Authorization': 'Bearer host-failure-boundary'},
+                json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                      'params': {'name': 'mars_submit_document', 'arguments': attempted}})
+        assert response.status_code == 200
+        result = response.json()['result']
+        assert result['isError']
+        error = json.loads(result['content'][0]['text'])
+        assert error['accepted'] is False and error['error_code'] == 'host_validation_error'
+        assert 'FileNotFoundError' in error['error']
+        assert state['status'] == 'validation_failed' and gateway.done.is_set()
+        assert json.loads((trace_root / 'submission_attempt.json').read_text()) == attempted
+        assert not (trace_root / 'submission.json').exists()
+        assert state['counts']['model_requests'] == 0
+    finally:
+        await gateway.close()
+
+
 @pytest.mark.parametrize('completion_driven,models,tools,expected', [
     (False, 2, 1, {'model_calls_remaining': 1, 'tool_calls_remaining': 1}),
     (True, 2, 1, {'model_calls_remaining': 3, 'tool_calls_remaining': 3}),

@@ -35,7 +35,7 @@ def research(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[
     source = tmp_path / "code"
     source.mkdir()
     git(source, "init", "-b", "baseline")
-    (source / "main.py").write_text("VALUE = 1\n")
+    (source / "main.py").write_bytes(b"VALUE = 1\n")
     git(source, "add", ".")
     git(source, "-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "Real baseline")
     (project.metadata_root / "repo_link.yaml").write_text(yaml.safe_dump({"repo_path": str(source),

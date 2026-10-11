@@ -86,10 +86,12 @@ class CodingAgent(BaseAgent):
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
         from app.harness.tools.config import load_execution_config
+        from app.harness.tools.execution.local_command import _RESULT_SCHEMA
         execution = load_execution_config()['execution']
         context.upstream['configured_execution_commands'] = json.dumps({
             'backend': get_settings().mars_execution_backend,
             'local_commands': execution.get('local_commands', []),
+            'local_command_result_schema': _RESULT_SCHEMA,
             'contract': 'local_command reads MARS_JOB_REQUEST JSON and writes MARS_RESULT_PATH as '
                 'local_command_result.v1 with matching invocation_id/run_id/experiment_id, status completed, '
                 'actual finite metrics and evidence_paths relative to the unique output_dir. '

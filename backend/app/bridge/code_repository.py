@@ -75,13 +75,23 @@ class CodeRepository:
     @contextmanager
     def _open(self, name: str, *, directory: bool) -> Iterator[int]:
         """Walk with directory descriptors: even concurrent symlink swaps cannot escape."""
-        fd = os.open(self.repo.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if os.name == 'nt':
+            from app.harness.windows_read import file_descriptor
+            if directory:
+                raise ValueError('Windows directory listing requires a pinned path')
+            with file_descriptor(self.repo.root, name) as descriptor:
+                yield descriptor
+            return
+        directory_flag = int(getattr(os, 'O_DIRECTORY'))
+        nofollow_flag = int(getattr(os, 'O_NOFOLLOW'))
+        nonblock_flag = int(getattr(os, 'O_NONBLOCK'))
+        fd = os.open(self.repo.root, os.O_RDONLY | directory_flag | nofollow_flag)
         try:
             parts = PurePosixPath(name).parts
             for index, part in enumerate(parts):
-                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                flags = os.O_RDONLY | nofollow_flag | nonblock_flag
                 if directory or index < len(parts) - 1:
-                    flags |= os.O_DIRECTORY
+                    flags |= directory_flag
                 child = os.open(part, flags, dir_fd=fd)
                 os.close(fd)
                 fd = child
@@ -91,6 +101,16 @@ class CodeRepository:
             yield fd
         finally:
             os.close(fd)
+
+    @contextmanager
+    def _children(self, name: str) -> Iterator[Iterator[os.DirEntry[str]]]:
+        if os.name == 'nt':
+            from app.harness.windows_read import pinned_path
+            with pinned_path(self.repo.root, name, directory=True) as (path, _), os.scandir(path) as children:
+                yield children
+        else:
+            with self._open(name, directory=True) as descriptor, os.scandir(descriptor) as children:
+                yield children
 
     def _identity(self, token: str) -> None:
         if token and token != self.token:
@@ -102,12 +122,16 @@ class CodeRepository:
         if offset < 0 or (name and not self._directory_allowed(name)):
             raise ValueError('目录范围无效')
         entries: list[dict[str, Any]] = []
-        with self._open(name, directory=True) as fd, os.scandir(fd) as children:
+        with self._children(name) as children:
             for child in children:
                 relative = f'{name}/{child.name}' if name else child.name
                 try:
                     self._name(relative)
-                    info = child.stat(follow_symlinks=False)
+                    # Windows DirEntry.stat caches FindFirstFile data with a
+                    # zero link count; os.stat queries the actual file identity.
+                    info = os.stat(child.path, follow_symlinks=False) if os.name == 'nt' else child.stat(follow_symlinks=False)
+                    if getattr(info, 'st_file_attributes', 0) & 0x400:
+                        continue
                     if stat.S_ISDIR(info.st_mode) and self._directory_allowed(relative):
                         kind = 'directory'
                     elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
