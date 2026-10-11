@@ -58,7 +58,7 @@ def _patched(before: str | None, item: dict[str, Any]) -> str | None:
     cursor = 0
     previous_kind = ""
     newline = "\r\n" if any(line.endswith("\r\n") for line in original) else "\n"
-    for row in item["lines"]:
+    for index, row in enumerate(item["lines"]):
         kind, text = row["kind"], row["text"]
         if kind == "hunk":
             match = re.match(r"@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@", text)
@@ -66,6 +66,23 @@ def _patched(before: str | None, item: dict[str, Any]) -> str | None:
                 raise ValueError("invalid hunk")
             count = int(match[2]) if match[2] is not None else 1
             start = max(0, int(match[1]) - (1 if count else 0))
+            # Git can apply a complete hunk at an offset. Replay that accepted
+            # write against its archived preimage, never against current code.
+            expected: list[str] = []
+            for following in item["lines"][index + 1:]:
+                if following["kind"] == "hunk":
+                    break
+                if following["kind"] in {"context", "delete"}:
+                    expected.append(following["text"])
+            if len(expected) != count:
+                raise ValueError("invalid hunk preimage count")
+            original_text = [line.rstrip("\r\n") for line in original]
+            if expected and (start < cursor or original_text[start:start + count] != expected):
+                positions = [position for position in range(cursor, len(original) - count + 1)
+                             if original_text[position:position + count] == expected]
+                if len(positions) != 1:
+                    raise ValueError("patch preimage is missing or ambiguous")
+                start = positions[0]
             if not cursor <= start <= len(original):
                 raise ValueError("invalid hunk offset")
             result.extend(original[cursor:start])
