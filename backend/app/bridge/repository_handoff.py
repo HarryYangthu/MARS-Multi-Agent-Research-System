@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 import yaml
 
 from app.harness.schema.frontmatter_parser import parse
@@ -73,25 +74,75 @@ def attach_repository_handoff(project: str, upstream: dict[str, str]) -> None:
         upstream["baseline_code"] = context
 
 
+def repository_data_configuration(repo: ProjectRepo, ref: str) -> dict[str, Any] | None:
+    """Read named configuration only; data availability is checked at launch review."""
+    if forbidden_source_path(ref):
+        raise ValueError(f"Data configuration cannot reference a control or credential file: {ref}")
+    path = resolve_allowed_path(repo, ref, require_exists=True, require_text=True)
+    if not path.is_file() or path.suffix.lower() not in {".yaml", ".yml"}:
+        return None
+    content = path.read_bytes()
+    raw = yaml.safe_load(content)
+    if not isinstance(raw, dict):
+        return None
+    nested = raw.get("data", {})
+    fields = {key: nested[key] for key in ("path", "tx_key", "rx_key", "nf_key")
+              if isinstance(nested, dict) and key in nested}
+    if raw.get("data_path"):
+        if fields.get("path") and fields["path"] != raw["data_path"]:
+            raise ValueError(f"{ref} 的 data_path 与 data.path 不一致，无法核对实际数据入口")
+        fields["path"] = raw["data_path"]
+    if not fields.get("path"):
+        return None
+    if not isinstance(fields["path"], str) or not fields["path"].strip():
+        raise ValueError(f"{ref} 的数据路径必须是非空字符串")
+    parameters = raw.get("data_param", {})
+    parameters = {key: parameters[key] for key in ("channels", "train_ratio", "xmax", "ymax")
+                  if isinstance(parameters, dict) and key in parameters}
+    protocol = {key: raw[key] for key in ("scale", "fs", "band", "bound0", "bound1",
+                "train_fraction", "validation_fraction", "split_guard", "context") if key in raw}
+    return {"config_path": ref, "config_sha256": hashlib.sha256(content).hexdigest(),
+            "data": fields, "data_param": parameters, "protocol": protocol}
+
+
 def baseline_data_description(repo: ProjectRepo, upstream: dict[str, str]) -> str:
-    """Describe actual baseline configuration, not inferred dataset contents."""
-    baseline = baseline_repository_context(repo, upstream)
-    if not baseline:
-        return ""
-    sources = []
-    for item in json.loads(baseline)["files"]:
-        if Path(item["path"]).suffix.lower() not in {".yaml", ".yml"}:
-            continue
-        path = resolve_allowed_path(repo, item["path"], require_exists=True, require_text=True)
-        raw = yaml.safe_load(path.read_text())
-        if not isinstance(raw, dict) or not isinstance(raw.get("data"), dict) or not raw["data"].get("path"):
-            continue
-        fields = {key: raw["data"][key] for key in ("path", "tx_key", "rx_key", "nf_key") if key in raw["data"]}
-        parameters = raw.get("data_param", {})
-        parameters = {key: parameters[key] for key in ("channels", "train_ratio", "xmax", "ymax")
-                      if isinstance(parameters, dict) and key in parameters}
-        sources.append({"config_path": item["path"], "config_sha256": item["sha256"],
-                        "data": fields, "data_param": parameters})
+    """Bind data from approved delivery, falling back to actual baseline references.
+
+    Output configuration is not baseline-code evidence. At execution, however,
+    the approved experiment/coding identity is the source of effective data knobs.
+    Never scrape a proposal's prose or use today's project default for an old run.
+    """
+    from app.harness.schema.experiment_contract import (
+        delivery_experiments, document_metadata, experiment_errors,
+    )
+    plan_text = upstream.get("experiment_plan.approved.md", "")
+    coding_text = upstream.get("code_spec.approved.md", "")
+    configurations: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    if coding_text:
+        rows = delivery_experiments(plan_text, document_metadata(coding_text), project=repo.project)
+    elif plan_text:
+        plan = document_metadata(plan_text)
+        if plan.get("schema") != "experiment_plan.v1" or plan.get("project") != repo.project:
+            raise ValueError("数据配置交接与当前项目不一致")
+        errors = experiment_errors(plan)
+        if errors:
+            raise ValueError("数据配置交接未通过：" + "；".join(errors))
+        rows = plan["ablations"]
+    for row in rows:
+        config = row["config"]
+        ref = (config.get("base_config") if not coding_text else None) or config.get("config_path") or config.get("cfg")
+        if isinstance(ref, str) and ref:
+            configurations.add(ref)
+    # Preserve the existing baseline-only fallback when no executable delivery
+    # names a configuration. Do not blend baseline data into a candidate plan.
+    if not configurations:
+        baseline = baseline_repository_context(repo, upstream)
+        if baseline:
+            configurations.update(item["path"] for item in json.loads(baseline)["files"]
+                                  if Path(item["path"]).suffix.lower() in {".yaml", ".yml"})
+    sources = [source for ref in sorted(configurations)
+               if (source := repository_data_configuration(repo, ref)) is not None]
     return json.dumps({"schema_id": "context.data_configuration.v1", "project": repo.project,
         "repo_path": str(repo.root), "sources": sources, "dataset_contents_loaded": False,
-        "instruction": "Actual baseline data configuration only. Verify dataset availability and effective overrides during execution confirmation; do not infer its contents."}, ensure_ascii=False) if sources else ""
+        "instruction": "Actual approved data configuration only. Verify dataset availability and effective overrides during execution confirmation; do not infer its contents."}, ensure_ascii=False) if sources else ""

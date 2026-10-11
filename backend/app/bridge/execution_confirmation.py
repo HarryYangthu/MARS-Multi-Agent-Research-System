@@ -281,6 +281,20 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                         raise ValueError('启动命令的解释器不可执行')
                     item['effective'] = {'command_id': spec.config.get('command_id'),
                                          'required_metrics': list(required), 'timeout_seconds': timeout}
+                    ref = spec.config.get('config_path') or spec.config.get('cfg')
+                    if isinstance(ref, str) and ref and branch is not None:
+                        from app.bridge.repository_handoff import repository_data_configuration
+                        from app.harness.tools.project_repo import load_run_project_repo
+                        data_source = repository_data_configuration(
+                            load_run_project_repo(run.project, run.root, run.run_id), ref)
+                        if data_source is not None:
+                            raw_path = str(spec.config.get('data_path') or data_source['data']['path'])
+                            data_path = Path(raw_path).expanduser()
+                            if not data_path.is_absolute():
+                                data_path = branch.root / data_path
+                            item['effective'].update(data_path=str(data_path.resolve()),
+                                config_path=data_source['config_path'], config_sha256=data_source['config_sha256'])
+                            files['job_config:' + spec.experiment_id] = data_source['config_sha256']
                     for index, arg in enumerate(argv):
                         resolved = shutil.which(arg) if index == 0 else arg
                         if resolved and Path(resolved).is_file():
@@ -288,8 +302,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                             stat = source.stat()
                             files['command:' + resolved] = (_file_hash(source) if source.suffix in {'.py', '.sh', '.js'}
                                 else digest([str(source), stat.st_size, stat.st_mtime_ns, stat.st_ino]))
-                except (OSError, ValueError, RuntimeError):
-                    blockers.append(f'{spec.experiment_id} 的启动命令未登记、未授权或环境不可用。')
+                except (OSError, ValueError, RuntimeError) as exc:
+                    blockers.append(f'{spec.experiment_id} 的启动配置未就绪：{exc}')
         elif not config.get('local_commands'):
             blockers.append('尚未配置实际启动命令。')
     elif settings.mars_execution_backend == 'remote_gpu':
@@ -339,8 +353,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     environment_hash = digest({key: value for key, value in os.environ.items()
                                if key.startswith(('MARS_REMOTE_', 'MARS_PAPER_'))})
     if prepared is not None:
-        for spec in prepared.specs:
-            raw_path = str(spec.config.get('data_path') or defaults.get('data_path') or '')
+        for item, spec in zip(experiments, prepared.specs, strict=True):
+            raw_path = str(item.get('effective', {}).get('data_path') or spec.config.get('data_path') or '')
             if raw_path:
                 path = Path(raw_path).expanduser()
                 if not path.is_absolute() and defaults.get('repository'):
