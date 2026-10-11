@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -70,11 +70,11 @@ def load_project_repo(project: str) -> ProjectRepo:
         raise ValueError(f"no real repository configured for project {project!r}")
     allowed = _tuple(raw.get("allowed_paths")) or ("",)
     branch = current_git_branch(project)
-    if branch is not None and root.resolve() != branch.root:
+    if branch is not None and root.resolve() != branch.source_root:
         raise ValueError("代码工程关联已变化，实验分支授权已停止")
     return ProjectRepo(
         project=project,
-        root=root.resolve(),
+        root=branch.root if branch is not None else root.resolve(),
         repo_mode=str(raw.get("repo_mode", "local_path")),
         read_only=bool(raw.get("read_only", False)) and branch is None,
         allowed_paths=allowed,
@@ -82,6 +82,20 @@ def load_project_repo(project: str) -> ProjectRepo:
         ignore_patterns=_tuple(raw.get("ignore_patterns")),
         git_branch=branch,
     )
+
+
+def load_run_project_repo(project: str, run_root: Path, run_id: str) -> ProjectRepo:
+    """Browse the run's own saved checkout without granting write authority."""
+    from app.harness.tools.git_branch import saved_branch
+    repo = load_project_repo(project)
+    if repo.scope is not None or repo.git_branch is not None:
+        if repo.git_branch is not None and repo.git_branch.run_id != run_id:
+            raise ValueError("代码工作目录不属于当前任务")
+        return repo
+    branch = saved_branch(repo.root, run_root, project, run_id)
+    if branch is not None and branch.source_repo_path:
+        return replace(repo, root=branch.root, read_only=True)
+    return repo
 
 
 def resolve_allowed_path(

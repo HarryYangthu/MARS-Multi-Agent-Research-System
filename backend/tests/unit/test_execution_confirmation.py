@@ -344,6 +344,7 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
     from app.bridge.research_branch import research_branch_scope
     from app.harness.project_workspace import open_folder
     from app.harness.tools.git_branch import git
+    from app.harness.tools.project_repo import load_project_repo
     monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
     reset_settings_cache()
     project = open_folder(str(tmp_path / 'git-project'), create=True)
@@ -357,7 +358,8 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'read_only': True, 'allowed_paths': ['main.py'], 'protected_paths': [], 'ignore_patterns': ['.git/']}))
     run = RunStore(tmp_path / 'git-runs').create(task='real-git-confirmation', project=project.name)
     with research_branch_scope(run, 'coding'):
-        (source / 'main.py').write_text('VALUE = 2\n')
+        candidate = load_project_repo(run.project).root
+        (candidate / 'main.py').write_text('VALUE = 2\n')
     artifacts = ArtifactStore(run)
     artifacts.approve(artifacts.write(text=dumps({'schema': 'code_spec.v1', 'project': run.project, 'agent': 'coding',
         'target_lang': 'python', 'baseline_compat': {'preserved': True},
@@ -366,13 +368,14 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'run_id': run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 1}, 'fingerprint_hash': 'sha256:00',
         'planned_experiments': [{'name': 'baseline', 'config': {'seed': 2026}}]}, 'Human-authored execution plan.')))
     view = execution_preview(run, 'execution')
-    assert view['defaults']['repository'] == str(source.resolve())
+    assert view['defaults']['repository'] == str(candidate)
     save_confirmation(run, 'execution', view['token'])
     with research_branch_scope(run, 'execution'):
         require_confirmation(run, 'execution')
     assert execution_preview(run, 'execution')['confirmed']
     assert git(source, 'show', 'baseline:main.py') == 'VALUE = 1'
-    (source / 'main.py').write_text('VALUE = 3\n')
+    assert (source / 'main.py').read_text() == 'VALUE = 1\n'
+    (candidate / 'main.py').write_text('VALUE = 3\n')
     assert not execution_preview(run, 'execution')['confirmed']
 
 

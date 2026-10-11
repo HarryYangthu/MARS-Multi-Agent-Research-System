@@ -19,7 +19,7 @@ from app.bridge.research_branch import research_branch_scope
 from app.harness.project_workspace import open_folder
 from app.harness.runtime.state_machine import NodeState
 from app.harness.schema.frontmatter_parser import dumps
-from app.harness.tools.git_branch import git
+from app.harness.tools.git_branch import git, receipt_path
 from app.harness.tools.registry import ToolContext, get_registry
 from app.settings import reset_settings_cache
 from app.storage.artifact_store import ArtifactStore
@@ -53,6 +53,10 @@ def research(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[
         reset_settings_cache()
 
 
+def checkout(run: RunHandle) -> Path:
+    return Path(json.loads(receipt_path(run.root).read_text())["repo_path"])
+
+
 def spec(run: RunHandle, paths: list[tuple[str, str]]) -> str:
     return dumps({"schema": "code_spec.v1", "project": run.project, "agent": "coding",
         "target_lang": "python", "baseline_compat": {"preserved": True},
@@ -78,7 +82,8 @@ async def test_written_implementation_ignores_older_unapplied_patch(research: tu
     receipts = list((run.root / "coding/tool_applications").glob("*.json"))
     await _apply_patch_or_raise(run.run_id, "v1")
     await _apply_patch_or_raise(run.run_id, "v1")
-    assert (source / "main.py").read_text() == "VALUE = 2\n"
+    assert (checkout(run) / "main.py").read_text() == "VALUE = 2\n"
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
     assert list((run.root / "coding/tool_applications").glob("*.json")) == receipts
     assert git(source, "show", "baseline:main.py") == "VALUE = 1"
     assert not (run.root / "coding/patch.v1.approved.json").exists()
@@ -122,7 +127,7 @@ async def test_host_validation_returns_actual_net_files_before_review(
         assert any('"files_changed": []' in error and "复用" in error for error in errors)
         assert await CodingAgent().validate_candidate(request, spec(run, []), []) == []
         # Identical content is still verified; a later external edit must block.
-        (source / "main.py").write_text("VALUE = 9\n")
+        (checkout(run) / "main.py").write_text("VALUE = 9\n")
         assert coding_candidate_errors(run, spec(run, []))
 
 
@@ -150,7 +155,7 @@ async def test_real_code_checks_use_the_selected_git_in_child_commands(
     # Real test executable, actual Git selection and actual governed subprocess.
     selected = resolve_git().executable
     with research_branch_scope(session.run, "coding"):
-        (source / "test_git_runtime.py").write_text(
+        (checkout(session.run) / "test_git_runtime.py").write_text(
             "from pathlib import Path\nimport shutil, subprocess\n"
             "def test_actual_child_git():\n"
             f"    assert Path(shutil.which('git')).resolve() == Path({selected!r}).resolve()\n"
@@ -170,7 +175,7 @@ async def test_partial_or_changed_code_is_not_approved(research: tuple[Orchestra
     await write(run)
     paths = [("main.py", "modified")]
     if case == "external_edit":
-        (source / "main.py").write_text("VALUE = 3\n")
+        (checkout(run) / "main.py").write_text("VALUE = 3\n")
     elif case == "partial":
         paths.append(("new.py", "added"))
     elif case == "extra":
@@ -181,11 +186,12 @@ async def test_partial_or_changed_code_is_not_approved(research: tuple[Orchestra
     if case == "wrong_project":
         text = text.replace(run.project, "other-project")
     ArtifactStore(run).write(text=text)
-    before = (source / "main.py").read_bytes()
+    before = (checkout(run) / "main.py").read_bytes()
     with pytest.raises(HTTPException) as refused:
         await _apply_patch_or_raise(run.run_id, "v1")
     assert refused.value.status_code == 409
-    assert (source / "main.py").read_bytes() == before
+    assert (checkout(run) / "main.py").read_bytes() == before
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
     assert not (run.root / "coding/code_spec.approved.md").exists()
 
 
@@ -196,7 +202,8 @@ async def test_patch_only_approval_uses_run_branch_and_gate(research: tuple[Orch
     ArtifactStore(run).write(text=spec(run, [("main.py", "modified")]))
     (run.root / "coding/patch.v1.diff").write_text("diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n")
     await _apply_patch_or_raise(run.run_id, "v1")
-    assert (source / "main.py").read_text() == "VALUE = 2\n"
+    assert (checkout(run) / "main.py").read_text() == "VALUE = 2\n"
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
     assert git(source, "show", "baseline:main.py") == "VALUE = 1"
     with research_branch_scope(run, "coding"):
         assert verify_written_code(run, (run.root / "coding/code_spec.v1.md").read_text())
@@ -220,6 +227,7 @@ async def test_real_approval_after_clean_shutdown_advances_original_run(research
     assert result.version == "approved" and result.text == ref.path.read_text()
     assert recovered.session(run.run_id).graph.state("coding") == NodeState.DONE
     assert recovered.session(run.run_id).termination is None
-    assert (source / "main.py").read_text() == "VALUE = 2\n"
+    assert (checkout(run) / "main.py").read_text() == "VALUE = 2\n"
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
     assert len(orch.run_store.list()) == 1
     assert not (run.root / "agent_traces").exists()

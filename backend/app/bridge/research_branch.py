@@ -60,10 +60,10 @@ def research_branch_scope(run: RunHandle, node_key: str) -> Iterator[None]:
     if repo.scope is not None or not repo.read_only and not (repo.root / ".git").exists():
         yield
         return
-    with repository_lock(repo.root):
-        branch = prepare(repo.root, run.root, run.project, run.run_id)
+    branch = prepare(repo.root, run.root, run.project, run.run_id)
+    with repository_lock(branch.root):
         run.write_event("agent_events", {"event": "coding.git_branch_ready", "agent": stage,
-            "node": node_key, **asdict(branch), "message": f"已就绪实验分支 {branch.branch}，复用原代码目录。"})
+            "node": node_key, **asdict(branch), "message": f"已就绪独立研究代码目录 {branch.repo_path}，分支 {branch.branch}。"})
         with bind_git_branch(branch):
             if stage == "execution":
                 checkpoint_approved_code(run)

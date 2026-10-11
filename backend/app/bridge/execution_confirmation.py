@@ -176,7 +176,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         if branch is not None:
             branch.validate(run.project, run.run_id)
     if branch is not None:
-        files['branch'] = digest({'branch': branch.branch, 'baseline_commit': branch.baseline_commit})
+        files['branch'] = digest({'branch': branch.branch, 'baseline_commit': branch.baseline_commit,
+                                 'repository': branch.repo_path})
     repository = str(branch.root) if branch is not None else ''
     defaults.update(repository=repository, branch=branch.branch if branch is not None else '')
     source_configs: list[dict[str, Any]] = []
@@ -280,6 +281,13 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                         raise ValueError('启动命令的解释器不可执行')
                     item['effective'] = {'command_id': spec.config.get('command_id'),
                                          'required_metrics': list(required), 'timeout_seconds': timeout}
+                    for index, arg in enumerate(argv):
+                        resolved = shutil.which(arg) if index == 0 else arg
+                        if resolved and Path(resolved).is_file():
+                            source = Path(resolved).resolve()
+                            stat = source.stat()
+                            files['command:' + resolved] = (_file_hash(source) if source.suffix in {'.py', '.sh', '.js'}
+                                else digest([str(source), stat.st_size, stat.st_mtime_ns, stat.st_ino]))
                 except (OSError, ValueError, RuntimeError):
                     blockers.append(f'{spec.experiment_id} 的启动命令未登记、未授权或环境不可用。')
         elif not config.get('local_commands'):
@@ -302,7 +310,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         blockers.append('当前执行后端无法核验真实仿真配置。')
     if experiments:
         defaults['data_path'] = effective_data_summary(experiments)
-    if settings.mars_execution_backend == 'local_command':
+    if settings.mars_execution_backend == 'local_command' and prepared is None:
         import shutil
         for row in config.get('local_commands', []):
             if isinstance(row, dict):

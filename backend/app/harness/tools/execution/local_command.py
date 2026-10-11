@@ -87,6 +87,29 @@ def _command(job: LocalCommandJob, tool_name: str) -> tuple[tuple[str, ...], tup
     allowlist = tool_config(tool_name).command_allowlist
     if not any(len(argv) >= len(prefix) and argv[:len(prefix)] == prefix for prefix in allowlist if prefix):
         raise ValueError("configured local_command is not allowlisted for " + tool_name)
+    from app.harness.tools.git_branch import current_git_branch, receipt_path, saved_branch
+    from app.harness.runtime.project_scope import current_project_scope, safe_scope_path
+    branch = current_git_branch(job.project)
+    if branch is None and receipt_path(job.run_root).exists():
+        from app.harness.tools.project_repo import load_project_repo
+        branch = saved_branch(load_project_repo(job.project).root, job.run_root, job.project, job.run_id)
+    scope = current_project_scope(job.project)
+    code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
+    routed = []
+    for index, argument in enumerate(argv):
+        if "{code_root}" in argument:
+            if code_root is None:
+                raise ValueError("registered command requires a bound research checkout")
+            argument = argument.replace("{code_root}", str(code_root))
+        path = Path(argument)
+        if index and branch is not None and branch.source_repo_path:
+            if path.is_absolute() and path.is_relative_to(branch.source_root):
+                path = safe_scope_path(branch.root, path.relative_to(branch.source_root).as_posix(), must_exist=True)
+                argument = str(path)
+            elif str(branch.source_root) in argument:
+                raise ValueError("启动命令包含共享代码仓路径，请改用 MARS_CODE_ROOT 或 {code_root} 绑定本研究代码。")
+        routed.append(argument)
+    argv = tuple(routed)
     required = selected.get("required_metrics", [])
     if not isinstance(required, list) or any(not isinstance(name, str) or not name for name in required):
         raise ValueError("required_metrics must be a list of metric names")
@@ -132,6 +155,12 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
     from app.harness.schema.experiment_contract import budget
     steps = budget(job.config)[1] if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else job.steps
     argv, required, timeout = _command(job, tool_name)
+    from app.harness.tools.git_branch import current_git_branch
+    from app.harness.runtime.project_scope import current_project_scope
+    branch = current_git_branch(job.project, job.run_id)
+    scope = current_project_scope(job.project, job.run_id)
+    code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
+    code_environment = {"MARS_CODE_ROOT": str(code_root)} if code_root is not None else {}
     invocation_id = uuid.uuid4().hex
     safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in job.experiment_id) or "experiment"
     output_dir = job.run_root.resolve() / "execution/local_commands" / safe_name / invocation_id
@@ -143,6 +172,11 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
         "run_id": job.run_id, "experiment_id": job.experiment_id, "project": job.project,
         "config": job.config, "seed": job.seed, "steps": steps, "output_dir": str(output_dir),
     }
+    if code_root is not None:
+        request["code_workspace"] = str(code_root)
+        if (code_root / ".git").exists():
+            from app.harness.tools.git_branch import git
+            request["code_commit"] = git(code_root, "rev-parse", "HEAD")
     atomic_write_json(request_path, request)
     request_sha256 = _file_hash(request_path)
     command_files = []
@@ -168,6 +202,7 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
                 "MARS_RUN_ID": job.run_id, "MARS_EXPERIMENT_ID": job.experiment_id,
                 "MARS_PROJECT": job.project, "MARS_RUN_ROOT": str(job.run_root.resolve()),
                 "MARS_JOB_REQUEST": str(request_path), "MARS_RESULT_PATH": str(result_path),
+                **code_environment,
             })
         stdout, stderr = await communicate_process(process, timeout=timeout)
         code = process.returncode
