@@ -1,3 +1,6 @@
+# context_window records total provider capacity (input + output), not input usage.
+# Actual input context stays capped by loop.input_token_budget and context.yaml
+# (128000 tokens or lower); increasing max_tokens must not increase input context.
 commander:
   enabled: true
   output_schema: ''

@@ -35,7 +35,7 @@ def test_settings_still_reject_nonpositive_output(limit: int) -> None:
 def test_large_output_reserves_room_inside_verified_model_window() -> None:
     policy = {"input_budget": 128000, "safety_margin": 4096}
     budget = input_budget(policy, 128000, output_reserve=393216, model_window=1048576)
-    assert budget == 651264
-    assert budget + 393216 + policy["safety_margin"] == 1048576
+    assert budget == 128000
+    assert budget + 393216 + policy["safety_margin"] < 1048576
     with pytest.raises(ValueError, match="no input space"):
         input_budget(policy, 128000, output_reserve=393216, model_window=128000)

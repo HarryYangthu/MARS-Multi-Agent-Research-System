@@ -121,10 +121,10 @@ def test_old_checkpoint_keeps_legacy_and_new_policy_freezes(tmp_path: Path) -> N
     assert input_budget(policy, 48000, output_reserve=8192, model_window=32000) == 32000-8192-policy['safety_margin']
 
 
-def test_verified_model_window_supersedes_old_agent_and_run_quotas() -> None:
+def test_verified_model_window_never_enlarges_configured_input_context() -> None:
     policy = {**load_policy(), 'input_budget': 32000}
-    assert input_budget(policy, 48000, output_reserve=8192, model_window=128000) == 117760
-    assert input_budget(policy, 24000, output_reserve=16384, model_window=128000) == 109568
+    assert input_budget(policy, 48000, output_reserve=8192, model_window=128000) == 32000
+    assert input_budget(policy, 24000, output_reserve=16384, model_window=128000) == 24000
     # Unknown model capacity is never guessed or treated as infinite.
     assert input_budget(policy, 48000, output_reserve=8192) == 32000
     with pytest.raises(ValueError, match='no input space'):
