@@ -1,3 +1,10 @@
+# Live cache/packing policy; does not change a run's frozen input/output budget.
+repository_materials:
+  enabled: true
+  max_cached_file_bytes: 2097152
+  max_index_files: 64
+  repeat_warning_after: 3
+
 feedback:
   max_tokens: 1500
   chars_per_token: 4

@@ -164,6 +164,7 @@ def pack_context(
     required_review_tools: tuple[str, ...] = (),
     native_observation_history: bool = False,
     deduplicate_evidence: bool = False,
+    group_repo_reads: bool = False,
 ) -> tuple[list[Message], dict[str, Any]]:
     required = list(pinned)
     if validation_issues and not reviewing:
@@ -179,8 +180,11 @@ def pack_context(
     if history:
         # The full observations may be compressed/omitted, but the agent must
         # still know which actions really happened and where their receipts live.
-        ledger = [compact({k: item.get(k) for k in ("tool", "args", "ok", "error", "reason", "raw_ref")}, 512)
-                  for item in history]
+        from app.harness.context.repository_evidence import grouped_read_history
+        indexed = grouped_read_history(history) if group_repo_reads else history
+        ledger = [compact({**{k: item.get(k) for k in ("tool", "args", "ok", "error", "reason", "raw_ref")},
+                  **{k: item[k] for k in ("source_window", "read_count", "last_raw_ref") if k in item}}, 512)
+                  for item in indexed]
         required.append(Message(role="user", content="[untrusted action receipt index; not full source content]\n" + canonical(ledger)))
         source_receipts = source_receipt_index(history)
         if source_receipts:

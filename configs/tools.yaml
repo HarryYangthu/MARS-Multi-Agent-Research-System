@@ -333,7 +333,7 @@ tools:
 
   code.repo_reader:
     enabled: true
-    description: Read text from a project file. When truncated is true, continue with the returned next_offset as char_offset; path must remain the exact file path, without fragment or class suffix.
+    description: Read and verify the current version of a project file. Reuse same-version text already visible in context. For archived text missing from context, cache.material_ref can be read with context.read_material using source character offsets; that snapshot does not verify live changes. When truncated is true, continue with next_offset as char_offset; keep the exact file path without fragment or class suffix.
     mutation_level: read
     repeatable_read: true
     allowed_agents: [idea, experiment, coding, execution, writing]

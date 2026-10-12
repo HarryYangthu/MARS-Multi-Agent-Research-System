@@ -76,30 +76,21 @@ async def repo_reader_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
     root, rel, target = resolved
     if target.suffix.lower() not in _TEXT_SUFFIXES:
         return ToolResult(ok=False, error=f"unsupported code file type '{target.suffix}'")
-    raw = target.read_text(encoding="utf-8", errors="replace")
     offset = args.get("char_offset", 0)
-    if type(offset) is not int or offset < 0 or (raw and offset >= len(raw)):
-        return ToolResult(ok=False, error="char_offset must identify a character inside the file")
     limit = _MAX_READ_BYTES
     if ctx.extra.get("run_root"):
         from app.harness.context.runtime_policy import freeze_policy
         policy = freeze_policy(Path(str(ctx.extra["run_root"])))
         if policy.get("version") == 3:
             limit = min(limit, int(policy["read_chars"]))
-    end = min(len(raw), offset + limit)
-    return ToolResult(
-        ok=True,
-        output={
-            "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
-            "repo_root": str(root),
-            "path": rel,
-            "truncated": end < len(raw),
-            "char_start": offset, "char_end": end, "total_chars": len(raw),
-            "next_offset": end if end < len(raw) else None,
-            "content": raw[offset:end],
-        },
-        evidence_refs=[rel],
-    )
+    from app.harness.context.repository_materials import repository_policy, source_window
+    try:
+        output = source_window(target, root, rel, offset=offset, limit=limit,
+            run_root=Path(str(ctx.extra['run_root'])) if ctx.extra.get('run_root') else None,
+            policy=repository_policy())
+    except (OSError, ValueError) as exc:
+        return ToolResult(ok=False, error=str(exc))
+    return ToolResult(ok=True, output=output, evidence_refs=[rel])
 
 
 async def patch_generator_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:

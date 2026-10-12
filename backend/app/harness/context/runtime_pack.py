@@ -17,6 +17,7 @@ from app.harness.agent_loop.context import token_upper_bound
 from app.harness.agent_loop.trace import atomic_json, canonical, digest
 from app.harness.llm.provider_base import Message
 from app.harness.context.runtime_policy import role_profile
+from app.harness.context.repository_evidence import SourceMessage, deduplicate_visible
 
 
 class ContextBudgetExceeded(ValueError):
@@ -109,7 +110,8 @@ def _units(messages: list[Message]) -> list[list[Message]]:
 def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: int,
                   tools: tuple[dict[str, Any], ...] = (), materials: dict[str, Material] | None = None,
                   root: Path | None = None, previous: dict[str, Any] | None = None,
-                  agent: str = '', readback_available: bool = True) -> tuple[list[Message], dict[str, Any]]:
+                  agent: str = '', readback_available: bool = True,
+                  deduplicate_repository: bool = False) -> tuple[list[Message], dict[str, Any]]:
     materials = materials or {}
     schema_size = len(canonical(tools).encode('utf-8')) if tools else 0
     units = _units(messages)
@@ -131,11 +133,29 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
     levels: dict[str, int] = {}
     old_levels = (previous or {}).get('levels', {})
     decisions: list[dict[str, Any]] = []
+    eligible = [deduplicate_repository and d.kind == 'tool' for d in descriptors]
+    # Local to this packing call: no stale filesystem or cross-run cache state.
+    parsed_sources: dict[str, SourceMessage | None] = {}
+    source_hashes: dict[Message, str] = {}
+    visible_cache: tuple[list[list[Message]], int] | None = None
+    cost_cache: int | None = None
+
+    def visible() -> tuple[list[list[Message]], int]:
+        nonlocal visible_cache
+        if visible_cache is None:
+            visible_cache = (deduplicate_visible(units, eligible, parsed=parsed_sources, hashes=source_hashes)
+                             if deduplicate_repository else (units, 0))
+        return visible_cache
 
     def cost() -> int:
-        return token_upper_bound([m for unit in units for m in unit]) + schema_size
+        nonlocal cost_cache
+        if cost_cache is None:
+            rendered, _ = visible()
+            cost_cache = token_upper_bound([m for unit in rendered for m in unit]) + schema_size
+        return cost_cache
 
     def reduce_unit(index: int, level: int, reason: str) -> None:
+        nonlocal visible_cache, cost_cache
         if protected[index] or not refs[index] or not readback_available:
             return
         limit = int(policy['excerpt_chars']) if level == 1 else 0
@@ -153,6 +173,7 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
             shortened.append(replace(m, content=text) if len(text) < len(m.content) else m)
         if token_upper_bound(shortened) < token_upper_bound(units[index]):
             units[index] = shortened
+            visible_cache, cost_cache = None, None
             levels[keys[index]] = level
             decisions.append({'unit': keys[index], 'source': descriptors[index].source,
                               'kind': descriptors[index].kind, 'action': reason, 'level': level,
@@ -182,8 +203,9 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
             reduce_unit(i, 1, 'excerpt_with_original')
             if cost() > target:
                 reduce_unit(i, 2, 'offload_with_original')
+    units, deduplicated_chars = visible()
     packed = [m for unit in units for m in unit]
-    used = cost()
+    used = token_upper_bound(packed) + schema_size
     # Deployment policy: the input budget is advisory, never a dispatch blocker.
     # The provider enforces the real model window and fails explicitly there.
     over_budget = used > budget
@@ -200,6 +222,7 @@ def pack_messages(messages: list[Message], *, policy: dict[str, Any], budget: in
                          'compression': levels.get(keys[i], 0),
                          'message_hashes': [message_key(m) for m in unit]})
     manifest = {'version': 3, 'estimator': 'utf8_byte_upper_bound', 'budget': budget,
+                'repository_duplicate_chars_removed': deduplicated_chars,
                 'before': before, 'restored': restored, 'used': used, 'target': target,
                 'trigger_percent': policy['trigger_percent'], 'triggered': triggered,
                 'target_percent': policy['target_percent'],
