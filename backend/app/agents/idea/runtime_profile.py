@@ -41,7 +41,7 @@ class _StrictModel(BaseModel):
 class _Author(_StrictModel):
     provider: Literal["deepseek"]
     name: Literal["deepseek-v4-pro"]
-    max_tokens: int = Field(ge=1, le=32768)
+    max_tokens: int = Field(ge=1)
     temperature: float = Field(ge=0, le=2)
     top_p: float = Field(gt=0, le=1)
     thinking: Literal[True]

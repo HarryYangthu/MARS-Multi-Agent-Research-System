@@ -1,7 +1,7 @@
 schema: idea.focused.config.v1
 author_agent: idea_author
 review_agent: idea_reviewer
-# Same GLM-5.3 model in separate author/reviewer sessions, explicitly selected.
+# Use the configured models in separate author/reviewer sessions.
 # Set cross_model to require different provider/model pairs again.
 review_mode: independent_session
 research_quality:
@@ -14,12 +14,12 @@ research_quality:
     evaluation: 与当前指标和对照条件的可比性
     limitations: 适用假设、失败条件与限制
 author:
-  # GLM-5.3 requires thinking and supports low, high or max effort.
+  # Keep the selected thinking mode and reasoning effort.
   thinking_enabled: true
   reasoning_effort: low
   temperature: 0.2
-  max_tokens: 32768
-  request_timeout_seconds: 180
+  max_tokens: 393216
+  request_timeout_seconds: 3600
   max_retries: 1
 loop:
   protocol: native_tools

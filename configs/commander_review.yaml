@@ -2,5 +2,5 @@
 poll_interval_seconds: 0.25
 max_revisions_per_node: 2
 max_input_characters: 60000
-max_output_tokens: 32768
-timeout_seconds: 360
+max_output_tokens: 393216
+timeout_seconds: 3600
