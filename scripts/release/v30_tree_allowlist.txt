@@ -121,6 +121,7 @@ backend/app/bridge/cli_research_report.py
 backend/app/bridge/cli_research_service.py
 backend/app/bridge/code_workspace_resolver.py
 backend/app/bridge/commander.py
+backend/app/bridge/commander_context.py
 backend/app/bridge/commander_code.py
 backend/app/bridge/conversation_edit.py
 backend/app/bridge/commander_agent.py

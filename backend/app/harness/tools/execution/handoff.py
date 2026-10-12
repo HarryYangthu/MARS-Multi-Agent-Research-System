@@ -8,6 +8,28 @@ from app.harness.tools.config import load_execution_config
 from app.harness.tools.project_repo import load_project_repo
 from app.settings import get_settings
 
+
+def execution_delivery_context() -> dict[str, Any]:
+    """Expose the same host bindings the coding handoff validator consumes."""
+    backend = get_settings().mars_execution_backend
+    policy = load_execution_config()['execution']
+    rows = policy.get('local_commands', [])
+    commands = [{key: row[key] for key in ('id', 'argv', 'required_metrics') if key in row}
+                for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    return {
+        'backend': backend,
+        'local_commands': commands if backend == 'local_command' else [],
+        'paper_static': policy.get('paper_static', {}) if backend == 'paper_static' else {},
+        'instruction': (
+            '当前执行方式为 local_command：每项 execution_jobs.config 必须填写上述登记命令的 id '
+            '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由宿主执行，不得自行替换。'
+            '命令从 MARS_JOB_REQUEST 读取本项配置和预算，产出 MARS_RESULT_PATH 与真实证据。'
+            '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
+            if backend == 'local_command' else
+            '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'
+        ),
+    }
+
 def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: str,
                           plan_required: bool = False) -> list[str]:
     try:
@@ -61,7 +83,10 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                 from app.harness.tools.execution.local_command import LocalCommandJob, _command
                 command_id = config.get('command_id')
                 if not isinstance(command_id, str) or not command_id:
-                    raise ValueError('当前执行方式要求交付实际 command_id')
+                    rows = policy.get('local_commands', [])
+                    ids = [str(row['id']) for row in rows if isinstance(row, dict) and row.get('id')] if isinstance(rows, list) else []
+                    raise ValueError('当前执行方式 local_command 要求交付实际 command_id；可用登记 ID：'
+                                     + (', '.join(ids) if ids else '无，请先配置真实执行命令'))
                 _command(LocalCommandJob(run_id='handoff-check', experiment_id=job['name'],
                     project=project, run_root=Path('.'), command_id=command_id), 'execution.simulation_runner')
         except (OSError, ValueError, RuntimeError) as exc:

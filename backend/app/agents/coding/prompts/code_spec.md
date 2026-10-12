@@ -14,6 +14,7 @@
 - 示意代码和带省略号的 diff 只用于解释，不可执行。交付可执行补丁时必须带完整 `---`/`+++` 文件头和有效 `@@` 行号；已完成写入不需要再次应用补丁。
 
 - `execution_jobs` 是机器可读的执行交付，每项 `name` 必须对应实验矩阵，`config` 只补充实际入口 `entrypoint`、`config_path` 或宿主登记的 `command_id` 等运行绑定。保留批准参数；明确随机种子、`max_iters` 和 `budget_unit`（steps/epochs），不得把步数换成轮数。每个配置必须存在且被真实代码消费。执行侧直接消费此清单，不再调用模型猜测命令。
+- 先读取宿主提供的 `configured_execution_delivery`。当前 backend 为 `local_command` 时，每项必须填写其中登记的 `command_id`，不能仅填写脚本入口和配置路径；无可用登记命令时明确说明执行配置尚未就绪。宿主 argv、请求/结果协议与真实证据要求必须保留。
 - `entrypoint` 只填写脚本路径，不得填完整命令（例如 `train_static.py`，不能填 `python train_static.py --cfg ...`）；`config_path` 只填写配置路径。完整可读命令放在正文，预算与种子使用各自字段；以接入执行器的实际合同为准。
 
 ## 仿真过程与可视化交付
