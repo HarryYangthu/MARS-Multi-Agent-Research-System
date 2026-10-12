@@ -232,9 +232,9 @@ def _read_code_fragment(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             raise ValueError("source file must be text")
         lines = raw.decode("utf-8").splitlines(keepends=True)
         start = _integer(args, "start_line", 1, 1, max(1, len(lines)))
-        end = _integer(args, "end_line", min(len(lines) or 1, start + policy.max_read_lines - 1),
-                       start, start + policy.max_read_lines - 1)
-        end = min(end, len(lines))
+        requested_end = _integer(args, "end_line", min(len(lines) or 1, start + policy.max_read_lines - 1),
+                                 start, policy.max_file_bytes)
+        end = min(requested_end, len(lines), start + policy.max_read_lines - 1)
         excerpt: list[str] = []
         chars = 0
         for line in lines[start - 1:end]:
@@ -248,6 +248,7 @@ def _read_code_fragment(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=True, output={"repo_root": str(root), "path": relative,
             "sha256": hashlib.sha256(raw).hexdigest(), "line_start": start, "line_end": last,
             "total_lines": len(lines), "content": "".join(excerpt), "truncated": last < len(lines),
+            "range_limited": last < min(requested_end, len(lines)),
             "next_line": last + 1 if last < len(lines) else None}, evidence_refs=[relative])
     except (OSError, ValueError, UnicodeError) as exc:
         return ToolResult(ok=False, error=str(exc))

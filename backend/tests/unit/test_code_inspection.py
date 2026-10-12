@@ -95,7 +95,12 @@ async def test_output_budgets_and_windows_relative_paths(source_context: ToolCon
     assert excerpt.ok
     assert excerpt.output["line_end"] == policy.max_read_lines
     assert excerpt.output["next_line"] == policy.max_read_lines + 1
-    assert not (await read_code_fragment({"path": "libs/long.py", "end_line": policy.max_read_lines + 1}, source_context)).ok
+    oversized_range = await read_code_fragment({"path": "libs/long.py", "end_line": policy.max_read_lines + 1}, source_context)
+    assert oversized_range.ok and oversized_range.output['range_limited']
+    assert oversized_range.output['line_end'] == policy.max_read_lines
+    assert oversized_range.output['next_line'] == policy.max_read_lines + 1
+    assert not (await read_code_fragment({"path": "libs/long.py", "start_line": 2, "end_line": 1}, source_context)).ok
+    assert not (await read_code_fragment({"path": "libs/long.py", "end_line": True}, source_context)).ok
     (tmp_path / "libs/oversize.py").write_text("x" * (policy.max_file_bytes + 1))
     search = await repo_search_tool({"query": "value", "path": "libs", "glob": "oversize.py"}, source_context)
     assert search.ok and search.output["skipped_large_files"] == 1
