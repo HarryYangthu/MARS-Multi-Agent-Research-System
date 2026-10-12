@@ -162,7 +162,7 @@ async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirm
 
 
 @router.get('/{run_id}/recovery')
-async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
+def get_recovery(run_id: str, project: str) -> dict[str, Any]:
     from app.bridge.run_recovery import recovery_status
     try:
         return recovery_status(get_orchestrator(), run_id, project=project)
@@ -490,7 +490,7 @@ async def list_trashed_runs(project: str = "") -> list[TrashRunSummary]:
 
 
 @router.get("/{run_id}", response_model=RunDetail)
-async def get_run(run_id: str) -> RunDetail:
+def get_run(run_id: str) -> RunDetail:
     from app.bridge.managed_review import review_state
     _ensure_active_run(run_id)
     session = _execution_session(run_id)
