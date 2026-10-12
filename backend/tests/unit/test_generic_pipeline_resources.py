@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,11 @@ async def test_real_folder_context_and_compiled_defaults_do_not_inherit_another_
     assert "macro_f1" in rendered and "maximize" in rendered and "evaluation/scorer.py" in rendered
     assert "明确阻断" in rendered
     for foreign_default in ("pimc", "PIMC", "RES", "-26", "Paper_Total_0327", "stream_label", "mock_simulation"):
-        assert foreign_default not in rendered
+        # The generic MARS_RESULT_PATH protocol is not the PIMC RES metric.
+        if foreign_default == "RES":
+            assert re.search(r"\bRES\b", rendered) is None
+        else:
+            assert foreign_default not in rendered
     snapshot = json.loads((tmp_path / "run/input/folder_context.v1.json").read_text())
     assert snapshot["project"] == project.name
     assert "project_knowledge" not in context.metadata

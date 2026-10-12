@@ -87,7 +87,10 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true, com
       const accepted: unknown = await response.json();
       const stopStatus = typeof accepted === "object" && accepted !== null && "status" in accepted ? accepted.status : null;
       const stopConfirmed = typeof accepted === "object" && accepted !== null && "run_stop_confirmed" in accepted && accepted.run_stop_confirmed === true;
-      setMessage(action === "stop" ? (stopStatus === "stop_requested" ? "停止请求已保存，已禁止新动作。" : stopConfirmed ? "已核对本任务的工作进程、作业回执与活动记录，停止完成。" : "停止请求已响应，请核对最新工作进程及独立实验作业状态。") : action === "migrate-state" ? "历史状态校验与迁移完成，尚未启动研究。" : "服务已接受请求，任务状态会继续更新。");
+      const stoppedOwner = typeof accepted === "object" && accepted !== null && "termination" in accepted
+        && typeof accepted.termination === "object" && accepted.termination !== null
+        && "cleanup_complete" in accepted.termination && accepted.termination.cleanup_complete === true;
+      setMessage(action === "stop" ? (stopStatus === "stop_requested" ? "停止请求已保存，已禁止新动作。" : stopConfirmed ? "已核对本任务的工作进程、作业回执与活动记录，停止完成。" : stoppedOwner ? "本服务的任务推进已停止，已保存产物保留。" : "停止请求已响应，请核对最新工作进程及独立实验作业状态。") : action === "migrate-state" ? "历史状态校验与迁移完成，尚未启动研究。" : "服务已接受请求，任务状态会继续更新。");
       try { const current = await getRun(runId); if (!controller.signal.aborted) onChange(current); } catch { if (!controller.signal.aborted) setMessage((current) => `${current} 最新状态暂时无法读取，请稍后刷新。`); }
     } catch (cause: unknown) {
       if (controller.signal.aborted) return;
