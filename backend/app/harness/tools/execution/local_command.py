@@ -130,7 +130,8 @@ def _command(job: LocalCommandJob, tool_name: str) -> tuple[tuple[str, ...], tup
             elif str(branch.source_root) in argument:
                 raise ValueError("启动命令包含共享代码仓路径，请改用 MARS_CODE_ROOT 或 {code_root} 绑定本研究代码。")
         routed.append(argument)
-    argv = tuple(routed)
+    from app.harness.tools.check_interpreter import check_argv
+    argv = check_argv(tuple(routed))
     required = selected.get("required_metrics", [])
     if not isinstance(required, list) or any(not isinstance(name, str) or not name for name in required):
         raise ValueError("required_metrics must be a list of metric names")

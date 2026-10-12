@@ -103,6 +103,32 @@ async def test_direct_command_request_uses_explicit_job_budget(
     assert json.loads(request.read_text())['steps'] == 7
 
 
+@pytest.mark.asyncio
+async def test_registered_python_placeholder_measures_without_a_login_path(
+    tmp_path: Path, actual_regression_command: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execution_path = tmp_path / 'host-execution.yaml'
+    execution = yaml.safe_load(execution_path.read_text())
+    execution['execution']['local_commands'][0]['argv'][0] = 'python'
+    execution_path.write_text(yaml.safe_dump(execution))
+    tools_path = tmp_path / 'host-tools.yaml'
+    tools = yaml.safe_load(tools_path.read_text())
+    for name in ('execution.simulation_runner', 'execution.batch_runner'):
+        tools['tools'][name]['command_allowlist'] = [['python', str(tmp_path / 'measure_regression.py')]]
+    tools_path.write_text(yaml.safe_dump(tools))
+    monkeypatch.setenv('PATH', '')
+    from app.harness.tools.execution.local_command import LocalCommandJob, run_local_command, local_command_protocol
+    result = await run_local_command(LocalCommandJob(run_id='portable-interpreter', experiment_id='actual',
+        project='regression', run_root=tmp_path / 'run', command_id='regression',
+        config={'budget_steps': 2, 'scale': 1, 'data_path': str(actual_regression_command)}))
+    assert result.status == 'completed' and result.metrics['mse'] == pytest.approx(14 / 3)
+    directory = next((tmp_path / 'run/execution/local_commands/actual').iterdir())
+    request = json.loads((directory / 'job.json').read_text())
+    receipt = json.loads((directory / 'execution_receipt.json').read_text())
+    assert set(local_command_protocol()['request']['fields']) <= request.keys()
+    assert receipt['argv'][0] == sys.executable
+
+
 @pytest.mark.parametrize("fault", ["stdout_only", "wrong_id"])
 @pytest.mark.asyncio
 async def test_stdout_or_previous_invocation_cannot_become_success(
