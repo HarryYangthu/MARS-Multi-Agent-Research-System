@@ -70,7 +70,7 @@ def _directory_visible(ctx: ToolContext, relative: str, policy: InspectionPolicy
 
 
 def _scan(ctx: ToolContext, args: dict[str, Any], policy: InspectionPolicy,
-          *, default_depth: int) -> tuple[Path, list[tuple[str, Path, bool]], bool]:
+          *, default_depth: int, allow_file: bool = False) -> tuple[Path, list[tuple[str, Path, bool]], bool]:
     root = _project_root(ctx)
     if root is None or not root.is_dir():
         raise ValueError("project code repository is not connected")
@@ -85,6 +85,14 @@ def _scan(ctx: ToolContext, args: dict[str, Any], policy: InspectionPolicy,
         current /= part
         if current.is_symlink():
             raise ValueError("repository inspection cannot traverse symbolic links")
+    if allow_file and folder.is_file():
+        resolved = _resolve_project_file(ctx, path, must_exist=True)
+        if isinstance(resolved, ToolResult):
+            raise ValueError(resolved.error or "source file is unavailable")
+        actual_root, relative, target = resolved
+        if target.suffix.lower() not in TEXT_SUFFIXES:
+            raise ValueError("source file is unsupported")
+        return actual_root, [(relative, target, False)], False
     if not folder.is_dir() or not folder.resolve().is_relative_to(root):
         raise ValueError("repository directory is unavailable")
     relative = rel.as_posix()
@@ -154,7 +162,7 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         query = args.get("query")
         if not isinstance(query, str) or not query.strip() or len(query) > policy.snippet_chars:
             raise ValueError("query must be a short nonempty literal string")
-        root, files, scan_limited = _scan(ctx, args, policy, default_depth=policy.max_depth)
+        root, files, scan_limited = _scan(ctx, args, policy, default_depth=policy.max_depth, allow_file=True)
         offset = _integer(args, "offset", 0, 0, policy.max_scanned_entries)
         limit = _integer(args, "limit", policy.page_size, 1, policy.max_results)
         glob = str(args.get("glob", "*"))

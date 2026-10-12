@@ -6,6 +6,7 @@ files. Stdout, a zero exit code, or old metrics alone cannot establish success.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -63,6 +64,26 @@ _RESULT_SCHEMA: dict[str, Any] = {
         "loss_curve": {"type": "array", "items": {"type": "number"}},
     },
 }
+
+
+def local_command_protocol() -> dict[str, Any]:
+    """Document the actual file envelope and result validator for code delivery."""
+    return {
+        'request': {
+            'delivery': 'MARS_JOB_REQUEST 是 UTF-8 JSON 文件的绝对路径，不是 JSON 文本；先读取文件再解析。',
+            'schema': 'local_command_request.v1',
+            'fields': ['schema', 'invocation_id', 'run_id', 'experiment_id', 'project',
+                       'config', 'seed', 'steps', 'output_dir'],
+            'config_location': 'execution_jobs.config 在 request["config"] 中，不在请求顶层。',
+        },
+        'result_schema': deepcopy(_RESULT_SCHEMA),
+        'result_delivery': (
+            'MARS_RESULT_PATH 是结果文件路径；成功结果严格符合上述 schema，三个标识原样复制请求。'
+            'metrics 仅放真实有限数值，布尔门控转换为 0/1。evidence_paths 是相对 request.output_dir '
+            '的实际证据路径，不得使用控制文件、绝对路径或路径逃逸。附加说明保存到独立证据 JSON，'
+            '不能塞入受 schema 限定的结果顶层。失败应返回非零退出码，不补造 completed 结果。'
+        ),
+    }
 
 
 def _file_hash(path: Path) -> str:

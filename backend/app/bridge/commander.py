@@ -339,7 +339,10 @@ def _parse_decision(text: str) -> Decision:
         if not isinstance(action, dict):
             raise CommanderDecisionError("action must be an object")
         tool = action.get("tool")
-        args = action.get("args", {})
+        flat = {key: value for key, value in action.items() if key not in {"tool", "args"}}
+        if "args" in action and flat:
+            raise CommanderDecisionError("ambiguous action arguments: use args or flat fields, not both")
+        args = action.get("args", flat)
         if not isinstance(tool, str) or not tool.strip() or not isinstance(args, dict):
             raise CommanderDecisionError("invalid action tool or arguments")
         actions.append({"tool": tool, "args": args})

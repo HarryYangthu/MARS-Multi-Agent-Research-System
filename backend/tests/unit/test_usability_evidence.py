@@ -13,6 +13,7 @@ from app.harness.context.runtime_pack import message_key, pack_messages
 from app.harness.context.runtime_policy import freeze_policy
 from app.harness.llm.provider_base import Message
 from app.harness.tools.execution.handoff import execution_delivery_context
+from app.harness.tools.execution.local_command import local_command_protocol, _RESULT_SCHEMA
 from app.settings import reset_settings_cache
 
 
@@ -50,6 +51,12 @@ def test_coding_receives_the_actual_registered_command_contract(tmp_path: Path, 
         assert context['backend'] == 'local_command'
         assert context['local_commands'] == [{key: registered[key] for key in ('id', 'argv', 'required_metrics')}]
         assert 'command_id' in context['instruction'] and 'MARS_RESULT_PATH' in context['instruction']
+        protocol = context['protocol']
+        assert protocol['result_schema'] == _RESULT_SCHEMA
+        assert '不是 JSON 文本' in protocol['request']['delivery']
+        assert 'request["config"]' in protocol['request']['config_location']
+        protocol['result_schema']['required'].clear()
+        assert local_command_protocol()['result_schema']['required'] == _RESULT_SCHEMA['required']
         config.write_text(yaml.safe_dump({'execution': {'local_commands': []}}))
         assert execution_delivery_context()['local_commands'] == []
     finally:

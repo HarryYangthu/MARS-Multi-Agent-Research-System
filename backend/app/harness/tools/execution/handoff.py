@@ -16,10 +16,12 @@ def execution_delivery_context() -> dict[str, Any]:
     rows = policy.get('local_commands', [])
     commands = [{key: row[key] for key in ('id', 'argv', 'required_metrics') if key in row}
                 for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    from app.harness.tools.execution.local_command import local_command_protocol
     return {
         'backend': backend,
         'local_commands': commands if backend == 'local_command' else [],
         'paper_static': policy.get('paper_static', {}) if backend == 'paper_static' else {},
+        'protocol': local_command_protocol() if backend == 'local_command' else {},
         'instruction': (
             '当前执行方式为 local_command：每项 execution_jobs.config 必须填写上述登记命令的 id '
             '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由宿主执行，不得自行替换。'

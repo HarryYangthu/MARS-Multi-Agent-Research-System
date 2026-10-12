@@ -65,6 +65,16 @@ async def test_search_is_literal_and_pages_matches(source_context: ToolContext) 
 
 
 @pytest.mark.asyncio
+async def test_search_accepts_an_exact_file_without_scanning_other_files(source_context: ToolContext) -> None:
+    result = await repo_search_tool({'query': 'taps', 'path': 'libs/model.py'}, source_context)
+    assert result.ok and len(result.output['matches']) == 1
+    assert result.output['matches'][0]['path'] == 'libs/model.py'
+    assert result.output['matches'][0]['line'] == 2
+    for path in ('../outside.py', 'configs/.env.local', 'data/private.py'):
+        assert not (await repo_search_tool({'query': 'secret', 'path': path}, source_context)).ok
+
+
+@pytest.mark.asyncio
 async def test_no_credentials_ignored_data_or_symbolic_links(source_context: ToolContext, tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     (tmp_path / "data/private.py").write_text("taps = 'private'\n")
