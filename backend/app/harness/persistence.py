@@ -25,7 +25,9 @@ _LOCKS_GUARD = threading.Lock()
 def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     """Serialize a logical transaction, including across worker processes."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    key = os.path.normcase(str(path.resolve()))
+    # Resolve the stable parent, not the disposable lock file: Windows can
+    # expose a pending-deletion file as $Extend/$Deleted during contention.
+    key = os.path.normcase(str(path.parent.resolve() / path.name))
     if os.name == "nt":
         # realpath may retain the extended prefix when the file is locked.
         # Both spellings refer to the same OS file and must share one RLock.
