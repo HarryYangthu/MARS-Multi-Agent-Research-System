@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+from threading import Thread
 
 import pytest
 
@@ -19,6 +20,29 @@ pytestmark = pytest.mark.skipif(os.name not in {"posix", "nt"}, reason="local ru
 
 def _assert_killed(returncode: object) -> None:
     assert returncode == (-signal.SIGKILL if os.name == "posix" else 1)
+
+
+def test_control_file_checks_accept_real_atomic_replacements(tmp_path: Path) -> None:
+    from app.execution.local.runner import _check_files
+    from app.harness.persistence import atomic_write_json
+
+    directory = tmp_path / "control"
+    directory.mkdir()
+    errors: list[Exception] = []
+    def replace() -> None:
+        try:
+            for index in range(250):
+                atomic_write_json(directory / "state.json", {"revision": index})
+        except Exception as error:
+            errors.append(error)
+    thread = Thread(target=replace)
+    thread.start()
+    while thread.is_alive():
+        _check_files(directory)
+        time.sleep(0.001)
+    thread.join(timeout=5)
+    assert not errors and not thread.is_alive()
+    assert json.loads((directory / "state.json").read_text())["revision"] == 249
 
 _MEASURE = '''import json, os
 from pathlib import Path

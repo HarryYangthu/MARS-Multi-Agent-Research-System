@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,10 +26,18 @@ jobs:
       - name: Build host tools
         shell: powershell
         run: python -m pip install 'uv==0.11.1' 'PyYAML>=6' 'packaging>=25'
+      - name: Reuse the dependency archive already verified by this repository
+        uses: actions/download-artifact@v4
+        with:
+          name: mars-windows-offline-package
+          run-id: 38218292675
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/mars-dependency-cache
       - name: Assemble real Windows dependencies and clean source
         shell: powershell
         run: |
-          python scripts/release/build_windows_offline.py --source . --source-profile repository --output "$env:RUNNER_TEMP\mars-offline" --sevenzip 'C:\Program Files\7-Zip\7z.exe'
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP\mars-dependency-cache\MARS-Product-Windows-Offline.zip" -DestinationPath "$env:RUNNER_TEMP\mars-dependency-cache\extracted"
+          python scripts/release/build_windows_offline.py --source . --source-profile repository --output "$env:RUNNER_TEMP\mars-offline" --prepared-dependencies "$env:RUNNER_TEMP\mars-dependency-cache\extracted\MARS-Product\offline"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: PowerShell 5.1 syntax and filesystem contracts
         shell: powershell
@@ -57,7 +66,7 @@ jobs:
         run: |
           $root = "$env:RUNNER_TEMP\mars-offline\MARS-Product"
           $env:MARS_RUNTIME_ROOT = $root
-          & "$root\deploy\windows-native\Mars.ps1" -Action Start -NoBrowser -SkipConfigure
+          cmd.exe /d /c "call `"$root\MARS-Windows.cmd`" -NoBrowser -SkipConfigure < nul"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $health = Invoke-RestMethod http://127.0.0.1:8010/health
           if ($health.service -ne 'mars-backend') { throw 'Wrong backend identity' }

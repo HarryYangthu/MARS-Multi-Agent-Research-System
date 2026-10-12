@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -119,7 +120,13 @@ def _check_files(directory: Path) -> None:
     for name in ("submission.json", "job.json", "state.json", "stop.json", "worker.lock", "control.lock",
                  "execution_receipt.json", "stdout.log", "stderr.log", "result.json"):
         path = directory / name
-        if path.is_symlink() or (path.exists() and not path.is_file()):
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        # One metadata snapshot: Windows atomic replacement may occur between
+        # separate exists()/is_file() calls and produce a false type rejection.
+        if not stat.S_ISREG(mode):
             raise ValueError("local runner control/output path is not a plain file")
 
 

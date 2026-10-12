@@ -288,3 +288,4 @@ try {
     if ($locked) { $mutex.ReleaseMutex() }
     if ($null -ne $mutex) { $mutex.Dispose() }
 }
+exit 0
