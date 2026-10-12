@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review
-from app.bridge.managed_review import review_input_manifest, review_policy
+from app.bridge.managed_review import ReviewPolicy, review_input_manifest, review_policy
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.provider_base import Message
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
@@ -54,7 +54,11 @@ def test_review_respects_smaller_role_or_model_input_space(loop_budget: int, win
 
 
 def test_legacy_review_policy_migrates_to_common_input_budget() -> None:
-    policy = review_policy().model_copy(update={"input_token_budget": None, "max_input_characters": 60000})
+    raw = {**review_policy().model_dump(), "input_token_budget": None, "max_input_characters": 60000}
+    policy = ReviewPolicy.model_validate(raw)
+    assert "max_input_characters" not in policy.model_dump()
+    assert "max_input_characters" not in ReviewPolicy.model_json_schema()["properties"]
+    assert raw["max_input_characters"] == 60000
     agent = replace(model_registry.get_agent_config("commander"), raw={"loop": {}, "model": {}})
     manifest = review_input_manifest([Message("user", "a" * 61000)], policy, agent,
                                      {"input_budget": 128000, "safety_margin": 1000})

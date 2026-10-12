@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 import yaml
 
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, digest
@@ -30,11 +30,17 @@ class ReviewPolicy(BaseModel):
     poll_interval_seconds: float = Field(gt=0)
     max_revisions_per_node: int = Field(ge=0)
     input_token_budget: int | None = Field(default=None, gt=0)
-    # Accepted only to migrate old workspace YAML; the common token budget
-    # replaces this independent character cap. Never truncate review evidence.
-    max_input_characters: int | None = Field(default=None, gt=0)
     max_output_tokens: int = Field(gt=0)
     timeout_seconds: int = Field(gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_character_limit(cls, value: Any) -> Any:
+        # Old workspace files remain loadable, but the removed limit must not
+        # survive as an exposed setting or affect approval admission.
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "max_input_characters"}
+        return value
 
 
 def review_policy() -> ReviewPolicy:
