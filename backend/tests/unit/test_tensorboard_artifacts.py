@@ -15,6 +15,7 @@ def test_saved_observations_figures_and_provenance_are_idempotent(tmp_path: Path
     model.mkdir(parents=True)
     (attempt/'job.json').write_text(json.dumps({'run_id': run.name, 'experiment_id': 'experiment'}))
     (model/'steps.jsonl').write_text(json.dumps({'optimizer_step': 1, 'training_loss': .25, 'lr': .001})+'\n')
+    (model/'config.json').write_text('{"model": "baseline"}')
     (model/'history.json').write_text(json.dumps([{'optimizer_steps': 0, 'validation_RES_db': 10., 'epoch': 0},
                                                {'optimizer_steps': 1, 'validation_RES_db': 8., 'epoch': 1}]))
     (model/'summary.json').write_text(json.dumps({'real_parameters': 12, 'selected_optimizer_steps': 1,
@@ -26,6 +27,9 @@ def test_saved_observations_figures_and_provenance_are_idempotent(tmp_path: Path
     report = sync_run_visualizations(run)
     assert report['images'] == 1 and not report['warnings']
     assert report['models'][0]['validation_points'] == 2
+    assert report['models'][0]['is_baseline'] is True
+    assert report['models'][0]['scalar_run'].endswith('/training/baseline')
+    assert report['models'][0]['image_tags'] == ['figures/training/baseline/figs/coeffs/lut.png']
     report2 = sync_run_visualizations(run)
     assert report2 == report
     root = run/'execution/tensorboard_artifacts'

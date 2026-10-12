@@ -1,7 +1,9 @@
+import type { ComparisonSource } from "./tensorboardComparison";
+
 export type TensorBoardSession = {
   key: string; project: string; run_id: string | null;
   url: string; status: string; logdirs: string[];
-  coverage?: { models: { name: string; native: boolean; training_steps: number; validation_points: number }[]; images: number; warnings: string[] } | null;
+  coverage?: { models: ComparisonSource[]; images: number; warnings: string[] } | null;
 };
 export type ExecutionDisplay = TensorBoardSession & {
   activation_id: string; phase: string; task: string; attempt: number; started_at: number;
