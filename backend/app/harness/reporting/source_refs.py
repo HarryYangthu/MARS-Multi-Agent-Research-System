@@ -5,6 +5,40 @@ from app.harness.runtime.project_scope import safe_scope_path
 from app.harness.schema.frontmatter_parser import parse
 
 
+def report_source_catalogue(root: Path) -> dict[str, object]:
+    """List admitted report references without reading or inventing results."""
+    candidates = {'proposal': 'idea/idea_proposal.approved.md',
+                  'plan': 'experiment/experiment_plan.approved.md',
+                  'code': 'coding/code_spec.approved.md'}
+    refs: dict[str, object] = {}
+    absent: list[str] = []
+    for key, name in candidates.items():
+        try:
+            present = safe_scope_path(root, name).is_file()
+        except (ValueError, OSError):
+            present = False
+        if present:
+            refs[key] = name
+        else:
+            absent.append(key)
+    measured = ['execution/run_log.approved.md', 'execution/metrics.json',
+                'execution/batch_summary.json', 'execution/loss_curves_16.png']
+    measured.extend(path.relative_to(root).as_posix() for path in
+        sorted((root / 'execution/local_commands').glob('*/*/execution_receipt.json')))
+    runs: list[str] = []
+    for name in measured:
+        try:
+            if safe_scope_path(root, name).is_file():
+                runs.append(name)
+        except (ValueError, OSError):
+            continue
+    refs['runs'] = runs
+    return {'chain_refs': refs, 'absent_stages': absent,
+        'instruction': '以上是当前研究实际存在的完整文件路径，不是内容或实验结论。chain_refs 可直接引用；'
+            '未运行的 proposal/plan 阶段省略对应字段，不得用其他阶段冒充。上下文材料标签（例如 '
+            'execution.job_files）不是磁盘路径；逐作业证据按其中 source 字段引用，不能猜哈希或目录。'}
+
+
 def report_source_errors(root: Path, text: str) -> list[str]:
     refs = parse(text).metadata.get("chain_refs", {})
     errors: list[str] = []

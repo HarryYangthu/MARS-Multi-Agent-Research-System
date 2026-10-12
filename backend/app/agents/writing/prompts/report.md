@@ -11,5 +11,6 @@
 - 全文使用 `chain_refs` 指向实际产物、run/attempt/job、日志和测量来源。摘要统计不能替代逐项证据，也不能掩盖失败、无效或缺失结果。
 - 保留证据文件完整后缀（例如 metrics.json、batch_summary.json、steps.jsonl），不得因最终报告是 Markdown 而删去 JSON 文件名。实际输出位置以 execution.job_files 的当前作业收据为准，配置中的 output_dir 不能代替宿主实际输出目录；已提供的逐步记录摘要可直接引用，无须在源代码仓猜测运行目录。曲线面板标签、测试数量与“单调下降”等描述必须另有实际证据，否则不写。
 - execution.job_files 是上下文材料标签，不是磁盘文件。chain_refs 应逐字引用材料中 source 字段的真实文件路径，不要创造 execution/job_files 这样的伪路径。
+- 先使用 admitted_report_sources 中宿主核对的路径清单。任务从编码或执行阶段进入时，proposal/plan 可能不存在；chain_refs 的这些字段可省略，不得拿编码产物替代提案或凭空补写文件路径。
 - 归因只写证据支持的范围；区分已验证结果、负结果、无效实验和待验证假设。单次 seed 或小规模运行不能自动推广。
 - 如实说明 baseline 保护、数据使用边界、人工决定、失败与迭代记录，以及下一步所需验证。不得承诺某种参数或实现改动必然改善。

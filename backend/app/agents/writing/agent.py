@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,17 @@ class WritingAgent(BaseAgent):
         "你负责把完整研究链路汇总成研究报告。用 knowledge.run_archive 回顾执行结果、"
         "knowledge.methodology 对齐写作规范,串联 proposal/plan/code/runs 的 chain_refs,"
         "面向 phd_advisor 给出可复现、有据可依的中文报告。"
+        "先核对 admitted_report_sources 提供的实际路径；跳过的研究或实验设计阶段不能编造 proposal/plan。"
+        "上下文材料标签不是文件路径，不得猜测作业哈希；保留完整路径、目录与后缀。"
     )
+
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        if request.extra.get('run_root'):
+            from app.harness.reporting.source_refs import report_source_catalogue
+            context.upstream['admitted_report_sources'] = json.dumps(
+                report_source_catalogue(Path(str(request.extra['run_root']))), ensure_ascii=False)
+        return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
