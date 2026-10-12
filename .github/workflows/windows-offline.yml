@@ -1,0 +1,102 @@
+name: Windows offline transfer package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'deploy/windows-native/**'
+      - 'backend/app/execution/local/**'
+      - 'backend/app/harness/agent_loop/zcode/config.py'
+      - 'backend/app/harness/persistence.py'
+      - 'backend/tests/unit/test_local_durable_runner.py'
+      - 'scripts/release/build_windows_offline.py'
+      - '.github/workflows/windows-offline.yml'
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build host tools
+        shell: powershell
+        run: python -m pip install 'uv==0.11.1' 'PyYAML>=6' 'packaging>=25'
+      - name: Reuse the dependency archive already verified by this repository
+        uses: actions/download-artifact@v4
+        with:
+          name: mars-windows-offline-package
+          run-id: 38218292675
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/mars-dependency-cache
+      - name: Assemble real Windows dependencies and clean source
+        shell: powershell
+        run: |
+          Expand-Archive -LiteralPath "$env:RUNNER_TEMP\mars-dependency-cache\MARS-Product-Windows-Offline.zip" -DestinationPath "$env:RUNNER_TEMP\mars-dependency-cache\extracted"
+          python scripts/release/build_windows_offline.py --source . --source-profile repository --output "$env:RUNNER_TEMP\mars-offline" --prepared-dependencies "$env:RUNNER_TEMP\mars-dependency-cache\extracted\MARS-Product\offline"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: PowerShell 5.1 syntax and filesystem contracts
+        shell: powershell
+        run: .\deploy\windows-native\Test-NativeScripts.ps1
+      - name: Actual first install with dependency clients offline
+        shell: powershell
+        run: |
+          $env:UV_OFFLINE = '1'
+          $env:UV_NO_PYTHON_DOWNLOADS = '1'
+          $env:npm_config_offline = 'true'
+          $env:HTTP_PROXY = 'http://127.0.0.1:9'
+          $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+          $env:NO_PROXY = '127.0.0.1,localhost'
+          & "$env:RUNNER_TEMP\mars-offline\MARS-Product\deploy\windows-native\Mars.ps1" -Action Install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real CPU tasks, descendants, deadlines and stop after owner exit
+        shell: powershell
+        run: |
+          $root = "$env:RUNNER_TEMP\mars-offline\MARS-Product"
+          $env:MARS_RUNTIME_ROOT = $root
+          $env:PYTHONPATH = "$root\backend"
+          & "$root\local\windows\venv\Scripts\python.exe" -m pytest backend/tests/unit/test_local_durable_runner.py -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Actual offline frontend, API proxy, ZCode readiness and repeated startup
+        shell: powershell
+        run: |
+          $root = "$env:RUNNER_TEMP\mars-offline\MARS-Product"
+          $env:MARS_RUNTIME_ROOT = $root
+          cmd.exe /d /c "call `"$root\MARS-Windows.cmd`" -NoBrowser -SkipConfigure < nul"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $health = Invoke-RestMethod http://127.0.0.1:8010/health
+          if ($health.service -ne 'mars-backend') { throw 'Wrong backend identity' }
+          $null = Invoke-RestMethod http://127.0.0.1:3001/api/system/version
+          $projects = Invoke-RestMethod http://127.0.0.1:3001/api/projects
+          & "$root\deploy\windows-native\Mars.ps1" -Action Start -NoBrowser -SkipConfigure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @{ first_install_offline = $true; windows_x64 = $true; actual_cpu_tasks_checked = $true;
+             frontend_proxy_checked = $true; repeated_start_checked = $true; model_requests = 0;
+             full_research_model_run_checked = $false } | ConvertTo-Json | Set-Content "$root\WINDOWS-VERIFICATION.json" -Encoding UTF8
+      - name: Stop owned services
+        if: always()
+        shell: powershell
+        run: |
+          $script = "$env:RUNNER_TEMP\mars-offline\MARS-Product\deploy\windows-native\Mars.ps1"
+          if (Test-Path $script) { & $script -Action Stop }
+      - name: Preserve verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-offline-verification
+          path: |
+            ${{ runner.temp }}/mars-offline/MARS-Product/local/windows/logs/
+            ${{ runner.temp }}/mars-offline/MARS-Product/WINDOWS-VERIFICATION.json
+          if-no-files-found: ignore
+      - name: Verified source and dependency package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mars-windows-offline-package
+          path: ${{ runner.temp }}/mars-offline/MARS-Product-Windows-Offline.zip
+          compression-level: 0

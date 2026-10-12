@@ -3,7 +3,8 @@ param(
     [ValidateSet('Menu', 'Install', 'Start', 'Configure', 'Stop', 'Status', 'TestApi')]
     [string]$Action = 'Menu',
     [switch]$NoBrowser,
-    [switch]$SkipConfigure
+    [switch]$SkipConfigure,
+    [switch]$OfflineRequired
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -16,6 +17,7 @@ $node = Join-Path $runtime ('tools/node/' + $config.node_executable)
 $git = Join-Path $runtime ('tools/git/' + $config.git_executable)
 $backendUrl = 'http://127.0.0.1:' + $config.backend_port
 $frontendUrl = 'http://127.0.0.1:' + $config.frontend_port
+. (Join-Path $PSScriptRoot 'Offline.ps1')
 
 function Read-ServiceState {
     if (Test-Path -LiteralPath $statePath) { return (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json) }
@@ -62,6 +64,11 @@ function Set-NativeEnvironment {
 
 function Install-NativeDependencies {
     Assert-ServicesStopped
+    if ($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) -or
+        (Test-Path -LiteralPath (Join-Path $root 'offline'))) {
+        Install-OfflineDependencies
+        return
+    }
     # A failed repair must not leave a prior success receipt behind.
     Remove-Item -LiteralPath (Join-Path $runtime 'installed.json') -Force -ErrorAction SilentlyContinue
     Write-Host 'Installing MARS dependencies (first install needs Internet access)...'
@@ -102,6 +109,8 @@ function Install-NativeDependencies {
 }
 
 function Test-InstallationCurrent {
+    if (($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'offline'))) -and
+        -not (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json'))) { return $false }
     $stamp = Join-Path $runtime 'installed.json'
     if (-not (Test-Path -LiteralPath $stamp)) { return $false }
     foreach ($file in @($python, $node, $git, $uv, (Join-Path $root 'frontend/node_modules/next/dist/bin/next'))) {
@@ -173,7 +182,8 @@ function Start-NativeServices {
             Start-Sleep -Milliseconds 500
         } while ((Get-Date) -lt $deadline)
         if ((Get-Date) -ge $deadline) { throw "Backend health timeout. See $logs" }
-        $arguments = ConvertTo-MarsArgumentString @((Join-Path $root 'frontend/node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', $config.frontend_port)
+        $frontendMode = if (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) { 'start' } else { 'dev' }
+        $arguments = ConvertTo-MarsArgumentString @((Join-Path $root 'frontend/node_modules/next/dist/bin/next'), $frontendMode, '--hostname', '127.0.0.1', '--port', $config.frontend_port)
         $frontend = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory (Join-Path $root 'frontend') -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (Join-Path $logs "frontend-$stamp.out.log") -RedirectStandardError (Join-Path $logs "frontend-$stamp.err.log")
         $deadline = (Get-Date).AddSeconds([int]$config.startup_timeout_seconds)
@@ -278,3 +288,4 @@ try {
     if ($locked) { $mutex.ReleaseMutex() }
     if ($null -ne $mutex) { $mutex.Dispose() }
 }
+exit 0

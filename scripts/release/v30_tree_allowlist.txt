@@ -694,3 +694,13 @@ docs/commander-managed-review.md
 
 configs/project_storage.yaml
 backend/app/harness/project_storage.py
+
+backend/app/execution/local/process_group.py
+
+deploy/windows-native/Offline.ps1
+
+deploy/windows-native/probe_zcode.py
+
+deploy/windows-native/README-OFFLINE.md
+
+manage-mars-windows.cmd
