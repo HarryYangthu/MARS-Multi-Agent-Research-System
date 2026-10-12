@@ -66,6 +66,7 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true, com
     return () => { controller.abort(); mutation.current?.abort(); clearTimeout(timer); };
   }, [runId, finished]);
   const cancelled = run?.termination?.type === "cancelled";
+  const stoppedReview = cancelled && run?.termination?.cleanup_complete === true && run.status === "waiting_review";
   const statusLabel = cancelled
     ? (run?.termination?.cleanup_complete ? "用户已停止" : "停止清理待确认")
     : STATUS[run?.status || ""] || "状态待核对";
@@ -95,7 +96,7 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true, com
     } finally { if (!controller.signal.aborted) setBusy(""); }
   }
   const button = "rounded border border-mars-border px-3 py-1.5 text-xs hover:bg-mars-panel2 disabled:opacity-50";
-  if (compact && !controlError && !message && !control?.available_actions.includes("stop") && !control?.stopping) return null;
+  if (compact && !stoppedReview && !controlError && !message && !control?.available_actions.includes("stop") && !control?.stopping) return null;
   return <section aria-label="任务控制" className="rounded-lg border border-mars-border bg-mars-panel px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-3">{!compact ? <div className="flex flex-wrap items-center gap-3 text-sm"><Link href={run ? `/projects/${encodeURIComponent(run.project)}/research` : "/projects"} className="text-slate-400 hover:text-white">← 项目研究</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div> : null}<div className="flex flex-wrap gap-2">
       {showSimpleLink ? <Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>简洁视图</Link> : null}
@@ -107,6 +108,7 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true, com
     </div></div>
     {run?.read_only ? <p className="mt-2 text-xs leading-5 text-amber-200">{READ_ONLY[run.read_only_reason || ""] || "此记录没有可供当前服务使用的可信执行状态。已保存产物仍可查看。"}</p> : null}
     {controlError ? <p role="status" className="mt-2 text-xs text-amber-200">暂时无法核对工作进程状态，正在重新连接。</p> : null}
+    {stoppedReview ? <p role="status" className="mt-2 text-xs text-amber-200">任务推进已停止，待审核产物已保留。审核并批准后可以继续。</p> : null}
     {control?.research_stop?.run_stop_confirmed ? <p role="status" className="mt-2 text-xs text-emerald-200">停止核对完成，已保存的产物和预算记录保留。</p> : control?.research_stop?.status === "stop_incomplete" ? <p role="status" className="mt-2 text-xs text-amber-200">仍有工作进程、作业或活动记录未能确认停止。新动作已阻止，请核对停止状态。</p> : null}
     {control?.state_persisted === false ? <p role="alert" className="mt-2 text-xs text-amber-200">停止状态保存失败。{control.owned_task_done ? "本服务的工作进程已经结束。" : "仍需核对工作进程是否完成清理。"}恢复前需修复执行记录。</p> : null}
     {run?.execution_admission?.blockers.length ? <details className="mt-2 text-xs text-slate-400"><summary className="cursor-pointer">查看启动受阻原因</summary><ul className="mt-2 list-inside list-disc space-y-1">{run.execution_admission.blockers.map((blocker) => <li key={blocker.code}>{blocker.message}</li>)}</ul></details> : null}

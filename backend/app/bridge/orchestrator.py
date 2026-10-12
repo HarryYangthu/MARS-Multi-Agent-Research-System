@@ -373,11 +373,15 @@ class Orchestrator:
                                "message": "research dispatch barrier could not be persisted"}
         if contract and termination is not None and termination.get("scope") == "research_contract":
             stopping = not bool(termination.get("cleanup_complete"))
+        elif termination is not None and termination.get("cleanup_complete") and state_error is None:
+            # Keep the internal cancellation barrier until explicit recovery,
+            # but do not present completed cleanup as an active stop operation.
+            stopping = False
         if stopping and session is None and not contract:
             state_error = {"type": "MissingRunSession", "phase": "request",
                            "message": "owned task has no in-memory persistence session"}
         return {"run_id": run_id, "owned_task_active": active, "stopping": stopping,
-            "owned_task_done": not active if active or stopping else None,
+            "owned_task_done": not active if active or stopping or termination is not None else None,
             "cleanup_complete": bool(termination.get("cleanup_complete")) if termination is not None else None,
             "state_persisted": False if state_error is not None else True if termination is not None else None,
             "state_persistence_error": state_error,
