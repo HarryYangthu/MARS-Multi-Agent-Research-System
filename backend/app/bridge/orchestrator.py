@@ -716,6 +716,39 @@ class Orchestrator:
                 else "run completion quality gate rejected the result" if quality_blocked else None
             ),
         })
+        self._notify_run_completion(run_id, terminal_status, failed_nodes, quality_blocked)
+
+    def _notify_run_completion(
+        self,
+        run_id: str,
+        terminal_status: str,
+        failed_nodes: list[str],
+        quality_blocked: bool,
+    ) -> None:
+        """Surface terminal run state in the linked chat conversation.
+
+        Runs started outside a chat turn (retry, resume, direct API) otherwise
+        finish silently and the user only finds out by reopening the page.
+        """
+        from app.bridge.commander_session import notify_linked_conversations
+
+        stage_names = {
+            "idea": "研究", "experiment": "实验设计", "coding": "编码",
+            "execution": "执行", "writing": "报告",
+        }
+        if terminal_status == "completed":
+            notice = (
+                f"【任务状态】研究任务 {run_id} 已完成：全部阶段（研究 → 实验设计 → 编码 → 执行 → 报告）"
+                "均已结束。可在任务详情查看报告与实验指标。"
+            )
+        else:
+            failed = "、".join(stage_names.get(node, node) for node in failed_nodes) or "质量门禁"
+            notice = (
+                f"【任务状态】研究任务 {run_id} 未完成：{failed} 阶段失败"
+                + ("（完成质量门禁拒绝）" if quality_blocked and not failed_nodes else "")
+                + "。可在任务详情查看失败证据；对话中的「任务恢复」支持仅重试失败阶段。"
+            )
+        notify_linked_conversations(run_id, notice)
 
     async def _write_evaluation_scorecard(self, session: RunSession) -> dict[str, Any]:
         try:

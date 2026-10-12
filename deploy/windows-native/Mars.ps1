@@ -151,7 +151,22 @@ function Start-NativeServices {
     }
     Assert-ServicesStopped
     if (-not (Test-InstallationCurrent)) { Install-NativeDependencies }
-    if (-not $SkipConfigure -and -not (Test-Path (Join-Path $runtime 'api-configured.json'))) { Configure-NativeApi }
+    if (-not $SkipConfigure -and -not (Test-Path (Join-Path $runtime 'api-configured.json'))) {
+        # An existing key in .env.local means this checkout was configured
+        # before (restored local state, or an unattended start). Do not block
+        # on the interactive wizard; menu 6 (Test API) can still verify it.
+        $envLocal = Join-Path $root '.env.local'
+        $hasKey = $false
+        if (Test-Path -LiteralPath $envLocal) {
+            $hasKey = @(Get-Content -LiteralPath $envLocal -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match '^[A-Z0-9_]+_API_KEY=\S+' }).Count -gt 0
+        }
+        if ($hasKey) {
+            Write-Host 'Found an API key in .env.local; skipping the API wizard. Use menu 6 (Test API) to verify, or configure-mars-api.cmd to change it.'
+        } else {
+            Configure-NativeApi
+        }
+    }
     Set-NativeEnvironment
     # Independently repair/check ZCode; a runtime update must not rebuild the Python venv.
     Invoke-MarsNativeCommand $python @((Join-Path $PSScriptRoot 'ensure_zcode.py')) $root

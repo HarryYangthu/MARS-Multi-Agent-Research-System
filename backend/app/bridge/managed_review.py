@@ -116,6 +116,29 @@ async def record_state(run: RunHandle, bus: EventBus, state: dict[str, Any]) -> 
     payload = {"event": "commander.managed_review", "agent": "commander", **state}
     run.write_event("agent_events", payload)
     await bus.publish(f"run.{run.run_id}.hitl", payload)
+    _notify_needs_user(run, state)
+
+
+_STAGE_LABELS = {"idea": "研究", "experiment": "实验设计", "coding": "编码",
+                 "execution": "执行", "writing": "报告", "commander": "总控"}
+_KIND_LABELS = {"execution_configuration": "仿真配置审核", "artifact": "产物审核",
+                "feedback": "反馈决策"}
+
+
+def _notify_needs_user(run: RunHandle, state: dict[str, Any]) -> None:
+    """Mirror a HITL pause into the linked chat so the user is not left waiting silently."""
+    if state.get("decision") != "needs_user" and state.get("status") != "needs_user":
+        return
+    node = _STAGE_LABELS.get(str(state.get("node")), str(state.get("node") or "任务"))
+    kind = _KIND_LABELS.get(str(state.get("kind")), str(state.get("kind") or "审核"))
+    reason = str(state.get("reason") or "").strip()
+    notice = (
+        f"【需要你决策】{node} · {kind} 已暂停并等待你的确认：{reason} "
+        "可在对话下方研究工作区处理，或直接回复本对话说明决策。"
+    )
+    from app.bridge.commander_session import notify_linked_conversations
+
+    notify_linked_conversations(run.run_id, notice)
 
 
 def revision_count(run: RunHandle, node: str) -> int:

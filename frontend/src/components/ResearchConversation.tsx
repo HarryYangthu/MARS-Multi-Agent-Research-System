@@ -179,7 +179,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     } finally { sending.current = false; if (alive.current) setBusy(false); }
   }
 
-  const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
+  const messages = conversation?.messages ?? [];
   const showPending = pending && !pendingSaved && !pending.replaceId;
   return <section aria-label="研究对话" className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
@@ -242,6 +242,9 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 }
 
 function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: StoredChatMessage; editing: boolean; editDisabled: boolean; onEdit: () => void }): JSX.Element {
+  if (message.role === "system") return <div role="status" className="mx-auto max-w-full rounded-xl border border-mars-border bg-mars-panel/60 px-4 py-2.5 text-center text-xs leading-6 text-slate-300">
+    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+  </div>;
   if (message.role === "tool") return <details className="rounded-lg border border-mars-border bg-mars-panel/40 px-4 py-3 text-xs text-slate-400">
     <summary className="cursor-pointer">工具调用 · {message.tool_name}{message.tool_result?.ok === false ? " · 未完成" : ""}</summary>
     <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words leading-6">{message.content}{message.tool_result ? `\n${JSON.stringify(message.tool_result, null, 2)}` : ""}</pre>
