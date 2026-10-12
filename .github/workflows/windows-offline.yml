@@ -7,6 +7,7 @@ on:
       - 'deploy/windows-native/**'
       - 'backend/app/execution/local/**'
       - 'backend/app/harness/agent_loop/zcode/config.py'
+      - 'backend/app/harness/persistence.py'
       - 'backend/tests/unit/test_local_durable_runner.py'
       - 'scripts/release/build_windows_offline.py'
       - '.github/workflows/windows-offline.yml'

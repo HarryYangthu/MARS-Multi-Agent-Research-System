@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import time
-from threading import Thread
+from threading import Event, Thread
 
 import pytest
 
@@ -43,6 +43,35 @@ def test_control_file_checks_accept_real_atomic_replacements(tmp_path: Path) -> 
     thread.join(timeout=5)
     assert not errors and not thread.is_alive()
     assert json.loads((directory / "state.json").read_text())["revision"] == 249
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers deny delete sharing")
+def test_atomic_state_replacement_waits_for_actual_windows_reader(tmp_path: Path) -> None:
+    from app.harness.persistence import atomic_write_json
+
+    path = tmp_path / "state.json"
+    atomic_write_json(path, {"revision": 0})
+    started = Event()
+    errors: list[Exception] = []
+
+    def replace() -> None:
+        started.set()
+        try:
+            atomic_write_json(path, {"revision": 1})
+        except Exception as error:
+            errors.append(error)
+
+    with path.open("rb") as reader:
+        thread = Thread(target=replace)
+        thread.start()
+        assert started.wait(timeout=1)
+        time.sleep(0.1)
+        assert thread.is_alive()
+        assert json.loads(reader.read()) == {"revision": 0}
+    thread.join(timeout=3)
+    assert not errors and not thread.is_alive()
+    assert json.loads(path.read_text()) == {"revision": 1}
+    assert not list(tmp_path.glob(".state.json.*.tmp"))
 
 _MEASURE = '''import json, os
 from pathlib import Path
