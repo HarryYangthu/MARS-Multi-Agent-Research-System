@@ -15,6 +15,7 @@ import uuid
 
 import httpx
 import yaml
+from loguru import logger
 
 from app.harness.persistence import atomic_write_json
 from app.harness.project_workspace import project_root
@@ -81,6 +82,7 @@ class TensorBoardManager:
         self.state_dir = state_dir or repo_root() / "workspace/.tensorboard"
         self.sessions: dict[str, TensorBoardSession] = {}
         self.activations: dict[str, dict[str, Any]] = {}
+        self.artifact_watchers: dict[str, asyncio.Task[None]] = {}
         self.lock = asyncio.Lock()
 
     async def ensure(self, project: str, run_id: str | None, logdirs: list[Path]) -> TensorBoardSession:
@@ -148,9 +150,25 @@ class TensorBoardManager:
                       "attempt": attempt, "started_at": time.time(), "task": run.task}
         self.activations[run.project] = activation
         atomic_write_json(run.subdir("execution") / "tensorboard.json", activation)
+        previous = self.artifact_watchers.get(run.run_id)
+        if previous is None or previous.done():
+            self.artifact_watchers[run.run_id] = asyncio.create_task(self._watch_artifacts(run))
         return activation
 
+    async def _watch_artifacts(self, run: RunHandle) -> None:
+        from app.execution.tensorboard_artifacts import sync_run_visualizations
+
+        while True:
+            try:
+                await asyncio.to_thread(sync_run_visualizations, run.root)
+            except Exception as exc:
+                logger.warning("TensorBoard saved-artifact collection failed: {}", exc)
+            await asyncio.sleep(float(tensorboard_config().get("reload_interval", 3)))
+
     def finish(self, run: RunHandle, phase: str) -> None:
+        watcher = self.artifact_watchers.pop(run.run_id, None)
+        if watcher is not None:
+            watcher.cancel()
         activation = self.activations.get(run.project)
         if activation and activation["run_id"] == run.run_id:
             activation = {**activation, "phase": phase}
@@ -158,6 +176,11 @@ class TensorBoardManager:
             atomic_write_json(run.subdir("execution") / "tensorboard.json", activation)
 
     async def close(self) -> None:
+        watchers = list(self.artifact_watchers.values())
+        for watcher in watchers:
+            watcher.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
+        self.artifact_watchers.clear()
         for session in self.sessions.values():
             if session.process.returncode is None:
                 await terminate_process_tree(session.process)

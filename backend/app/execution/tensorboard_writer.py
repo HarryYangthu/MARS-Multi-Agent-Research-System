@@ -25,6 +25,27 @@ class ScalarWriter:
     def flush(self) -> None:
         self._writer.flush()
 
+    def image(self, tag: str, path: Path, step: int = 0) -> None:
+        from PIL import Image
+        from tensorboard.compat.proto.event_pb2 import Event
+        from tensorboard.compat.proto.summary_pb2 import Summary
+        import io
+
+        with Image.open(path) as source:
+            picture = source.convert("RGB")
+            encoded = io.BytesIO()
+            picture.save(encoded, format="PNG")
+            value = Summary.Image(height=picture.height, width=picture.width,
+                                  colorspace=3, encoded_image_string=encoded.getvalue())
+        self._writer.add_event(Event(wall_time=time.time(), step=step,
+                                    summary=Summary(value=[Summary.Value(tag=tag, image=value)])))
+
+    def text(self, tag: str, content: str) -> None:
+        from tensorboard.compat.proto.event_pb2 import Event
+        from tensorboard.plugins.text.summary import text_pb
+
+        self._writer.add_event(Event(wall_time=time.time(), step=0, summary=text_pb(tag, content)))
+
     def close(self) -> None:
         self._writer.close()
 

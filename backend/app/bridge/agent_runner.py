@@ -5,6 +5,7 @@ agent Protocol, but not on concrete agent classes). Concrete classes are
 already inside the registry by the time this runs.
 """
 from __future__ import annotations
+import asyncio
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -799,6 +800,10 @@ async def _run_execution_batch(
             bus_publish=_publish,
             check_inputs=check_inputs,
         )
+        from app.execution.tensorboard_artifacts import sync_run_visualizations
+        coverage = await asyncio.to_thread(sync_run_visualizations, run.root)
+        await _publish(f"run.{run.run_id}.execution", {
+            "event": "execution.visualizations_ready", "coverage": coverage})
         phase = "failed" if outcome.failures else "completed"
     finally:
         scalars.close()

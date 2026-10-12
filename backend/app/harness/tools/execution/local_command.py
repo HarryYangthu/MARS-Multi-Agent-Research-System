@@ -202,6 +202,8 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
                 "MARS_RUN_ID": job.run_id, "MARS_EXPERIMENT_ID": job.experiment_id,
                 "MARS_PROJECT": job.project, "MARS_RUN_ROOT": str(job.run_root.resolve()),
                 "MARS_JOB_REQUEST": str(request_path), "MARS_RESULT_PATH": str(result_path),
+                "MARS_TENSORBOARD_ENABLED": "1",
+                "MARS_VISUALIZATIONS_DIR": str(output_dir / "visualizations"),
                 **code_environment,
             })
         stdout, stderr = await communicate_process(process, timeout=timeout)

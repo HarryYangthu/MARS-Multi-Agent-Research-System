@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 
 from app.api.dependencies import get_run_store
 from app.bridge.tensorboard_service import get_tensorboard_manager, project_logdirs
+from app.execution.tensorboard_artifacts import sync_run_visualizations
 
 router = APIRouter(prefix="/api/tensorboard", tags=["tensorboard"])
 
@@ -22,15 +24,17 @@ class OpenTensorBoard(BaseModel):
 @router.post("/sessions")
 async def open_session(body: OpenTensorBoard) -> dict[str, object]:
     try:
+        coverage = None
         if body.run_id:
             run = get_run_store().get(body.run_id)
             if run is None or run.project != body.project:
                 raise HTTPException(status_code=404, detail="运行不属于当前项目或已删除")
             directories = [run.root.resolve()]
+            coverage = await asyncio.to_thread(sync_run_visualizations, run.root)
         else:
             directories = project_logdirs(body.project)
         session = await get_tensorboard_manager().ensure(body.project, body.run_id, directories)
-        return session.view()
+        return {**session.view(), "coverage": coverage}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (RuntimeError, OSError) as exc:

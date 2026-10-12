@@ -12,6 +12,7 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"tensorboard" | "compare">("tensorboard");
+  const [dashboard, setDashboard] = useState("scalars");
   useEffect(() => {
     let alive = true;
     setSession(null); setError(""); setLoading(true);
@@ -37,14 +38,19 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
         </div>
         <div className="flex items-center gap-3 text-xs">
           {view === "tensorboard" ? <span className="text-slate-400">每 30 秒更新</span> : null}
-          {session ? <a href={session.url + "#scalars"} target="_blank" rel="noreferrer" className="text-mars-accent hover:underline">独立打开 ↗</a> : null}
+          {session ? <a href={session.url + "#" + dashboard} target="_blank" rel="noreferrer" className="text-mars-accent hover:underline">独立打开 ↗</a> : null}
           <button className="rounded border border-mars-border px-3 py-1.5 hover:bg-mars-subtle" onClick={() => setRetry((value) => value + 1)}>{error ? "重试" : "重新加载"}</button>
         </div>
       </header>
       {runId ? <nav aria-label="实验台视图" className="flex gap-2 border-b border-mars-border px-4 py-3">{([['tensorboard', 'TensorBoard'], ['compare', '多实验对比']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} onClick={() => setView(key)} className={`rounded-lg px-3 py-2 text-xs ${view === key ? "bg-mars-accent text-white" : "border border-mars-border text-slate-400"}`}>{label}</button>)}</nav> : null}
+      {view === "tensorboard" && session ? <div className="border-b border-mars-border px-4 py-2 text-xs">
+        <nav aria-label="可视化内容" className="flex flex-wrap gap-2">{([['scalars', '训练与性能曲线'], ['images', '频谱与模型图像'], ['histograms', '参数分布'], ['text', '配置与记录来源']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={dashboard === key} onClick={() => setDashboard(key)} className={`rounded px-3 py-1.5 ${dashboard === key ? "bg-mars-accent text-white" : "border border-mars-border text-slate-400"}`}>{label}</button>)}</nav>
+        {session.coverage?.models.some((model) => !model.native) ? <p className="mt-2 text-slate-400">训练曲线由已保存的真实记录补回；缺少的历史参数快照不会补造。</p> : null}
+        {session.coverage?.warnings.map((warning) => <p key={warning} role="alert" className="mt-2 text-amber-200">{warning}</p>)}
+      </div> : null}
       {view === "compare" && runId ? <div className="min-h-0 flex-1 overflow-y-auto p-5"><ExperimentComparison runId={runId} /></div> : loading ? <div role="status" className="flex flex-1 items-center justify-center text-sm text-slate-400">正在打开 TensorBoard…</div>
         : error ? <div role="alert" className="flex flex-1 items-center justify-center p-8 text-sm text-amber-200">{error}</div>
-        : session ? <iframe key={`${session.key}-${retry}`} src={session.url + "#scalars"} title={runId ? `TensorBoard · ${runId}` : "TensorBoard · 项目实验记录"} className="min-h-0 w-full flex-1 border-0 bg-white" /> : null}
+        : session ? <iframe key={`${session.key}-${retry}-${dashboard}`} src={session.url + "#" + dashboard} title={runId ? `TensorBoard · ${runId}` : "TensorBoard · 项目实验记录"} className="min-h-0 w-full flex-1 border-0 bg-white" /> : null}
     </section>
   );
 }
