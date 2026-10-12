@@ -195,6 +195,13 @@ def main() -> None:
     stage = output / "MARS-Product"
     stage.mkdir(parents=True)
     copy_source(source, stage, product=arguments.source_profile == "product")
+    # Persist offline intent in every target entrypoint, so deleting the marker
+    # and caches cannot silently turn a double-click into an online installer.
+    for entry in stage.glob("*.cmd"):
+        content = entry.read_text(encoding="utf-8")
+        if "windows-native\\Mars.ps1" in content and "%*" in content:
+            content = content.replace(" %*", " -OfflineRequired %*")
+            entry.write_bytes(content.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
     offline = stage / "offline"
     if arguments.prepared_dependencies:
         shutil.copytree(arguments.prepared_dependencies, offline)

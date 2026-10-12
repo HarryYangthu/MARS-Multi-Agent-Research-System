@@ -3,7 +3,8 @@ param(
     [ValidateSet('Menu', 'Install', 'Start', 'Configure', 'Stop', 'Status', 'TestApi')]
     [string]$Action = 'Menu',
     [switch]$NoBrowser,
-    [switch]$SkipConfigure
+    [switch]$SkipConfigure,
+    [switch]$OfflineRequired
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -63,7 +64,8 @@ function Set-NativeEnvironment {
 
 function Install-NativeDependencies {
     Assert-ServicesStopped
-    if (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) {
+    if ($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) -or
+        (Test-Path -LiteralPath (Join-Path $root 'offline'))) {
         Install-OfflineDependencies
         return
     }
@@ -107,6 +109,8 @@ function Install-NativeDependencies {
 }
 
 function Test-InstallationCurrent {
+    if (($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'offline'))) -and
+        -not (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json'))) { return $false }
     $stamp = Join-Path $runtime 'installed.json'
     if (-not (Test-Path -LiteralPath $stamp)) { return $false }
     foreach ($file in @($python, $node, $git, $uv, (Join-Path $root 'frontend/node_modules/next/dist/bin/next'))) {
