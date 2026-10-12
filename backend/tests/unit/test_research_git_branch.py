@@ -378,5 +378,5 @@ async def test_parallel_registered_commands_use_exact_reviewed_checkouts_and_com
             assert all(Path(row['path']).is_relative_to(task.root) for row in receipt['evidence'])
             return result.metrics['mse']
     measured = await asyncio.gather(execute(run), execute(other))
-    assert measured == [0, pytest.approx(14 / 3)]
+    assert len(measured) == 2 and measured[0] == 0 and measured[1] == pytest.approx(14 / 3)
     assert (source / 'main.py').read_text() == 'VALUE = 1\n'
