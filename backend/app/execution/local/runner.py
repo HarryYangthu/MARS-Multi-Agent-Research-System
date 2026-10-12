@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.harness.persistence import atomic_write_json, path_lock
 from app.harness.tools.process_runtime import sanitized_subprocess_environment
 from app.harness.tools.execution.local_command import _file_hash, _read_result
+from app.execution.local.process_group import worker_process_options
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}\Z")
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
@@ -157,8 +158,8 @@ def _owner_active(directory: Path) -> bool:
 
 class LocalRunner:
     def __init__(self, run_root: Path) -> None:
-        if os.name != "posix":
-            raise ValueError("independent local runner currently supports POSIX hosts only")
+        if os.name not in {"posix", "nt"}:
+            raise ValueError("independent local runner requires POSIX or Windows")
         self.root = _plain_directory(run_root)
         self.run_id = self.root.name
 
@@ -204,7 +205,7 @@ class LocalRunner:
                 worker = Path(__file__).with_name("worker.py")
                 child = subprocess.Popen([sys.executable, "-I", str(worker), str(directory)],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    env=sanitized_subprocess_environment(), start_new_session=True, close_fds=True)
+                    env=sanitized_subprocess_environment(), close_fds=True, **worker_process_options())
                 _CHILDREN[:] = [item for item in _CHILDREN if item.poll() is None]
                 _CHILDREN.append(child)
         return self.status(spec.job_id)

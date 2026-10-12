@@ -14,7 +14,11 @@ import pytest
 from app.execution.local.runner import LocalJobSpec, LocalJobStatus, LocalRunner
 from app.execution.local import worker
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="independent local runner currently supports POSIX")
+pytestmark = pytest.mark.skipif(os.name not in {"posix", "nt"}, reason="local runner requires POSIX or Windows")
+
+
+def _assert_killed(returncode: object) -> None:
+    assert returncode == (-signal.SIGKILL if os.name == "posix" else 1)
 
 _MEASURE = '''import json, os
 from pathlib import Path
@@ -208,7 +212,7 @@ time.sleep(30)
     _wait_file(command.parent / "child_ticks")
     receipt = _wait(runner, spec.job_id).receipt
     assert receipt and receipt["status"] == "failed" and receipt["error"] == "deadline_exceeded"
-    assert receipt["returncode"] == -signal.SIGKILL
+    _assert_killed(receipt["returncode"])
     ticks = (command.parent / "child_ticks").read_bytes()
     time.sleep(0.15)
     assert (command.parent / "child_ticks").read_bytes() == ticks
@@ -224,7 +228,7 @@ def test_stop_uses_live_owner_and_is_idempotent(tmp_path: Path) -> None:
     stopped = _wait(runner, spec.job_id)
     assert stopped.status == "cancelled" and stopped.receipt
     assert stopped.receipt["error"] == "stop_requested"
-    assert stopped.receipt["returncode"] == -signal.SIGKILL
+    _assert_killed(stopped.receipt["returncode"])
 
 
 def test_launching_backend_sigkill_does_not_remove_worker_deadline(tmp_path: Path) -> None:
@@ -244,10 +248,11 @@ def test_launching_backend_sigkill_does_not_remove_worker_deadline(tmp_path: Pat
         assert backend.poll() is None and runner.status(spec.job_id).owner_active
         backend.kill()
         _, stderr = backend.communicate(timeout=5)
-        assert backend.returncode == -signal.SIGKILL and not stderr
+        _assert_killed(backend.returncode)
+        assert not stderr
         terminal = _wait(runner, spec.job_id)
         assert terminal.receipt and terminal.receipt["error"] == "deadline_exceeded"
-        assert terminal.receipt["returncode"] == -signal.SIGKILL
+        _assert_killed(terminal.receipt["returncode"])
     finally:
         if backend.poll() is None:
             backend.kill()

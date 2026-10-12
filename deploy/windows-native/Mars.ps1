@@ -16,6 +16,7 @@ $node = Join-Path $runtime ('tools/node/' + $config.node_executable)
 $git = Join-Path $runtime ('tools/git/' + $config.git_executable)
 $backendUrl = 'http://127.0.0.1:' + $config.backend_port
 $frontendUrl = 'http://127.0.0.1:' + $config.frontend_port
+. (Join-Path $PSScriptRoot 'Offline.ps1')
 
 function Read-ServiceState {
     if (Test-Path -LiteralPath $statePath) { return (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json) }
@@ -62,6 +63,10 @@ function Set-NativeEnvironment {
 
 function Install-NativeDependencies {
     Assert-ServicesStopped
+    if (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) {
+        Install-OfflineDependencies
+        return
+    }
     # A failed repair must not leave a prior success receipt behind.
     Remove-Item -LiteralPath (Join-Path $runtime 'installed.json') -Force -ErrorAction SilentlyContinue
     Write-Host 'Installing MARS dependencies (first install needs Internet access)...'
@@ -173,7 +178,8 @@ function Start-NativeServices {
             Start-Sleep -Milliseconds 500
         } while ((Get-Date) -lt $deadline)
         if ((Get-Date) -ge $deadline) { throw "Backend health timeout. See $logs" }
-        $arguments = ConvertTo-MarsArgumentString @((Join-Path $root 'frontend/node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', $config.frontend_port)
+        $frontendMode = if (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) { 'start' } else { 'dev' }
+        $arguments = ConvertTo-MarsArgumentString @((Join-Path $root 'frontend/node_modules/next/dist/bin/next'), $frontendMode, '--hostname', '127.0.0.1', '--port', $config.frontend_port)
         $frontend = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory (Join-Path $root 'frontend') -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (Join-Path $logs "frontend-$stamp.out.log") -RedirectStandardError (Join-Path $logs "frontend-$stamp.err.log")
         $deadline = (Get-Date).AddSeconds([int]$config.startup_timeout_seconds)
