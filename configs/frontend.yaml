@@ -1,6 +1,6 @@
 frontend:
   client:
-    request_timeout_ms: 15000
+    request_timeout_ms: 60000
     connection_test_timeout_ms: 40000
     control_refresh_ms: 2000
     activity_clock_ms: 1000

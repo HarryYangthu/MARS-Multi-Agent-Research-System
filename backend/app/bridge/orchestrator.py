@@ -1150,13 +1150,13 @@ class Orchestrator:
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
-                        current = execution_preview(session.run, node_key)
+                        current = await asyncio.to_thread(execution_preview, session.run, node_key)
                         if current['confirmed']:
                             return True
                         if current['token'] != token or current['blockers']:
                             await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
-                            save_confirmation(session.run, node_key, str(token), actor="commander")
+                            await asyncio.to_thread(save_confirmation, session.run, node_key, str(token), actor="commander")
                             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
                             return True
                         else:
