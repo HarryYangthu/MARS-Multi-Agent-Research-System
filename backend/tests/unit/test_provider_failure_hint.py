@@ -100,6 +100,21 @@ def test_unknown_or_missing_receipts_do_not_invent_quota_failure(tmp_path: Path)
     assert provider_failure_hint(events, status='model_error') == ''
 
 
+def test_deepseek_balance_hint_requires_terminal_matching_provider_rejection() -> None:
+    # Classification inputs only; no provider execution is substituted.
+    request = {'kind': 'model_request', 'provider': 'deepseek'}
+    failure = {'kind': 'sdk_attempt_failed', 'details': {'http_status': 402},
+               'error': 'PRIVATE RESPONSE'}
+    events = [request, failure]
+    hint = provider_failure_hint(events, status='model_error')
+    assert 'DeepSeek' in hint and '余额不足' in hint and 'HTTP 402' in hint
+    assert 'PRIVATE' not in hint
+    assert provider_failure_hint(events, status='passed') == ''
+    assert provider_failure_hint(events + [{'kind': 'sdk_attempt_succeeded'}], status='model_error') == ''
+    assert provider_failure_hint(events + [request], status='model_error') == ''
+    assert provider_failure_hint([{'kind': 'model_request', 'provider': 'openai'}, failure], status='model_error') == ''
+
+
 def test_actual_archived_quota_error_is_explained_without_a_new_api_call() -> None:
     configured = os.environ.get('MARS_TEST_QUOTA_TRACE')
     if not configured:

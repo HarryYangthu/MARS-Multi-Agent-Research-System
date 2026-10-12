@@ -4,6 +4,7 @@ from typing import Any
 import json
 
 from app.harness.agent_loop.context import pack_context
+from app.harness.agent_loop.native_protocol import history_groups
 from app.harness.agent_loop.trace import canonical, digest
 from app.harness.context.runtime_pack import Material, message_key, pack_messages
 from app.harness.llm.provider_base import Message
@@ -35,6 +36,10 @@ def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedbac
     materials = {key: Material(**value) for key, value in metadata.get('materials', {}).items()}
     pinned_keys = {message_key(m) for m in pinned}
     required_tools = set(options.get('required_review_tools', ()))
+    latest_group = history_groups(history)[-1] if history else []
+    latest_call_ids = {call['id'] for item in latest_group
+                       if isinstance(call := item.get('native_call'), dict)
+                       and isinstance(call.get('id'), str)}
     for m in full:
         key = message_key(m)
         if key in pinned_keys:
@@ -43,10 +48,15 @@ def pack_native(*, pinned: list[Message], history: list[dict[str, Any]], feedbac
             failed = observation_failed(m.content)
             envelope = observation_envelope(m.content) or {}
             essential = envelope.get('tool') in required_tools or envelope.get('tool') == 'context.read_material'
+            call = envelope.get('native_call')
+            latest = m.tool_call_id in latest_call_ids or (
+                isinstance(call, dict) and call.get('id') in latest_call_ids)
             # Keep the evidence needed to author and review the method, including
             # explicit readbacks. Offloading it again causes repeated API calls.
+            # Observation-history mode renders each result as a separate user
+            # message, so the packer cannot infer the latest batch's boundary.
             materials[key] = Material('tool', 'actual tool observation',
-                                      failed or essential or bool(options.get('reviewing')))
+                                      failed or essential or latest or bool(options.get('reviewing')))
         elif m.content.startswith(('[untrusted current candidate', '[untrusted action receipt index')):
             materials[key] = Material('history', 'active candidate and receipt index', True)
     messages, manifest = pack_messages(full, policy=policy, budget=budget, tools=tools,

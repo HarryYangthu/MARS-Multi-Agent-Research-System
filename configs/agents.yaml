@@ -1,6 +1,7 @@
 # context_window records total provider capacity (input + output), not input usage.
-# Actual input context stays capped by loop.input_token_budget and context.yaml
-# (128000 tokens or lower); increasing max_tokens must not increase input context.
+# Actual input context uses loop.input_token_budget and context.yaml (128000
+# tokens or lower); protected evidence can exceed this advisory budget.
+# A project-local key binding avoids inheriting another application's old key.
 commander:
   enabled: true
   output_schema: ''
@@ -10,7 +11,7 @@ commander:
     model: deepseek-flash
     temperature: 0.2
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -49,7 +50,7 @@ idea:
     temperature: 0.7
     max_tokens: 393216
     top_p: 1.0
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -108,7 +109,7 @@ idea_research:
     model: deepseek-flash
     temperature: 0.2
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -153,7 +154,7 @@ experiment:
     model: deepseek-flash
     temperature: 0.3
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -183,7 +184,7 @@ coding:
     model: deepseek-flash
     temperature: 0.1
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -243,7 +244,7 @@ execution:
     temperature: 0.7
     max_tokens: 393216
     request_timeout_seconds: 3600
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
 writing:
   enabled: true
@@ -254,7 +255,7 @@ writing:
     model: deepseek-flash
     temperature: 0.4
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -290,7 +291,7 @@ idea_author:
     model: deepseek-flash
     temperature: 0.2
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
@@ -311,7 +312,7 @@ idea_reviewer:
     model: deepseek-flash
     temperature: 0.1
     max_tokens: 393216
-    api_key_env: DEEPSEEK_API_KEY
+    api_key_env: MARS_DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true

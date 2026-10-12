@@ -34,6 +34,10 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
     if not attempts or attempts[-1].get('kind') != 'sdk_attempt_failed':
         return ''
     details = attempts[-1].get('details', {})
+    if (provider == 'deepseek' and isinstance(details, dict)
+            and details.get('http_status') == 402):
+        return ('DeepSeek 账户余额不足（HTTP 402）。请充值或切换有余额的 API 密钥后重试当前阶段；'
+                '已有方案与调用记录保留。')
     if isinstance(details, dict) and details.get('exception_type') in {
             'APITimeoutError', 'ReadTimeout', 'ConnectTimeout', 'TimeoutError'}:
         label = 'GLM' if provider == 'zhipu' else '模型服务'
