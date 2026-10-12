@@ -93,12 +93,22 @@ def baseline_data_description(repo: ProjectRepo, upstream: dict[str, str]) -> st
             continue
         path = resolve_allowed_path(repo, item["path"], require_exists=True, require_text=True)
         raw = yaml.safe_load(path.read_text())
-        if not isinstance(raw, dict) or not isinstance(raw.get("data"), dict) or not raw["data"].get("path"):
+        if not isinstance(raw, dict):
             continue
-        fields = {key: raw["data"][key] for key in ("path", "tx_key", "rx_key", "nf_key") if key in raw["data"]}
+        if isinstance(raw.get("data"), dict) and raw["data"].get("path"):
+            fields = {key: raw["data"][key] for key in ("path", "tx_key", "rx_key", "nf_key") if key in raw["data"]}
+        elif all(isinstance(raw.get(key), str) and raw[key].strip() for key in ("data_dir", "data_name")):
+            # Flat paper configurations are declarations too. Preserve their
+            # exact fields; only the actual execution adapter may resolve the
+            # loader's base directory, extension and effective overrides.
+            fields = {key: raw[key] for key in ("data_dir", "data_name")}
+        else:
+            continue
         parameters = raw.get("data_param", {})
         parameters = {key: parameters[key] for key in ("channels", "train_ratio", "xmax", "ymax")
                       if isinstance(parameters, dict) and key in parameters}
+        parameters.update({key: raw[key] for key in ("Ntx", "Nrx", "tra_offset", "tra_len", "val_len", "Fs_MHz")
+                           if key in raw})
         sources.append({"config_path": item["path"], "config_sha256": item["sha256"],
                         "data": fields, "data_param": parameters})
     return json.dumps({"schema_id": "context.data_configuration.v1", "project": repo.project,

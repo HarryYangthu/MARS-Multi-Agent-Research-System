@@ -57,6 +57,23 @@ def test_actual_baseline_dataset_configuration_is_described_without_loading_data
     assert 'secret' not in json.dumps(context)
 
 
+def test_flat_dataset_configuration_preserves_loader_fields_without_claiming_data_loaded(tmp_path: Path) -> None:
+    path = tmp_path / 'baseline.yaml'
+    path.write_text('data_dir: ../data\ndata_name: case17\nNtx: 16\ntra_len: 24576\npassword: secret\n')
+    context = json.loads(baseline_data_description(repo(tmp_path), proposal(path.name)))
+    assert context['sources'][0]['data'] == {'data_dir': '../data', 'data_name': 'case17'}
+    assert context['sources'][0]['data_param'] == {'Ntx': 16, 'tra_len': 24576}
+    assert context['dataset_contents_loaded'] is False
+    assert 'secret' not in json.dumps(context)
+
+
+@pytest.mark.parametrize('fields', ['data_dir: ../data', 'data_name: case17', 'data_dir: 1\ndata_name: case17'])
+def test_incomplete_flat_configuration_does_not_supply_data_context(tmp_path: Path, fields: str) -> None:
+    path = tmp_path / 'baseline.yaml'
+    path.write_text(fields)
+    assert baseline_data_description(repo(tmp_path), proposal(path.name)) == ''
+
+
 def test_approved_experiment_base_config_supplies_actual_repository_identity(tmp_path: Path) -> None:
     path = tmp_path / "base.yaml"
     path.write_text("lr_init: 0.0004\ndata:\n  path: data/not-loaded.pth\n")
