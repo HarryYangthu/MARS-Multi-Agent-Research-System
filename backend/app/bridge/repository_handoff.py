@@ -31,6 +31,15 @@ def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> 
         if metadata.get("schema") == "proposal.v1":
             candidates = [item.get("ref") for item in metadata.get("evidence_refs", [])
                           if isinstance(item, dict) and item.get("kind") == "code"]
+            # Focused proposals also record exact file identities separately
+            # from literature citations. These are source declarations, not
+            # proof of reads: resolve and hash the live files below. Never
+            # extract filenames or treat claimed hashes/findings as evidence.
+            method = metadata.get("method_spec")
+            checks = method.get("code_check") if isinstance(method, dict) else None
+            checked_files = checks.get("files") if isinstance(checks, dict) else None
+            if isinstance(checked_files, list):
+                candidates.extend(item.get("path") for item in checked_files if isinstance(item, dict))
         elif metadata.get("schema") == "experiment_plan.v1":
             # A proposal may omit optional evidence_refs. The approved plan
             # still names the exact source configuration for its experiments.

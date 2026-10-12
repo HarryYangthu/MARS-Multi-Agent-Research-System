@@ -2,11 +2,15 @@
 from pathlib import Path
 import json
 from functools import partial
+from dataclasses import replace
 
 import pytest
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review
+from app.bridge.managed_review import review_input_manifest, review_policy
+from app.harness.agent_loop.trace import digest
+from app.harness.llm.provider_base import Message
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.workflow_service import build_standalone
 from app.bridge.commander_session import CommanderSessionStore, ChatMessage
@@ -14,6 +18,47 @@ from app.harness.llm import model_registry
 from app.harness.runtime.event_bus import InProcessEventBus
 from app.storage.run_store import RunStore
 from app.storage.run_state_store import RunStateStore
+
+
+def test_complete_review_over_legacy_character_limit_fits_configured_context() -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {"input_token_budget": 128000}, "model": {"context_window": 1048576}})
+    messages = [Message("system", "Review the entire authored input."), Message("user", "a" * 61000)]
+    manifest = review_input_manifest(messages, policy, agent, {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["within_budget"] and not manifest["truncated"]
+    assert manifest["input_token_budget"] == 128000
+    assert manifest["complete_input_sha256"] == digest([m.to_wire() for m in messages])
+    assert len(messages[-1].content) == 61000
+
+
+def test_review_counts_multibyte_input_and_keeps_all_evidence_when_too_large() -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {}, "model": {"context_window": 1048576}})
+    messages = [Message("user", "证" * 50000)]
+    manifest = review_input_manifest(messages, policy, agent, {"input_budget": 128000, "safety_margin": 1000})
+    assert not manifest["within_budget"] and not manifest["truncated"]
+    assert manifest["estimated_upper_bound_tokens"] > 150000
+    assert messages[0].content == "证" * 50000
+
+
+@pytest.mark.parametrize("loop_budget,window,expected", [(64000, 1048576, 64000), (128000, 420000, 25784)])
+def test_review_respects_smaller_role_or_model_input_space(loop_budget: int, window: int, expected: int) -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000, "max_output_tokens": 393216})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {"input_token_budget": loop_budget}, "model": {"context_window": window}})
+    manifest = review_input_manifest([Message("user", "Authored review")], policy, agent,
+                                     {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["input_token_budget"] == expected
+
+
+def test_legacy_review_policy_migrates_to_common_input_budget() -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": None, "max_input_characters": 60000})
+    agent = replace(model_registry.get_agent_config("commander"), raw={"loop": {}, "model": {}})
+    manifest = review_input_manifest([Message("user", "a" * 61000)], policy, agent,
+                                     {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["within_budget"] and manifest["input_token_budget"] == 128000
 
 
 def test_review_parser_requires_bound_evidence() -> None:

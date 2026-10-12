@@ -14,9 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 import yaml
 
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, digest
+from app.harness.agent_loop.context import token_upper_bound
+from app.harness.context.runtime_policy import input_budget, load_policy
 from app.harness.llm.accounting import guarded_complete
 from app.harness.llm.usage_policy import agent_quota_mode
-from app.harness.llm.model_registry import get_agent_config, select_provider
+from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Message
 from app.harness.runtime.event_bus import EventBus
 from app.settings import repo_root
@@ -27,7 +29,10 @@ class ReviewPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     poll_interval_seconds: float = Field(gt=0)
     max_revisions_per_node: int = Field(ge=0)
-    max_input_characters: int = Field(gt=0)
+    input_token_budget: int | None = Field(default=None, gt=0)
+    # Accepted only to migrate old workspace YAML; the common token budget
+    # replaces this independent character cap. Never truncate review evidence.
+    max_input_characters: int | None = Field(default=None, gt=0)
     max_output_tokens: int = Field(gt=0)
     timeout_seconds: int = Field(gt=0)
 
@@ -39,6 +44,25 @@ def review_policy() -> ReviewPolicy:
     if not path.is_file():
         path = Path(__file__).resolve().parents[3] / "configs/commander_review.yaml"
     return ReviewPolicy.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def review_input_manifest(messages: list[Message], policy: ReviewPolicy, agent: AgentConfig,
+                          context_policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Account for the complete review using the same input/model ceilings.
+
+    UTF-8 wire bytes are a conservative bound, not measured provider tokens.
+    Large output capacity must never enlarge the configured input budget.
+    """
+    context = context_policy if context_policy is not None else load_policy()
+    configured = policy.input_token_budget or int(context['input_budget'])
+    loop_budget = agent.raw.get('loop', {}).get('input_token_budget', configured)
+    window = agent.raw.get('model', {}).get('context_window')
+    budget = input_budget(context, min(configured, int(loop_budget)),
+                          output_reserve=min(agent.max_tokens, policy.max_output_tokens), model_window=window)
+    used = token_upper_bound(messages)
+    return {'input_token_budget': budget, 'estimated_upper_bound_tokens': used,
+            'within_budget': used <= budget, 'truncated': False,
+            'complete_input_sha256': digest([message.to_wire() for message in messages])}
 
 
 class ReviewDecision(BaseModel):
@@ -122,8 +146,6 @@ async def review_once(
                              "status": "reviewing", "reason": "主控正在核对方案、约束与检查证据。"}
     policy = review_policy()
     content = json.dumps(payload, ensure_ascii=False, allow_nan=False)
-    if len(content) > policy.max_input_characters:
-        blocker = "审核材料超过当前上下文预算，请接管审核或缩小方案范围。"
     if blocker:
         await record_state(run, bus, {**state, "status": "needs_user", "reason": blocker})
         return None
@@ -147,7 +169,16 @@ async def review_once(
             '不得仅因旧配额数值已耗尽而要求用户接管。研究目标、实验参数、真实证据、代码保护和权限仍须核验，'
             '不改变批准标准；缺少证据或存在实质冲突时仍按实际情况决定。')))
     try:
-        provider, config = select_provider(get_agent_config("commander"))
+        agent_config = get_agent_config("commander")
+        manifest = review_input_manifest(messages, policy, agent_config)
+        atomic_json(trace.root / "review_context.json", manifest)
+        if not manifest['within_budget']:
+            await record_state(run, bus, {**state, "status": "needs_user", "failure_code": "review_context_budget",
+                "context": manifest, "reason": (
+                    f"完整审核输入估算上界 {manifest['estimated_upper_bound_tokens']} 超过配置预算 "
+                    f"{manifest['input_token_budget']}；材料未截断、方案未批准。请调整审核输入预算或精简重复材料。")})
+            return None
+        provider, config = select_provider(agent_config)
     except Exception as error:
         await record_state(run, bus, {**state, "status": "needs_user", "reason": f"主控模型配置不可用（{type(error).__name__}），请接管审核。"})
         return None
