@@ -46,3 +46,50 @@ def test_contended_nested_transactions_preserve_all_updates(tmp_path: Path) -> N
     with ThreadPoolExecutor(6) as pool:
         list(pool.map(update, range(6)))
     assert counter.read_text() == '90'
+
+
+def test_nested_exception_releases_outer_transaction(tmp_path: Path) -> None:
+    path = tmp_path / 'state.lock'
+    with pytest.raises(ValueError):
+        with path_lock(path, timeout=1):
+            with path_lock(path, timeout=1):
+                raise ValueError('abort transaction')
+    with ThreadPoolExecutor(1) as pool:
+        def acquire_again() -> None:
+            with path_lock(path, timeout=1):
+                pass
+        pool.submit(acquire_again).result(timeout=3)
+
+
+def test_concurrent_state_and_artifact_reads(tmp_path: Path) -> None:
+    from app.harness.runtime.run_graph import RunGraph
+    from app.storage.artifact_store import ArtifactStore
+    from app.storage.run_state_store import RunStateStore
+    from app.storage.run_store import RunStore
+
+    run = RunStore(tmp_path).create(task='lock-read', project='pimc', entrypoint='idea')
+    graph = RunGraph()
+    graph.add_node('idea')
+    graph.set_entrypoint('idea')
+    state = RunStateStore(run)
+    state.write(graph=graph, request={'task': run.task, 'project': run.project,
+                'entrypoint': 'idea', 'standalone': True}, status='created', expected_revision=0)
+
+    def read_transaction(index: int) -> None:
+        for _ in range(10):
+            if index % 2:
+                assert RunStateStore(run).load() is not None
+            else:
+                assert ArtifactStore(run).list_versions(agent_dir='idea', stem='proposal') == []
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(read_transaction, range(8)))
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows extended path alias')
+def test_extended_windows_path_is_same_nested_lock(tmp_path: Path) -> None:
+    path = tmp_path / 'state.lock'
+    extended = Path('\\\\?\\' + str(path.resolve()))
+    for outer, inner in [(path, extended), (extended, path)]:
+        with path_lock(outer, timeout=1):
+            with path_lock(inner, timeout=0.1):
+                pass

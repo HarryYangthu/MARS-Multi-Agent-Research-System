@@ -26,6 +26,13 @@ def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     """Serialize a logical transaction, including across worker processes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     key = os.path.normcase(str(path.resolve()))
+    if os.name == "nt":
+        # realpath may retain the extended prefix when the file is locked.
+        # Both spellings refer to the same OS file and must share one RLock.
+        if key.startswith("\\\\?\\unc\\"):
+            key = "\\\\" + key[8:]
+        elif key.startswith("\\\\?\\"):
+            key = key[4:]
     with _LOCKS_GUARD:
         if key not in _LOCKS:
             # Thread ownership is enforced by RLock, while one shared OS-lock
