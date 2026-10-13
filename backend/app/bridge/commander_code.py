@@ -65,6 +65,20 @@ def routing_source_evidence(repo: ProjectRepo, session: CommanderSession) -> lis
     return evidence
 
 
+def routing_conclusion_needs_source(session: CommanderSession, *, repo: ProjectRepo | None = None) -> bool:
+    """A status receipt cannot validate a code-based claim about the old route."""
+    turn = session.active_turn_id
+    if turn is None:
+        return False
+    observations = {m.tool_name for m in session.context_messages()
+                    if m.turn_id == turn and m.role == 'tool' and m.tool_result
+                    and m.tool_result.get('ok') is True}
+    if 'code.repo_search' not in observations or not observations.intersection({'get_run_status', 'run.status', 'run.recovery_status'}):
+        return False
+    return not (routing_source_evidence(repo, session) if repo is not None
+                else routing_repository_check({}, session).get('evidence'))
+
+
 def repository_summary(project: str) -> str:
     """Inject connection metadata only. Code is selected by later tool actions."""
     try:
@@ -77,9 +91,11 @@ def repository_summary(project: str) -> str:
 
 
 async def execute_code_inspection(name: str, args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    original_request = next((m.content for m in reversed(ctx.session.context_messages()) if m.role == 'user'), '')
     context = HarnessContext(run_id=ctx.session.conv_id, project=ctx.session.project, agent="commander",
         session_id=ctx.session.conv_id,
-        extra={"run_root": str(get_session_store().session_directory(ctx.session))})
+        extra={"run_root": str(get_session_store().session_directory(ctx.session)),
+               "original_request": original_request})
     result = await get_registry().dispatch(name, args, context)
     return {"ok": result.ok, "output": result.output, "error": result.error,
             "evidence_refs": result.evidence_refs, "status": result.status}

@@ -5,6 +5,7 @@ import asyncio
 import fnmatch
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,15 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         limit = _integer(args, "limit", policy.page_size, 1, policy.max_results)
         glob = str(args.get("glob", "*"))
         hits: list[dict[str, Any]] = []
+        original = str(ctx.extra.get('original_request', ''))[:policy.max_read_chars]
+        # Keep literal-query results intact. Candidate matches for identifiers
+        # in the actual task are separate, bounded and use the same file scope.
+        terms = list(dict.fromkeys(re.findall(r'[A-Za-z0-9_]+', original)))
+        terms = [term for term in terms if len(term) > 1 and not term.isdigit()
+                 and term.casefold() != query.casefold()]
+        terms.sort(key=lambda term: (not bool(re.search(r'[0-9_]|[a-z][A-Z]', term)), -len(term)))
+        terms = terms[:policy.page_size]
+        fallback_hits: list[dict[str, Any]] = []
         skipped_large = 0
         skipped_unreadable = 0
         matched = 0
@@ -193,6 +203,14 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 continue
             sha = hashlib.sha256(raw).hexdigest()
             for line, content in enumerate(text.splitlines(), 1):
+                folded = content.casefold()
+                for term in terms if len(fallback_hits) < limit else []:
+                    candidate = folded.find(term.casefold())
+                    if candidate >= 0:
+                        start = max(0, candidate - policy.snippet_chars // 4)
+                        fallback_hits.append({'path': name, 'line': line, 'sha256': sha,
+                            'matched_query': term, 'snippet': content[start:start + policy.snippet_chars]})
+                        break
                 position = content.casefold().find(query.casefold())
                 if position < 0:
                     continue
@@ -208,11 +226,15 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             if more:
                 break
         return ToolResult(ok=True, output={"repo_root": str(root), "query": query, "matches": hits,
+            "search_semantics": 'literal; no matches does not establish absence of a model or capability',
+            "fallback_queries": terms if not hits else [],
+            "fallback_matches": fallback_hits if not hits else [],
+            "next_step_if_empty": 'Search the original user term, browse matching filenames/configuration and inspect the model registration before a routing conclusion.',
             "truncated": more or scan_limited, "scan_limited": scan_limited,
             "skipped_large_files": skipped_large, "skipped_unreadable_files": skipped_unreadable,
             "next_offset": offset + len(hits) if more else None,
             "hint": "Read only the relevant matching line ranges; no match is not proof of absence if scanning was limited."},
-            evidence_refs=list(dict.fromkeys(str(hit["path"]) for hit in hits)))
+            evidence_refs=list(dict.fromkeys(str(hit["path"]) for hit in (hits or fallback_hits))))
     except (OSError, ValueError) as exc:
         return ToolResult(ok=False, error=str(exc))
 

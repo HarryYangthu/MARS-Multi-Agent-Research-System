@@ -65,6 +65,19 @@ async def test_search_is_literal_and_pages_matches(source_context: ToolContext) 
 
 
 @pytest.mark.asyncio
+async def test_missed_alias_returns_separate_actual_user_identifier_candidates(source_context: ToolContext, tmp_path: Path) -> None:
+    (tmp_path / 'libs/model.py').write_text('class Existing7LFilter:\n    taps = 17\n')
+    source_context.extra['original_request'] = '仿真一下 7L 模型'
+    result = await repo_search_tool({'query': 'num_layers', 'path': 'libs'}, source_context)
+    assert result.ok and result.output['matches'] == []  # Literal semantics are unchanged.
+    assert result.output['fallback_queries'] == ['7L']
+    assert result.output['fallback_matches'][0]['matched_query'] == '7L'
+    assert result.output['fallback_matches'][0]['path'] == 'libs/model.py'
+    assert result.output['fallback_matches'][0]['sha256'] == hashlib.sha256((tmp_path / 'libs/model.py').read_bytes()).hexdigest()
+    assert result.evidence_refs == ['libs/model.py']
+
+
+@pytest.mark.asyncio
 async def test_search_accepts_an_exact_file_without_scanning_other_files(source_context: ToolContext) -> None:
     result = await repo_search_tool({'query': 'taps', 'path': 'libs/model.py'}, source_context)
     assert result.ok and len(result.output['matches']) == 1

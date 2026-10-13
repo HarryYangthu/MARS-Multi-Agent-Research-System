@@ -146,7 +146,7 @@ async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         "ok": True,
         "status": started["status"],
         "run_id": run_id,
-        "entrypoint": rsession.request.entrypoint,
+        "entrypoint": rsession.request.extra.get('scope_entrypoint', rsession.request.entrypoint),
         "auto_approve": rsession.request.auto_approve,
         "review_mode": rsession.request.review_mode,
         "states": {k: s.value for k, s in rsession.graph.all_states().items()},
@@ -165,7 +165,36 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     waiting = [k for k, v in states.items() if v == "waiting_review"]
     from app.bridge.managed_review import review_state
     return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting,
+            "entrypoint": rsession.request.extra.get('scope_entrypoint', rsession.request.entrypoint),
+            "initial_entrypoint": rsession.request.entrypoint, "task_request": rsession.request.user_request,
+            "routing": rsession.request.extra.get('routing'),
+            "routing_note": '运行状态不证明旧任务的目标或入口正确。用户纠正需求时须重新核对代码；空字面搜索不证明没有实现。',
             "review_mode": rsession.request.review_mode, "managed_review": review_state(rsession.run)}
+
+
+async def _routing_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    result = routing_repository_check(args, ctx.session)
+    turn = ctx.session.active_turn_id
+    result['original_request'] = next((m.content for m in reversed(ctx.session.context_messages())
+                                      if m.role == 'user' and m.turn_id == turn), '')
+    result['attempted_queries'] = [m.tool_args.get('query') for m in ctx.session.context_messages()
+        if m.turn_id == turn and m.tool_name == 'code.repo_search' and m.tool_args]
+    return result
+
+
+async def _correct_scope(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    routing = routing_repository_check(args, ctx.session)
+    if not routing['ok']:
+        return routing
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    if not run_id:
+        return {'ok': False, 'error': 'No linked run to correct.'}
+    result = ctx.orchestrator.correct_initial_scope(run_id, project=ctx.session.project,
+        entrypoint=str(args.get('entrypoint', '')), user_request=str(args.get('user_request', '')),
+        reason=str(args.get('reason', '')), routing=routing)
+    if result['ok'] and args.get('start', True) is True:
+        return {**result, 'start': await _start_run({'run_id': run_id}, ctx)}
+    return result
 
 
 async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -522,6 +551,14 @@ async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
 
 
 TOOLS: dict[str, ToolSpec] = {
+    'routing.repository_check': ToolSpec(name='routing.repository_check',
+        description='Verify current-turn source evidence before concluding that the existing run has the correct code-related route. Empty literal search is not evidence of absence. Read matching configuration/registration before concluding.',
+        parameters={}, handler=_routing_check),
+    'run.correct_scope': ToolSpec(name='run.correct_scope',
+        description='Correct an early misrouted existing task after the user corrects its scope. Preserve the same run ID, history and cumulative budget. Requires current code evidence. Refuses active/approved/executed/unreconciled work; cannot bypass it by creating another run.',
+        parameters={'run_id':'optional linked run', 'entrypoint':'coding|experiment',
+                    'user_request':'corrected task using verified existing implementation; no invented redesign',
+                    'reason':'user correction and evidence', 'start':'boolean, default true'}, handler=_correct_scope),
     "code.repo_list": ToolSpec(name="code.repo_list",
         description="List the connected project's source paths, without reading contents. Browse relevant directories or filter filenames. Read-only; no shell. Paginate with next_offset; narrow the path if scan_limited.",
         parameters={"path": "relative directory, default .", "glob": "optional filename glob", "depth": "1 by default, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},

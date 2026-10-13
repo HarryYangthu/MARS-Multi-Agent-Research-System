@@ -53,7 +53,10 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const composer = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(!initialRunId);
   const activity = useResearchActivity(conversation?.linked_run_id, project);
+  const refreshActivity = activity.refresh;
   const processing = busy || conversation?.processing === true;
+  const lastStoredMessage = conversation?.messages.at(-1);
+  const settledMessage = processing ? null : `${lastStoredMessage?.id ?? ""}:${lastStoredMessage?.timestamp ?? ""}`;
   const editDisabled = processing || loading || needsRefresh || modeSaving;
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.kind === "model" ? "分析研究任务" : item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
   const toolActivities: Activity[] = (conversation?.messages ?? []).filter(message => message.role === "tool").map((message, index) => ({ id: `tool:${message.id || index}`, turn_id: message.turn_id, timestamp: message.timestamp, agent: "commander", title: `${toolWork(message.tool_name || "任务工具")} · ${message.tool_result?.ok === false ? "未完成" : "已返回结果"}`, detail: "", status: message.tool_result?.ok === false ? "failed" : "completed" }));
@@ -112,6 +115,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   }, [conversation?.conv_id, conversation?.linked_run_id, conversation?.processing, busy]);
 
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
+
+  // Terminal runs stop polling, but a Commander turn can restart or correct
+  // the same run. Revalidate after its persisted reply, including replies
+  // observed through conversation polling from another open tab.
+  useEffect(() => {
+    if (conversation?.linked_run_id && settledMessage !== null) void refreshActivity();
+  }, [conversation?.linked_run_id, settledMessage, refreshActivity]);
 
   async function refresh(): Promise<void> {
     const id = initialConversationId || conversation?.conv_id || savedConversation(project, experimentId);

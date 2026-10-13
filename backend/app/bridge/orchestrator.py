@@ -11,10 +11,11 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -328,6 +329,80 @@ class Orchestrator:
         self._persist_state(session, status="created")
         self._contract_execution_block(session)
         return session
+
+    def correct_initial_scope(self, run_id: str, *, project: str, entrypoint: str,
+                              user_request: str, reason: str, routing: dict[str, Any]) -> dict[str, Any]:
+        """Correct a user-rejected early route without allocating a new budget/run."""
+        session = self.session(run_id)
+        if session.run.project != project or session.read_only or CONTRACT_HASH_KEY in session.request.extra:
+            return {'ok': False, 'status': 'scope_correction_blocked', 'error': '任务归属、历史状态或冻结合同不允许原地改写。'}
+        if entrypoint not in {'experiment', 'coding'} or not user_request.strip() or not reason.strip():
+            return {'ok': False, 'error': '入口纠正必须指定 experiment/coding、用户纠正的目标与原因。'}
+        if routing.get('ok') is not True or not routing.get('evidence'):
+            return {'ok': False, 'error': '纠正代码相关任务前必须核对当前源文件。'}
+        if self.owned_tasks.active(run_id) is not None or self.owned_tasks.closing:
+            return {'ok': False, 'status': 'scope_correction_active', 'error': '任务仍在运行，请先停止并核对，再纠正入口。'}
+        if session.termination and session.termination.get('cleanup_complete') is not True:
+            return {'ok': False, 'error': '停止清理尚未完成，不能改写入口。'}
+        target_index = LINEAR_STAGES.index(entrypoint)
+        for key, state in session.graph.all_states().items():
+            index = LINEAR_STAGES.index(parse_node_key(key).stage)
+            allowed = {NodeState.PENDING, NodeState.SKIPPED}
+            if index < target_index:
+                allowed.add(NodeState.FAILED)
+            if state not in allowed:
+                return {'ok': False, 'error': '已有阶段产物待审核、已完成，或目标及后续阶段已开始；不能覆盖这些工作。'}
+        if any(list((session.run.root / stage).glob('*.approved.md')) for stage in LINEAR_STAGES):
+            return {'ok': False, 'error': '已有批准产物，不能用入口纠正丢弃原审批。'}
+        from app.harness.llm.accounting import RunModelBudget
+        ledger = session.run.root / 'resources/model_budget.v1.json'
+        if ledger.is_file():
+            budget = RunModelBudget(session.run.root).recovery_snapshot()
+            if any(row.get('status') in {'in_flight', 'reconciliation_required'}
+                   for row in budget.get('requests', {}).values()):
+                return {'ok': False, 'error': '存在结果未确认的模型调用，需先核对；入口纠正不会清空用量。'}
+        from app.harness.runtime.task_contract import TaskEnvelope
+        for path in (session.run.root / 'input/task_contracts').glob('*.json'):
+            task = TaskEnvelope.model_validate_json(path.read_text())
+            if task.run_id != run_id or task.project != project:
+                return {'ok': False, 'error': '原任务检查点归属无法核验。'}
+            checkpoint = session.run.root / 'agent_traces' / task.agent / task.invocation_id / 'checkpoint.json'
+            if not checkpoint.resolve().is_relative_to(session.run.root.resolve()):
+                return {'ok': False, 'error': '原任务检查点路径无法核验。'}
+            if checkpoint.is_file():
+                state = json.loads(checkpoint.read_text())
+                if state.get('pending') == 'tool' or state.get('pending_batch'):
+                    return {'ok': False, 'error': '存在结果未确认的工具操作，不能重排任务。'}
+        from app.harness.persistence import atomic_write_json, atomic_write_text
+        correction_id = uuid4().hex
+        record = {'schema_id': 'run.scope_correction.v1', 'id': correction_id,
+                  'run_id': run_id, 'project': project, 'reason': reason,
+                  'created_at': datetime.now(timezone.utc).isoformat(),
+                  'previous_revision': session.state_revision, 'previous_request': asdict(session.request),
+                  'previous_graph': session.graph.to_dict(), 'previous_termination': session.termination,
+                  'entrypoint': entrypoint, 'user_request': user_request, 'routing': routing}
+        record_path = session.run.root / 'input/scope_corrections' / (correction_id + '.json')
+        atomic_write_json(record_path, record)
+        # Creation identity remains immutable in the state journal. The graph
+        # and explicit active scope describe the corrected operational entry.
+        session.request = replace(session.request,
+            user_request=user_request, extra={**session.request.extra, 'routing': routing,
+                                             'scope_entrypoint': entrypoint,
+                                             'scope_correction_id': correction_id})
+        session.graph = (build_standalone(entrypoint) if session.request.standalone
+                         else build_pipeline(cast(EntryPoint, entrypoint)))
+        session.termination = None
+        self._persist_state(session, status='created')
+        session.run.meta.update(active_entrypoint=entrypoint, scope_correction_id=correction_id)
+        atomic_write_json(session.run.root / 'run_meta.json', session.run.meta)
+        atomic_write_text(session.run.root / 'input/user_request.md', user_request)
+        self._persist_request_extra(session.run, session.request.extra)
+        if self.langgraph_runtime.enabled():
+            self.langgraph_runtime.write_manifest(run=session.run, graph=session.graph)
+        return {'ok': True, 'run_id': run_id, 'entrypoint': entrypoint, 'status': 'scope_corrected',
+                'scope_correction_id': correction_id, 'history_preserved': True,
+                'cumulative_budget_preserved': True,
+                'states': {key: state.value for key, state in session.graph.all_states().items()}}
 
     def session(self, run_id: str) -> RunSession:
         if run_id not in self._sessions:
