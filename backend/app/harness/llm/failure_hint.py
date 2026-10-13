@@ -31,6 +31,17 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ''
     details = attempts[-1].get('details', {})
     if isinstance(details, dict) and details.get('exception_type') in {
+            'APIConnectionError', 'ConnectError', 'NetworkError'}:
+        label = 'GLM' if provider == 'zhipu' else '模型服务'
+        timed_out = any(isinstance(event.get('details'), dict)
+                        and event['details'].get('exception_type') in {
+                            'APITimeoutError', 'ReadTimeout', 'ConnectTimeout', 'TimeoutError'}
+                        for event in attempts[:-1])
+        sequence = '请求先超时，重试后连接失败' if timed_out else '请求连接失败'
+        return (f'{label} {sequence}（已尝试 {len(attempts)} 次），本次未取得模型回复。'
+                '已有工作与调用记录已保留；请检查网络、代理或模型服务后重试。'
+                '恢复时仍会核对原请求和工具状态；该错误不表示仿真代码失败。')
+    if isinstance(details, dict) and details.get('exception_type') in {
             'APITimeoutError', 'ReadTimeout', 'ConnectTimeout', 'TimeoutError'}:
         label = 'GLM' if provider == 'zhipu' else '模型服务'
         return (f'{label} 请求超时（已尝试 {len(attempts)} 次），本次未取得模型回复。'

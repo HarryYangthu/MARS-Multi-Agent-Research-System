@@ -26,6 +26,24 @@ def test_protocol_hint_explains_rejected_work_without_claiming_acceptance() -> N
     assert provider_failure_hint(events, status='passed') == ''
 
 
+def test_connection_after_timeout_explains_the_terminal_cause() -> None:
+    events: list[dict[str, Any]] = [{'kind': 'model_request', 'provider': 'zhipu'},
+        {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APITimeoutError'}},
+        {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APIConnectionError'}}]
+    hint = provider_failure_hint(events, status='model_error')
+    assert '先超时，重试后连接失败' in hint and '2 次' in hint
+    assert '不表示仿真代码失败' in hint
+    assert provider_failure_hint(events + [{'kind': 'sdk_attempt_succeeded'}], status='model_error') == ''
+    assert provider_failure_hint(events + [{'kind': 'model_request'}], status='model_error') == ''
+
+
+def test_connection_only_does_not_invent_timeout_or_provider() -> None:
+    events: list[dict[str, Any]] = [{'kind': 'model_request'},
+        {'kind': 'sdk_attempt_failed', 'details': {'exception_type': 'APIConnectionError'}}]
+    hint = provider_failure_hint(events, status='model_error')
+    assert '模型服务 请求连接失败' in hint and '先超时' not in hint and 'GLM' not in hint
+
+
 def test_actual_timeout_is_explained_without_another_model_request() -> None:
     configured = os.environ.get('MARS_TEST_PROTOCOL_RECOVERY_RUN')
     if not configured:

@@ -18,7 +18,7 @@ from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.discovery_types import DiscoveryRunSpec
-from app.bridge.commander_code import execute_code_inspection
+from app.bridge.commander_code import execute_code_inspection, routing_repository_check
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
 from app.harness.tools.config import tool_config
@@ -83,7 +83,13 @@ async def _create_and_start_run(args: dict[str, Any], ctx: ToolContext) -> dict[
 
 
 async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    routing = routing_repository_check(args, ctx.session)
+    if not routing['ok']:
+        return routing
     entrypoint = str(args.get("entrypoint", "pipeline"))
+    if entrypoint == 'execution':
+        return {'ok': False, 'status': 'execution_delivery_required',
+                'error': '新任务尚未绑定编码交付与 execution_jobs 运行清单，任务未创建。已有模型/训练 YAML 不等于系统可消费的执行交接。请从 coding 复用现有模型、只补必要运行交付；需设计比较协议才从 experiment 开始。已有任务的执行清单通过 run.recovery_status/run.recover 复用，不要重新研究模型。'}
     user_request = str(args.get("user_request", ""))
     seed_artifact = args.get("seed_artifact")
     task = str(args.get("task") or user_request[:60] or "commander_run")
@@ -95,7 +101,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
         review_mode="commander" if ctx.session.auto_mode else "manual",
-        extra=({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {}),
+        extra={"routing": routing, **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
     )
     rsession = ctx.orchestrator.create_session(request)
     run_id = rsession.run.run_id
@@ -534,9 +540,11 @@ TOOLS: dict[str, ToolSpec] = {
         handler=_read_context_material),
     "run.create": ToolSpec(
         name="run.create",
-        description="Create a run without starting it; supports pipeline or single-stage entrypoints.",
+        description="Create without starting. Inspect task-relevant connected source in this turn before choosing entrypoint. Existing-model simulation is not new research; for unrelated tasks explain repository_scope=not_applicable in routing_reason.",
         parameters={
             "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
+            "repository_scope": "required (default) or not_applicable for tasks unrelated to code",
+            "routing_reason": "why this is the earliest necessary stage, based on inspected code or non-code scope",
             "user_request": "natural-language task",
             "task": "optional short slug",
             "seed_artifact": "optional complete schema-valid markdown doc",
@@ -608,6 +616,11 @@ TOOLS: dict[str, ToolSpec] = {
         name="create_and_start_run",
         description=(
             "Create and immediately start a pipeline/standalone run. Use the "
+            "task-relevant source read in this turn to choose the earliest necessary stage. "
+            "For a NEW existing-model simulation use coding to bind execution delivery; "
+            "this creation tool cannot import an approved coding manifest into a fresh execution run. "
+            "Use recovery tools for existing execution runs. "
+            "Running an existing model must not be expanded into designing a new one. "
             "`entrypoint` to SKIP agents the user doesn't need: 'pipeline' runs "
             "the full Idea→Experiment→Coding→Execution→Writing chain; or pick a "
             "single stage ('idea'|'experiment'|'coding'|'execution'|'writing') to "
@@ -621,6 +634,8 @@ TOOLS: dict[str, ToolSpec] = {
             "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
             "user_request": "the research question / task description (natural language)",
             "task": "optional short slug for the run",
+            "repository_scope": "required (default); not_applicable only for tasks unrelated to the connected code",
+            "routing_reason": "evidence-backed reason for the selected stage; required when repository_scope=not_applicable",
             "seed_artifact": "RARELY used — only a complete schema-valid markdown doc",
         },
         handler=_create_and_start_run,
