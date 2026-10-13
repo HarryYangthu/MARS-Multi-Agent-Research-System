@@ -4,10 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-import re
-
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
@@ -30,40 +27,6 @@ class CreateConversationPayload(BaseModel):
 
 class MessagePayload(BaseModel):
     text: str = Field(..., min_length=1)
-    # Inline base64 images (data:image/png;base64,...), bounded by count and size.
-    images: list[str] = Field(default_factory=list, max_length=4)
-
-
-_IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
-_MAX_IMAGE_BYTES = 4 * 1024 * 1024
-
-
-def _store_images(conv_id: str, images: list[str]) -> list[str]:
-    import base64 as b64
-    import binascii
-    import uuid as uuid_lib
-
-    from app.bridge.commander_session import _conversations_root
-
-    saved: list[str] = []
-    for data_url in images:
-        header, _, payload = data_url.partition(",")
-        mime = header[5:].split(";")[0] if header.startswith("data:") else ""
-        suffix = _IMAGE_TYPES.get(mime)
-        if not suffix or not payload:
-            raise HTTPException(422, "仅支持 PNG/JPEG/WebP 图片附件")
-        try:
-            blob = b64.b64decode(payload, validate=True)
-        except (binascii.Error, ValueError):
-            raise HTTPException(422, "图片附件编码无效") from None
-        if len(blob) > _MAX_IMAGE_BYTES:
-            raise HTTPException(422, "图片附件超过 4 MB 限制")
-        name = f"{uuid_lib.uuid4().hex}{suffix}"
-        target = _conversations_root() / conv_id / "attachments" / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(blob)
-        saved.append(f"attachments/{name}")
-    return saved
 
 
 class EditMessagePayload(MessagePayload):
@@ -90,7 +53,6 @@ class MessageView(BaseModel):
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_result: dict[str, Any] | None = None
-    attachments: list[str] = Field(default_factory=list)
 
 
 class ConversationView(BaseModel):
@@ -115,7 +77,6 @@ def _msg_view(m: ChatMessage) -> MessageView:
         content=m.content,
         timestamp=m.timestamp,
         state=m.state,
-        attachments=list(m.attachments),
         tool_name=m.tool_name,
         tool_args=m.tool_args,
         tool_result=m.tool_result,
@@ -180,19 +141,6 @@ async def open_run_conversation(run_id: str, payload: OpenRunConversationPayload
     return _conv_view(session)
 
 
-@router.get("/conversations/{conv_id}/attachments/{name}")
-def get_attachment(conv_id: str, name: str) -> FileResponse:
-    from app.bridge.commander_session import _conversations_root
-
-    if not re.fullmatch(r"[0-9a-f]{32}\.(png|jpg|webp)", name):
-        raise HTTPException(404, "附件不存在")
-    path = _conversations_root() / conv_id / "attachments" / name
-    if not path.is_file():
-        raise HTTPException(404, "附件不存在")
-    media = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[name.rsplit(".", 1)[1]]
-    return FileResponse(path, media_type=media)
-
-
 @router.get("/conversations/{conv_id}", response_model=ConversationView)
 async def get_conversation(conv_id: str) -> ConversationView:
     session = get_session_store().get(conv_id)
@@ -209,18 +157,9 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         raise HTTPException(status_code=404, detail="conversation not found")
     if session.processing:
         raise HTTPException(status_code=409, detail="conversation is already processing a message")
-    saved = _store_images(conv_id, payload.images) if payload.images else []
-    if saved:
-        payload.text = (payload.text.rstrip() + "\n\n[用户附图 " + str(len(saved)) + " 张："
-                        + "、".join(saved) + "；当前对话模型为文本通道，图片已存档待视觉模型接入]")
     commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
     try:
         await commander.handle_user_message(session, payload.text)
-        if saved:
-            for chat_message in reversed(session.messages):
-                if chat_message.role == "user":
-                    chat_message.attachments = saved
-                    break
     except Exception as exc:
         failure = conversation_failure(exc)
         if failure is None:

@@ -2046,7 +2046,6 @@ export function executionPlotUrl(plot: ExecutionPlot): string {
 // ---------- chat / Commander ----------
 export type ChatMessageView = {
   role: "user" | "assistant" | "system" | "tool";
-  attachments?: string[];
   content: string;
   timestamp: string;
   state: string | null;
@@ -2106,11 +2105,11 @@ export async function recoverRun(runId: string, project: string, action: Recover
   }));
 }
 
-export async function sendChatMessage(convId: string, text: string, images: string[] = []): Promise<Conversation> {
+export async function sendChatMessage(convId: string, text: string): Promise<Conversation> {
   const response = await fetch(`${BASE}/api/chat/conversations/${convId}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, images }),
+      body: JSON.stringify({ text }),
     });
   if (!response.ok) {
     const body = await response.text();
