@@ -46,6 +46,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const [pollError, setPollError] = useState("");
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [pending, setPending] = useState<PendingMessage | null>(null);
+  const [imageDrafts, setImageDrafts] = useState<string[]>([]);
+  const imagePicker = useRef<HTMLInputElement>(null);
   const sending = useRef(false);
   const alive = useRef(true);
   const bottom = useRef<HTMLDivElement>(null);
@@ -157,7 +159,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   async function send(): Promise<void> {
     const text = draft.trim();
-    if (!text || sending.current || changingMode.current || conversation?.processing || loading || needsRefresh) return;
+    if ((!text && imageDrafts.length === 0) || sending.current || changingMode.current || conversation?.processing || loading || needsRefresh) return;
+    const images = imageDrafts;
     follow.current = true; sending.current = true; setBusy(true); setError("");
     setPending({ text, after: conversation?.messages.length ?? 0, startedAt: new Date().toISOString(),
       ...(editing ? { replaceId: editing.messageId, expectedTimestamp: editing.originalTimestamp } : {}) }); updateDraft({ type: "submitted" });
@@ -167,7 +170,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       if (!alive.current) return;
       setConversation(current);
       const updated = editing ? await replaceChatMessage(current.conv_id, editing.messageId, text, editing.originalContent, editing.originalTimestamp)
-        : await sendChatMessage(current.conv_id, text);
+        : await sendChatMessage(current.conv_id, text || "[图片]", images);
+      setImageDrafts([]);
       if (alive.current) { setConversation(updated); setPending(null); if (fresh) router.replace(`/runs/new?${new URLSearchParams({ project, conversation: updated.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`); }
     } catch (cause: unknown) {
       if (alive.current) {
@@ -199,7 +203,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6">
         {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending && !conversation?.linked_run_id ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
         {groups.map(entry => {
-          if (entry.kind === "message") return <ResearchMessage key={entry.id} message={entry.message} editing={editing?.messageId === entry.id} editDisabled={editDisabled || !entry.message.id} onEdit={() => editMessage(entry.message)} />;
+          if (entry.kind === "message") return <ResearchMessage key={entry.id} message={entry.message} convId={conversation?.conv_id} editing={editing?.messageId === entry.id} editDisabled={editDisabled || !entry.message.id} onEdit={() => editMessage(entry.message)} />;
           const research = entry.activities.some(item => item.id.startsWith("run:") || item.agent !== "commander");
           const owners = liveGroups.get(entry.id);
           // A bounded event window can drop its first row on every poll. Keep
@@ -222,6 +226,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     <form onSubmit={(event) => { event.preventDefault(); void send(); }} className="shrink-0 px-4 pb-5 sm:px-6">
       <div className="mx-auto max-w-3xl">
         {error ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200"><p>{error}</p><button type="button" disabled={loading || busy} onClick={() => void refresh()} className="mt-2 underline disabled:opacity-40">重新读取对话</button></div> : null}
+        {imageDrafts.length ? <div className="mb-2 flex flex-wrap gap-2">
+          {imageDrafts.map((src, index) => <span key={index} className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={`附件 ${index + 1}`} className="h-16 w-16 rounded-lg border border-mars-border object-cover" />
+            <button type="button" aria-label={`移除附件 ${index + 1}`} onClick={() => setImageDrafts(previous => previous.filter((_, i) => i !== index))} className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full bg-slate-700 text-xs text-white hover:bg-slate-600">×</button>
+          </span>)}
+        </div> : null}
         <div className="rounded-2xl border border-mars-border bg-mars-panel p-3 focus-within:border-indigo-400/60">
           {editing ? <div role="status" className="mb-2 flex items-start justify-between gap-3 border-b border-mars-border px-2 pb-3">
             <div><p className="text-sm text-indigo-200">编辑并重新发送</p><p className="mt-1 text-xs text-slate-400">重新发送后替换这条消息，旧回复和处理记录不保留，其他消息保持原样。</p></div>
@@ -231,7 +242,19 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
             if (event.key === "Escape" && editing && !processing && !event.nativeEvent.isComposing) { event.preventDefault(); updateDraft({ type: "cancel" }); }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            {!editing ? <input ref={imagePicker} type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only" aria-label="添加图片附件" onChange={event => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              void Promise.all(files.slice(0, 4 - imageDrafts.length).map(file => (file.size > 4 * 1024 * 1024 ? Promise.reject(new Error(`${file.name} 超过 4 MB`)) : new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result));
+                reader.onerror = () => reject(new Error("图片读取失败"));
+                reader.readAsDataURL(file);
+              })))).then(sources => setImageDrafts(previous => [...previous, ...sources].slice(0, 4))).catch(error => setError(error instanceof Error ? error.message : "图片附件无效"));
+            }} /> : null}
+            {!editing ? <button type="button" aria-label="添加图片附件" disabled={processing || loading || modeSaving || imageDrafts.length >= 4} onClick={() => imagePicker.current?.click()} className="rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-indigo-200 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40" title={imageDrafts.length ? `已选 ${imageDrafts.length}/4 张（当前模型为文本通道，图片先存档）` : "附加图片（最多 4 张）"}>📎 {imageDrafts.length ? `${imageDrafts.length}/4` : ""}</button> : null}
+            <span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || (!draft.trim() && imageDrafts.length === 0)} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
         </div>
       </div>
     </form>
@@ -241,7 +264,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   </section>;
 }
 
-function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: StoredChatMessage; editing: boolean; editDisabled: boolean; onEdit: () => void }): JSX.Element {
+function ResearchMessage({ message, convId, editing, editDisabled, onEdit }: { message: StoredChatMessage; convId?: string; editing: boolean; editDisabled: boolean; onEdit: () => void }): JSX.Element {
   if (message.role === "system") return <div role="status" className="mx-auto max-w-full rounded-xl border border-mars-border bg-mars-panel/60 px-4 py-2.5 text-center text-xs leading-6 text-slate-300">
     <p className="whitespace-pre-wrap break-words">{message.content}</p>
   </div>;
@@ -251,6 +274,10 @@ function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: 
   </details>;
   if (message.role === "user") return <div className="ml-auto flex max-w-[90%] flex-col items-end gap-1">
     <div className={`whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7 ${editing ? "ring-1 ring-indigo-400/60" : ""}`}>{message.content}</div>
+    {message.attachments?.length && convId ? <div className="flex flex-wrap justify-end gap-2">
+      {message.attachments.map(name => <a key={name} href={`/api/chat/conversations/${convId}/attachments/${name.split("/").pop()}`} target="_blank" rel="noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/api/chat/conversations/${convId}/attachments/${name.split("/").pop()}`} alt="用户附件" className="h-20 rounded-lg border border-mars-border" /></a>)}
+    </div> : null}
     <button type="button" disabled={editDisabled} aria-pressed={editing} onClick={onEdit} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-indigo-200 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5M4 20l4-1L21 6a2.8 2.8 0 0 0-4-4L4 15l-1 6Z" /></svg>
       编辑并重新发送

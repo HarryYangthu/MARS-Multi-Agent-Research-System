@@ -266,4 +266,18 @@ async def finish_review(run: RunHandle, bus: EventBus, status: str, reason: str,
         raise ValueError("invalid review identity")
     path = run.root / "hitl/managed_reviews" / (identity + ".json")
     state = json.loads(path.read_text())
+    previous = (json.loads((run.root / "hitl/managed_review_state.json").read_text(encoding="utf-8"))
+                if (run.root / "hitl/managed_review_state.json").exists() else {})
     await record_state(run, bus, {**state, "status": status, "reason": reason})
+    # Close the loop on the earlier pause notice so historical decisions in
+    # the chat are distinguishable from pending ones.
+    if previous.get("decision") == "needs_user" or previous.get("status") == "needs_user":
+        node = _STAGE_LABELS.get(str(state.get("node")), str(state.get("node") or "任务"))
+        resolution = {"approved": "已批准放行", "revision_requested": "已要求修改", "needs_user": "仍等待决策",
+                      "cancelled": "已取消"}.get(status, status)
+        from app.bridge.commander_session import notify_linked_conversations
+
+        notify_linked_conversations(
+            run.run_id,
+            f"【决策已处理】{node} 审核结果：{resolution}。{str(reason).strip()[:120]}",
+        )

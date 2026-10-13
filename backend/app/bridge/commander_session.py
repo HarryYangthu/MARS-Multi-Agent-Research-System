@@ -51,6 +51,8 @@ class ChatMessage:
     tool_result: dict[str, Any] | None = None
     # Conversation FSM state at the moment this message was emitted:
     state: str | None = None
+    # User-attached images (stored under conversations/<id>/attachments/).
+    attachments: list[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: uuid4().hex)
     turn_id: str | None = None
 
@@ -259,6 +261,7 @@ class CommanderSessionStore:
                         tool_args=raw.get("tool_args"),
                         tool_result=raw.get("tool_result"),
                         state=raw.get("state"),
+                        attachments=[str(a) for a in (raw.get("attachments") or []) if isinstance(a, str)],
                         id=str(raw.get("id") or uuid5(NAMESPACE_URL, f"mars:{conv_id}:message:{index}:{raw.get('timestamp', '')}").hex),
                         turn_id=raw.get("turn_id"),
                     )
