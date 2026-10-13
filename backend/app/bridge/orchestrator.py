@@ -208,11 +208,21 @@ class Orchestrator:
         tool_log = session.run.root / "events/tool_calls.jsonl"
         code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
                        if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        # run_log.approved.md is the plan frozen at approval time, not the
+        # measured outcome. Without the post-run receipts a writing review
+        # cannot verify reported numbers and flags them as unverified claims.
+        measurement_evidence: dict[str, str] = {}
+        if ref.agent_dir == "writing":
+            from app.bridge.agent_runner import _execution_result_handoffs
+
+            measurement_evidence = _execution_result_handoffs(session.run)
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
                    "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
                    "project_context": folder_context, "actual_code_checks": code_checks,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
-                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+                   **measurement_evidence,
+                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *measurement_evidence.keys(),
+                                     *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
