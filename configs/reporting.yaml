@@ -10,6 +10,9 @@ reporting:
     markdown:
       enabled: true
       source_artifact: writing/research_report.approved.md
+    html:
+      enabled: true
+      filename: research_report.html
     excel:
       enabled: true
       filename: results_workbook.xlsx

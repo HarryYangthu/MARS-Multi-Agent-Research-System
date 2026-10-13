@@ -21,6 +21,7 @@ from app.reporting.generators import (
     pretty_json,
     write_research_deck,
     write_research_docx,
+    write_research_html,
     write_results_workbook,
 )
 from app.settings import repo_root
@@ -40,8 +41,8 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     cfg = _reporting_config()
     if not cfg.get("enabled", True):
         raise ValueError("报告导出已在配置中关闭")
-    if any(kind not in {"excel", "word", "powerpoint"} for kind in formats):
-        raise ValueError("仅支持 Excel、Word、PPT 格式")
+    if any(kind not in {"html", "excel", "word", "powerpoint"} for kind in formats):
+        raise ValueError("仅支持 HTML、Excel、Word、PPT 格式")
     if any(not _format_config(cfg, kind).get("enabled", True) for kind in formats):
         raise ValueError("请求的报告格式已在配置中关闭")
     approved = safe_scope_path(run.root, "writing/research_report.approved.md", must_exist=True)
@@ -91,7 +92,8 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     materials_archive = _completed_deliverable(run, "markdown_archive", archive_path)
 
     reusable = _reusable_formats(run, previous, data_pack)
-    writers = [("excel", "results_workbook.xlsx", write_results_workbook),
+    writers = [("html", "research_report.html", write_research_html),
+               ("excel", "results_workbook.xlsx", write_results_workbook),
                ("word", "research_report.docx", write_research_docx),
                ("powerpoint", "research_deck.pptx", write_research_deck)]
     for kind, filename, writer in writers:
@@ -250,7 +252,7 @@ def _run_writer(
     _event(run, "reporting.deliverable_started", {"kind": kind, "path": _relative(run, path)})
     try:
         writer(path, data_pack)
-        check = _zip_check(name=kind, path=path)
+        check = _deliverable_check(name=kind, path=path)
         if check["status"] != "passed":
             raise ValueError(check["detail"])
         item = _completed_deliverable(run, kind, path)
@@ -294,6 +296,15 @@ def _qa_status(
     else:
         status = "passed"
     return {"status": status, "checks": checks}
+
+
+def _deliverable_check(*, name: str, path: Path) -> dict[str, str]:
+    if path.suffix == ".html":
+        data = path.read_bytes()[:512]
+        if not data.lstrip().startswith(b"<!DOCTYPE html") or len(path.read_bytes()) < 1024:
+            return {"name": name, "status": "failed", "detail": "HTML document is empty or malformed"}
+        return {"name": name, "status": "passed", "detail": path.name}
+    return _zip_check(name=name, path=path)
 
 
 def _zip_check(*, name: str, path: Path) -> dict[str, str]:

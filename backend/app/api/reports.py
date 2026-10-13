@@ -21,7 +21,7 @@ class SkillChoice(BaseModel):
 
 
 class ReportGeneration(BaseModel):
-    formats: list[Literal["excel", "word", "powerpoint"]] = Field(default_factory=list, max_length=3)
+    formats: list[Literal["html", "excel", "word", "powerpoint"]] = Field(default_factory=list, max_length=4)
 
 
 def _run(run_id: str) -> RunHandle:
@@ -53,6 +53,20 @@ def download_report_file(run_id: str, filename: str, manifest: str | None = None
         raise HTTPException(404, "导出文件不存在，请重新生成") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/{run_id}/view/{filename}")
+def view_report_file(run_id: str, filename: str, manifest: str | None = None) -> FileResponse:
+    """Inline view for the self-contained HTML presentation report."""
+    try:
+        path = report_service.download_path(_run(run_id), filename, manifest)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "导出文件不存在，请重新生成") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if path.suffix != ".html":
+        raise HTTPException(409, "仅支持在线查看 HTML 报告")
+    return FileResponse(path, media_type="text/html; charset=utf-8")
 
 
 @router.get("/{run_id}/skills")
