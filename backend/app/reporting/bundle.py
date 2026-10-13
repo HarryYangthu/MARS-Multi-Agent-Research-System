@@ -8,7 +8,7 @@ import zipfile
 from uuid import uuid4
 from xml.etree import ElementTree
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
@@ -50,7 +50,11 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     validation = validate_document(approved.read_text(encoding="utf-8"), expected_schema="report.v1")
     if not validation.valid or validation.metadata.get("project") != run.project:
         raise ValueError("已审核报告格式或项目身份不正确，未生成导出文件")
-    deliverables_dir = safe_scope_path(run.root, str(Path(str(cfg.get("deliverables_dir", "writing/deliverables"))) / ".export_anchor")).parent / uuid4().hex
+    # relative_scope() rejects backslashes and str(Path(...)) emits them on
+    # Windows; build the anchor reference with PurePosixPath so exports work
+    # on Windows-native installs too.
+    configured_dir = str(cfg.get("deliverables_dir", "writing/deliverables")).replace("\\", "/")
+    deliverables_dir = safe_scope_path(run.root, str(PurePosixPath(configured_dir) / ".export_anchor")).parent / uuid4().hex
     deliverables_dir.mkdir(parents=True, exist_ok=True)
 
     previous = read_latest_report_bundle(run)
@@ -71,7 +75,10 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
                 f"{'!' if Path(item['path']).suffix.lower() != '.pdf' else ''}[已记录的实验图]({quote('images/' + Path(item['path']).name)})\n\n来源：`{item['source_path']}` · SHA-256：`{item['sha256']}`"
                 for item in images)
             text += "\n"
-        snapshot.write_text(text, encoding="utf-8")
+        # Keep exported markdown byte-identical across platforms: the default
+        # text-mode newline translation would turn \n into \r\n on Windows and
+        # diverge from both the approved source and the materials archive.
+        snapshot.write_text(text, encoding="utf-8", newline="\n")
         deliverables.append(_completed_deliverable(run, "markdown", snapshot))
     else:
         deliverables.append({"kind": "markdown", "path": "writing/research_report.approved.md", "status": "skipped", "error": "approved markdown report not found"})

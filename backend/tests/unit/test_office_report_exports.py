@@ -226,7 +226,7 @@ from app.storage.run_store import RunStore
 from app.bridge.report_skill_binding import frozen_report_skills
 from app.storage.report_skill_store import select_report_skills
 async def check():
-    run = RunStore(Path("TEST_RUN_ROOT")).create(task="skill-context", project="generic")
+    run = RunStore(Path(__import__("os").environ["MARS_TEST_RUN_ROOT"])).create(task="skill-context", project="generic")
     ids = frozen_report_skills(run, "writing", create=True)
     assert ids
     select_report_skills("generic", [], [])
@@ -240,6 +240,8 @@ async def check():
     again = await agent.build_context(request)
     assert again.metadata["skills"] == context.metadata["skills"]
 asyncio.run(check())
-'''.replace("TEST_RUN_ROOT", str(tmp_path / "runs"))
-    result = subprocess.run([sys.executable, "-c", script], env={**os.environ, "MARS_RUNTIME_ROOT": str(root)}, capture_output=True, text=True, timeout=30)
+'''
+    # Pass the run root via the environment: interpolating a Windows path
+    # into the script source turns \U into an invalid unicode escape.
+    result = subprocess.run([sys.executable, "-c", script], env={**os.environ, "MARS_RUNTIME_ROOT": str(root), "MARS_TEST_RUN_ROOT": str(tmp_path / "runs")}, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
