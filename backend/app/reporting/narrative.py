@@ -55,6 +55,65 @@ class Narrative:
     summary: dict[str, Any] = field(default_factory=dict)
 
 
+def split_prose_tables(text: str) -> tuple[list[str], list[list[list[str]]]]:
+    """Separate a section into prose paragraphs and pipe-tables (rows)."""
+    paragraphs: list[str] = []
+    tables: list[list[list[str]]] = []
+    current_table: list[list[str]] = []
+    for block in text.split("\n\n"):
+        lines = [line for line in block.splitlines() if line.strip()]
+        pipe_rows = [line for line in lines if " | " in line]
+        if len(pipe_rows) >= 2 and len(pipe_rows) == len(lines):
+            if current_table:
+                tables.append(current_table)
+            current_table = [[cell.strip() for cell in line.split("|")] for line in pipe_rows]
+        else:
+            if current_table:
+                tables.append(current_table)
+                current_table = []
+            if block.strip():
+                paragraphs.append(block.strip())
+    if current_table:
+        tables.append(current_table)
+    return paragraphs, tables
+
+
+def plain_summary(story: "Narrative") -> dict[str, str]:
+    """Human-readable executive summary composed from measured facts only."""
+    baseline = next((m for m in story.metrics if "baseline" in str(m.get("experiment_id", "")).lower()), None)
+    candidate = next((m for m in story.metrics if "3term" in str(m.get("experiment_id", "")).lower()),
+                      next((m for m in story.metrics if "2term" in str(m.get("experiment_id", "")).lower()
+                            and "3term" not in str(m.get("experiment_id", "")).lower()), None))
+    lines: dict[str, str] = {}
+    goal = ""
+    if story.hypothesis and not story.hypothesis.startswith(("必须同时声明", "限制", "本结论基于")):
+        goal = story.hypothesis
+    if not goal:
+        for line in story.purpose.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith(("必须同时声明", "限制", "本结论基于", "0.", "1.")) and len(stripped) >= 12:
+                goal = stripped
+                break
+    lines["goal"] = (goal.split("。")[0].strip(" ：:，,") + "。") if goal else ""
+    if story.experiments:
+        roles = "、".join(f"{c.experiment_id}（{c.role.split('（')[0]}）" for c in story.experiments)
+        lines["did"] = f"本轮一共跑了几组对照实验：{roles}。每组使用相同的数据、随机种子与训练预算，只有方案本身不同，这样结果之间的差异只能来自方案。"
+    if baseline and candidate:
+        try:
+            gain = float(candidate["improvement_db"]); base_gain = float(baseline["improvement_db"])
+            params = float(candidate["parameters_real_equivalent"]); base_params = float(baseline["parameters_real_equivalent"])
+            lines["result"] = (f"实测结果：改进方案把互调干扰压低了 {gain:.2f} dB，"
+                               f"与基线的 {base_gain:.2f} dB 相比{'略有提升' if gain >= base_gain else '有所下降'}"
+                               f"（差 {gain - base_gain:+.3f} dB）；模型参数从 {base_params:.0f} 降到 {params:.0f}，"
+                               f"只有基线的 {params / base_params:.0%}。")
+            met = params <= base_params * 0.8 and gain >= base_gain
+            lines["conclusion"] = (f"结论：{'参数量少于基线 80% 且性能没有变差，本轮目标达成。' if met else '本轮未同时满足全部达标条件，详见判定章节。'}"
+                                   "以上是单次测量的结果，代表本轮设置下的表现。")
+        except (KeyError, TypeError, ValueError):
+            pass
+    return {k: v for k, v in lines.items() if v}
+
+
 def _plain(block: dict[str, Any]) -> str:
     """Extract visible text from a mistune AST token (raw leaves + children)."""
     if block.get("type") in {"softbreak", "linebreak"}:
@@ -140,7 +199,7 @@ def build_narrative(pack: dict[str, Any], blocks: list[dict[str, Any]]) -> Narra
                 break
     if not hypothesis:
         for line in purpose_lines:
-            if re.search(r"假设", line) and len(line.strip()) >= 20:
+            if re.search(r"假设", line) and len(line.strip()) >= 20 and not line.strip().startswith(("必须同时声明", "限制", "本结论基于")):
                 hypothesis = line.strip()
                 break
     experiments = []

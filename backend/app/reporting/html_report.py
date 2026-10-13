@@ -32,6 +32,42 @@ def _para(text: str) -> str:
     return "".join(f"<p>{html.escape(part)}</p>" for part in text.split("\n\n") if part.strip())
 
 
+def _render_section(text: str, intro: str = "") -> str:
+    """Render a narrative section: prose paragraphs + real tables, no pipe dumps."""
+    from app.reporting.narrative import split_prose_tables
+
+    paragraphs, tables = split_prose_tables(text)
+    parts: list[str] = []
+    if intro:
+        parts.append(f'<p class="lead">{html.escape(intro)}</p>')
+    for para in paragraphs:
+        parts.append(f"<p>{html.escape(para)}</p>")
+    for rows in tables:
+        body = "".join("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in row) + "</tr>" for row in rows)
+        parts.append(f'<div class="table-wrap"><table>{body}</table></div>')
+    if not parts:
+        return ""
+    return f'<div class="card">{"".join(parts)}</div>'
+
+
+_PLAIN_LABELS = {"goal": "要解决的问题", "did": "我们做了什么", "result": "结果怎么样", "conclusion": "结论"}
+
+
+def _plain_card(story: Narrative) -> str:
+    from app.reporting.narrative import plain_summary
+
+    lines = plain_summary(story)
+    if not lines:
+        return ""
+    items = "".join(
+        f'<div class="plain-row"><span class="plain-tag">{_PLAIN_LABELS[key]}</span>'
+        f'<div class="plain-body"><p>{html.escape(text)}</p></div></div>'
+        for key, text in lines.items())
+    return (f'<section id="plain"><h2>一页白话摘要</h2>'
+            f'<div class="card plain-card">{items}</div>'
+            f'<p class="muted" style="margin:6px 0 0">先看这一页就能明白整件事；下面各章是给需要核对细节的人准备的。</p></section>')
+
+
 def _frac(numerator: str, denominator: str) -> str:
     return (f'<span class="frac"><span class="num">{numerator}</span>'
             f'<span class="den">{denominator}</span></span>')
@@ -156,7 +192,8 @@ def write_research_html(path: Path, data_pack: dict[str, Any], blocks: list[dict
 <style>
   :root {{ --ink:#18243A; --muted:#64748B; --line:#D8DEE9; --brand:#475FA8; --accent:#BE7A34; --bg:#F6F8FB; }}
   * {{ box-sizing:border-box; }}
-  body {{ margin:0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif; color:var(--ink); background:var(--bg); line-height:1.75; }}
+  body {{ margin:0; font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif; color:var(--ink); background:var(--bg); line-height:1.8; font-size:15.5px; }}
+  h1, h2 {{ font-family:"Noto Serif SC","Source Han Serif SC","SimSun",Georgia,serif; }}
   .page {{ max-width:1080px; margin:0 auto; padding:0 32px 64px; background:#fff; box-shadow:0 0 24px rgba(24,36,58,.06); }}
   header.hero {{ padding:56px 0 28px; border-bottom:3px solid var(--brand); }}
   .kicker {{ color:var(--brand); font-weight:700; letter-spacing:.18em; font-size:12px; }}
@@ -168,7 +205,13 @@ def write_research_html(path: Path, data_pack: dict[str, Any], blocks: list[dict
   h2 {{ font-size:22px; margin:44px 0 14px; padding-left:12px; border-left:5px solid var(--brand); }}
   h3 {{ font-size:16px; margin:24px 0 8px; color:var(--brand); }}
   p {{ margin:8px 0; }}
-  .muted {{ color:var(--muted); font-size:13px; }}
+  .muted {{ color:#475569; font-size:13.5px; }}
+  .lead {{ color:#33415C; font-weight:600; }}
+  .plain-card {{ background:linear-gradient(180deg,#FDFEFF,#F4F7FC); }}
+  .plain-row {{ display:flex; gap:14px; align-items:flex-start; padding:10px 0; border-bottom:1px dashed var(--line); }}
+  .plain-row:last-child {{ border-bottom:none; }}
+  .plain-tag {{ flex:0 0 auto; margin-top:3px; background:var(--ink); color:#fff; border-radius:8px; padding:3px 12px; font-size:13px; font-weight:700; letter-spacing:.06em; }}
+  .plain-body p {{ margin:0; }}
   .card {{ background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:14px 0; }}
   .formula-card {{ background:#FBFCFE; border:1px dashed var(--brand); border-radius:12px; padding:16px 22px; margin:14px 0; }}
   .formula {{ font-family:"Cambria Math",Georgia,serif; font-size:17px; margin:12px 0; display:flex; align-items:center; gap:2px; }}
@@ -190,10 +233,11 @@ def write_research_html(path: Path, data_pack: dict[str, Any], blocks: list[dict
   .exp-card h4 {{ margin:0 0 6px; font-size:14.5px; }}
   .role {{ display:inline-block; background:#EEF2FF; color:var(--brand); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; }}
   .table-wrap {{ overflow-x:auto; }}
-  table {{ border-collapse:collapse; width:100%; font-size:13px; margin:12px 0; }}
+  table {{ border-collapse:collapse; width:100%; font-size:13.5px; margin:12px 0; }}
   th {{ background:var(--ink); color:#fff; padding:8px 10px; text-align:left; font-weight:600; white-space:nowrap; }}
-  td {{ border-bottom:1px solid var(--line); padding:7px 10px; white-space:nowrap; }}
-  tr:nth-child(even) td {{ background:#F8FAFC; }}
+  td {{ border-bottom:1px solid var(--line); padding:8px 10px; white-space:nowrap; }}
+  tr:nth-child(odd) td {{ background:#F8FAFC; }}
+  tr:first-child td {{ background:var(--ink); color:#fff; font-weight:600; }}
   .verdict {{ border-left:5px solid var(--accent); }}
   .verdict h2 {{ border-color:var(--accent); }}
   .badge {{ display:inline-block; border-radius:999px; padding:4px 14px; font-weight:700; font-size:13px; margin:6px 0 0; vertical-align:middle; }}
@@ -211,20 +255,21 @@ def write_research_html(path: Path, data_pack: dict[str, Any], blocks: list[dict
   <div class="meta">任务：{html.escape(story.run_id)} · 生成：{html.escape(story.created[:19].replace('T', ' '))} · 数据来源：真实作业回执（evaluation.json / metrics.json）</div>
 </header>
 <nav>
-  <a href="#purpose">1 研究目的</a><a href="#principle">2 关键原理</a><a href="#path">3 方案路径</a>
+  <a href="#plain">白话摘要</a><a href="#purpose">1 研究目的</a><a href="#principle">2 关键原理</a><a href="#path">3 方案路径</a>
   <a href="#design">4 实验设计</a><a href="#results">5 实验结果</a><a href="#verdict">6 结论</a><a href="#limit">7 边界与证据</a>
 </nav>
 {kpi}
+{_plain_card(story)}
 
 <section id="purpose"><h2>1 研究目的</h2>
-  <div class="card">{_para(story.purpose) or '<p class="muted">—</p>'}</div>
+  {_render_section(story.purpose, intro="先说清楚这轮研究要回答的问题。")}
   {f'<div class="card"><h3>本轮可证伪假设</h3>{_para(story.hypothesis)}</div>' if story.hypothesis else ''}
 </section>
 
 <section id="principle"><h2>2 关键原理</h2>
   {_formula_block()}
   <figure><img src="{chart_imgs[0]}" alt="模型结构框图"/><figcaption>PP 先验对消模型结构框图 · 族基项由报告方法节提取</figcaption></figure>
-  <div class="card">{_para(story.principle_text)}</div>
+  {_render_section(story.principle_text, intro="模型为什么这样设计：公式和框图说的是同一件事——发射信号按已知频移规则变换后，去预测接收端的互调干扰。")}
 </section>
 
 <section id="path"><h2>3 尝试的方案路径</h2>
@@ -233,21 +278,21 @@ def write_research_html(path: Path, data_pack: dict[str, Any], blocks: list[dict
 </section>
 
 <section id="design"><h2>4 实验设计</h2>
-  <div class="card">{_para(story.design_text) or '<p class="muted">报告未包含独立实验设计章节。</p>'}</div>
+  {_render_section(story.design_text, intro="怎么保证比较是公平的：所有实验只改方案本身，数据、种子、预算完全相同。")}
   {_metric_table(metrics)}
 </section>
 
 <section id="results"><h2>5 实验结果</h2>
   {''.join(result_charts)}
-  <div class="card">{_para(story.results_text)}</div>
+  {_render_section(story.results_text, intro="数字怎么读：柱状图里灰的是基线、橙色是本轮候选，柱顶括号是和基线的差值。")}
 </section>
 
 <section id="verdict" class="verdict"><h2>6 结论</h2>
-  <div class="card">{_para(story.verdict_text) or '<p class="muted">报告未包含独立判定章节。</p>'}</div>
+  {_render_section(story.verdict_text, intro="按任务开始时定好的标准逐条核对。")}
 </section>
 
 <section id="limit"><h2>7 边界与证据</h2>
-  <div class="card">{_para(story.limitations_text) or '<p class="muted">报告未包含局限章节。</p>'}</div>
+  {_render_section(story.limitations_text, intro="哪些结论能下、哪些还不能，如实列出。")}
   <div class="card"><h3>来源与完整性</h3>
     <p class="muted">已审核报告：{html.escape(str(data_pack.get('report_source', '')))}</p>
     <p class="muted">报告 SHA-256：{html.escape(str(data_pack.get('report_source_sha256', ''))[:32])}…</p>
