@@ -154,3 +154,47 @@ def test_protocol_error_mapping_is_actionable_and_does_not_expose_raw_payload() 
     assert "重新读取" in message
     assert "继续" in message
     assert all(value not in message for value in ("private-provider-payload", "/private/path", "api_key", "secret"))
+
+
+def test_deepseek_dsml_tool_calls_parse_as_actions() -> None:
+    """DeepSeek intermittently answers with native tool-call markup; parse it faithfully."""
+    text = (
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="code.repo_read_lines">\n'
+        '<｜｜DSML｜｜ parameter name="path" string="true">configs/singleband_g1_c17_ca_pp.yaml</｜｜DSML｜｜ parameter>\n'
+        '<｜｜DSML｜｜ parameter name="start_line" string="false">1</｜｜DSML｜｜ parameter>\n'
+        '<｜｜DSML｜｜ parameter name="end_line" string="false">120</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        '<｜｜DSML｜｜ invoke name="code.repo_search">\n'
+        '<｜｜DSML｜｜ parameter name="query" string="true">ca_pp</｜｜DSML｜｜ parameter>\n'
+        '<｜｜DSML｜｜ parameter name="limit" string="false">40</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    decision = _parse_decision(text)
+    assert decision.reply == ""
+    assert decision.next_state is None
+    assert decision.actions == [
+        {"tool": "code.repo_read_lines", "args": {
+            "path": "configs/singleband_g1_c17_ca_pp.yaml", "start_line": 1, "end_line": 120}},
+        {"tool": "code.repo_search", "args": {"query": "ca_pp", "limit": 40}},
+    ]
+
+
+def test_dsml_with_leading_prose_keeps_reply() -> None:
+    text = (
+        "我先读取配置再启动。\n"
+        "<｜｜DSML｜｜ calls>\n"
+        '<｜｜DSML｜｜ invoke name="code.repo_list">\n'
+        '<｜｜DSML｜｜ parameter name="path" string="true">configs</｜｜DSML｜｜ parameter>\n'
+        "</｜｜DSML｜｜ invoke>\n"
+        "</｜｜DSML｜｜ calls>"
+    )
+    decision = _parse_decision(text)
+    assert decision.reply == "我先读取配置再启动。"
+    assert decision.actions == [{"tool": "code.repo_list", "args": {"path": "configs"}}]
+
+
+def test_malformed_dsml_still_raises() -> None:
+    with pytest.raises(CommanderDecisionError):
+        _parse_decision("<｜｜DSML｜｜ calls><broken></｜｜DSML｜｜ calls>")

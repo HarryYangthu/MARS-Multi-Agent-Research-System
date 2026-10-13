@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
@@ -334,9 +335,72 @@ def _summarize_result(tool: str, result: dict[str, Any]) -> str:
     return f"[{tool}] {json.dumps(result, ensure_ascii=False)[:200]}"
 
 
+_DSML_CALLS_RE = re.compile(r"<｜｜DSML｜｜\s*calls>(.*?)</｜｜DSML｜｜\s*calls>", re.DOTALL)
+_DSML_INVOKE_RE = re.compile(
+    r'<｜｜DSML｜｜\s*invoke\s+name="([^"]+)">(.*?)</｜｜DSML｜｜\s*invoke>', re.DOTALL
+)
+_DSML_PARAM_RE = re.compile(
+    r'<｜｜DSML｜｜\s*parameter\s+name="([^"]+)"(?:\s+string="([^"]*)")?>(.*?)</｜｜DSML｜｜\s*parameter>',
+    re.DOTALL,
+)
+_DSML_INT_RE = re.compile(r"-?\d+\Z")
+_DSML_FLOAT_RE = re.compile(r"-?\d+\.\d+\Z")
+
+
+def _coerce_dsml_value(raw: str, *, string_attr: str | None) -> Any:
+    """Convert a DSML parameter body to a JSON value, honouring string flags."""
+    if string_attr == "true":
+        return raw
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if _DSML_INT_RE.fullmatch(raw):
+        return int(raw)
+    if _DSML_FLOAT_RE.fullmatch(raw):
+        return float(raw)
+    if raw[:1] in "[{":
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    return raw
+
+
+def _parse_dsml_decision(text: str) -> Decision | None:
+    """Parse DeepSeek's native tool-call markup when it replaces the JSON decision.
+
+    Some DeepSeek responses emit ``<｜｜DSML｜｜ calls>`` blocks instead of the
+    requested JSON object. The markup carries the model's actual tool intents,
+    so parsing it executes the real decision rather than failing the turn.
+    Returns None when no complete calls block is present; malformed blocks
+    still surface the original CommanderDecisionError.
+    """
+    wrapper = _DSML_CALLS_RE.search(text)
+    if wrapper is None:
+        return None
+    actions: list[dict[str, Any]] = []
+    for invoke in _DSML_INVOKE_RE.finditer(wrapper.group(1)):
+        tool = invoke.group(1).strip()
+        if not tool:
+            continue
+        args: dict[str, Any] = {}
+        for param in _DSML_PARAM_RE.finditer(invoke.group(2)):
+            value = _coerce_dsml_value(param.group(3).strip(), string_attr=param.group(2))
+            args[param.group(1)] = value
+        actions.append({"tool": tool, "args": args})
+    if not actions:
+        return None
+    reply = _DSML_CALLS_RE.sub("", text).strip()
+    logger.info("Commander decision parsed from DSML tool-call markup: {} action(s)", len(actions))
+    return Decision(reply=reply, next_state=None, actions=actions)
+
+
 def _parse_decision(text: str) -> Decision:
     raw = _extract_json(text)
     if raw is None:
+        dsml = _parse_dsml_decision(text)
+        if dsml is not None:
+            return dsml
         raise CommanderDecisionError("expected a single decision object")
     if not ({"reply", "actions"} & raw.keys()):
         raise CommanderDecisionError("missing decision fields")
