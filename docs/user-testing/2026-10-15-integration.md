@@ -44,3 +44,11 @@
 
 - 用户允许移除两个旧test项目，但清理命令被自动审批拒绝，未提供具体原因。
   未执行备份或删除；按用户“删不掉就不管”的要求保留原项目，未继续尝试替代删除路径。
+
+## Windows验证限制与恢复脚本
+
+- 上游 `scripts/idea_live_resume.py` 顶层导入fcntl使10组恢复/审计测试在Windows无法收集。
+  Windows改用已安装的FileLock，Linux保持原flock协议；真实竞争进程被拒绝，释放后可重新获取。
+  脚本与回归测试mypy通过。该脚本不在当前研究服务的执行路径，无需重启即可使用。
+- 全量检查使用UTF-8环境；远端Linux worker测试依赖os.killpg，不纳入本机Windows执行范围。
+  本机不能创建符号链接（WinError 1314），相关边界用例不能宣称通过，仍需Linux CI验证。

@@ -1,10 +1,10 @@
 """File-level resume guards and immutable source journals for real evaluations."""
 from __future__ import annotations
 
-import fcntl
 import copy
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -53,6 +53,19 @@ def resume_scenario(initial: dict[str, Any]) -> dict[str, Any]:
 def exclusive_run(root: Path) -> Iterator[None]:
     if not root.is_dir():
         raise ValueError("resume run directory does not exist")
+    if os.name == "nt":
+        from filelock import FileLock, Timeout
+        lock = FileLock(root / "evaluation.lock", timeout=0)
+        try:
+            lock.acquire()
+        except Timeout as exc:
+            raise ValueError("another evaluation process holds this run") from exc
+        try:
+            yield
+        finally:
+            lock.release()
+        return
+    import fcntl
     with (root / "evaluation.lock").open("a") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)

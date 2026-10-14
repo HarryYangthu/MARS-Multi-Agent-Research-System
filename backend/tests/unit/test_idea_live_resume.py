@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -40,6 +42,24 @@ def test_abandoned_model_recovery_is_explicit_and_preserves_state() -> None:
         with pytest.raises(ValueError):
             check_resume_state({"status": status, "pending": pending, "pending_batch": batch},
                                has_review=False, recover_abandoned=True)
+
+
+def test_exclusive_run_rejects_an_actual_competing_process(tmp_path: Path) -> None:
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "from scripts.idea_live_resume import exclusive_run\n"
+        "try:\n"
+        "    with exclusive_run(Path(sys.argv[1])): pass\n"
+        "except ValueError as exc:\n"
+        "    assert 'another evaluation' in str(exc)\n"
+        "    sys.exit(17)\n"
+    )
+    argv = [sys.executable, "-X", "utf8", "-c", script, str(tmp_path)]
+    with exclusive_run(tmp_path):
+        blocked = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        assert blocked.returncode == 17, blocked.stderr
+    released = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    assert released.returncode == 0, released.stderr
 
 
 def test_resume_message_guard_accepts_json_roundtrip_but_rejects_changed_input() -> None:
