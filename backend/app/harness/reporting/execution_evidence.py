@@ -43,6 +43,40 @@ def _digest_matches(expected: object, raw: bytes) -> bool:
             and expected.removeprefix("sha256:") == hashlib.sha256(raw).hexdigest())
 
 
+def _tensorboard_event(path: Path) -> bool:
+    return path.name.startswith('events.out.tfevents.')
+
+
+def _streamed_event_item(path: Path, source: str, expected_sha256: object, expected_bytes: object,
+                         byte_budget: int) -> dict[str, Any]:
+    """Verify an opaque native event without admitting its bytes as text."""
+    if (not isinstance(expected_sha256, str)
+            or re.fullmatch(r'(?:sha256:)?[a-f0-9]{64}', expected_sha256) is None):
+        raise ValueError('TensorBoard event requires a recorded SHA-256')
+    before = path.stat()
+    if before.st_size > byte_budget:
+        raise ValueError('TensorBoard event exceeds bounded handoff capacity')
+    if expected_bytes is not None and (type(expected_bytes) is not int or expected_bytes != before.st_size):
+        raise ValueError('TensorBoard event size differs from its receipt/index')
+    checksum = hashlib.sha256()
+    consumed = 0
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1048576), b''):
+            consumed += len(block)
+            if consumed > byte_budget or consumed > before.st_size:
+                raise ValueError('TensorBoard event changed or exceeds bounded handoff capacity')
+            checksum.update(block)
+    after = path.stat()
+    initial = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    final = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if (initial != final or consumed != before.st_size
+            or checksum.hexdigest() != expected_sha256.removeprefix('sha256:')):
+        raise ValueError('TensorBoard event no longer matches its recorded digest')
+    return {'source': source, 'sha256': checksum.hexdigest(), 'bytes': consumed,
+            'integrity': 'recorded_sha256_verified', 'text_readable': False,
+            'content_admitted': False, 'read_method': 'streamed_hash_only'}
+
+
 _CHECKPOINT_SUFFIXES = frozenset({".pth", ".pt", ".ckpt"})
 
 
@@ -173,6 +207,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
              "A file is absent only when actual receipts/indexed paths establish that; format names are not mandatory.",
              "Current job manifest, effective configuration and executed metric implementation take priority over old README interfaces.",
              "source is a run-relative citation path, not a code.repo_reader path. Use each text file's paired reader with its exact material_ref.",
+             "sha256 is only an integrity digest, never a context.read_material ref. Read only with file.reader.args.ref / material_ref; a digest without a paired reader is not readable through that tool.",
              "Each completed job includes its actual stored metrics; use all paired jobs, not only abbreviated aggregate previews.",
              "Min/max loss does not establish monotonic convergence or statistical significance."]
     paths = sorted(jobs.glob("*.json")) if jobs.exists() else []
@@ -194,12 +229,29 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                 lines.append(json.dumps(record, ensure_ascii=False, allow_nan=False))
                 continue
             verified: dict[str, bytes] = {}
+            opaque: dict[str, dict[str, Any]] = {}
             evidence_rows = job.get("evidence", [])
             if not isinstance(evidence_rows, list) or len(evidence_rows) > 64:
                 raise ValueError("Job evidence exceeds bounded receipt capacity")
             for evidence in evidence_rows:
                 relative = _execution_relative(root, evidence.get("path"))
                 target = safe_scope_path(root, relative, must_exist=True)
+                if _tensorboard_event(target):
+                    existing = opaque.get(relative)
+                    if existing is not None:
+                        expected = evidence.get('sha256')
+                        if (not isinstance(expected, str) or expected.removeprefix('sha256:') != existing['sha256']
+                                or evidence.get('bytes', existing['bytes']) != existing['bytes']):
+                            raise ValueError('Repeated TensorBoard event declarations disagree')
+                        continue
+                    if file_budget <= 0:
+                        raise ValueError('Job evidence exceeds bounded receipt capacity')
+                    item = _streamed_event_item(target, relative, evidence.get('sha256'),
+                                                evidence.get('bytes'), byte_budget)
+                    opaque[relative] = item
+                    file_budget -= 1
+                    byte_budget -= int(item['bytes'])
+                    continue
                 if file_budget <= 0 or target.stat().st_size > byte_budget:
                     raise ValueError("Job evidence exceeds bounded handoff capacity")
                 _, content = _read(root, relative)
@@ -210,7 +262,6 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                     byte_budget -= len(content)
                 verified[relative] = content
             indexed = False
-            opaque: dict[str, dict[str, Any]] = {}
             legacy_directories: set[Path] = set()
             historical_receipts: set[str] = set()
             fingerprint = job.get('result', {}).get('fingerprint_hash')
@@ -273,6 +324,21 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                         raise ValueError("Artifact index requires output-relative file paths")
                     target = safe_scope_path(root / path.parent, child, must_exist=True)
                     source = _execution_relative(root, target.relative_to(root).as_posix(), indexed_checkpoint=True)
+                    if _tensorboard_event(target):
+                        event = opaque.get(source)
+                        if event is not None:
+                            expected = entry.get('sha256')
+                            if (not isinstance(expected, str) or expected.removeprefix('sha256:') != event['sha256']
+                                    or type(entry.get('bytes')) is not int or entry['bytes'] != event['bytes']):
+                                raise ValueError('Indexed TensorBoard event differs from its job evidence')
+                            continue
+                        if file_budget <= 0:
+                            raise ValueError('Artifact index exceeds bounded file capacity')
+                        opaque[source] = _streamed_event_item(target, source, entry.get('sha256'),
+                                                              entry.get('bytes'), byte_budget)
+                        file_budget -= 1
+                        byte_budget -= int(opaque[source]['bytes'])
+                        continue
                     if target.suffix.casefold() in _CHECKPOINT_SUFFIXES:
                         if file_budget <= 0:
                             raise ValueError("Artifact index exceeds bounded handoff capacity")
