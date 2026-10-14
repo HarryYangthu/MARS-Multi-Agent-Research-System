@@ -116,9 +116,13 @@ def _input_signature(path: Path) -> dict[str, Any]:
             'inode': stat.st_ino, 'device': stat.st_dev}
 
 
-def _checked_path(job: LocalCommandJob, name: str) -> Path:
+def _checked_roots(job: LocalCommandJob) -> tuple[Path, ...]:
+    """Resolve host grants once per operation, never cache across admissions."""
     from app.harness.tools.execution.local_command import _bound_workspace
-    roots = [root.resolve() for root in _bound_workspace(job) if root is not None]
+    return tuple(root.resolve() for root in _bound_workspace(job) if root is not None)
+
+
+def _path_in_roots(name: str, roots: tuple[Path, ...]) -> Path:
     path = Path(name)
     if not path.is_absolute() or path.is_symlink():
         raise ValueError('validated input must be an absolute regular file in the bound project')
@@ -135,6 +139,11 @@ def _checked_path(job: LocalCommandJob, name: str) -> Path:
     return resolved
 
 
+def _checked_path(job: LocalCommandJob, name: str) -> Path:
+    """Standalone callers must still validate the current host binding."""
+    return _path_in_roots(name, _checked_roots(job))
+
+
 def known_input_changes(job: LocalCommandJob, source_token: str) -> list[dict[str, Any]]:
     """Learn paths only from a verified checker, then poll stat signatures cheaply."""
     path = job.run_root / 'execution/preflight' / (_identity(job, source_token) + '.inputs.json')
@@ -149,11 +158,12 @@ def known_input_changes(job: LocalCommandJob, source_token: str) -> list[dict[st
     records = raw.get('input_files')
     if not isinstance(records, list) or len(records) > 256:
         raise ValueError('validated input snapshot is invalid')
+    roots = _checked_roots(job) if records else ()
     changed: list[dict[str, Any]] = []
     for record in records:
         if not isinstance(record, dict) or not isinstance(record.get('path'), str):
             raise ValueError('validated input snapshot is invalid')
-        target = _checked_path(job, record['path'])
+        target = _path_in_roots(record['path'], roots)
         if not target.is_file():
             changed.append({'path': str(target), 'state': 'missing'})
         else:
@@ -167,12 +177,13 @@ def _verified_inputs(job: LocalCommandJob, result: dict[str, Any], *, deadline: 
     rows = [row for check in result['checks'] for row in check.get('details', {}).get('input_files', [])]
     if len(rows) > 256:
         raise ValueError('too many validated input files')
+    roots = _checked_roots(job) if rows else ()
     records: dict[str, dict[str, Any]] = {}
     consumed = 0
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get('path'), str) or not isinstance(row.get('sha256'), str):
             raise ValueError('validated input_files must include absolute paths and SHA-256')
-        target = _checked_path(job, row['path'])
+        target = _path_in_roots(row['path'], roots)
         if not target.is_file():
             raise ValueError('validated input file is missing')
         before = _input_signature(target)
@@ -223,9 +234,12 @@ def preflight_state(job: LocalCommandJob, inputs_token: str) -> dict[str, Any]:
             source = receipt_path.with_name(name)
             if source.is_symlink() or not source.is_file() or _file_hash(source) != receipt.get(field):
                 raise ValueError('command validation request or result changed')
-        for record in receipt.get('input_files', []):
-            target = _checked_path(job, record['path'])
-            if not target.is_file() or _input_signature(target) != {key: record.get(key) for key in _input_signature(target)}:
+        records = receipt.get('input_files', [])
+        roots = _checked_roots(job) if records else ()
+        for record in records:
+            target = _path_in_roots(record['path'], roots)
+            signature = _input_signature(target) if target.is_file() else None
+            if signature is None or signature != {key: record.get(key) for key in signature}:
                 return {'status': 'stale', 'configured': True, 'error': 'validated input files changed',
                         'receipt_path': str(receipt_path), 'receipt_sha256': raw['receipt_sha256']}
     return {'status': raw['status'], 'configured': True, 'error': raw.get('error', ''),

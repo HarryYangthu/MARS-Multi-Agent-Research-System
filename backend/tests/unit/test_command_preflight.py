@@ -3,16 +3,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 import pytest
 import yaml
 
-from app.harness.tools.execution.command_preflight import bounded_error, preflight_state, run_command_preflight
+from app.harness.tools.execution.command_preflight import (
+    _verified_inputs, bounded_error, known_input_changes, preflight_state, run_command_preflight,
+)
 from app.harness.tools.execution.local_command import LocalCommandJob, _command, command_request, run_local_command
 from app.settings import repo_root, reset_settings_cache
 
@@ -110,6 +114,73 @@ def test_actual_preflight_checks_data_budget_without_executing_measurement(genui
     failed = run_command_preflight(job, 'approved-token')
     assert failed['status'] == 'failed' and 'JSONDecodeError' in failed['error']
     assert preflight_state(job, 'approved-token')['status'] == 'failed'
+
+
+def test_multiple_checked_inputs_revalidate_real_git_binding_between_operations(
+    genuine_checker: tuple[LocalCommandJob, Path, Path],
+) -> None:
+    from app.harness.tools.git_branch import GitBranch, GitWorkspaceError, bind_git_branch, git
+    job, _, data = genuine_checker
+    code = data.parent / 'code'
+    code.mkdir(exist_ok=True)
+    git(code, 'init', '-b', 'baseline')
+    (code / 'main.py').write_text('VALUE = 1\n')
+    git(code, 'add', 'main.py')
+    git(code, '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false',
+        'commit', '-m', 'Genuine preflight baseline')
+    baseline = git(code, 'rev-parse', 'HEAD')
+    git(code, 'switch', '-c', 'study')
+    branch = GitBranch(job.project, job.run_id, str(code), 'study', 'baseline', baseline)
+    checkpoint = data.parent / 'checkpoint.json'
+    checkpoint.write_text('[1,2,3]')
+    with bind_git_branch(branch):
+        state = run_command_preflight(job, 'multi-input-token')
+        assert state['status'] == 'passed'
+        result = json.loads(Path(state['receipt_path']).with_name('result.json').read_text())
+        records = _verified_inputs(job, result, deadline=time.monotonic() + 2, max_bytes=4096)
+        assert {row['path'] for row in records} == {str(data), str(checkpoint)}
+        assert known_input_changes(job, 'multi-input-token') == []
+        assert preflight_state(job, 'multi-input-token')['status'] == 'passed'
+        # A successful earlier operation never grants a later operation access
+        # after an external branch switch. These are actual Git invocations.
+        git(code, 'switch', 'baseline')
+        with pytest.raises(GitWorkspaceError, match='切换到其他分支'):
+            _verified_inputs(job, result, deadline=time.monotonic() + 2, max_bytes=4096)
+        with pytest.raises(GitWorkspaceError, match='切换到其他分支'):
+            known_input_changes(job, 'multi-input-token')
+        with pytest.raises(GitWorkspaceError, match='切换到其他分支'):
+            preflight_state(job, 'multi-input-token')
+    assert not (data.parent / 'actual_execution.txt').exists()
+
+
+def test_each_input_still_checks_hash_scope_symlinks_and_control_paths(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], tmp_path: Path,
+) -> None:
+    job, _, data = genuine_checker
+    other = data.parent / 'other.json'
+    other.write_text('[4,5,6]')
+
+    def inputs(*paths: Path) -> dict[str, Any]:
+        return {'checks': [{'details': {'input_files': [
+            {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths
+        ]}}]}
+
+    saved = inputs(data, other)
+    assert len(_verified_inputs(job, saved, deadline=time.monotonic() + 2, max_bytes=4096)) == 2
+    other.write_text('[7,8,9]')
+    with pytest.raises(ValueError, match='hash does not match'):
+        _verified_inputs(job, saved, deadline=time.monotonic() + 2, max_bytes=4096)
+    link = data.parent / 'symbolic.json'
+    link.symlink_to(data)
+    forbidden = [tmp_path / 'outside.json', data.parent / '.env.private',
+                 data.parent / '.git' / 'config', data.parent / '.ssh' / 'identity',
+                 data.parent / 'private.pem']
+    for path in forbidden:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('human-authored boundary fixture')
+    for path in [link, *forbidden]:
+        with pytest.raises(ValueError, match='absolute regular file|control/credential files'):
+            _verified_inputs(job, inputs(data, path), deadline=time.monotonic() + 2, max_bytes=4096)
 
 
 @pytest.mark.asyncio
