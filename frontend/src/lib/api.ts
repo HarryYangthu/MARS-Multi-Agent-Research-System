@@ -1177,6 +1177,9 @@ export async function uploadDataSource(params: {
   channelCount?: number | null;
   description?: string;
 }, signal?: AbortSignal): Promise<DataSourceProfile> {
+  if (params.file.size > CLIENT_POLICY.uploadMaxBytes) {
+    throw new Error(`数据文件超过上传上限（${Math.floor(CLIENT_POLICY.uploadMaxBytes / 1024 / 1024)} MiB），请调整上传配置后重试。`);
+  }
   const url = apiUrl(`${BASE}/api/data-sources/upload`);
   url.searchParams.set("filename", params.file.name);
   url.searchParams.set("project", params.project);

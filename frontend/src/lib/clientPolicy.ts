@@ -7,6 +7,7 @@ export const CLIENT_POLICY = {
   activityClockMs: Number(process.env.NEXT_PUBLIC_MARS_ACTIVITY_CLOCK_MS),
   readinessRefreshMs: Number(process.env.NEXT_PUBLIC_MARS_READINESS_REFRESH_MS),
   maxContractBytes: Number(process.env.NEXT_PUBLIC_MARS_MAX_CONTRACT_BYTES),
+  uploadMaxBytes: Number(process.env.NEXT_PUBLIC_MARS_UPLOAD_MAX_BYTES),
 };
 
 export async function boundedFetch(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = CLIENT_POLICY.requestTimeoutMs): Promise<Response> {

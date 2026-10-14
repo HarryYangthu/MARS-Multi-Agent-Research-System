@@ -4,12 +4,16 @@ import YAML from "yaml";
 const frontendPolicy = YAML.parse(readFileSync(new URL("../configs/frontend.yaml", import.meta.url), "utf8"))?.frontend;
 const clientPolicy = frontendPolicy?.client;
 const proxyTimeoutMs = frontendPolicy?.server?.proxy_timeout_ms;
+const uploadMaxBytes = frontendPolicy?.server?.upload_max_bytes;
 if (!Number.isSafeInteger(proxyTimeoutMs) || proxyTimeoutMs <= 0) {
   throw new Error("configs/frontend.yaml must define a finite positive proxy timeout");
 }
-const policyFields = ["request_timeout_ms", "execution_confirmation_timeout_ms", "connection_test_timeout_ms", "control_refresh_ms", "activity_clock_ms", "readiness_refresh_ms", "max_contract_bytes"];
+const policyFields = ["request_timeout_ms", "execution_confirmation_timeout_ms", "connection_test_timeout_ms", "control_refresh_ms", "activity_clock_ms", "readiness_refresh_ms", "max_contract_bytes", "upload_max_bytes"];
 if (!clientPolicy || policyFields.some((key) => !Number.isSafeInteger(clientPolicy[key]) || clientPolicy[key] <= 0)) {
   throw new Error("configs/frontend.yaml must define a finite positive client policy");
+}
+if (!Number.isSafeInteger(uploadMaxBytes) || uploadMaxBytes <= 0 || clientPolicy.upload_max_bytes !== uploadMaxBytes) {
+  throw new Error("configs/frontend.yaml must define matching positive client/server upload limits");
 }
 
 /** @type {import('next').NextConfig} */
@@ -26,7 +30,7 @@ const nextConfig = {
   // TensorBoard serves a directory URL; preserve its trailing slash for assets.
   skipTrailingSlashRedirect: true,
   typedRoutes: false,
-  experimental: { proxyTimeout: proxyTimeoutMs },
+  experimental: { proxyTimeout: proxyTimeoutMs, middlewareClientMaxBodySize: uploadMaxBytes },
   async rewrites() {
     return [
       {
