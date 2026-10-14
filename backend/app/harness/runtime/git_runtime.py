@@ -97,6 +97,45 @@ def git_environment(environment: Mapping[str, str] | None = None) -> dict[str, s
     return result
 
 
+def git_helper_environment(runtime: GitRuntime, environment: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Admit helper directories from the selected installation, not a repo override.
+
+    Standalone packages may need their relocated libexec directory. Resolve the
+    actual executable first so a source-repo symlink cannot redefine its origin.
+    Unknown explicit GIT_EXEC_PATH values are discarded; Git's compiled default
+    remains available when no same-installation helper directory is present.
+    """
+    result = git_environment(environment)
+    explicit = next((value for key, value in result.items() if key.upper() == 'GIT_EXEC_PATH'), None)
+    result = {key: value for key, value in result.items() if key.upper() != 'GIT_EXEC_PATH'}
+    executable = Path(runtime.executable).resolve(strict=True)
+    prefix = executable.parent.parent
+    layouts = ('libexec/git-core', 'lib/git-core', 'mingw64/libexec/git-core',
+               'mingw32/libexec/git-core', 'usr/libexec/git-core')
+    admitted: list[Path] = []
+    for layout in layouts:
+        directory = prefix / layout
+        helper = directory / ('git-upload-pack.exe' if sys.platform == 'win32' else 'git-upload-pack')
+        try:
+            resolved = directory.resolve(strict=True)
+            if (directory.is_dir() and resolved.is_relative_to(prefix)
+                    and helper.is_file() and helper.resolve(strict=True).is_relative_to(prefix)):
+                admitted.append(resolved)
+        except (OSError, ValueError, RuntimeError):
+            continue
+    selected: Path | None = None
+    if explicit and Path(explicit).is_absolute():
+        try:
+            candidate = Path(explicit).resolve(strict=True)
+            selected = next((path for path in admitted if path == candidate), None)
+        except (OSError, ValueError, RuntimeError):
+            pass
+    selected = selected or (admitted[0] if admitted else None)
+    if selected is not None:
+        result['GIT_EXEC_PATH'] = str(selected)
+    return result
+
+
 def _policy(path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -178,7 +217,7 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
             timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     runtime = resolve_git(environment=environment)
     limit = timeout or float(_policy(repo_root() / "configs/git_runtime.yaml")["command_timeout_seconds"])
-    child_environment = git_environment(environment)
+    child_environment = git_helper_environment(runtime, environment)
     # Local transports invoke Git again (for example upload-pack during a
     # file fetch). They must discover the verified host binary before an
     # unusable system shim, just like configured coding commands do.
@@ -197,7 +236,8 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
 
 def git_child_environment() -> dict[str, str]:
     """Use the same verified Git for a coding program's own child commands."""
-    env = git_environment()
-    directory = str(Path(resolve_git().executable).parent)
+    runtime = resolve_git()
+    env = git_helper_environment(runtime)
+    directory = str(Path(runtime.executable).parent)
     env["PATH"] = directory + os.pathsep + env.get("PATH", "")
     return env

@@ -1,2 +1,3 @@
 poll_interval_seconds: 1
 max_source_bytes: 2000000
+preflight_total_timeout_seconds: 45

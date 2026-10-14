@@ -14,18 +14,23 @@ def execution_delivery_context() -> dict[str, Any]:
     backend = get_settings().mars_execution_backend
     policy = load_execution_config()['execution']
     rows = policy.get('local_commands', [])
-    commands = [{key: row[key] for key in ('id', 'argv', 'required_metrics') if key in row}
+    commands = [{key: row[key] for key in ('id', 'argv', 'required_metrics', 'project_ids',
+                'entrypoints', 'config_paths', 'consumes_data_path', 'validation') if key in row}
                 for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
     from app.harness.tools.execution.local_command import local_command_protocol
+    from app.harness.tools.execution.command_preflight import validation_protocol
     return {
         'backend': backend,
         'local_commands': commands if backend == 'local_command' else [],
         'paper_static': policy.get('paper_static', {}) if backend == 'paper_static' else {},
         'protocol': local_command_protocol() if backend == 'local_command' else {},
+        'validation_protocol': validation_protocol() if backend == 'local_command' else {},
         'instruction': (
             '当前执行方式为 local_command：每项 execution_jobs.config 必须填写上述登记命令的 id '
             '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由宿主执行，不得自行替换。'
             '命令从 MARS_JOB_REQUEST 读取本项配置和预算，产出 MARS_RESULT_PATH 与真实证据。'
+            '登记命令的项目、入口和配置能力必须与本项匹配；旧命令不能作为其他模型的通用入口。'
+            '声明 consumes_data_path 时必须消费宿主交付的数据；验证模式只检查，不训练。'
             '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
             if backend == 'local_command' else
             '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'
@@ -89,8 +94,14 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                     ids = [str(row['id']) for row in rows if isinstance(row, dict) and row.get('id')] if isinstance(rows, list) else []
                     raise ValueError('当前执行方式 local_command 要求交付实际 command_id；可用登记 ID：'
                                      + (', '.join(ids) if ids else '无，请先配置真实执行命令'))
-                _command(LocalCommandJob(run_id='handoff-check', experiment_id=job['name'],
-                    project=project, run_root=Path('.'), command_id=command_id), 'execution.simulation_runner')
+                from app.harness.tools.git_branch import current_git_branch
+                from app.harness.runtime.project_scope import current_project_scope
+                branch = current_git_branch(project)
+                scope = current_project_scope(project)
+                run_id = branch.run_id if branch is not None else scope.run_id if scope is not None else 'handoff-check'
+                _command(LocalCommandJob(run_id=run_id, experiment_id=job['name'],
+                    project=project, run_root=scope.run_root if scope is not None else Path('.'),
+                    command_id=command_id, config=config), 'execution.simulation_runner')
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(prefix + ': ' + str(exc))
     return errors

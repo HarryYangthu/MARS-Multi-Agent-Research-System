@@ -24,6 +24,12 @@ assert.deepEqual(summaries.get("src/api"), { total: 2, unapplied: 1 });
 assert.deepEqual(summaries.get("libs"), { total: 1, unapplied: 1 });
 assert.deepEqual(summaries.get("libs-extra"), { total: 1, unapplied: 0 });
 assert.equal(summaries.size, 4, "only real path ancestors receive a marker");
+const history = directoryChangeSummaries([
+  { path: "approved/main.py", change: "modified", status: "approved_history", source: "approved_git_history" },
+  { path: "unapproved/main.py", change: "modified", status: "approved_history", source: "verified_git_commit" },
+]);
+assert.deepEqual(history.get("approved"), { total: 1, unapplied: 0 });
+assert.deepEqual(history.get("unapproved"), { total: 1, unapplied: 1 }, "only the approved-history source represents an approved archived commit");
 
 const run: RunDetail = { run_id: "visibility-input", project: "presentation-only", task: "UI state input", entrypoint: "pipeline", created_at: "", status: "running", states: { idea: "running", coding: "pending" }, graph: { nodes: [], edges: [], entrypoints: ["idea"] } };
 assert.equal(showCompletedCodeChanges(null), false);

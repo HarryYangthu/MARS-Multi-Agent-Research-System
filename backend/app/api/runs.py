@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies import existing_orchestrator, get_orchestrator, get_run_store
@@ -16,6 +17,7 @@ from app.bridge.research_run_service import (
     CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
 )
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
+from app.harness.tools.execution.command_preflight import bounded_error
 from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
@@ -69,9 +71,16 @@ def _code_changes(run_id: str, project: str, change_id: str | None = None) -> di
     try:
         return code_changes(run, project=project, change_id=change_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Code changes unavailable: run={} project={} error_type={} reason={}',
+                       run.run_id, run.project, type(exc).__name__, cause)
+        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取：' + cause) from exc
     except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail='代码改动记录无法校验，请核对项目及记录。') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Code changes invalid: run={} project={} error_type={} reason={}',
+                       run.run_id, run.project, type(exc).__name__, cause)
+        raise HTTPException(status_code=409, detail='代码改动记录无法校验：' + cause
+                            + '。请核对项目及记录。') from exc
 
 
 class RecoveryPayload(BaseModel):
@@ -112,7 +121,11 @@ def _execution_configuration(run_id: str, project: str, *, include_hidden: bool 
     try:
         view = execution_preview(session.run, node)
     except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='仿真配置无法核验，请检查项目配置与任务记录。') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Execution configuration invalid: run={} project={} node={} error_type={} reason={}',
+                       session.run.run_id, session.run.project, node, type(exc).__name__, cause)
+        raise HTTPException(status_code=409, detail='仿真配置无法核验：' + cause
+                            + '。请检查项目配置与任务记录。') from exc
     return session, {**view, 'visible': visible,
         'state': state.value, 'launch_ready': state == NodeState.APPROVED,
         'can_confirm': state == NodeState.APPROVED and not view['blockers'] and not session.read_only}
@@ -154,7 +167,9 @@ async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirm
     try:
         receipt = await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
     except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='配置未确认，请刷新并核对配置变化。') from exc
+        from app.harness.tools.execution.command_preflight import bounded_error
+        raise HTTPException(status_code=409, detail='运行前核对未通过：' + bounded_error(str(exc))
+                            + '。尚未启动新的训练，请按原因修正后重新核对。') from exc
     if not receipt['created']:
         return {'ok': True, 'confirmed': True, 'status': 'already_confirmed', 'run_id': run_id}
     result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')

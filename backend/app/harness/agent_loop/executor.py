@@ -670,6 +670,7 @@ class NativeAgentLoop:
                             request.review_provider if reviewing and request.review_provider else request.provider,
                             messages, call_config,
                             run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)),
+                            active_model_time=True,
                             correlation=correlation),
                         timeout=llm_call_deadline_seconds(call_config))
                 except ResourceBudgetError as exc:

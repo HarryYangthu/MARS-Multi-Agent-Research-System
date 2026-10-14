@@ -67,7 +67,7 @@ async def test_main_batch_runs_actual_configurations_and_binds_measurement_recei
     tmp_path: Path, actual_regression_command: Path,
 ) -> None:
     specs = [JobSpec(run_id="real-cpu", experiment_id=f"scale-{scale}", project="regression",
-        run_root=tmp_path / "run", config={"scale": scale, "budget_steps": scale,
+        run_root=tmp_path / "run", config={"command_id": "regression", "scale": scale, "budget_steps": scale,
         "data_path": str(actual_regression_command)}) for scale in (1, 2)]
     outcome = await run_batch(specs, config=BatchConfig(max_concurrency=2, steps=100))
     assert not outcome.failures and len(outcome.results) == 2
@@ -135,7 +135,7 @@ async def test_stdout_or_previous_invocation_cannot_become_success(
     tmp_path: Path, actual_regression_command: Path, fault: str,
 ) -> None:
     result = await run_one(JobSpec(run_id="invalid-receipt", experiment_id=fault, project="regression",
-        run_root=tmp_path / "run", config={"data_path": str(actual_regression_command), "scale": 2, fault: True}))
+        run_root=tmp_path / "run", config={"command_id": "regression", "data_path": str(actual_regression_command), "scale": 2, fault: True}))
     assert result.status == "failed" and result.metrics == {} and not result.is_mock
     receipt_path = next((tmp_path / "run/execution/local_commands" / fault).glob("*/execution_receipt.json"))
     receipt = json.loads(receipt_path.read_text())
@@ -156,7 +156,7 @@ async def test_bridge_executes_manual_approved_plan_and_preserves_seed(
     plan = {"schema": "run_log.v1", "agent": "execution", "project": "regression", "run_id": run.run_id,
             "status": "interrupted", "metrics": {"planned_experiments": 1}, "fingerprint_hash": "sha256:00",
             "planned_experiments": [{"name": "actual-comparison", "config": {
-                "scale": 2, "data_path": str(actual_regression_command), "seed": 0, "stdout_only": omit_result}}]}
+                "command_id": "regression", "scale": 2, "data_path": str(actual_regression_command), "seed": 0, "stdout_only": omit_result}}]}
     store = ArtifactStore(run)
     store.approve(store.write(text=dumps(plan, "Manually authored test input; no Agent output is substituted.")))
     from app.bridge.execution_confirmation import execution_preview, save_confirmation
@@ -187,7 +187,7 @@ async def test_bridge_executes_manual_approved_plan_and_preserves_seed(
 async def test_managed_resume_reuses_only_intact_completed_measurements(tmp_path: Path, actual_regression_command: Path) -> None:
     root = tmp_path / 'managed'
     spec = JobSpec(run_id='managed', experiment_id='candidate', project='regression', run_root=root,
-                   seed=0, config={'scale': 2, 'data_path': str(actual_regression_command)})
+                   seed=0, config={'command_id': 'regression', 'scale': 2, 'data_path': str(actual_regression_command)})
     first = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
     second = await run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1))
     assert not first.failures and not second.failures
@@ -205,7 +205,7 @@ async def test_concurrent_duplicate_job_and_unknown_state_do_not_relaunch(tmp_pa
     import asyncio
     root = tmp_path / 'deduplicate'
     spec = JobSpec(run_id='deduplicate', experiment_id='candidate', project='regression', run_root=root,
-                   config={'scale': 2, 'data_path': str(actual_regression_command)})
+                   config={'command_id': 'regression', 'scale': 2, 'data_path': str(actual_regression_command)})
     outcomes = await asyncio.gather(*(run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1)) for _ in range(2)))
     assert any(not row.failures for row in outcomes)
     assert len(list((root / 'execution/local_commands/candidate').glob('*/job.json'))) == 1
@@ -308,7 +308,7 @@ async def test_interrupt_kills_real_worker_and_requires_explicit_new_attempt(tmp
     import asyncio
     import os
     root = tmp_path / 'interrupt'
-    config = {'scale': 2, 'data_path': str(actual_regression_command), 'delay': 30, 'confirmation_token': 'first'}
+    config = {'command_id': 'regression', 'scale': 2, 'data_path': str(actual_regression_command), 'delay': 30, 'confirmation_token': 'first'}
     spec = JobSpec(run_id='interrupt', experiment_id='candidate', project='regression', run_root=root, config=config)
     owner = asyncio.create_task(run_batch([spec], config=BatchConfig(max_concurrency=1, steps=1)))
     for _ in range(100):

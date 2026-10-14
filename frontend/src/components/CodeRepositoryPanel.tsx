@@ -7,11 +7,11 @@ import { CodeFileContent } from "./CodeFileContent";
 import { CodeChangeMarker, DirectoryChangeMarker, codeChangeColor } from "./CodeChangeMarker";
 import { directoryChangeSummaries, type DirectoryChangeSummary } from "@/lib/codeChangeMarkers";
 
-const statusLabel = (status: string): string => ({ applied: "已核对", not_applied: "未写入", proposed: "待应用", recorded: "待核对" }[status] || "待核对");
+const statusLabel = (item: CodeChange): string => item.status === "approved_history" && item.source === "approved_git_history" ? "已批准提交历史" : ({ applied: "已核对", not_applied: "未写入", proposed: "待应用", recorded: "待核对" }[item.status] || "待核对");
 const message = (error: unknown): string => error instanceof Error ? error.message : "读取失败，请重试";
 
-export function CodeRepositoryPanel({ runId, project, history, initialChange }: {
-  runId: string; project: string; history: CodeChange[]; initialChange?: CodeChange;
+export function CodeRepositoryPanel({ runId, project, history, initialChange, historical = false, currentMismatch = false }: {
+  runId: string; project: string; history: CodeChange[]; initialChange?: CodeChange; historical?: boolean; currentMismatch?: boolean;
 }): JSX.Element {
   const [selected, setSelected] = useState(initialChange?.path ?? "");
   const [changeId, setChangeId] = useState(initialChange?.id ?? "");
@@ -43,10 +43,11 @@ export function CodeRepositoryPanel({ runId, project, history, initialChange }: 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-mars-border bg-mars-panel/40 px-4 py-3">
         <span className="min-w-0 break-all font-mono text-xs">{selected || "选择代码文件"}</span>
         {selected ? <div className="flex items-center gap-3 text-xs">
-          {diskSelected ? <button type="button" aria-pressed={mode === "file"} onClick={() => setMode("file")} className={mode === "file" ? "text-indigo-300" : "text-slate-500"}>完整文件</button> : null}
+          {diskSelected ? <button type="button" aria-pressed={mode === "file"} onClick={() => setMode("file")} className={mode === "file" ? "text-indigo-300" : "text-slate-500"}>{historical ? "当前文件" : "完整文件"}</button> : null}
           {chosen ? <button type="button" aria-pressed={mode === "change"} onClick={() => setMode("change")} className={mode === "change" ? "text-indigo-300" : "text-slate-500"}>改动记录</button> : null}
         </div> : null}
-        {mode === "change" && chosen ? <div className="flex w-full flex-wrap items-center gap-3 text-xs"><span className={chosen.status === "applied" ? "text-emerald-300" : "text-amber-300"}>{statusLabel(chosen.status)}</span>{versions.length > 1 ? <select aria-label="改动记录版本" value={chosen.id} onChange={event => setChangeId(event.target.value)} className="max-w-full rounded border border-mars-border bg-mars-panel px-2 py-1">{versions.map((item, index) => <option key={item.id} value={item.id}>{index === 0 ? "最新记录" : "历史记录"} · {new Date(item.timestamp).toLocaleString()} · {statusLabel(item.status)}</option>)}</select> : null}</div> : null}
+        {mode === "change" && chosen ? <div className="flex w-full flex-wrap items-center gap-3 text-xs"><span className={chosen.status === "applied" ? "text-emerald-300" : chosen.source === "approved_git_history" ? "text-indigo-300" : "text-amber-300"}>{statusLabel(chosen)}</span>{versions.length > 1 ? <select aria-label="改动记录版本" value={chosen.id} onChange={event => setChangeId(event.target.value)} className="max-w-full rounded border border-mars-border bg-mars-panel px-2 py-1">{versions.map((item, index) => <option key={item.id} value={item.id}>{index === 0 ? "最新记录" : "历史记录"} · {item.timestamp ? new Date(item.timestamp).toLocaleString() : "提交记录"} · {statusLabel(item)}</option>)}</select> : null}</div> : null}
+        {historical ? <p role="status" className={`w-full text-xs ${currentMismatch ? "text-amber-300" : "text-slate-400"}`}>{mode === "change" ? `显示已批准提交的历史差异${currentMismatch ? "；当前工作目录已变化" : ""}。` : "文件浏览展示当前工作目录内容；已批准提交的历史内容请查看改动记录。"}</p> : null}
       </div>
       {mode === "change" && chosen ? <ChangeContent key={`${runId}:${chosen.id}`} runId={runId} project={project} item={chosen} /> : selected && root ? <CodeFileContent key={`${root.repository_token}:${selected}:${refresh}`} runId={runId} project={project} path={selected} token={root.repository_token} /> : <p className="p-6 text-sm text-slate-500">从右侧选择文件查看完整内容。</p>}
     </main>
@@ -59,7 +60,7 @@ export function CodeRepositoryPanel({ runId, project, history, initialChange }: 
         {!onlyChanges ? <>{error ? <p role="alert" className="break-words p-3 text-xs text-amber-300">{error}</p> : root ? <DirectoryBranch key={`${root.repository_token}:${refresh}`} runId={runId} project={project} path="" token={root.repository_token} depth={0} selected={selected} changes={latest} directoryChanges={directoryChanges} onSelect={selectFile} initial={root} /> : <p role="status" className="p-3 text-xs text-slate-500">正在读取目录…</p>}</> : null}
         {changes.length ? <div className={!onlyChanges ? "mt-3 border-t border-mars-border pt-3" : ""}>
           {!onlyChanges ? <p className="px-3 pb-2 text-xs text-slate-500">改动记录 · {changes.length}</p> : null}
-          {changes.map(item => <button key={item.path} type="button" onClick={() => selectChange(item)} aria-pressed={selected === item.path && mode === "change"} className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs ${selected === item.path && mode === "change" ? "bg-indigo-400/15 text-indigo-200" : "hover:bg-white/5"}`}><span className={`min-w-0 flex-1 break-all font-mono ${codeChangeColor(item.change)}`}>{item.path}</span><span className="shrink-0 text-slate-500">{statusLabel(item.status)}</span><CodeChangeMarker record={item} /></button>)}
+          {changes.map(item => <button key={item.path} type="button" onClick={() => selectChange(item)} aria-pressed={selected === item.path && mode === "change"} className={`flex w-full items-start gap-2 px-3 py-2 text-left text-xs ${selected === item.path && mode === "change" ? "bg-indigo-400/15 text-indigo-200" : "hover:bg-white/5"}`}><span className={`min-w-0 flex-1 break-all font-mono ${codeChangeColor(item.change)}`}>{item.path}</span><span className="shrink-0 text-slate-500">{statusLabel(item)}</span><CodeChangeMarker record={item} /></button>)}
         </div> : onlyChanges ? <p className="p-3 text-xs text-slate-500">暂无改动记录</p> : null}
       </nav>
     </aside>

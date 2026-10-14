@@ -7,10 +7,13 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
+
+import mistune
 
 from app.storage.run_store import RunHandle
 from app.harness.schema.frontmatter_parser import parse
-from app.harness.runtime.project_scope import safe_scope_path
+from app.harness.runtime.project_scope import safe_scope_path, forbidden_source_path
 
 
 def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
@@ -26,7 +29,6 @@ def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
         source_refs.append("execution/metrics.json")
 
     curves = _collect_curves(run, source_refs)
-    plots = _collect_plots(run, source_refs)
     evaluation = _read_json(run.subdir("events") / "evaluation_scorecard.json")
     if evaluation is not None:
         source_refs.append("events/evaluation_scorecard.json")
@@ -43,6 +45,7 @@ def collect_report_data_pack(run: RunHandle) -> dict[str, Any]:
         report_bytes = writing_source.read_bytes()
         report_markdown = parse(report_bytes.decode("utf-8")).body
         source_refs.append(_relative(run, writing_source))
+    plots = _collect_plots(run, source_refs, report_markdown)
 
     diagnostics = [
         {
@@ -218,24 +221,82 @@ def _collect_curves(run: RunHandle, source_refs: list[str]) -> list[dict[str, An
     return out
 
 
-def _collect_plots(run: RunHandle, source_refs: list[str]) -> list[dict[str, Any]]:
+def markdown_image_references(text: str) -> list[dict[str, str]]:
+    """Read actual inline/reference images, excluding Markdown code examples."""
+    tokens = mistune.create_markdown(renderer="ast", plugins=["table"])(text)
+    references: list[dict[str, str]] = []
+
+    def walk(items: list[Any]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            attrs = item.get('attrs', {})
+            if item.get('type') == 'image' and isinstance(attrs, dict) and isinstance(attrs.get('url'), str):
+                references.append({'url': attrs['url'], 'label': str(item.get('ref') or '')})
+            children = item.get('children')
+            if isinstance(children, list):
+                walk(children)
+
+    if isinstance(tokens, list):
+        walk(tokens)
+    return references
+
+
+def _report_image_path(run: RunHandle, reference: str) -> Path | None:
+    parts = urlsplit(reference)
+    if parts.scheme or parts.netloc:
+        return None  # External/data URLs are neither read nor downloaded.
+    name = unquote(parts.path)
+    roots = {'idea', 'experiment', 'coding', 'execution', 'writing'}
+    if name.startswith('../'):
+        name = name[3:]  # The approved report resides in writing/.
+        if name.split('/', 1)[0] not in roots:
+            raise ValueError('报告图片不属于此任务的研究产物')
+    elif name.startswith('./'):
+        name = name[2:]
+    if Path(name).is_absolute() or '..' in Path(name).parts:
+        raise ValueError('报告图片不能逃逸任务目录')
+    if name.split('/', 1)[0] not in roots:
+        name = 'writing/' + name
+    if forbidden_source_path(name):
+        raise ValueError('报告图片不能引用控制文件或凭据目录')
+    path = safe_scope_path(run.root, name, must_exist=True)
+    if (not path.is_file() or path.suffix.lower() not in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.pdf'}
+            or path.stat().st_size > 10 * 1024 * 1024):
+        raise ValueError('报告图片格式或大小不支持归档')
+    return path
+
+
+def _collect_plots(run: RunHandle, source_refs: list[str], report_markdown: str = '') -> list[dict[str, Any]]:
     plots_dir = run.subdir("execution") / "plots"
     out: list[dict[str, Any]] = []
     candidates = list(plots_dir.iterdir()) if plots_dir.exists() else []
     candidates.extend(run.subdir("execution").glob("*.png"))
+    report_refs: dict[str, list[str]] = {}
+    for reference in markdown_image_references(report_markdown):
+        path = _report_image_path(run, reference['url'])
+        if path is not None:
+            candidates.append(path)
+            report_refs.setdefault(_relative(run, path), []).append(reference['url'])
+    seen: set[str] = set()
     for path in _sorted_paths(candidates):
         if not path.is_file():
             continue
         if not path.resolve().is_relative_to(run.root.resolve()):
             continue
-        if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".svg", ".pdf"}:
+        if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".pdf"}:
             continue
-        source_refs.append(_relative(run, path))
+        source_ref = _relative(run, path)
+        if source_ref in seen:
+            continue
+        seen.add(source_ref)
+        source_refs.append(source_ref)
         out.append(
             {
-                "path": _relative(run, path),
+                "path": source_ref,
                 "kind": path.suffix.lower().lstrip("."),
                 "bytes": path.stat().st_size,
+                **({'report_references': list(dict.fromkeys(report_refs[source_ref]))} if source_ref in report_refs else {}),
             }
         )
     return out

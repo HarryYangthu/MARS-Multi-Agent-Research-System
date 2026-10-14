@@ -7,12 +7,15 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from app.harness.runtime.git_runtime import run_git
+from app.harness.runtime.git_runtime import git_helper_environment, resolve_git, run_git
 
 
 def _git_environment(environment: Mapping[str, str]) -> dict[str, str]:
     # Repository snapshots must not inherit config injection, signing, filters or hooks.
-    result = {key: value for key, value in environment.items() if not key.upper().startswith("GIT_")}
+    host = git_helper_environment(resolve_git(environment=environment), environment)
+    result = {key: value for key, value in host.items() if not key.upper().startswith("GIT_")}
+    if 'GIT_EXEC_PATH' in host:
+        result['GIT_EXEC_PATH'] = host['GIT_EXEC_PATH']
     result.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "GIT_ATTR_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"})
     return result

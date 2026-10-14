@@ -197,7 +197,7 @@ class ZCodeGateway:
                 # tool metadata and any private history required by the SDK.
                 response = await guarded_complete(WireProvider(self.request.provider, payload),
                     [Message("user", canonical(payload))], config,
-                    run_root=run_root(self.request), correlation=self.request.correlation)
+                    run_root=run_root(self.request), active_model_time=True, correlation=self.request.correlation)
                 result = response.raw["wire_response"]
                 counts["model_responses"] += 1
                 usage = result.get("usage")

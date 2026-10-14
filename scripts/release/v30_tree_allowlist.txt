@@ -337,6 +337,12 @@ backend/app/harness/tools/code_inspection.py
 backend/app/harness/tools/config.py
 backend/app/harness/tools/execution/__init__.py
 backend/app/harness/tools/execution/local_command.py
+backend/app/harness/tools/execution/command_preflight.py
+configs/execution_review.yaml
+frontend/src/components/ExecutionConfigurationReview.tsx
+frontend/src/lib/executionReview.ts
+backend/app/bridge/git_code_delivery.py
+backend/app/harness/reporting/execution_evidence.py
 backend/app/harness/tools/knowledge/__init__.py
 backend/app/harness/tools/mcp_adapters/__init__.py
 backend/app/harness/tools/process_runtime.py

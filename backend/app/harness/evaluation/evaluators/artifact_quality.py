@@ -34,10 +34,18 @@ _PROPOSAL_EVIDENCE_WARNING_IDS: frozenset[str] = frozenset(
     }
 )
 
+# This is a presence check, not a scientific assessment of the stated limits.
+# Keep equivalent Chinese reports subject to the same rubric as English reports.
+_LIMITATION_MARKERS: tuple[str, ...] = (
+    "limitation", "risk", "caveat", "failure", "constraint",
+    "局限", "风险", "约束", "失败", "限制条件",
+    "未验证", "未评估", "未覆盖", "不能外推", "无法外推", "不支持外推", "不宣称",
+)
+
 
 class ArtifactQualityEvaluator:
     id = "artifact_quality.rubric"
-    version = 1
+    version = 2
 
     def evaluate(self, target: EvaluationTarget) -> EvaluationReport:
         validation = validate_document(target.text, expected_schema=target.expected_schema)
@@ -81,7 +89,8 @@ class ArtifactQualityEvaluator:
                 recommended_actions=("Add a structured rubric before using this schema in benchmark scoring.",),
             )
 
-        scores = _score_for_schema(schema_id, metadata, parsed.body)
+        scores = (_score_report(metadata, parsed.body, required_chain=target.required_report_chain)
+                  if schema_id == 'report.v1' else _score_for_schema(schema_id, metadata, parsed.body))
         for dimension in rubric.dimensions:
             scores.setdefault(dimension.id, 0.0)
         overall = weighted_score(scores, rubric)
@@ -238,17 +247,21 @@ def _score_run_log(metadata: dict[str, Any], _body: str) -> dict[str, float]:
     }
 
 
-def _score_report(metadata: dict[str, Any], body: str) -> dict[str, float]:
+def _score_report(metadata: dict[str, Any], body: str, *, required_chain: tuple[str, ...] | None = None) -> dict[str, float]:
     chain = raw_mapping(metadata.get("chain_refs"))
-    chain_count = sum(1 for key in ("proposal", "plan", "code", "runs") if chain.get(key))
+    required = required_chain if required_chain is not None else ("proposal", "plan", "code", "runs")
+    if (not required or len(set(required)) != len(required)
+            or any(key not in {"proposal", "plan", "code", "runs"} for key in required)):
+        raise ValueError('invalid host report chain requirements')
+    chain_count = sum(1 for key in required if chain.get(key))
     lower_body = body.lower()
     return {
-        "claim_support": 1.0 if chain_count >= 3 else 0.65 if chain_count >= 2 else 0.35,
+        "claim_support": 1.0 if chain_count >= min(3, len(required)) else 0.65 if chain_count >= 2 else 0.35,
         "metric_accuracy": 1.0 if _mentions_metric(body) or chain.get("runs") else 0.45,
         "limitation_honesty": 1.0
-        if any(token in lower_body for token in ("limitation", "risk", "caveat", "failure", "constraint"))
+        if any(token in lower_body for token in _LIMITATION_MARKERS)
         else 0.45,
-        "chain_coverage": min(1.0, chain_count / 4.0),
+        "chain_coverage": chain_count / len(required),
         "audience_fit": 1.0 if metadata.get("target_audience") and metadata.get("deliverable_type") else 0.4,
     }
 

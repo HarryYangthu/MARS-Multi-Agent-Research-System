@@ -26,6 +26,8 @@ class EvaluationTarget:
     text: str
     expected_schema: str | None = None
     target_schema: str | None = None
+    # Supplied by the host's authoritative graph, never artifact frontmatter.
+    required_report_chain: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

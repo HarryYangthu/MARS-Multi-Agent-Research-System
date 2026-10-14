@@ -19,6 +19,11 @@ def verify_written_code(run: RunHandle, text: str) -> bool:
     validation = validate_document(text, expected_schema="code_spec.v1")
     if not validation.valid or validation.metadata.get("project") != run.project:
         raise ValueError("编码方案校验未通过或不属于当前项目，未批准。")
+    backend = validation.metadata.get('coding_backend')
+    if isinstance(backend, dict) and backend.get('type') == 'git_commit':
+        from app.bridge.git_code_delivery import verify_git_delivery
+        verify_git_delivery(run, validation.metadata)
+        return True
     rows: list[dict[str, Any]] = validation.metadata["files_changed"]
     declared = {row["path"]: row["type"] for row in rows}
     if len(declared) != len(rows):

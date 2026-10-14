@@ -519,8 +519,7 @@ def load_agent_handoff_context(
                 from app.bridge.idea_revision_context import failed_idea_revision_context
                 upstream.update(failed_idea_revision_context(run.root, run.project))
         upstream["human_revision_request"] = (
-            "Human reviewer rejected the current draft and requested a revised "
-            f"version. Feedback: {revision_reason}"
+            f"Revision requested for the current draft. Feedback: {revision_reason}"
         )
     if stage in {"coding", "execution"}:
         from app.bridge.repository_handoff import attach_repository_handoff
@@ -582,8 +581,10 @@ def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
         out["execution.loss_curves_16.png"] = (
             "# Actual execution plot\n"
             f"source: {curves_path.relative_to(run.root).as_posix()}\n"
-            "This PNG is the generated loss curve panel from the completed "
-            "Execution Agent batch. Cite it as visual evidence when discussing convergence."
+            "This PNG overlays the adapter-returned measurement records for each actual experiment. "
+            "The historical filename does not mean 16 channels. Read the genuine job CSV/history and metric "
+            "definition for units and optimizer-step positions; record index is not automatically epoch or "
+            "optimizer step. The PNG alone does not prove convergence."
         )
     from app.bridge.execution_evidence_handoff import execution_job_evidence
     out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project)
@@ -731,7 +732,7 @@ async def _run_execution_batch(
     fail closed. Publishes per-experiment WS events via the
     orchestrator's bus when provided.
     """
-    from app.execution.batch_runner import BatchConfig, run_batch
+    from app.execution.batch_runner import BatchConfig, batch_failure_message, run_batch
     from app.execution.curve_parser import write_curve
     from app.execution.metrics_collector import (
         write_metrics_json,
@@ -760,7 +761,10 @@ async def _run_execution_batch(
     batch_steps = prepared.batch_steps
     specs = prepared.specs
     for spec in specs:
-        spec.config["confirmation_token"] = confirmed["inputs_token"]
+        # An explicit retry renews the decision even when scientific inputs stay
+        # unchanged. Admission must use the exact decision whose checker passed.
+        spec.config["confirmation_token"] = confirmed["token"]
+        spec.config["confirmation_inputs_token"] = confirmed["inputs_token"]
 
     async def check_inputs() -> None:
         import asyncio
@@ -833,7 +837,8 @@ async def _run_execution_batch(
         plot_loss_curves(
             batch_plot_curves,
             run.subdir("execution") / "loss_curves_16.png",
-            title=f"{len(batch_plot_curves)}-experiment measured loss",
+            title=f"{len(batch_plot_curves)}-experiment reported measurements",
+            value_scale="native",
         )
     write_metrics_json(run_root=run.root, results=outcome.results)
 
@@ -841,6 +846,8 @@ async def _run_execution_batch(
     summary = {
         "experiments": [r.experiment_id for r in outcome.results],
         "failures": outcome.failures,
+        "failure_evidence": {r.experiment_id: r.evidence_refs for r in outcome.results
+                             if r.status != "completed" and r.evidence_refs},
         "max_concurrency": max_concurrency,
         "configured_max_concurrency": configured_max_concurrency,
         "attempt": attempt,
@@ -861,7 +868,7 @@ async def _run_execution_batch(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
     if outcome.failures or len(outcome.results) != len(specs):
-        raise RuntimeError("actual execution batch failed; inspect execution/batch_summary.json")
+        raise RuntimeError(batch_failure_message(outcome, len(specs)))
 
 
 def _representative_execution_spec() -> tuple[str, dict[str, Any]]:

@@ -30,11 +30,18 @@ class WritingAgent(BaseAgent):
             from app.harness.reporting.source_refs import report_source_catalogue
             context.upstream['admitted_report_sources'] = json.dumps(
                 report_source_catalogue(Path(str(request.extra['run_root']))), ensure_ascii=False)
+            from app.harness.reporting.execution_evidence import execution_job_evidence
+            context.upstream['execution.job_files'] = execution_job_evidence(
+                Path(str(request.extra['run_root'])), str(request.extra.get('run_id') or Path(str(request.extra['run_root'])).name),
+                request.project, admit_materials=True)
         return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
         errors = await super().validate_candidate(request, text, observations)
+        if not errors:
+            errors.extend(_review_metadata_errors(parse_frontmatter(text).metadata,
+                                                  debate_enabled=self._config.debate_enabled))
         if not errors and request.extra.get("run_root"):
             from app.harness.reporting.source_refs import report_source_errors
             errors.extend(report_source_errors(Path(str(request.extra["run_root"])), text))
@@ -69,6 +76,18 @@ class WritingAgent(BaseAgent):
             artifact.text = fm_dumps(artifact.metadata, artifact.body)
             return artifact
         return await self._draft_via_llm(request, context)
+
+
+def _review_metadata_errors(metadata: dict[str, Any], *, debate_enabled: bool) -> list[str]:
+    """Model-written review labels cannot create a debate that was disabled."""
+    if debate_enabled:
+        return []
+    summary = metadata.get('debate_summary', {})
+    claimed = isinstance(summary, dict) and (summary.get('rounds', 0) != 0 or bool(summary.get('reviewer_critiques')))
+    if claimed or metadata.get('debate_mode') or metadata.get('debate_transcript_ref'):
+        return ['debate_summary: this invocation has debate disabled; retries and revision feedback '
+                'cannot be presented as debate rounds or reviewer critiques']
+    return []
 
 
 def _turn_preview(text: str, *, limit: int = 240) -> str:

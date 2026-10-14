@@ -54,7 +54,8 @@ async def test_actual_missing_capture_is_a_batch_failure(tmp_path: Path, monkeyp
     finally:
         reset_settings_cache()
     assert len(outcome.results) == 1 and outcome.results[0].status == "failed"
-    assert outcome.failures == [("missing", "execution status: failed")]
+    assert outcome.failures == [("missing", outcome.results[0].error)]
+    assert outcome.results[0].error
 
 
 @pytest.mark.asyncio

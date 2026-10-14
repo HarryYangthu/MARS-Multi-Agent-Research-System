@@ -7,7 +7,7 @@ const proxyTimeoutMs = frontendPolicy?.server?.proxy_timeout_ms;
 if (!Number.isSafeInteger(proxyTimeoutMs) || proxyTimeoutMs <= 0) {
   throw new Error("configs/frontend.yaml must define a finite positive proxy timeout");
 }
-const policyFields = ["request_timeout_ms", "connection_test_timeout_ms", "control_refresh_ms", "activity_clock_ms", "readiness_refresh_ms", "max_contract_bytes"];
+const policyFields = ["request_timeout_ms", "execution_confirmation_timeout_ms", "connection_test_timeout_ms", "control_refresh_ms", "activity_clock_ms", "readiness_refresh_ms", "max_contract_bytes"];
 if (!clientPolicy || policyFields.some((key) => !Number.isSafeInteger(clientPolicy[key]) || clientPolicy[key] <= 0)) {
   throw new Error("configs/frontend.yaml must define a finite positive client policy");
 }

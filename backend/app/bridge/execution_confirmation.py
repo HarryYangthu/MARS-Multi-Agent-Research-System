@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 import uuid
@@ -27,6 +28,9 @@ def confirmation_policy() -> dict[str, Any]:
     raw: dict[str, Any] = yaml.safe_load((repo_root() / 'configs/execution_review.yaml').read_text())
     if raw.get('poll_interval_seconds', 0) <= 0 or raw.get('max_source_bytes', 0) < 1:
         raise ValueError('仿真配置核对策略无效')
+    timeout = raw.get('preflight_total_timeout_seconds', 45)
+    if type(timeout) not in {int, float} or not 0 < timeout <= 60:
+        raise ValueError('仿真配置运行前验证的总时限无效')
     return raw
 
 
@@ -181,6 +185,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     repository = str(branch.root) if branch is not None else ''
     defaults.update(repository=repository, branch=branch.branch if branch is not None else '')
     source_configs: list[dict[str, Any]] = []
+    validation_jobs: list[Any] = []
     code = run.root / 'coding/code_spec.approved.md'
     if code.is_file() and branch is not None:
         rows = parse(code.read_text()).metadata.get('files_changed', [])
@@ -274,13 +279,27 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         if prepared is not None:
             for item, spec in zip(experiments, prepared.specs, strict=True):
                 try:
-                    argv, required, timeout = _command(LocalCommandJob(run_id=run.run_id,
+                    job = LocalCommandJob(run_id=run.run_id,
                         experiment_id=spec.experiment_id, project=run.project, run_root=run.root,
-                        command_id=str(spec.config.get('command_id') or '')), 'execution.simulation_runner')
+                        config=spec.config, seed=spec.seed, steps=prepared.batch_steps,
+                        command_id=str(spec.config.get('command_id') or ''))
+                    argv, required, timeout = _command(job, 'execution.simulation_runner')
                     if not shutil.which(argv[0]):
                         raise ValueError('启动命令的解释器不可执行')
+                    from app.harness.tools.execution.local_command import _registered_command, command_request
+                    from app.harness.tools.execution.command_preflight import validation_configuration
+                    registered = _registered_command(job)
+                    required_validation = validation_configuration(registered) is not None
                     item['effective'] = {'command_id': spec.config.get('command_id'),
-                                         'required_metrics': list(required), 'timeout_seconds': timeout}
+                        'required_metrics': list(required), 'timeout_seconds': timeout,
+                        'validation_configured': required_validation}
+                    validation_jobs.append(job)
+                    if not required_validation:
+                        warnings.append(f'{spec.experiment_id}：登记命令尚未配置运行前验证；配置确认不代表已验证可运行。')
+                    bound_request = command_request(job, 'preview', run.root)
+                    if bound_request.get('data_binding'):
+                        item['effective']['data_path'] = bound_request['data_binding']['path']
+                        item['effective']['data_binding_sha256'] = bound_request['data_binding']['binding_sha256']
                     ref = spec.config.get('config_path') or spec.config.get('cfg')
                     if isinstance(ref, str) and ref and branch is not None:
                         from app.bridge.repository_handoff import repository_data_configuration
@@ -292,7 +311,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                             data_path = Path(raw_path).expanduser()
                             if not data_path.is_absolute():
                                 data_path = branch.root / data_path
-                            item['effective'].update(data_path=str(data_path.resolve()),
+                            item['effective'].update(data_path=str(bound_request.get('data_binding', {}).get('path') or data_path.resolve()),
                                 config_path=data_source['config_path'], config_sha256=data_source['config_sha256'])
                             files['job_config:' + spec.experiment_id] = data_source['config_sha256']
                     for index, arg in enumerate(argv):
@@ -365,10 +384,19 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     files['data:' + spec.experiment_id] = digest([str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ino])
                 else:
                     blockers.append(f'{spec.experiment_id} 的数据路径不可访问。')
-    inputs_token = digest({'run': run.run_id, 'project': run.project, 'node': node_key, 'files': files,
+    base_inputs_token = digest({'run': run.run_id, 'project': run.project, 'node': node_key, 'files': files,
         'runtime': settings.mars_execution_backend, 'config': config, 'defaults': defaults,
         'experiments': experiments, 'policy': ledger['configuration_sha256'], 'environment': environment_hash})
+    from app.harness.tools.execution.command_preflight import known_input_changes
+    input_changes = [{'name': job.experiment_id, 'files': changes} for job in validation_jobs
+                     if (changes := known_input_changes(job, base_inputs_token))]
+    inputs_token = digest([base_inputs_token, input_changes]) if input_changes else base_inputs_token
     token = _confirmation_token(run, node_key, inputs_token)
+    from app.harness.tools.execution.command_preflight import preflight_state
+    validation_states = [{'name': job.experiment_id, **preflight_state(job, token)} for job in validation_jobs]
+    for state in validation_states:
+        if state['status'] in {'failed', 'stale'}:
+            warnings.append(f"{state['name']}：运行前验证失败：{state['error']}")
     path = _receipt_path(run, token)
     confirmed = False
     if path.exists():
@@ -378,12 +406,19 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
             and receipt.get('token') == token and receipt.get('actor') in {'user', 'auto_approve', 'commander'})
         if not confirmed:
             raise ValueError('仿真配置确认记录无法校验')
+        saved_validation = receipt.get('validation', [])
+        expected_validation = {state['name']: state.get('receipt_sha256') for state in validation_states if state['configured']}
+        actual_validation = {state.get('name'): state.get('receipt_sha256') for state in saved_validation if isinstance(state, dict)}
+        if (any(state['configured'] and state['status'] != 'passed' for state in validation_states)
+                or expected_validation and expected_validation != actual_validation):
+            confirmed = False
     from app.execution.job_journal import job_states
     return {'jobs': job_states(run.root), 'runtime_mode': 'deterministic', 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
         'inputs_token': inputs_token,
+        'base_inputs_token': base_inputs_token, 'validated_input_changes': input_changes,
         'confirmed': confirmed, 'defaults': defaults, 'experiments': _public_config(experiments),
         'source_configs': source_configs, 'blockers': list(dict.fromkeys(blockers)),
-        'warnings': warnings, 'budget': budget_view}
+        'warnings': warnings, 'budget': budget_view, 'validation': _public_config(validation_states)}
 
 
 def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str = 'user') -> dict[str, Any]:
@@ -396,10 +431,28 @@ def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str =
         if view['blockers']:
             raise ValueError('；'.join(view['blockers']))
         if not view['confirmed']:
+            if get_settings().mars_execution_backend == 'local_command':
+                from app.harness.tools.execution.local_command import LocalCommandJob
+                from app.harness.tools.execution.command_preflight import run_command_preflight
+                prepared = prepare_execution(run, node_key)
+                deadline = time.monotonic() + float(confirmation_policy().get('preflight_total_timeout_seconds', 45))
+                for spec in prepared.specs:
+                    job = LocalCommandJob(run_id=run.run_id, experiment_id=spec.experiment_id,
+                        project=run.project, run_root=run.root, config=spec.config, seed=spec.seed,
+                        steps=prepared.batch_steps, command_id=str(spec.config.get('command_id') or ''))
+                    state = run_command_preflight(job, token, timeout_budget=deadline - time.monotonic(),
+                                                  source_token=view['base_inputs_token'])
+                    if state['status'] == 'failed':
+                        raise ValueError(f"{spec.experiment_id}：运行前验证失败，尚未确认或启动仿真：{state['error']}")
+                refreshed = execution_preview(run, node_key)
+                if refreshed['token'] != token or refreshed['blockers']:
+                    raise ValueError('验证期间配置或代码已变化，尚未确认或启动仿真。')
+                view = refreshed
             atomic_write_json(_receipt_path(run, token), {'schema': 'execution.confirmation',
                 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
                 'actor': actor, 'confirmed_at': datetime.now(timezone.utc).isoformat(),
-                'defaults': view['defaults'], 'experiment_names': [item['name'] for item in view['experiments']]})
+                'defaults': view['defaults'], 'experiment_names': [item['name'] for item in view['experiments']],
+                'validation': view['validation']})
         return {**view, 'confirmed': True, 'created': not view['confirmed']}
 
 

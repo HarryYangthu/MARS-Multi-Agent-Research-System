@@ -10,13 +10,13 @@ from xml.etree import ElementTree
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yaml
 from loguru import logger
 
 from app.harness.schema.frontmatter_parser import parse
-from app.reporting.data_pack import collect_report_data_pack
+from app.reporting.data_pack import collect_report_data_pack, markdown_image_references
 from app.reporting.generators import (
     pretty_json,
     write_research_deck,
@@ -154,6 +154,8 @@ def _save_images(run: RunHandle, folder: Path, pack: dict[str, Any]) -> list[dic
         target.write_bytes(data)
         item = _completed_deliverable(run, "image", target)
         item["source_path"] = source_ref
+        if plot.get('report_references'):
+            item['report_references'] = plot['report_references']
         images.append(item)
         plot["source_path"], plot["path"] = source_ref, item["path"]
     return images
@@ -165,16 +167,38 @@ def portable_image_links(text: str, images: list[dict[str, Any]]) -> str:
     for item in images:
         source = str(item['source_path'])
         target = quote('images/' + Path(item['path']).name)
-        for ref in (source, './' + source, '../' + source):
+        for ref in (source, './' + source, '../' + source, *item.get('report_references', [])):
             links[ref] = target
+            links[unquote(ref)] = target
             links[quote(ref)] = target
-    pattern = re.compile(r'(!\[[^\]\n]*\]\()[ \t]*(<[^>\n]+>|[^\s)]+)([ \t]+(?:"[^"\n]*"|\x27[^\x27\n]*\x27))?[ \t]*\)')
+    pattern = re.compile(r'((?<!\\)!\[[^\]\n]*\]\()[ \t]*(<[^>\n]+>|[^\s)]+)([ \t]+(?:"[^"\n]*"|\x27[^\x27\n]*\x27))?[ \t]*\)')
+    labels = {' '.join(item['label'].split()).casefold() for item in markdown_image_references(text) if item['label']}
+    definition = re.compile(r'(^ {0,3}\[([^\]\n]+)\]:[ \t]*)(<[^>\n]+>|[^\s]+)')
 
     def relink(match: re.Match[str]) -> str:
         ref = match.group(2)
         ref = ref[1:-1] if ref.startswith('<') else ref
         target = links.get(ref)
         return match.group(1) + target + (match.group(3) or '') + ')' if target else match.group(0)
+
+    def relink_definition(match: re.Match[str]) -> str:
+        ref = match.group(3)
+        ref = ref[1:-1] if ref.startswith('<') else ref
+        target = links.get(ref)
+        if target and ' '.join(match.group(2).split()).casefold() in labels:
+            return match.group(1) + target
+        return match.group(0)
+
+    def rewrite_line(line: str) -> str:
+        # Inline code is preserved just like fenced code; it is not an image.
+        pieces: list[str] = []
+        cursor = 0
+        for code in re.finditer(r'(`+)(?!`)(.*?)(?<!`)\1(?!`)', line):
+            pieces.append(pattern.sub(relink, line[cursor:code.start()]))
+            pieces.append(code.group(0))
+            cursor = code.end()
+        pieces.append(pattern.sub(relink, line[cursor:]))
+        return definition.sub(relink_definition, ''.join(pieces))
 
     lines: list[str] = []
     fence = ''
@@ -187,7 +211,7 @@ def portable_image_links(text: str, images: list[dict[str, Any]]) -> str:
                 fence = ''
             lines.append(line)
         else:
-            lines.append(line if fence else pattern.sub(relink, line))
+            lines.append(line if fence else rewrite_line(line))
     return ''.join(lines)
 
 

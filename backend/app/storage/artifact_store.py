@@ -326,6 +326,7 @@ class ArtifactStore:
                 stem=ref.stem,
                 version=ref.version,
                 expected_schema=expected_schema,
+                required_report_chain=self._required_report_chain() if expected_schema == 'report.v1' else None,
             )
         except Exception as exc:  # pragma: no cover - eval must not block artifact writes
             logger.warning(
@@ -335,6 +336,28 @@ class ArtifactStore:
                 exc,
             )
             return []
+
+    def _required_report_chain(self) -> tuple[str, ...] | None:
+        from app.harness.runtime.state_journal import StateJournal
+        from app.harness.runtime.run_graph import RunGraph
+        from app.harness.runtime.state_machine import NodeState
+        authority = StateJournal.from_authority(self.run.root, run_id=self.run.run_id)
+        if authority is None:
+            return None  # Unknown/legacy state does not prove that any stage was skipped.
+        saved = authority.read()
+        if saved.get('project') != self.run.project or saved.get('run_id') != self.run.run_id:
+            raise ValueError('report evaluation graph belongs to another run/project')
+        graph = RunGraph.from_dict(saved['graph'])
+        stages = {'idea': 'proposal', 'experiment': 'plan', 'coding': 'code', 'execution': 'runs'}
+        required: list[str] = []
+        for stage, chain in stages.items():
+            nodes = [node for node in graph.nodes.values()
+                     if node.metadata.get('stage', node.key) == stage]
+            # Exclude only an explicit host SKIPPED; missing graph stages remain
+            # conservative requirements and cannot masquerade as skipped work.
+            if not nodes or any(node.state != NodeState.SKIPPED for node in nodes):
+                required.append(chain)
+        return tuple(required) or None
 
 
 def _version_sort_key(v: str) -> int:
