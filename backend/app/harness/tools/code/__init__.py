@@ -384,18 +384,19 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
             )
         from app.harness.tools.check_interpreter import check_argv
         argv = check_argv(command.argv)
-        from app.harness.tools.git_branch import current_git_branch
-        check_environment = None
-        if current_git_branch(ctx.project, ctx.run_id) is not None:
-            from app.harness.runtime.git_runtime import git_child_environment
-            check_environment = git_child_environment()
+        from app.harness.tools.code.check_environment import check_environment
+        try:
+            environment = check_environment(ctx, root, project_binding=command.project_binding)
+        except (OSError, ValueError) as exc:
+            return ToolResult(ok=False, error=f'{command.id} input binding failed: {exc}',
+                              output={'executed': False})
         process = await start_process(
             argv,
             backend=tool_config(tool_name).process_backend,
             require_isolation=tool_config(tool_name).require_isolation,
             cwd=str(root),
-            env=check_environment,
-            replace_environment=check_environment is not None,
+            env=environment,
+            replace_environment=True,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

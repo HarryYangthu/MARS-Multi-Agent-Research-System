@@ -14,7 +14,7 @@ def execution_delivery_context() -> dict[str, Any]:
     backend = get_settings().mars_execution_backend
     policy = load_execution_config()['execution']
     rows = policy.get('local_commands', [])
-    commands = [{key: row[key] for key in ('id', 'argv', 'required_metrics', 'project_ids',
+    commands = [{key: row[key] for key in ('id', 'label', 'argv', 'required_metrics', 'project_ids',
                 'entrypoints', 'config_paths', 'consumes_data_path', 'validation') if key in row}
                 for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
     from app.harness.tools.execution.local_command import local_command_protocol

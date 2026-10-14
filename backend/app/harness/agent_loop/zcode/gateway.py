@@ -14,6 +14,7 @@ from app.harness.agent_loop.executor import LoopInput
 from app.harness.agent_loop.native_protocol import native_specs, wire_name
 from app.harness.agent_loop.trace import LoopTrace, canonical, atomic_json
 from app.harness.agent_loop.zcode.config import ZCodeConfig
+from app.harness.agent_loop.zcode.limits import invocation_limits
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.provider_base import Completion, Delta, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import dumps
@@ -101,6 +102,7 @@ class ZCodeGateway:
     def __init__(self, request: LoopInput, config: ZCodeConfig, token: str,
                  state: dict[str, Any], trace: LoopTrace) -> None:
         self.request, self.config, self.token = request, config, token
+        self.limits = invocation_limits(config, request.policy)
         self.state, self.trace = state, trace
         self.tools = wire_tools(request)
         self.names = {wire_name(name): name for name in request.tools}
@@ -171,8 +173,7 @@ class ZCodeGateway:
             counts = self.state["counts"]
             if self.state["status"] != "running":
                 raise web.HTTPConflict(text="MARS invocation stopped")
-            if (counts["model_requests"] >= self.config.max_model_calls
-                    or not self.request.policy.allows_model_calls(counts["model_requests"])):
+            if not self.limits.allows_model_call(counts["model_requests"]):
                 self.stop("budget_exhausted", "ZCode model-call limit reached")
                 raise web.HTTPTooManyRequests(text="MARS model budget exhausted")
             tools = payload.get("tools", [])
@@ -273,7 +274,7 @@ class ZCodeGateway:
             self.trace.emit("validation", {"errors": errors}, visible=candidate)
             if errors:
                 self.state["counts"]["validation_repairs"] += 1
-                if self.state["counts"]["validation_repairs"] > self.config.max_validation_repairs:
+                if not self.limits.allows_validation_repairs(self.state["counts"]["validation_repairs"]):
                     self.stop("validation_failed", "Candidate did not pass MARS validation")
                 self.save()
                 return mcp_result({"accepted": False, "errors": errors}, error=True)
@@ -286,8 +287,7 @@ class ZCodeGateway:
         if tool is None:
             return mcp_result({"error": "Tool is outside MARS allowlist"}, error=True)
         counts = self.state["counts"]
-        if (counts["tool_dispatches"] >= self.config.max_tool_calls
-                or not self.request.policy.allows_tool_calls(counts["tool_dispatches"])):
+        if not self.limits.allows_tool_call(counts["tool_dispatches"]):
             self.stop("budget_exhausted", "ZCode tool-call limit reached")
             return mcp_result({"error": "MARS tool budget exhausted"}, error=True)
         self.state["pending"] = "tool"

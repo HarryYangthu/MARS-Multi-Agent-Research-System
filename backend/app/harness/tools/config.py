@@ -40,6 +40,7 @@ class CommandSpec:
     id: str
     label: str
     argv: tuple[str, ...]
+    project_binding: str = 'test'
 
 
 def load_tool_configs() -> dict[str, ToolConfig]:
@@ -126,6 +127,7 @@ def check_commands(kind: str) -> tuple[CommandSpec, ...]:
                 id=str(item.get("id") or f"{kind}_{i + 1}"),
                 label=str(item.get("label") or item.get("id") or f"{kind} {i + 1}"),
                 argv=tuple(argv_raw),
+                project_binding=str(item.get('project_binding', 'test')),
             )
         )
     return tuple(out)

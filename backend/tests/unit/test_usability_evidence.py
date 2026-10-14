@@ -49,7 +49,7 @@ def test_coding_receives_the_actual_registered_command_contract(tmp_path: Path, 
     try:
         context = execution_delivery_context()
         assert context['backend'] == 'local_command'
-        assert context['local_commands'] == [{key: registered[key] for key in ('id', 'argv', 'required_metrics')}]
+        assert context['local_commands'] == [{key: registered[key] for key in ('id', 'label', 'argv', 'required_metrics')}]
         assert 'command_id' in context['instruction'] and 'MARS_RESULT_PATH' in context['instruction']
         protocol = context['protocol']
         assert protocol['result_schema'] == _RESULT_SCHEMA

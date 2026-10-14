@@ -1,6 +1,7 @@
 """Pure classification plus optional real archived provider failure evidence."""
 from pathlib import Path
 from typing import Any
+import json
 import os
 
 import pytest
@@ -79,3 +80,26 @@ def test_actual_archived_quota_error_is_explained_without_a_new_api_call() -> No
     if not configured:
         pytest.skip('requires actual native provider failure receipts')
     assert '1113' in checkpoint_failure_hint(Path(configured), status='model_error')
+
+
+def test_model_limit_hint_reads_only_verified_terminal_counts(tmp_path: Path) -> None:
+    checkpoint = tmp_path / 'checkpoint.json'
+    state = {'status': 'budget_exhausted', 'error': 'ZCode model-call limit reached',
+             'counts': {'model_requests': 24}, 'history': 'private prompt'}
+    checkpoint.write_text(json.dumps(state), encoding='utf-8')
+    before = checkpoint.read_bytes()
+    hint = checkpoint_failure_hint(tmp_path, status='budget_exhausted')
+    assert '24 次' in hint and '交付内容尚未通过验收' in hint
+    assert '此状态不代表仿真已运行' in hint and 'private prompt' not in hint
+    assert checkpoint.read_bytes() == before
+    assert checkpoint_failure_hint(tmp_path, status='passed') == ''
+    state['error'] = 'private unknown reason'
+    checkpoint.write_text(json.dumps(state), encoding='utf-8')
+    assert checkpoint_failure_hint(tmp_path, status='budget_exhausted') == ''
+
+
+@pytest.mark.parametrize('counts', [None, {}, {'model_requests': True}, {'model_requests': -1}])
+def test_model_limit_hint_never_invents_missing_or_invalid_counts(tmp_path: Path, counts: Any) -> None:
+    (tmp_path / 'checkpoint.json').write_text(json.dumps({
+        'status': 'budget_exhausted', 'error': 'ZCode model-call limit reached', 'counts': counts}))
+    assert checkpoint_failure_hint(tmp_path, status='budget_exhausted') == ''

@@ -54,7 +54,29 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
     return ''
 
 
+def _model_call_limit_hint(root: Path) -> str:
+    path = root / 'checkpoint.json'
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            return ''
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return ''
+    if (not isinstance(state, dict) or state.get('status') != 'budget_exhausted'
+            or state.get('error') != 'ZCode model-call limit reached'):
+        return ''
+    counts = state.get('counts')
+    used = counts.get('model_requests') if isinstance(counts, dict) else None
+    if type(used) is not int or used <= 0:
+        return ''
+    return (f'本轮已到模型调用次数上限（{used} 次），交付内容尚未通过验收。'
+            '已有工作、检查结果和累计调用记录已保留；核对未通过项后可在原任务重试。'
+            '此状态不代表仿真已运行或仿真代码运行失败。')
+
+
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:
+    if status == 'budget_exhausted':
+        return _model_call_limit_hint(root)
     if status not in {'model_error', 'protocol_exhausted'}:
         return ''
     path = root / 'events.jsonl'
