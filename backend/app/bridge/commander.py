@@ -71,6 +71,10 @@ class Commander:
         self.orchestrator = orchestrator
         self.run_store = run_store or orchestrator.run_store
         self._provider, self._llm_config = select_provider(agent_config) if agent_config else self._resolve_provider()
+        # Commander decisions are JSON, unlike agents' Markdown documents.
+        # Request the provider's structured format as well as validating it;
+        # prompt-only output can append invented observations after an action.
+        self._llm_config = replace(self._llm_config, json_mode=True)
         self.max_react_steps = _react_step_limit(agent_config.raw) if agent_config else self._resolve_max_react_steps()
 
     def _resolve_provider(self) -> tuple[LLMProvider, LLMConfig]:

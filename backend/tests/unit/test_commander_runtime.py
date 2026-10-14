@@ -33,6 +33,15 @@ def test_commander_accepts_explicit_real_config_without_constructing_a_fake_prov
     commander = Commander(orchestrator=Orchestrator(run_store=RunStore(tmp_path)), agent_config=config)
     assert commander.max_react_steps == 6
     assert commander._llm_config.provider == "local_vllm"
+    assert commander._llm_config.json_mode is True
+    from app.harness.llm.openai_provider import _OpenAICompatProvider
+    from app.harness.llm.provider_base import Message
+    assert isinstance(commander._provider, _OpenAICompatProvider)
+    request = commander._provider._request_kwargs(
+        [Message("user", "Return a JSON decision.")], commander._llm_config,
+    )
+    assert request["response_format"] == {"type": "json_object"}
+    assert commander._provider._client is None
     # Construction is not a successful connection or completed Commander loop.
 
 
@@ -64,5 +73,6 @@ def test_missing_commander_config_keeps_default_step_limit(
         commander = Commander(orchestrator=Orchestrator(run_store=RunStore(tmp_path / "runs")))
         assert commander.max_react_steps == DEFAULT_MAX_REACT_STEPS
         assert commander._llm_config.model == "unavailable-local-model"
+        assert commander._llm_config.json_mode is True
     finally:
         model_registry.reset_cache_for_tests()
