@@ -19,7 +19,7 @@ import tempfile
 from typing import Any
 import uuid
 
-from jsonschema import validate
+from jsonschema import ValidationError, validate
 
 from app.harness.persistence import atomic_write_json, atomic_write_text
 from app.harness.tools.config import load_execution_config, tool_config
@@ -64,6 +64,7 @@ _RESULT_SCHEMA: dict[str, Any] = {
         "evidence_paths": {"type": "array", "minItems": 1, "maxItems": 32,
                            "uniqueItems": True, "items": {"type": "string", "minLength": 1}},
         "loss_curve": {"type": "array", "items": {"type": "number"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
     },
 }
 
@@ -85,7 +86,8 @@ def local_command_protocol() -> dict[str, Any]:
             'MARS_RESULT_PATH 是结果文件路径；成功结果严格符合上述 schema，三个标识原样复制请求。'
             'metrics 仅放真实有限数值，布尔门控转换为 0/1。evidence_paths 是相对 request.output_dir '
             '的实际证据路径，不得使用控制文件、绝对路径或路径逃逸。附加说明保存到独立证据 JSON，'
-            '不能塞入受 schema 限定的结果顶层。失败应返回非零退出码，不补造 completed 结果。'
+            'warnings 可选且必须为字符串数组；其他附加字段不能塞入结果顶层。'
+            '失败应返回非零退出码，不补造 completed 结果。'
         ),
     }
 
@@ -274,7 +276,13 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
     if not path.is_file() or path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
         raise ValueError("command did not create a bounded result.json in its attempt directory")
     raw = json.loads(path.read_text(encoding="utf-8"))
-    validate(instance=raw, schema=_RESULT_SCHEMA)
+    try:
+        validate(instance=raw, schema=_RESULT_SCHEMA)
+    except ValidationError as exc:
+        from app.harness.tools.execution.command_preflight import bounded_error
+        location = '.'.join(str(part) for part in exc.absolute_path) or '$'
+        raise ValueError('result.json schema validation failed at ' + location + ': '
+                         + bounded_error(exc.message)) from exc
     for key in ("invocation_id", "run_id", "experiment_id"):
         if raw[key] != request[key]:
             raise ValueError("local_command result belongs to a different " + key)
@@ -300,6 +308,108 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
         artifacts.append({"kind": "measurement_evidence", "path": str(source), "sha256": _file_hash(source),
                           "bytes": source.stat().st_size})
     return metrics, curve, artifacts
+
+
+def _scientific_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Only delivery IDs and explicit retry decisions are administrative."""
+    result = {key: value for key, value in request.items() if key not in {'invocation_id', 'output_dir'}}
+    config = result.get('config')
+    if not isinstance(config, dict):
+        raise ValueError('local command request has no scientific configuration')
+    result['config'] = {key: value for key, value in config.items()
+                        if key not in {'attempt', 'confirmation_token', 'confirmation_inputs_token'}}
+    return result
+
+
+def _command_files(argv: tuple[str, ...]) -> list[dict[str, str]]:
+    files = []
+    for index, argument in enumerate(argv):
+        resolved = shutil.which(argument) if index == 0 else argument
+        if resolved is not None and Path(resolved).is_file():
+            source = Path(resolved).resolve()
+            files.append({'path': str(source), 'sha256': _file_hash(source)})
+    return files
+
+
+def _recover_zero_exit_result(job: LocalCommandJob, request: dict[str, Any], argv: tuple[str, ...],
+                              required: tuple[str, ...], command_files: list[dict[str, str]],
+                              preflight: dict[str, Any], directory: Path) -> LocalCommandResult | None:
+    """Re-admit genuine completed output rejected by an older host contract.
+
+    Never edit the failed attempt or claim a new process ran. A same-input zero
+    exit attempt with altered or invalid evidence blocks automatic retraining.
+    """
+    from app.harness.tools.execution.command_preflight import preflight_state
+    if preflight.get('status') != 'passed' or not preflight.get('input_files'):
+        return None
+    root = job.run_root.resolve()
+    expected = _scientific_request(request)
+    for receipt_path in sorted(directory.glob('*/execution_receipt.json'),
+                               key=lambda path: path.stat().st_mtime, reverse=True):
+        if receipt_path.is_symlink() or receipt_path.parent.is_symlink():
+            raise ValueError('existing execution receipt cannot be symbolic; original output was not rerun')
+        if not receipt_path.resolve().is_relative_to(root) or receipt_path.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError('existing execution receipt is outside its bounded run; original output was not rerun')
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        if (receipt.get('schema') != 'local_command_receipt.v1' or receipt.get('status') != 'failed'
+                or receipt.get('returncode') != 0 or receipt.get('run_id') != job.run_id
+                or receipt.get('experiment_id') != job.experiment_id):
+            continue
+        old_request_path = receipt_path.with_name('job.json')
+        old_result_path = receipt_path.with_name('result.json')
+        for path in (old_request_path, old_result_path):
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError('zero-exit attempt request/result is unavailable; original output was not rerun')
+        old_request = json.loads(old_request_path.read_text(encoding='utf-8'))
+        for path, field in ((old_request_path, 'request_sha256'), (old_result_path, 'result_sha256')):
+            if _file_hash(path) != receipt.get(field):
+                raise ValueError('zero-exit attempt request/result changed; original output was not rerun')
+        if _scientific_request(old_request) != expected:
+            continue
+        if (receipt.get('invocation_id') != old_request.get('invocation_id')
+                or old_request.get('output_dir') != str(receipt_path.parent)
+                or receipt.get('argv') != list(argv) or receipt.get('command_files') != command_files):
+            raise ValueError('zero-exit attempt command binding changed; original output was not rerun')
+        raw_result = json.loads(old_result_path.read_text(encoding='utf-8'))
+        if raw_result.get('status') != 'completed':
+            raise ValueError('zero-exit attempt has no completed result; original output was not rerun')
+        old_token = old_request['config'].get('confirmation_token')
+        if not isinstance(old_token, str) or not old_token:
+            raise ValueError('zero-exit attempt has no approved validation binding; original output was not rerun')
+        previous_job = LocalCommandJob(run_id=job.run_id, experiment_id=job.experiment_id, project=job.project,
+            run_root=job.run_root, config=old_request['config'], seed=old_request.get('seed'),
+            steps=old_request['steps'], command_id=job.command_id)
+        old_preflight = preflight_state(previous_job, old_token)
+        current_inputs = {row['path']: (row['sha256'], row['bytes']) for row in preflight['input_files']}
+        previous_inputs = {row['path']: (row['sha256'], row['bytes']) for row in old_preflight.get('input_files', [])}
+        if old_preflight.get('status') != 'passed' or current_inputs != previous_inputs:
+            raise ValueError('zero-exit attempt validated inputs changed; original output was not rerun')
+        metrics, curve, evidence = _read_result(old_result_path, old_request, required)
+        source_evidence = [
+            {'kind': kind, 'path': str(path), 'sha256': _file_hash(path), 'bytes': path.stat().st_size}
+            for kind, path in (('original_execution_receipt', receipt_path),
+                               ('local_command_request', old_request_path), ('local_command_result', old_result_path))
+        ]
+        duration = float(receipt['duration_seconds'])
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError('zero-exit attempt duration is invalid; original output was not rerun')
+        recovered_dir = directory / uuid.uuid4().hex
+        recovered_dir.mkdir(parents=True, exist_ok=False)
+        recovered_path = recovered_dir / 'execution_receipt.json'
+        atomic_write_json(recovered_path, {**receipt, 'status': 'completed', 'error': '',
+            'evidence': [*evidence, *source_evidence], 'recovery': {
+                'schema': 'local_command_result_recovery.v1', 'training_rerun': False,
+                'source_receipt_path': str(receipt_path), 'source_receipt_sha256': _file_hash(receipt_path),
+                'source_request_path': str(old_request_path), 'source_result_path': str(old_result_path),
+                'original_validation_receipt_path': old_preflight['receipt_path'],
+                'original_validation_receipt_sha256': old_preflight['receipt_sha256'],
+                'current_validation_receipt_path': preflight['receipt_path'],
+                'current_validation_receipt_sha256': preflight['receipt_sha256'],
+            }})
+        return LocalCommandResult(status='completed', duration_seconds=duration, metrics=metrics, loss_curve=curve,
+            fingerprint_hash=_file_hash(recovered_path), artifacts=[
+                {'kind': 'local_command_receipt', 'path': str(recovered_path)}, *source_evidence, *evidence])
+    return None
 
 
 def _process_output_limits() -> tuple[int, int]:
@@ -368,18 +478,17 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
     invocation_id = uuid.uuid4().hex
     safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in job.experiment_id) or "experiment"
     output_dir = job.run_root.resolve() / "execution/local_commands" / safe_name / invocation_id
-    output_dir.mkdir(parents=True, exist_ok=False)
     request_path = output_dir / "job.json"
     result_path = output_dir / "result.json"
     request = command_request(job, invocation_id, output_dir)
+    command_files = _command_files(argv)
+    recovered = await asyncio.to_thread(_recover_zero_exit_result, job, request, argv, required,
+                                        command_files, preflight, output_dir.parent)
+    if recovered is not None:
+        return recovered
+    output_dir.mkdir(parents=True, exist_ok=False)
     atomic_write_json(request_path, request)
     request_sha256 = _file_hash(request_path)
-    command_files = []
-    for index, argument in enumerate(argv):
-        resolved = shutil.which(argument) if index == 0 else argument
-        if resolved is not None and Path(resolved).is_file():
-            source = Path(resolved).resolve()
-            command_files.append({"path": str(source), "sha256": _file_hash(source)})
     started = time.monotonic()
     code: int | None = None
     metrics: dict[str, float] = {}

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 from typing import Any
@@ -181,6 +182,135 @@ def test_each_input_still_checks_hash_scope_symlinks_and_control_paths(
     for path in [link, *forbidden]:
         with pytest.raises(ValueError, match='absolute regular file|control/credential files'):
             _verified_inputs(job, inputs(data, path), deadline=time.monotonic() + 2, max_bytes=4096)
+
+
+def _actual_legacy_zero_exit(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], tmp_path: Path,
+) -> tuple[LocalCommandJob, Path, Path]:
+    """Execute archived host code and genuine computation under its old schema."""
+    from app.harness.runtime.git_runtime import GitRuntimeError, run_git
+    job, config, data = genuine_checker
+    registered = yaml.safe_load(config.read_text())['execution']['local_commands'][0]
+    source = Path(registered['argv'][1])
+    text = source.read_text()
+    text = text.replace(" result={'schema':'local_command_result.v1'", " count=path.parent/'measurement_count.txt'\n"
+        " count.write_text(str(int(count.read_text())+1) if count.exists() else '1')\n"
+        " result={'schema':'local_command_result.v1'")
+    text = text.replace("'metrics':{'mse':mse},'evidence_paths'",
+        "'metrics':{'mse':mse},'warnings':['Measurement uses three actual fixture samples'],'evidence_paths'")
+    source.write_text(text)
+    job = replace(job, config={**job.config, 'attempt': 1, 'confirmation_token': 'original-decision',
+                              'confirmation_inputs_token': 'original-inputs'})
+    assert run_command_preflight(job, 'original-decision')['status'] == 'passed'
+    legacy = tmp_path / 'legacy_local_command.py'
+    try:
+        archived_source = run_git(['show', '55b2c087:backend/app/harness/tools/execution/local_command.py'],
+                                   cwd=repo_root()).stdout
+    except GitRuntimeError:
+        pytest.skip('Genuine archived 55b2c087 host code is unavailable in this checkout')
+    legacy.write_text(archived_source)
+    declaration = tmp_path / 'legacy_host_job.json'
+    declaration.write_text(json.dumps({'run_id': job.run_id, 'experiment_id': job.experiment_id,
+        'project': job.project, 'run_root': str(job.run_root), 'config': job.config,
+        'seed': job.seed, 'steps': job.steps, 'command_id': job.command_id}))
+    launcher = (
+        "import asyncio,importlib.util,json,pathlib,sys\n"
+        "s=importlib.util.spec_from_file_location('actual_legacy_command',sys.argv[1])\n"
+        "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m)\n"
+        "j=json.loads(pathlib.Path(sys.argv[2]).read_text());j['run_root']=pathlib.Path(j['run_root'])\n"
+        "r=asyncio.run(m.run_local_command(m.LocalCommandJob(**j)))\n"
+        "assert r.status=='failed',r.status\n"
+    )
+    completed = subprocess.run([sys.executable, '-c', launcher, str(legacy), str(declaration)],
+                               cwd=repo_root(), capture_output=True, text=True, timeout=20)
+    assert completed.returncode == 0, completed.stderr
+    receipt = next((job.run_root / 'execution/local_commands' / job.experiment_id).glob('*/execution_receipt.json'))
+    raw = json.loads(receipt.read_text())
+    assert raw['returncode'] == 0 and raw['status'] == 'failed'
+    assert 'warnings' in raw['error']
+    assert json.loads(receipt.with_name('result.json').read_text())['status'] == 'completed'
+    assert (data.parent / 'measurement_count.txt').read_text() == '1'
+    return job, receipt, source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('invalid', [False, True])
+async def test_actual_result_warnings_extension_and_concise_schema_failure(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], invalid: bool,
+) -> None:
+    job, configuration, _ = genuine_checker
+    source = Path(yaml.safe_load(configuration.read_text())['execution']['local_commands'][0]['argv'][1])
+    source.write_text(source.read_text().replace("'metrics':{'mse':mse},'evidence_paths'",
+        "'metrics':{'mse':mse},'warnings':r['config']['warnings'],'evidence_paths'"))
+    actual = await run_local_command(replace(job, config={**job.config,
+        'warnings': [7] if invalid else ['Measured zero residual on three actual fixture samples']}))
+    if invalid:
+        assert actual.status == 'failed' and 'schema validation failed at warnings.0' in actual.error
+        assert "7 is not of type 'string'" in actual.error
+        assert 'On instance' not in actual.error and 'Failed validating' not in actual.error
+    else:
+        assert actual.status == 'completed' and actual.metrics == {'mse': 0}
+
+
+@pytest.mark.asyncio
+async def test_zero_exit_legacy_schema_failure_recovers_without_repeating_real_measurement(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], tmp_path: Path,
+) -> None:
+    from app.execution.job_journal import _evidence, run_managed_job
+    from app.execution.simulation_runner import JobSpec
+    from app.harness.reporting.execution_evidence import execution_job_evidence
+    job, old_receipt, _ = _actual_legacy_zero_exit(genuine_checker, tmp_path)
+    old_files = {path: path.read_bytes() for path in old_receipt.parent.iterdir() if path.is_file()}
+    retry = replace(job, config={**job.config, 'attempt': 2, 'confirmation_token': 'renewed-decision',
+                                'confirmation_inputs_token': 'renewed-inputs'})
+    assert run_command_preflight(retry, 'renewed-decision')['status'] == 'passed'
+    spec = JobSpec(run_id=job.run_id, experiment_id=job.experiment_id, project=job.project,
+                   run_root=job.run_root, config=retry.config, seed=job.seed)
+    recovered = await run_managed_job(spec, steps=retry.steps)
+    assert recovered.status == 'completed' and recovered.metrics == {'mse': 0}
+    assert (genuine_checker[2].parent / 'measurement_count.txt').read_text() == '1'
+    for path, original in old_files.items():
+        assert path.read_bytes() == original
+    receipt_path = next(path for path in old_receipt.parent.parent.glob('*/execution_receipt.json')
+                        if 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest() == recovered.fingerprint_hash)
+    assert receipt_path != old_receipt and receipt_path.name == 'execution_receipt.json'
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt['status'] == 'completed' and receipt['returncode'] == 0
+    assert receipt['recovery']['training_rerun'] is False
+    assert receipt['recovery']['source_receipt_path'] == str(old_receipt)
+    evidence = _evidence(spec, recovered)
+    assert str(old_receipt) in {row['path'] for row in evidence}
+    assert str(old_receipt.with_name('result.json')) in {row['path'] for row in evidence}
+    handoff = execution_job_evidence(job.run_root, job.run_id, job.project, admit_materials=True)
+    assert 'evidence_error' not in handoff
+    assert 'measurement_recovered_without_retraining' in handoff
+    assert 'original host contract failure; retained audit, not a new measurement' in handoff
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tamper', ['request', 'result', 'command', 'same_stat_input', 'missing_evidence'])
+async def test_same_job_legacy_zero_exit_tampering_cannot_trigger_recovery_or_retraining(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], tmp_path: Path, tamper: str,
+) -> None:
+    job, receipt, source = _actual_legacy_zero_exit(genuine_checker, tmp_path)
+    if tamper in {'request', 'result'}:
+        path = receipt.with_name('job.json' if tamper == 'request' else 'result.json')
+        path.write_text(path.read_text() + '\n')
+    elif tamper == 'command':
+        source.write_text(source.read_text() + '\n# Different actual command bytes\n')
+    elif tamper == 'same_stat_input':
+        data = genuine_checker[2]
+        stat = data.stat()
+        data.write_text('[[1,3],[2,6],[3,9]]')
+        os.utime(data, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    else:
+        receipt.with_name('measured.json').unlink()
+    retry = replace(job, config={**job.config, 'attempt': 2, 'confirmation_token': 'renewed-decision'})
+    assert run_command_preflight(retry, 'renewed-decision')['status'] == 'passed'
+    with pytest.raises(ValueError):
+        await run_local_command(retry)
+    assert (genuine_checker[2].parent / 'measurement_count.txt').read_text() == '1'
+    assert len(list(receipt.parent.parent.glob('*/execution_receipt.json'))) == 1
 
 
 @pytest.mark.asyncio

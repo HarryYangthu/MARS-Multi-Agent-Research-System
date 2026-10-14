@@ -212,14 +212,47 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
             indexed = False
             opaque: dict[str, dict[str, Any]] = {}
             legacy_directories: set[Path] = set()
+            historical_receipts: set[str] = set()
+            fingerprint = job.get('result', {}).get('fingerprint_hash')
+            for relative, content in verified.items():
+                if Path(relative).name != 'execution_receipt.json' or not _digest_matches(fingerprint, content):
+                    continue
+                primary = json.loads(content)
+                recovery = primary.get('recovery')
+                if not isinstance(recovery, dict):
+                    continue
+                if (primary.get('status') != 'completed' or recovery.get('schema') != 'local_command_result_recovery.v1'
+                        or recovery.get('training_rerun') is not False):
+                    raise ValueError('Primary execution recovery binding is invalid')
+                source = _execution_relative(root, recovery.get('source_receipt_path'))
+                original_bytes = verified.get(source)
+                if original_bytes is None or not _digest_matches(recovery.get('source_receipt_sha256'), original_bytes):
+                    raise ValueError('Original execution receipt differs from its recovered primary receipt')
+                original = json.loads(original_bytes)
+                if (original.get('schema') != 'local_command_receipt.v1' or original.get('status') != 'failed'
+                        or original.get('returncode') != 0 or original.get('run_id') != run_id
+                        or original.get('experiment_id') != job.get('experiment_id')):
+                    raise ValueError('Original execution receipt is not this job\'s zero-exit historical failure')
+                for kind in ('request', 'result'):
+                    source_target = _execution_relative(root, recovery.get('source_' + kind + '_path'))
+                    if (Path(source_target).parent != Path(source).parent or source_target not in verified
+                            or not _digest_matches(primary.get(kind + '_sha256'), verified[source_target])):
+                        raise ValueError('Original execution request/result differs from its recovered primary receipt')
+                historical_receipts.add(source)
+                record['historical_execution_receipts'] = [{'source': source, 'status': 'failed', 'returncode': 0,
+                    'role': 'original host contract failure; retained audit, not a new measurement'}]
+                record['measurement_recovered_without_retraining'] = True
+                record['actual_output_dir'] = Path(source).parent.as_posix()
             for relative, content in list(verified.items()):
                 path = Path(relative)
                 if path.name == "execution_receipt.json":
                     receipt = json.loads(content)
                     if (receipt.get("run_id") != run_id or receipt.get("experiment_id") != job.get("experiment_id")
-                            or (job.get('status') == 'completed' and receipt.get("status") != "completed")):
+                            or (job.get('status') == 'completed' and receipt.get("status") != "completed"
+                                and relative not in historical_receipts)):
                         raise ValueError("Execution receipt identity/status differs from its completed job")
-                    record["actual_output_dir"] = path.parent.as_posix()
+                    if not historical_receipts:
+                        record["actual_output_dir"] = path.parent.as_posix()
                 if path.name == "summary.json":
                     legacy_directories.add(path.parent)
                     record.setdefault("actual_output_dir", path.parent.as_posix())
