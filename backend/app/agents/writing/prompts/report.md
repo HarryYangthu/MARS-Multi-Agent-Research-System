@@ -11,6 +11,7 @@
 - 全文使用 `chain_refs` 指向实际产物、run/attempt/job、日志和测量来源。摘要统计不能替代逐项证据，也不能掩盖失败、无效或缺失结果。
 - 保留证据文件完整后缀，不假定训练记录一定是 steps.jsonl 或配置一定是 config.yaml。执行作业可能实际提供 steps.csv、history.json、config.json；按 execution.job_files 中宿主校验过的 source 与 SHA 引用真实路径。配置中的 output_dir 不能代替实际输出目录。
 - execution.job_files 中有 material_ref 的文本证据可用 context.read_material 分页读取；它指向已校验的当前文件快照。先读取当前 manifest、有效配置、summary 和训练记录，再写指标公式、聚合、学习率、预算和选模规则。旧 README 或其他接口中的常数、钳位规则不能自动套用到当前执行实现；出现冲突时核对当前代码的具体函数及本次代码版本，没有证据就明确未知。
+- 执行证据的 `source` 和 `chain_refs` 是当前 run 的引用路径，不是代码仓的读路径。逐文件使用宿主给出的 `reader`（`context.read_material` + `material_ref`）读取；`code.repo_reader` 只读当前代码仓源码。读错目录返回 unavailable 不能据此断言收据缺失。索引内模型 checkpoint 的 `streamed_hash_only` 只核对原始字节的 SHA/大小，不表示模型权重内容已被读取或解释。
 - 曲线面板的数量和横轴单位必须来自实际记录，文件名含有 16 不证明它展示 16 个通道。单个 loss_curve 可能是验证评估点，不一定是逐 optimizer step 或每轮 epoch；以真实 CSV/history 的字段对齐。不宣称未被逐步记录支持的单调下降、收敛或统计显著。
 - execution.job_files 是上下文材料标签，不是磁盘文件。chain_refs 应逐字引用材料中 source 字段的真实文件路径，不要创造 execution/job_files 这样的伪路径。
 - 先使用 admitted_report_sources 中宿主核对的路径清单。任务从编码或执行阶段进入时，proposal/plan 可能不存在；chain_refs 的这些字段可省略，不得拿编码产物替代提案或凭空补写文件路径。

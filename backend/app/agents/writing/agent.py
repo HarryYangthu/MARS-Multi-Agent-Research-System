@@ -22,6 +22,8 @@ class WritingAgent(BaseAgent):
         "面向 phd_advisor 给出可复现、有据可依的中文报告。"
         "先核对 admitted_report_sources 提供的实际路径；跳过的研究或实验设计阶段不能编造 proposal/plan。"
         "上下文材料标签不是文件路径，不得猜测作业哈希；保留完整路径、目录与后缀。"
+        "执行证据的 source 是当前 run 的引用路径；按其 reader/material_ref 用 context.read_material 读取，"
+        "不能把 run 路径交给 code.repo_reader。代码仓读取失败不能据此声称执行证据不存在。"
     )
 
     async def build_context(self, request: RunRequest) -> ContextPack:

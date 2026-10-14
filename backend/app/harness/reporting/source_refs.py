@@ -36,7 +36,10 @@ def report_source_catalogue(root: Path) -> dict[str, object]:
     return {'chain_refs': refs, 'absent_stages': absent,
         'instruction': '以上是当前研究实际存在的完整文件路径，不是内容或实验结论。chain_refs 可直接引用；'
             '未运行的 proposal/plan 阶段省略对应字段，不得用其他阶段冒充。上下文材料标签（例如 '
-            'execution.job_files）不是磁盘路径；逐作业证据按其中 source 字段引用，不能猜哈希或目录。'}
+            'execution.job_files）不是磁盘路径；逐作业证据按其中 source 字段引用，不能猜哈希或目录。'
+            '这些是当前 run 的引用路径，不是代码仓路径，不能交给 code.repo_reader 读取。'
+            '读取作业文本时使用 execution.job_files 中对应 source 的 reader（context.read_material + material_ref）；'
+            '读取代码仓源码时才使用 code.repo_reader。工具对错误目录的读取失败不证明真实证据文件缺失。'}
 
 
 def report_source_errors(root: Path, text: str) -> list[str]:

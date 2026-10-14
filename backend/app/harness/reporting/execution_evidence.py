@@ -43,7 +43,10 @@ def _digest_matches(expected: object, raw: bytes) -> bool:
             and expected.removeprefix("sha256:") == hashlib.sha256(raw).hexdigest())
 
 
-def _execution_relative(root: Path, value: object) -> str:
+_CHECKPOINT_SUFFIXES = frozenset({".pth", ".pt", ".ckpt"})
+
+
+def _execution_relative(root: Path, value: object, *, indexed_checkpoint: bool = False) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("Execution evidence path is missing")
     target = Path(value)
@@ -51,10 +54,42 @@ def _execution_relative(root: Path, value: object) -> str:
     if not name.startswith("execution/"):
         raise ValueError("Job evidence is outside execution scope")
     from app.harness.runtime.project_scope import forbidden_source_path
-    if forbidden_source_path(name):
+    # Source inspection excludes model binaries. A completed job's hashed
+    # artifact index may declare its generated checkpoint, which is hashed as
+    # opaque bytes only. Credential/control directories stay excluded.
+    checkpoint = (indexed_checkpoint and Path(name).suffix.casefold() in _CHECKPOINT_SUFFIXES
+                  and not forbidden_source_path(Path(name).with_suffix(".opaque").as_posix()))
+    if forbidden_source_path(name) and not checkpoint:
         raise ValueError("Job evidence names a forbidden source")
     safe_scope_path(root, name, must_exist=True)
     return name
+
+
+def _checkpoint_item(path: Path, source: str, entry: dict[str, Any], max_bytes: int) -> dict[str, Any]:
+    """Verify a declared generated checkpoint without decoding or admitting it."""
+    expected = entry.get("sha256")
+    if not isinstance(expected, str) or re.fullmatch(r"(?:sha256:)?[a-f0-9]{64}", expected) is None:
+        raise ValueError("Indexed checkpoint requires a recorded SHA-256 digest")
+    size = entry.get("bytes")
+    if type(size) is not int or size < 0 or path.stat().st_size != size:
+        raise ValueError("Indexed checkpoint size differs from its receipt: " + source)
+    bound = min(16 * 1024 * 1024, max_bytes)
+    if size > bound:
+        return {"source": source, "declared_sha256": expected.removeprefix("sha256:"), "bytes": size,
+                "integrity": "index_declared_only", "hash_verification": "deferred_due_to_streaming_budget",
+                "bytes_hash_verified": False, "text_readable": False, "content_admitted": False}
+    digest, total = hashlib.sha256(), 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(65536):
+            total += len(chunk)
+            if total > bound:
+                raise ValueError("Indexed checkpoint exceeds bounded handoff capacity")
+            digest.update(chunk)
+    if total != size or digest.hexdigest() != expected.removeprefix("sha256:"):
+        raise ValueError("Indexed checkpoint no longer matches its recorded digest: " + source)
+    return {"source": source, "sha256": digest.hexdigest(), "bytes": total,
+            "integrity": "recorded_sha256_verified", "read_method": "streamed_hash_only",
+            "text_readable": False, "content_admitted": False}
 
 
 def _step_summary(path: Path, text: str) -> dict[str, Any]:
@@ -121,6 +156,8 @@ def _file_item(root: Path, name: str, raw: bytes, *, integrity: str,
             f"source: {name}\nsource_sha256: {item['sha256']}\n"
             "Actual stored evidence; credential redaction may change its displayed text.\n" + text)
         item["material_ref"] = store_material(root, message)
+        item["reader"] = {"tool": "context.read_material", "args": {
+            "ref": item["material_ref"], "char_offset": 0}}
     return item
 
 
@@ -135,7 +172,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
              "Use the actual artifact index and source paths, not assumed steps.jsonl/config.yaml filenames.",
              "A file is absent only when actual receipts/indexed paths establish that; format names are not mandatory.",
              "Current job manifest, effective configuration and executed metric implementation take priority over old README interfaces.",
-             "Stored text with material_ref is readable using context.read_material(ref, char_offset); source is the citation path.",
+             "source is a run-relative citation path, not a code.repo_reader path. Use each text file's paired reader with its exact material_ref.",
              "Each completed job includes its actual stored metrics; use all paired jobs, not only abbreviated aggregate previews.",
              "Min/max loss does not establish monotonic convergence or statistical significance."]
     paths = sorted(jobs.glob("*.json")) if jobs.exists() else []
@@ -173,6 +210,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                     byte_budget -= len(content)
                 verified[relative] = content
             indexed = False
+            opaque: dict[str, dict[str, Any]] = {}
             legacy_directories: set[Path] = set()
             for relative, content in list(verified.items()):
                 path = Path(relative)
@@ -201,7 +239,20 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                     if not isinstance(child, str) or Path(child).is_absolute():
                         raise ValueError("Artifact index requires output-relative file paths")
                     target = safe_scope_path(root / path.parent, child, must_exist=True)
-                    source = _execution_relative(root, target.relative_to(root).as_posix())
+                    source = _execution_relative(root, target.relative_to(root).as_posix(), indexed_checkpoint=True)
+                    if target.suffix.casefold() in _CHECKPOINT_SUFFIXES:
+                        if file_budget <= 0:
+                            raise ValueError("Artifact index exceeds bounded handoff capacity")
+                        item = _checkpoint_item(target, source, entry, byte_budget)
+                        if source in opaque:
+                            if item != opaque[source]:
+                                raise ValueError("Indexed checkpoint declarations disagree")
+                            continue
+                        opaque[source] = item
+                        file_budget -= 1
+                        if item["integrity"] == "recorded_sha256_verified":
+                            byte_budget -= int(item["bytes"])
+                        continue
                     if source in verified:
                         if not _digest_matches(entry.get("sha256"), verified[source]):
                             raise ValueError("Artifact index digest differs from the job evidence digest")
@@ -221,6 +272,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
             for source, content in verified.items():
                 record["files"].append(_file_item(root, source, content, integrity="recorded_sha256_verified",
                     admit_materials=admit_materials, text_budget=text_budget))
+            record["files"].extend(opaque.values())
             if not indexed:
                 for directory in sorted(legacy_directories):
                     for sibling in sorted((root / directory).iterdir()):
