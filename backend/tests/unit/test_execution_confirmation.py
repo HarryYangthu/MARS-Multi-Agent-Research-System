@@ -94,7 +94,7 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
     metadata = {'schema': 'run_log.v1', 'project': session.run.project, 'agent': 'execution',
         'run_id': session.run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 2},
         'fingerprint_hash': 'sha256:00', 'planned_experiments': [
-            {'name': name, 'config': {'seed': 2026, 'data_path': str(data), 'budget_steps': 50}}
+            {'name': name, 'config': {'command_id': 'python-environment', 'seed': 2026, 'data_path': str(data), 'budget_steps': 50}}
             for name in ('baseline', 'candidate')]}
     artifacts = ArtifactStore(session.run)
     artifacts.approve(artifacts.write(text=dumps(metadata, 'Human-authored execution plan; no measured result is asserted.')))
@@ -367,7 +367,7 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'files_changed': [{'path': 'main.py', 'type': 'modified'}]}, 'Human-authored code review.')))
     artifacts.approve(artifacts.write(text=dumps({'schema': 'run_log.v1', 'project': run.project, 'agent': 'execution',
         'run_id': run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 1}, 'fingerprint_hash': 'sha256:00',
-        'planned_experiments': [{'name': 'baseline', 'config': {'seed': 2026}}]}, 'Human-authored execution plan.')))
+        'planned_experiments': [{'name': 'baseline', 'config': {'command_id': 'python-environment', 'seed': 2026}}]}, 'Human-authored execution plan.')))
     view = execution_preview(run, 'execution')
     assert view['defaults']['repository'] == str(candidate)
     save_confirmation(run, 'execution', view['token'])

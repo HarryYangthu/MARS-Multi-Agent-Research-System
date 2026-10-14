@@ -45,6 +45,7 @@ def write_reports_for_artifact(
     version: str,
     expected_schema: str | None,
     runner: EvaluationRunner | None = None,
+    required_report_chain: tuple[str, ...] | None = None,
 ) -> list[Path]:
     text = artifact_path.read_text(encoding="utf-8")
     target_ref = artifact_path.relative_to(run_root).as_posix()
@@ -54,6 +55,7 @@ def write_reports_for_artifact(
         target_ref=target_ref,
         expected_schema=expected_schema,
         target_schema=expected_schema,
+        required_report_chain=required_report_chain,
     )
     written: list[Path] = []
     for report in reports:

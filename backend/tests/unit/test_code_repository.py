@@ -103,7 +103,7 @@ def test_windows_hardlinks_junctions_and_pinned_ancestors(tmp_path: Path) -> Non
     (outside / 'private.py').write_bytes(b'PRIVATE')
     os.link(outside / 'private.py', root / 'hard.py')
     junction = root / 'junction'
-    _winapi.CreateJunction(str(outside), str(junction))
+    getattr(_winapi, 'CreateJunction')(str(outside), str(junction))
     try:
         repo = browser(root)
         assert [item['path'] for item in repo.directory()['entries']] == ['normal.py']

@@ -83,10 +83,25 @@ class GitBranch:
         if _branch(self.root) != self.branch:
             raise GitWorkspaceError("代码仓已切换到其他分支，当前操作已停止；请恢复本任务分支。",
                                     "git_workspace_branch_changed")
-        if git(self.source_root, "rev-parse", "--verify", f"refs/heads/{self.baseline_branch}") != self.baseline_commit:
-            raise GitWorkspaceError("原基线分支已有新提交，请核对后重新开展研究；不会覆盖基线。",
-                                    "git_workspace_baseline_changed")
-        git(self.root, "merge-base", "--is-ancestor", self.baseline_commit, "HEAD")
+        if not self.source_repo_path:
+            # Legacy tasks still share their source checkout. Advancing its
+            # mutable baseline ref must not broaden their original write grant.
+            if git(self.source_root, "rev-parse", "--verify", f"refs/heads/{self.baseline_branch}") != self.baseline_commit:
+                raise GitWorkspaceError("原基线分支已有新提交，请核对后重新开展研究；不会覆盖基线。",
+                                        "git_workspace_baseline_changed")
+            git(self.root, "merge-base", "--is-ancestor", self.baseline_commit, "HEAD")
+            return
+        # An isolated clone owns an immutable starting commit, not today's tip
+        # of the source branch. Other studies may legitimately advance main.
+        for commit in {self.baseline_commit, self.initial_commit}:
+            if re.fullmatch(r"[0-9a-f]{40,64}", commit) is None:
+                raise GitWorkspaceError("保存的研究起点提交无法校验，未绑定代码。", "git_workspace_history_changed")
+            try:
+                git(self.root, "cat-file", "-e", commit + "^{commit}")
+                git(self.root, "merge-base", "--is-ancestor", commit, "HEAD")
+            except GitWorkspaceError as exc:
+                raise GitWorkspaceError("保存的基线或研究起点不在本任务代码历史中，未绑定代码。",
+                                        "git_workspace_history_changed") from exc
 
 
 def receipt_path(run_root: Path) -> Path:
@@ -245,7 +260,7 @@ def _inspect(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
     _git_root(root)
     saved = _load(root, run_root, project, run_id)
     if saved is not None:
-        if git(root, "rev-parse", "--verify", f"refs/heads/{saved.baseline_branch}") != saved.baseline_commit:
+        if not saved.source_repo_path and git(root, "rev-parse", "--verify", f"refs/heads/{saved.baseline_branch}") != saved.baseline_commit:
             raise GitWorkspaceError("原基线分支已有新提交，请核对研究基线。", "git_workspace_baseline_changed")
         if saved.source_repo_path:
             if not saved.root.exists():

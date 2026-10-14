@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.bridge.execution_evidence_handoff import execution_job_evidence, measured_metrics
-from app.harness.reporting.source_refs import report_source_errors
+from app.harness.reporting.source_refs import report_source_errors, report_source_catalogue
 from app.harness.schema.frontmatter_parser import dumps
 from app.settings import repo_root
 from app.bridge.report_revision_context import report_revision_reason
@@ -31,6 +31,23 @@ def test_reference_scope_rejects_escape_and_symlink(tmp_path: Path) -> None:
     root.mkdir()
     (root / "link.md").symlink_to(tmp_path / "outside.md")
     assert len(report_source_errors(root, report(["../outside.md", "link.md"]))) == 2
+
+
+def test_direct_coding_report_catalogue_does_not_invent_skipped_stages(tmp_path: Path) -> None:
+    references = ['coding/code_spec.approved.md', 'execution/metrics.json',
+                  'execution/batch_summary.json',
+                  'execution/local_commands/job/actual-attempt/execution_receipt.json']
+    for ref in references:
+        path = tmp_path / ref
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('Authored reference contract; no execution result claimed.')
+    catalogue = report_source_catalogue(tmp_path)
+    assert catalogue['absent_stages'] == ['proposal', 'plan']
+    refs = catalogue['chain_refs']
+    assert isinstance(refs, dict) and refs['code'] == references[0]
+    assert 'proposal' not in refs and 'plan' not in refs
+    assert refs['runs'] == references[1:]
+    assert report_source_errors(tmp_path, dumps({'chain_refs': refs}, 'Authored reference input')) == []
 
 
 def test_job_handoff_never_admits_another_project(tmp_path: Path) -> None:

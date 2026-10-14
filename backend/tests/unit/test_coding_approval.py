@@ -132,6 +132,86 @@ async def test_host_validation_returns_actual_net_files_before_review(
 
 
 @pytest.mark.asyncio
+async def test_retry_accepts_real_prior_writes_without_replaying_or_approving_them(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, source = research
+    run = session.run
+    await write(run)
+    work = checkout(run)
+    head = git(work, "rev-parse", "HEAD")
+    records = {path.name: path.read_bytes() for path in (run.root / "coding/tool_applications").glob("*.json")}
+    checkpoints = list((run.root / "coding/git_checkpoints").glob("*.json"))
+    assert checkpoints and all(not json.loads(path.read_text())["approved"] for path in checkpoints)
+    request = AgentRequest(project=run.project, user_request="Reuse this task's prior real implementation",
+                           candidate_validator=lambda text: coding_candidate_errors(run, text))
+    with research_branch_scope(run, "coding_attempt_2"):
+        assert await CodingAgent().validate_candidate(request, spec(run, [("main.py", "modified")]), []) == []
+    assert git(work, "rev-parse", "HEAD") == head
+    assert {path.name: path.read_bytes() for path in (run.root / "coding/tool_applications").glob("*.json")} == records
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
+    assert (work / "main.py").read_text() == "VALUE = 2\n"
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+    assert not (run.root / "execution/jobs").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["missing_receipt", "other_run", "snapshot_hash", "file_hash", "other_branch"])
+async def test_retry_rejects_unverified_or_unbound_prior_changes(
+    research: tuple[Orchestrator, RunSession, Path], case: str,
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, _ = research
+    run = session.run
+    await write(run)
+    work = checkout(run)
+    records = [path for path in (run.root / "coding/tool_applications").glob("*.json")
+               if not path.name.startswith("rollback_")]
+    assert len(records) == 1
+    record_path = records[0]
+    record = json.loads(record_path.read_text())
+    if case == "missing_receipt":
+        record_path.unlink()
+    elif case == "other_run":
+        record["run_id"] = "different-research"
+        record_path.write_text(json.dumps(record))
+    elif case == "snapshot_hash":
+        snapshot_path = Path(record["rollback_ref"])
+        if not snapshot_path.is_absolute():
+            snapshot_path = run.root / snapshot_path
+        snapshot = json.loads(snapshot_path.read_text())
+        snapshot["snapshots"][0]["sha256"] = "sha256:" + "0" * 64
+        snapshot_path.write_text(json.dumps(snapshot))
+    elif case == "file_hash":
+        (work / "main.py").write_text("VALUE = 9\n")
+    request = AgentRequest(project=run.project, user_request="Verify the retained implementation",
+                           candidate_validator=lambda text: coding_candidate_errors(run, text))
+    with research_branch_scope(run, "coding_attempt_2"):
+        if case == "other_branch":
+            git(work, "switch", "-c", "unowned-test-branch")
+        errors = await CodingAgent().validate_candidate(request, spec(run, [("main.py", "modified")]), [])
+        assert errors, case
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+    assert not (run.root / "execution/jobs").exists()
+
+
+@pytest.mark.asyncio
+async def test_standalone_candidate_cannot_claim_prior_writes_without_host_verification(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, _ = research
+    await write(session.run)
+    request = AgentRequest(project=session.run.project, user_request="No trusted durable verifier is bound")
+    assert any("real code tools" in error for error in await CodingAgent().validate_candidate(
+        request, spec(session.run, [("main.py", "modified")]), []))
+
+
+@pytest.mark.asyncio
 async def test_legacy_explanatory_patch_fails_without_tool_dispatch(
     research: tuple[Orchestrator, RunSession, Path],
 ) -> None:

@@ -68,6 +68,14 @@ def test_optional_fields_keep_their_protocol_defaults() -> None:
     assert action.actions == [{"tool": "get_run_status", "args": {}}]
 
 
+def test_actual_flat_source_search_keeps_all_arguments_without_execution() -> None:
+    action = {'tool': 'code.repo_search', 'query': 'loss', 'path': 'libs/engine.py'}
+    result = _parse_decision(json.dumps({'actions': [action]}))
+    assert result.actions == [{'tool': 'code.repo_search', 'args': {'query': 'loss', 'path': 'libs/engine.py'}}]
+    with pytest.raises(CommanderDecisionError, match='ambiguous'):
+        _parse_decision(json.dumps({'actions': [{**action, 'args': {'query': 'another'}}]}))
+
+
 @pytest.mark.parametrize("text", [
     "", "模型只返回了普通文本", "null", "[]", '[{"reply":"nested"}]',
     'prefix {"reply":"not a root decision"}',

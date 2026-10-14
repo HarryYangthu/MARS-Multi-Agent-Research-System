@@ -137,6 +137,7 @@ def test_focused_source_declarations_cannot_guess_paths_or_cross_projects(tmp_pa
     (tmp_path / "train.py").write_text("value = 1\n")
     assert baseline_repository_context(repo(tmp_path), checked_proposal(["train.py"], "other")) == ""
     assert baseline_repository_context(repo(tmp_path), checked_proposal(["train.py with explanation"])) == ""
+    checks: object
     for checks in (None, [], "train.py", {"files": "train.py"}, {"files": [None, "train.py"]}):
         text = dumps({"schema": "proposal.v1", "project": "local", "method_spec": {"code_check": checks}},
                      "Authored malformed optional metadata.")

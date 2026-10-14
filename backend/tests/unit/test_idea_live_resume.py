@@ -67,16 +67,18 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
         atomic_json(tmp_path / "input/request.json", initial)
         atomic_json(tmp_path / "summary.json", {"run_id": tmp_path.name, "status": "prepared"})
         context = await agent.build_context(request)
-        with pytest.raises(RuntimeError, match="model_error"):
+        with pytest.raises(RuntimeError):
             await agent.run_loop(request, context)
         loaded, _, checkpoint, before = load_resume(tmp_path)
+        assert before["status"] == "model_error"
         assert loaded == initial and before["counts"]["model_requests"] == 1
         journal = record_resumption(tmp_path, checkpoint, {"source_commit": "authored-journal-label", "source_dirty": False})
         assert json.loads((journal / "checkpoint.json").read_text()) == before
         request.extra["resume_invocation"] = checkpoint.parent.name
-        with pytest.raises(RuntimeError, match="model_error"):
+        with pytest.raises(RuntimeError):
             await agent.run_loop(request, context)
     after = json.loads(checkpoint.read_text())
+    assert after["status"] == "model_error"
     assert after["counts"]["model_requests"] == after["counts"]["sdk_attempts"] == 2
     assert after["counts"]["model_responses"] == 0 and after["candidate"] == ""
     assert after["usage_complete"] is False

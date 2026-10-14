@@ -298,7 +298,7 @@ async def test_legacy_migration_saves_governed_partial_work_keeps_branch_and_rec
         assert (load_project_repo(run.project).root / "main.py").read_text() == "VALUE = 1\n"
 
 
-def test_missing_checkout_or_changed_baseline_never_restarts_from_wrong_code(research: tuple[RunHandle, Path]) -> None:
+def test_missing_checkout_blocks_but_source_advance_preserves_frozen_candidate(research: tuple[RunHandle, Path]) -> None:
     import shutil
     run, source = research
     with research_branch_scope(run, "coding"):
@@ -306,9 +306,15 @@ def test_missing_checkout_or_changed_baseline_never_restarts_from_wrong_code(res
     work = checkout(run); renamed = work.with_name(work.name + "-retained"); work.rename(renamed)
     assert "代码目录缺失" in coding_workspace_blocker(run)
     renamed.rename(work)
+    frozen = json.loads(receipt_path(run.root).read_text())
+    original_head = git(work, "rev-parse", "HEAD")
     (source / "main.py").write_text("VALUE = 2\n"); git(source, "add", ".")
     git(source, "-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "New baseline")
-    assert "基线分支已有新提交" in coding_workspace_blocker(run)
+    assert coding_workspace_blocker(run) == ""
+    with research_branch_scope(run, "coding"):
+        assert git(work, "rev-parse", "HEAD") == original_head
+        assert (work / "main.py").read_text() == "VALUE = 1\n"
+    assert json.loads(receipt_path(run.root).read_text()) == frozen
 
 
 def test_read_permission_does_not_cover_mutations_or_network() -> None:
@@ -386,5 +392,5 @@ async def test_parallel_registered_commands_use_exact_reviewed_checkouts_and_com
             assert all(Path(row['path']).is_relative_to(task.root) for row in receipt['evidence'])
             return result.metrics['mse']
     measured = await asyncio.gather(execute(run), execute(other))
-    assert measured == [0, pytest.approx(14 / 3)]
+    assert len(measured) == 2 and measured[0] == 0 and measured[1] == pytest.approx(14 / 3)
     assert (source / 'main.py').read_text() == 'VALUE = 1\n'

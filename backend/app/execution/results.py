@@ -12,3 +12,5 @@ class SimulationResult:
     fingerprint_hash: str
     is_mock: bool = False  # Historical read compatibility; real execution must be false.
     loss_curve: list[float] = field(default_factory=list)
+    error: str = ""
+    evidence_refs: list[str] = field(default_factory=list)

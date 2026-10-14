@@ -1,6 +1,13 @@
 frontend:
+  server:
+    # Multi-step Commander calls can exceed Next's 30s rewrite default.
+    # Finite transport ceiling matches the aggregate model time budget;
+    # provider, task and short client-request deadlines remain independent.
+    proxy_timeout_ms: 5400000
   client:
     request_timeout_ms: 60000
+    # Confirmation runs a bounded real preflight before persisting permission.
+    execution_confirmation_timeout_ms: 60000
     connection_test_timeout_ms: 40000
     control_refresh_ms: 2000
     activity_clock_ms: 1000

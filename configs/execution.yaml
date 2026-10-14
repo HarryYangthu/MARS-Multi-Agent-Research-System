@@ -8,6 +8,11 @@ execution:
   max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
   batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
   command_timeout_seconds: 60
+  # Each real command stream keeps this disk prefix and this memory tail.
+  # Receipts explicitly mark truncated logs and interrupted captures.
+  # Log cap: 1024-16777216 bytes; tail: 1-65536 bytes, no larger than log cap.
+  command_log_max_bytes: 1048576
+  command_output_tail_bytes: 8192
   allow_real_patch_apply: true
   paper_static:
     # Project-specific execution is opt-in. Each installation supplies its own
@@ -37,6 +42,19 @@ execution:
       - model.lut_init
   # Configure explicit real commands for local execution. No canned metrics.
   local_commands: []
+  # Commands are explicitly selected by execution_jobs.config.command_id.
+  # Optional host capability restrictions: project_ids, entrypoints, config_paths.
+  # consumes_data_path: true declares consumption of the host-resolved
+  # request.config.data_path / MARS_DATA_PATH; files stay in the bound project.
+  # Optional genuine no-training preflight (same argv unless validation.argv is
+  # explicitly host-configured and command-allowlisted):
+  # validation:
+  #   environment: {MARS_VALIDATE_ONLY: '1'}
+  #   timeout_seconds: 30
+  #   max_output_bytes: 1048576
+  #   max_input_bytes: 1073741824
+  # It writes local_command_validation.v1 to MARS_RESULT_PATH. Legacy commands
+  # without validation remain available, but are described as unverified.
   remote_gpu:
     enabled: false
     endpoint: ""               # Deprecated V2 status field; remote_job.v1 uses system OpenSSH.

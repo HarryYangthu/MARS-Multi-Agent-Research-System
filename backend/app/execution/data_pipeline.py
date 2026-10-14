@@ -9,7 +9,7 @@ from typing import Any, Callable, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import io, signal  # type: ignore[import-untyped]
+from scipy import io, signal
 
 Array = NDArray[np.complex128]
 

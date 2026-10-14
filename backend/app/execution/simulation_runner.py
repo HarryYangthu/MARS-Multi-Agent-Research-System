@@ -18,6 +18,7 @@ from app.settings import get_settings
 from app.harness.persistence import atomic_write_json
 from app.harness.tools.config import load_execution_config
 from app.harness.schema.experiment_contract import budget
+from app.harness.tools.execution.command_preflight import bounded_error
 from app.harness.tools.process_runtime import start_process, terminate_process_tree
 
 
@@ -196,6 +197,7 @@ async def _run_real_pim_in_worker(
             metrics={},
             fingerprint_hash="",
             is_mock=False,
+            error=bounded_error(str(exc)),
         )
     if res.loss_curve and last_plotted_step != len(res.loss_curve) - 1:
         await _write_live_plot(len(res.loss_curve) - 1, last_curve or res.loss_curve)
@@ -290,7 +292,7 @@ async def run_real_pim_simulation(
                 raise ValueError("pim_cpu worker result failed measurement validation")
             result = measured
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = bounded_error(f"{type(exc).__name__}: {exc}")
         except BaseException as exc:
             result.status, error, interrupted = "cancelled", type(exc).__name__, exc
         finally:
@@ -305,6 +307,8 @@ async def run_real_pim_simulation(
         "result_sha256": "sha256:" + hashlib.sha256(result_path.read_bytes()).hexdigest() if result_path.is_file() else None,
         "execution_backend": "local_process", "os_isolated": False, "argv": argv, "error": error})
     result.fingerprint_hash = "sha256:" + hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    result.error = error
+    result.evidence_refs = [str(receipt_path), str(attempt_dir / "stderr.log")]
     if interrupted is not None:
         raise interrupted
     if bus_publish is not None:
@@ -339,7 +343,10 @@ async def run_one(spec: JobSpec, *, bus_publish: Any | None = None, steps: int =
                                         "error": outcome.error})
         return SimulationResult(run_id=spec.run_id, experiment_id=spec.experiment_id,
             duration_seconds=outcome.duration_seconds, status=outcome.status, metrics=outcome.metrics,
-            fingerprint_hash=outcome.fingerprint_hash, is_mock=False, loss_curve=outcome.loss_curve)
+            fingerprint_hash=outcome.fingerprint_hash, is_mock=False, loss_curve=outcome.loss_curve,
+            error=bounded_error(outcome.error), evidence_refs=[str(item["path"]) for item in outcome.artifacts
+                if item.get("kind") in {"local_command_receipt", "local_command_validation_receipt", "execution_log"}
+                and item.get("path")])
     use_real = spec.run_root is not None
     if use_real and backend == "paper_static":
         from app.execution.paper_static_adapter import run_paper_static_simulation

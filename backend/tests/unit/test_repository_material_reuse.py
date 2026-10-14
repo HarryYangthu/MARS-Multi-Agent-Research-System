@@ -16,7 +16,7 @@ from app.harness.context.runtime_policy import load_policy
 from app.harness.llm.provider_base import Message
 from app.harness.tools.code import repo_reader_tool
 from app.harness.tools.context_material import read_material_tool
-from app.harness.tools.registry import ToolContext
+from app.harness.tools.registry import ToolContext, get_registry
 
 
 def workspace(tmp_path: Path) -> tuple[Path, ToolContext]:
@@ -62,6 +62,30 @@ async def test_cache_is_shared_by_agents_and_snapshots_survive_live_edits(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_dispatch_revalidates_external_edits_and_repository_binding(tmp_path: Path) -> None:
+    source, ctx = workspace(tmp_path)
+    ctx.run_id = tmp_path.name
+    ctx.agent = 'coding'
+    args = {'path': 'libs/model.py'}
+    registry = get_registry()
+    first = await registry.dispatch('code.repo_reader', args, ctx)
+    repeat = await registry.dispatch('code.repo_reader', args, ctx)
+    assert first.ok and repeat.ok and repeat.output['cache']['hit']
+    stamp = source.stat()
+    source.write_bytes(source.read_bytes().replace(b'* 2', b'* 3'))
+    os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    changed = await registry.dispatch('code.repo_reader', args, ctx)
+    assert changed.ok and changed.output['sha256'] != first.output['sha256']
+    assert '* 3' in changed.output['content']
+    _, other = workspace(tmp_path / 'other')
+    rebound = await registry.dispatch('code.repo_reader', args,
+                                     replace(ctx, project_repo_root=other.project_repo_root))
+    assert rebound.ok and rebound.output['repo_root'] != changed.output['repo_root']
+    source.unlink()
+    assert not (await registry.dispatch('code.repo_reader', args, ctx)).ok
+
+
+@pytest.mark.asyncio
 async def test_cache_separates_repositories_and_rejects_corrupt_evidence(tmp_path: Path) -> None:
     source, ctx = workspace(tmp_path)
     first = (await observed(ctx, 'libs/model.py', 0, 1))['output']
@@ -94,7 +118,7 @@ async def test_cached_material_does_not_authorize_outside_or_ignored_paths(tmp_p
 
 def test_cache_limits_and_line_endings_preserve_reader_semantics(tmp_path: Path) -> None:
     source, ctx = workspace(tmp_path)
-    options = dict(repository=Path(ctx.project_repo_root), relative='libs/model.py', offset=0,
+    options: dict[str, Any] = dict(repository=Path(ctx.project_repo_root), relative='libs/model.py', offset=0,
                    limit=6000, run_root=Path(ctx.extra['run_root']))
     small = source_window(source, **options, policy=replace(repository_policy(), max_cached_file_bytes=1))
     assert 'cache' not in small and '\r' not in small['content']
@@ -112,7 +136,7 @@ async def test_visible_reuse_preserves_native_pairs_prefix_and_originals(tmp_pat
     _, ctx = workspace(tmp_path)
     history = [await observed(ctx, 'libs/model.py', 0, n) for n in range(1, 5)]
     original = deepcopy(history)
-    kwargs = dict(pinned=[Message('system', 'Rules'), Message('user', 'Compare implementation')],
+    kwargs: dict[str, Any] = dict(pinned=[Message('system', 'Rules'), Message('user', 'Compare implementation')],
                   feedback='', candidate='', budget=128000, tools=(), policy=load_policy(), metadata={},
                   root=Path(ctx.extra['run_root']), agent='experiment', readback_available=True,
                   native=True, native_observation_history=native_history)
@@ -141,7 +165,7 @@ async def test_offloaded_text_is_rehydrated_and_versions_are_not_conflated(tmp_p
     first = await observed(ctx, 'libs/model.py', 0, 1)
     source.with_name('other.py').write_text('unrelated\n' * 900, encoding='utf-8')
     second = await observed(ctx, 'libs/other.py', 0, 2)
-    kwargs = dict(pinned=[Message('user', 'Compare')], feedback='', candidate='', budget=8000,
+    kwargs: dict[str, Any] = dict(pinned=[Message('user', 'Compare')], feedback='', candidate='', budget=8000,
         tools=(), policy=load_policy(), metadata={}, root=Path(ctx.extra['run_root']), agent='experiment',
         readback_available=True, native=True, native_observation_history=True)
     packed, before = pack_native(history=[first, second], previous=None, **kwargs)

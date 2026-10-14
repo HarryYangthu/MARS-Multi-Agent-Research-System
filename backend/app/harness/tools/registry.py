@@ -60,10 +60,11 @@ class ToolContext:
     supplemental_read_scope: ConfiguredReadToolScope | None = None
 
 
-# Read-only tools whose identical (agent, tool, args) calls within one run
-# return the same content until a write tool changes repository state.
+# Knowledge observations may be reused within one run. Repository reads use
+# their own versioned material cache, which rechecks scope and actual bytes;
+# an outer argument-only cache would hide external edits or checkout changes.
 _CACHEABLE_READ_TOOLS = frozenset({
-    "code.repo_reader", "knowledge.kb_query", "knowledge.experiment_memory",
+    "knowledge.kb_query", "knowledge.experiment_memory",
     "knowledge.baseline_match", "knowledge.run_archive",
 })
 _CACHE_INVALIDATING_TOOLS = frozenset({

@@ -65,6 +65,29 @@ async def test_search_is_literal_and_pages_matches(source_context: ToolContext) 
 
 
 @pytest.mark.asyncio
+async def test_missed_alias_returns_separate_actual_user_identifier_candidates(source_context: ToolContext, tmp_path: Path) -> None:
+    (tmp_path / 'libs/model.py').write_text('class Existing7LFilter:\n    taps = 17\n')
+    source_context.extra['original_request'] = '仿真一下 7L 模型'
+    result = await repo_search_tool({'query': 'num_layers', 'path': 'libs'}, source_context)
+    assert result.ok and result.output['matches'] == []  # Literal semantics are unchanged.
+    assert result.output['fallback_queries'] == ['7L']
+    assert result.output['fallback_matches'][0]['matched_query'] == '7L'
+    assert result.output['fallback_matches'][0]['path'] == 'libs/model.py'
+    assert result.output['fallback_matches'][0]['sha256'] == hashlib.sha256((tmp_path / 'libs/model.py').read_bytes()).hexdigest()
+    assert result.evidence_refs == ['libs/model.py']
+
+
+@pytest.mark.asyncio
+async def test_search_accepts_an_exact_file_without_scanning_other_files(source_context: ToolContext) -> None:
+    result = await repo_search_tool({'query': 'taps', 'path': 'libs/model.py'}, source_context)
+    assert result.ok and len(result.output['matches']) == 1
+    assert result.output['matches'][0]['path'] == 'libs/model.py'
+    assert result.output['matches'][0]['line'] == 2
+    for path in ('../outside.py', 'configs/.env.local', 'data/private.py'):
+        assert not (await repo_search_tool({'query': 'secret', 'path': path}, source_context)).ok
+
+
+@pytest.mark.asyncio
 async def test_no_credentials_ignored_data_or_symbolic_links(source_context: ToolContext, tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     (tmp_path / "data/private.py").write_text("taps = 'private'\n")
@@ -95,7 +118,12 @@ async def test_output_budgets_and_windows_relative_paths(source_context: ToolCon
     assert excerpt.ok
     assert excerpt.output["line_end"] == policy.max_read_lines
     assert excerpt.output["next_line"] == policy.max_read_lines + 1
-    assert not (await read_code_fragment({"path": "libs/long.py", "end_line": policy.max_read_lines + 1}, source_context)).ok
+    oversized_range = await read_code_fragment({"path": "libs/long.py", "end_line": policy.max_read_lines + 1}, source_context)
+    assert oversized_range.ok and oversized_range.output['range_limited']
+    assert oversized_range.output['line_end'] == policy.max_read_lines
+    assert oversized_range.output['next_line'] == policy.max_read_lines + 1
+    assert not (await read_code_fragment({"path": "libs/long.py", "start_line": 2, "end_line": 1}, source_context)).ok
+    assert not (await read_code_fragment({"path": "libs/long.py", "end_line": True}, source_context)).ok
     (tmp_path / "libs/oversize.py").write_text("x" * (policy.max_file_bytes + 1))
     search = await repo_search_tool({"query": "value", "path": "libs", "glob": "oversize.py"}, source_context)
     assert search.ok and search.output["skipped_large_files"] == 1

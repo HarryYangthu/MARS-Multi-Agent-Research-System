@@ -97,7 +97,7 @@ def prepare_regression_fixture(root: Path) -> Path:
         raise ValueError("fixture directory already exists; choose a new directory to preserve previous work")
     project = open_folder(str(root), create=True)
     (root / "baseline").mkdir()
-    (root / "data").mkdir()
+    (root / "data").mkdir(exist_ok=True)
     initial = "# Actual initial polynomial ridge model; the baseline remains immutable.\nDEGREE = 1\nREGULARIZATION = 0.01\n"
     (root / "baseline/baseline.py").write_text(initial)
     (root / "candidate.py").write_text(initial)

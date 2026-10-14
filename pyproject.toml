@@ -42,7 +42,7 @@ dependencies = [
 mars = "app.cli:main"
 
 [project.optional-dependencies]
-pimc = ["torch>=2.2,<3", "scipy>=1.12", "matplotlib>=3.8", "pandas>=2.2,<4"] # PIMC validation CSV exports.
+pimc = ["torch>=2.2,<3", "scipy>=1.12", "matplotlib>=3.8", "pandas>=2.2,<4", "seaborn>=0.13,<1"] # PIMC validation CSV exports.
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
