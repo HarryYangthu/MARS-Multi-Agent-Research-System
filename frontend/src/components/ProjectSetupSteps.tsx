@@ -53,11 +53,11 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     </ol>
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs leading-5"><span className="shrink-0 text-slate-500">项目目录</span><span className="min-w-0 break-all text-slate-300">{project.folder_path || project.repo_path}</span></div>
     {step === 0 ? <div className="space-y-2 text-sm leading-6 text-slate-400">
-      <p>项目文件夹在「新建项目 / 打开文件夹」时已选定；项目元数据保存在目录内的 .mars/ 中，背景资料与研究记录都不会写入基线代码仓。</p>
+      <p>项目文件夹保存本项目的全部工作：.mars/ 存配置，context/ 存资料，code/ 存导入代码，data/ 存数据，conversations/ 存对话，runs/ 存任务、仿真结果和报告。</p>
       <p>顶部步骤条可以随时点击跳转，已保存的内容会保留。</p>
     </div> : null}
     {step !== 2 ? <h3 className="text-base font-semibold">{step === 5 ? "项目已创建" : STEPS[step]}</h3> : null}
-    <div hidden={step !== 1}><OnboardingModelSetup onStatus={setApiSaved} onBusy={setModelBusy} /></div>
+    <div hidden={step !== 1}><OnboardingModelSetup project={project.project_type === "folder" ? project.name : undefined} onStatus={setApiSaved} onBusy={setModelBusy} /></div>
     <div hidden={step !== 2} className="space-y-3">
       {project.project_type === "folder" ? <ProjectCodeFolder project={project} onBusy={setCodeBusy} /> : null}
       {project.project_type === "folder" ? <label className="block rounded-lg border border-mars-border p-4 text-sm"><span className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">背景文件</span><span className="text-xs text-slate-500">README.md · Markdown / TXT</span></span><input aria-label="上传背景文件" type="file" accept=".md,.txt,text/markdown,text/plain" disabled={busy} className="mt-3 block w-full min-w-0 text-sm file:mr-3 file:rounded file:border-0 file:bg-indigo-500/20 file:px-3 file:py-2 file:text-indigo-100" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} /></label> : null}

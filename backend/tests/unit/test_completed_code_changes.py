@@ -177,3 +177,33 @@ async def test_new_writes_and_rollback_preserve_exact_bytes(tmp_path: Path, cont
     assert completed_code_changes(run, project=run.project, repository=browser)['warnings']
     restored = await rollback_patch_tool({'rollback_ref': result.rollback_ref}, ctx)
     assert restored.ok and target.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_real_shifted_patch_replays_archived_preimage(tmp_path: Path) -> None:
+    run, root, ctx, browser = setup(tmp_path)
+    before = "".join(f"v{i} = {i}\n" for i in range(40))
+    (root / "value.py").write_text(before)
+    diff = ("--- a/value.py\n+++ b/value.py\n@@ -12,7 +12,7 @@\n"
+            " v16 = 16\n v17 = 17\n v18 = 18\n-v19 = 19\n+v19 = 999\n"
+            " v20 = 20\n v21 = 21\n v22 = 22\n")
+    result = await get_registry().dispatch("code.apply_patch", {"diff": diff}, ctx)
+    assert result.ok, result.error
+    assert (root / "value.py").read_text() == before.replace("v19 = 19", "v19 = 999")
+    view = completed_code_changes(run, project=run.project, repository=browser)
+    assert not view["warnings"]
+    assert [(item["path"], item["change"]) for item in view["items"]] == [("value.py", "modified")]
+
+
+@pytest.mark.parametrize("before", ["header\nother\n", "header\nvalue\nkeep\nvalue\nkeep\n"])
+def test_shifted_hunk_missing_or_ambiguous_preimage_is_rejected(before: str) -> None:
+    item = parse_diff("--- a/value.py\n+++ b/value.py\n@@ -1,2 +1,2 @@\n-value\n+new\n keep\n")[0]
+    with pytest.raises(ValueError, match="missing or ambiguous"):
+        _patched(before, item)
+
+
+def test_multiple_shifted_hunks_retain_untouched_lines() -> None:
+    before = "prefix\nfirst\nkeep1\nmiddle\nsecond\nkeep2\nsuffix\n"
+    diff = ("--- a/value.py\n+++ b/value.py\n@@ -1,2 +1,2 @@\n-first\n+new1\n keep1\n"
+            "@@ -4,2 +4,2 @@\n-second\n+new2\n keep2\n")
+    assert _patched(before, parse_diff(diff)[0]) == before.replace("first", "new1").replace("second", "new2")

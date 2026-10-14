@@ -82,7 +82,7 @@ class HandoffBlockedError(ValueError):
         self.handoffs = handoffs
         missing = sorted({kind for handoff in handoffs for kind in handoff.missing_context})
         details = [f"{item.description}（需绑定实际输入 context_ref）" if item.input_ref is None
-                   else f"{item.input_ref}：{item.description}"
+                   else f"未接收到输入 {item.input_ref}；方案要求：{item.description}"
                    for handoff in handoffs for item in handoff.prerequisites
                    if (item.input_ref or "other (unbound)") in handoff.missing_context]
         super().__init__("执行交接资料未就绪：" + "；".join(details or missing))

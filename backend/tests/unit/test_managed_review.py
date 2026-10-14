@@ -16,6 +16,50 @@ from app.bridge.workflow_service import build_standalone
 from app.bridge.commander_session import CommanderSessionStore, ChatMessage
 from app.harness.llm import model_registry
 from app.harness.runtime.event_bus import InProcessEventBus
+
+
+def test_execution_review_carries_exact_approvals_and_separates_budget_units(tmp_path: Path) -> None:
+    import hashlib
+    from app.bridge.managed_review import execution_review_payload
+    run = RunStore(tmp_path).create(project='synthetic_regression', task='approved input review')
+    contents = {'experiment/experiment_plan.approved.md': 'Human-authored plan: 100 epochs.\n',
+                'coding/code_spec.approved.md': 'Human-authored approved command binding.\n'}
+    for ref, content in contents.items():
+        (run.root / ref).write_bytes(content.encode("utf-8"))
+    configuration = {'confirmed': False, 'jobs': [], 'blockers': [],
+        'budget': {'unit': 'model_requests', 'used': 92, 'limit': 100, 'required': 0},
+        'experiments': [{'name': 'candidate', 'config': {'budget_unit': 'epochs', 'max_iters': 100}}]}
+    payload = execution_review_payload(run, goal='Approved protocol', configuration=configuration)
+    assert payload['configuration'] == configuration
+    assert payload['review_contract']['confirmed_false_means'] == 'awaiting_this_decision'
+    assert payload['review_contract']['empty_jobs_means'] == 'no_simulations_launched'
+    assert payload['review_contract']['model_budget_unit'] == 'model_requests'
+    assert set(payload['evidence_refs']) == {'execution_configuration', *contents}
+    for item in payload['approved_artifacts']:
+        assert item['content'] == contents[item['ref']]
+        assert item['sha256'] == hashlib.sha256(contents[item['ref']].encode()).hexdigest()
+    assert not (run.root / 'execution/confirmations').exists()
+
+
+@pytest.mark.asyncio
+async def test_execution_review_identity_tracks_approvals_not_live_usage(tmp_path: Path) -> None:
+    from app.bridge.managed_review import execution_review_payload
+    run = RunStore(tmp_path).create(project='synthetic_regression', task='upstream approval identity')
+    source = run.root / 'coding/code_spec.approved.md'
+    source.write_text('Authored approval version one.\n')
+    for used in (92, 93):
+        configuration = {'token': 'same-host-confirmation', 'inputs_token': 'same-host-inputs',
+            'blockers': ['Host admission blocked'], 'budget': {'unit': 'model_requests', 'used': used}}
+        payload = execution_review_payload(run, goal='Inspect approved inputs', configuration=configuration)
+        assert await review_once(run=run, node='execution', kind='execution_configuration', payload=payload,
+            generation=1, eligible=lambda: True, bus=InProcessEventBus(), blocker='Host admission blocked') is None
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 1
+    source.write_text('Authored approval version two.\n')
+    changed = execution_review_payload(run, goal='Inspect approved inputs', configuration=configuration)
+    assert await review_once(run=run, node='execution', kind='execution_configuration', payload=changed,
+        generation=1, eligible=lambda: True, bus=InProcessEventBus(), blocker='Host admission blocked') is None
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 2
+    assert not list((run.root / 'agent_traces/commander').glob('*/events.jsonl'))
 from app.storage.run_store import RunStore
 from app.storage.run_state_store import RunStateStore
 

@@ -114,3 +114,36 @@ async def test_proxy_directory_routes_do_not_redirect_to_backend_origin() -> Non
             response = await client.get(path)
             assert response.status_code == 503
             assert "location" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_running_viewer_collects_new_saved_observations(tmp_path: Path) -> None:
+    import json
+
+    manager = TensorBoardManager(tmp_path/'service')
+    run = RunStore(tmp_path/'runs').create(task='continuous observability', project='pimc')
+    attempt = run.root/'execution/local_commands/study/invocation'
+    model = attempt/'training/model'
+    model.mkdir(parents=True)
+    (attempt/'job.json').write_text(json.dumps({'run_id': run.run_id, 'experiment_id': 'study'}))
+    (model/'history.json').write_text('[{"optimizer_steps": 0, "validation_RES_db": 9.0}]')
+    (model/'steps.jsonl').write_text('')
+    try:
+        await manager.activate(run, 1)
+        (model/'steps.jsonl').write_text('{"optimizer_step": 1, "training_loss": 0.125}\n')
+        deadline = time.monotonic()+10
+        records = []
+        while time.monotonic() < deadline:
+            dirs = list((run.root/'execution/tensorboard_artifacts').glob('*/training/model'))
+            if dirs:
+                accumulator = EventAccumulator(str(dirs[0])).Reload()
+                if 'train/loss' in accumulator.Tags()['scalars']:
+                    records = accumulator.Scalars('train/loss')
+                    if records:
+                        break
+            await asyncio.sleep(.25)
+        assert records[0].value == .125 and records[0].step == 1
+        manager.finish(run, 'completed')
+        assert run.run_id not in manager.artifact_watchers
+    finally:
+        await manager.close()

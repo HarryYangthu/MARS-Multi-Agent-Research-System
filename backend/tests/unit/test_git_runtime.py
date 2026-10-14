@@ -110,7 +110,8 @@ def test_real_branch_uses_configured_git_with_spaces_and_preserves_baseline(tmp_
         branch = prepare(root, run_root, "project", "run")
         branch.validate("project", "run")
     assert git(root, "rev-parse", "baseline") == base
-    assert git(root, "branch", "--show-current") == branch.branch
+    assert git(root, "branch", "--show-current") == "baseline"
+    assert branch.root != root and git(branch.root, "branch", "--show-current") == branch.branch
     assert not (run_root / "candidate").exists()
 
 

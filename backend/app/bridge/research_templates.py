@@ -88,7 +88,7 @@ def _record(root: Path, relative: str, limits: TemplateLimits) -> dict[str, Any]
 
 
 def _load(store: RunStore, run_id: str, limits: TemplateLimits) -> tuple[SavedResearchSettings, RunHandle]:
-    root = store.runs_root / _identifier(run_id)
+    root = store.resolve_root(_identifier(run_id))
     if not root.exists() and not root.is_symlink():
         raise TemplateMissing("Saved research was not found")
     try:
@@ -180,7 +180,7 @@ def list_research_settings(store: RunStore, *, cursor: str | None = None, limit:
         _identifier(cursor)
     if not store.runs_root.exists():
         return SavedResearchPage(items=(), next_cursor=None, unavailable_count=0)
-    names = heapq.nsmallest(size + 1, (path.name for path in store.runs_root.iterdir()
+    names = heapq.nsmallest(size + 1, (path.name for directory in store.storage_roots() for path in directory.iterdir()
                    if not path.name.startswith(".") and re.fullmatch(r"[A-Za-z0-9_.-]+", path.name)
                    and (cursor is None or path.name > cursor) and (path.is_dir() or path.is_symlink())))
     selected = names[:size]

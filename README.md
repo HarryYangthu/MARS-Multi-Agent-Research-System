@@ -235,6 +235,24 @@ knowledge/
 runs/
 ```
 
+Folder projects support simultaneous research runs against one baseline. Each
+run gets an independent local Git clone under the project's `code/` folder and
+its own persistent `mars/<run>-<id>` branch. Coding, review, code browsing and
+execution use that run's checkout; the baseline checkout never switches.
+Retries reuse the same branch and commits. Verified coding writes are committed
+automatically, including on interruption; unrelated edits are preserved and
+never included. Automatic saving does not approve execution or merge a candidate
+into the baseline. Legacy branches migrate with their exact saved commit and
+backups of their bindings. Only the same run's workspace is locked.
+
+Host `local_command` registrations should use `MARS_CODE_ROOT` or `{code_root}`
+for code entrypoints. Direct absolute file arguments under the configured
+baseline are routed to the run's checkout. Inline commands containing a shared
+baseline path are rejected to prevent executing a different run's code. Job
+requests record the actual checkout and commit. Data stays in the project data
+folder and execution artifacts stay under the corresponding run; code isolation
+does not override CPU/GPU resource limits.
+
 ## Repository Layout
 
 ```text

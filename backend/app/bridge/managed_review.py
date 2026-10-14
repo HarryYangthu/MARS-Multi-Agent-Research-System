@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -146,6 +147,27 @@ def revision_count(run: RunHandle, node: str) -> int:
                if (row := json.loads(path.read_text())).get("node") == node and row.get("status") == "revision_requested")
 
 
+def execution_review_payload(run: RunHandle, *, goal: str, configuration: dict[str, Any]) -> dict[str, Any]:
+    """Give the reviewer the actual upstream approvals and explicit decision semantics."""
+    artifacts = []
+    for ref in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md'):
+        path = run.root / ref
+        if not path.resolve().is_relative_to(run.root.resolve()):
+            raise ValueError('托管审核资料越出当前任务')
+        if path.is_file():
+            content = path.read_bytes()
+            artifacts.append({'ref': ref, 'sha256': hashlib.sha256(content).hexdigest(),
+                              'content': content.decode('utf-8')})
+    return {'goal': goal, 'configuration': configuration, 'approved_artifacts': artifacts,
+        'review_contract': {'schema_id': 'managed.execution_confirmation.v1',
+            'decision_scope': 'confirm_approved_inputs_before_launch',
+            'confirmed_false_means': 'awaiting_this_decision',
+            'empty_jobs_means': 'no_simulations_launched',
+            'model_budget_unit': 'model_requests',
+            'training_budget_source': 'experiments[].config.budget_unit and max_iters'},
+        'evidence_refs': ['execution_configuration', *(item['ref'] for item in artifacts)]}
+
+
 async def review_once(
     *, run: RunHandle, node: str, kind: str, payload: dict[str, Any], generation: int,
     eligible: Callable[[], bool], bus: EventBus, blocker: str = "",
@@ -163,7 +185,10 @@ async def review_once(
         # The review call itself increments live usage. Usage counters and job
         # timestamps must not cause polling to review the same config forever.
         identity_input = {"goal": payload["goal"], "token": configuration.get("token"),
-                          "inputs_token": configuration.get("inputs_token"), "blockers": configuration.get("blockers")}
+                          "inputs_token": configuration.get("inputs_token"), "blockers": configuration.get("blockers"),
+                          "review_contract": payload.get("review_contract"),
+                          "approved_artifacts": [{key: item[key] for key in ('ref', 'sha256')}
+                                                 for item in payload.get('approved_artifacts', [])]}
     identity = digest({"node": node, "kind": kind, "payload": identity_input, "generation": generation})
     path = run.root / "hitl/managed_reviews" / (identity + ".json")
     if path.exists():
@@ -189,6 +214,10 @@ async def review_once(
         "不得把 schema 分数当成科学验证或把待执行实验当成结果。合理且检查通过则 approve；"
         "明确可修复的方案问题则 revise，说明具体修改；实质歧义、权限、超预算、缺证据或连续失败则 needs_user。"
         "执行配置与反馈决策只能 approve 或 needs_user，不能擅自改参数、放宽预算或继续被要求暂停的阶段。"
+        "执行配置审核中，confirmed=false 表示等待你本次作出确认，不能要求用户先确认才允许托管审批；"
+        "jobs 是实际已启动作业，启动前为空正常，待启动清单在 experiments。"
+        "configuration.budget 只计累计模型请求次数，与训练 epoch/step 预算独立；"
+        "训练预算以批准方案及 experiments[].config.budget_unit/max_iters 为准。"
         "只输出 JSON：{\"decision\":\"approve|revise|needs_user\",\"reason\":\"中文审核理由\","
         "\"evidence_refs\":[\"从材料 evidence_refs 选择实际核对的依据\"]}。")),
         Message(role="user", content=content)]

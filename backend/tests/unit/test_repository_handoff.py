@@ -78,7 +78,8 @@ def test_approved_experiment_base_config_supplies_actual_repository_identity(tmp
     path = tmp_path / "base.yaml"
     path.write_text("lr_init: 0.0004\ndata:\n  path: data/not-loaded.pth\n")
     plan = dumps({"schema": "experiment_plan.v1", "project": "local",
-                  "ablations": [{"config": {"base_config": path.name, "config_path": "new.yaml"}}]},
+                  "estimated_runs": 1, "ablations": [{"name": "candidate", "config": {
+                      "base_config": path.name, "config_path": "new.yaml", "seed": 2026, "budget_steps": 50}}]},
                  "Human-authored approved plan input; the output configuration does not exist yet.")
     upstream = {"experiment_plan.approved.md": "[upstream artifact: experiment/experiment_plan.approved.md]\n" + plan}
     context = json.loads(baseline_repository_context(repo(tmp_path), upstream))
@@ -140,3 +141,67 @@ def test_focused_source_declarations_cannot_guess_paths_or_cross_projects(tmp_pa
         text = dumps({"schema": "proposal.v1", "project": "local", "method_spec": {"code_check": checks}},
                      "Authored malformed optional metadata.")
         assert baseline_repository_context(repo(tmp_path), {"proposal": text}) == ""
+
+
+def executable_data_plan(ref: str, project: str = "local") -> dict[str, str]:
+    plan = dumps({"schema": "experiment_plan.v1", "project": project, "estimated_runs": 1,
+                  "ablations": [{"name": "candidate", "config": {
+                      "config_path": ref, "seed": 2026, "budget_unit": "epochs", "max_iters": 100}}]},
+                 "Human-authored approved configuration; no measured result.")
+    return {"experiment_plan.approved.md": "[upstream artifact: experiment/experiment_plan.approved.md]\n" + plan}
+
+
+@pytest.mark.parametrize("field", ["data_path: data/not-loaded.pth", "data:\n  path: data/not-loaded.pth"])
+def test_approved_execution_configuration_supplies_data_without_baseline_or_selection(
+    tmp_path: Path, field: str,
+) -> None:
+    config = tmp_path / "candidate.yaml"
+    config.write_text(field + "\nscale: 32768\nfs: 245.76\nband: [-29.74, -24.74]\npassword: secret\n")
+    upstream = executable_data_plan(config.name)
+    assert baseline_repository_context(repo(tmp_path), upstream) == ""
+    described = json.loads(baseline_data_description(repo(tmp_path), upstream))
+    source = described["sources"][0]
+    assert source["config_path"] == config.name
+    assert source["config_sha256"] == hashlib.sha256(config.read_bytes()).hexdigest()
+    assert source["data"]["path"] == "data/not-loaded.pth"
+    assert source["protocol"] == {"scale": 32768, "fs": 245.76, "band": [-29.74, -24.74]}
+    assert described["dataset_contents_loaded"] is False
+    assert "secret" not in json.dumps(described)
+
+
+def test_execution_data_is_not_replaced_with_unrelated_baseline_or_proposal_prose(tmp_path: Path) -> None:
+    (tmp_path / "base.yaml").write_text("data:\n  path: data/baseline.pth\n")
+    (tmp_path / "new.yaml").write_text("seed: 2026\n")
+    upstream = {**proposal("base.yaml"), **executable_data_plan("new.yaml")}
+    assert baseline_data_description(repo(tmp_path), upstream) == ""
+    assert baseline_data_description(repo(tmp_path), {"description": "data_path: data/invented.pth"}) == ""
+
+
+@pytest.mark.parametrize("ref", ["missing.yaml", "../outside.yaml", ".env.yaml"])
+def test_approved_data_configuration_keeps_file_scope_checks(tmp_path: Path, ref: str) -> None:
+    with pytest.raises(ValueError):
+        baseline_data_description(repo(tmp_path), executable_data_plan(ref))
+
+
+def test_data_handoff_keeps_coding_plan_hash_and_project_guards(tmp_path: Path) -> None:
+    from app.harness.schema.experiment_contract import document_hash
+    (tmp_path / "candidate.yaml").write_text("data_path: data/not-loaded.pth\n")
+    upstream = executable_data_plan("candidate.yaml")
+    code = {"schema": "code_spec.v1", "project": "local",
+            "experiment_plan_sha256": document_hash(upstream["experiment_plan.approved.md"]),
+            "execution_jobs": [{"name": "candidate", "config": {"command_id": "registered"}}]}
+    upstream["code_spec.approved.md"] = dumps(code, "Authored command binding.")
+    assert json.loads(baseline_data_description(repo(tmp_path), upstream))["sources"]
+    code["experiment_plan_sha256"] = "0" * 64
+    upstream["code_spec.approved.md"] = dumps(code, "Stale binding.")
+    with pytest.raises(ValueError, match="experiment_plan_sha256"):
+        baseline_data_description(repo(tmp_path), upstream)
+    with pytest.raises(ValueError, match="项目"):
+        baseline_data_description(repo(tmp_path), executable_data_plan("candidate.yaml", "other"))
+
+
+@pytest.mark.parametrize("contents", ["data_path: 123", "data_path: a.pth\ndata:\n  path: b.pth"])
+def test_ambiguous_or_invalid_dataset_fields_fail_explicitly(tmp_path: Path, contents: str) -> None:
+    (tmp_path / "new.yaml").write_text(contents)
+    with pytest.raises(ValueError):
+        baseline_data_description(repo(tmp_path), executable_data_plan("new.yaml"))

@@ -55,10 +55,13 @@ def test_code_binding_preserves_identity_rules_and_source(tmp_path: Path) -> Non
     code = tmp_path / "external-code"
     code.mkdir()
     (code / "baseline.py").write_text("VALUE = 42\n")
-    assert bind_code_folder(folder, str(code)) == code
+    imported = bind_code_folder(folder, str(code))
+    assert imported.is_relative_to(folder.root / "code")
+    assert (imported / "baseline.py").read_bytes() == (code / "baseline.py").read_bytes()
+    assert (imported / ".git").is_dir()
     after = yaml.safe_load(link.read_text())
     assert {k: v for k, v in after.items() if k not in {"repo_path", "repo_role", "read_only"}} == {k: v for k, v in before.items() if k not in {"repo_path", "repo_role", "read_only"}}
-    assert after["repo_path"] == str(code)
+    assert (folder.metadata_root / after["repo_path"]).resolve() == imported
     assert after["read_only"] is True and after["repo_role"] == "simulation_baseline"
     assert (folder.metadata_root / "project.yaml").read_bytes() == marker
     assert list(code.iterdir()) == [code / "baseline.py"]
@@ -158,7 +161,7 @@ def test_replacement_uses_remaining_capacity_and_can_shrink_oversized_readme(
             save_background(folder, "large.md", b"x" * 1001)
         assert readme.read_bytes() == b"x" * 1000
         assert list(folder.metadata_root.glob("background-history/*.md")) == history
-        (folder.root / "context").mkdir()
+        (folder.root / "context").mkdir(exist_ok=True)
         (folder.root / "context/other.md").write_text("other context")
         with pytest.raises(ValueError, match="数量"):
             save_background(folder, "background.md", b"short")
@@ -236,7 +239,8 @@ def test_created_project_can_resume_setup_without_changing_identity(tmp_path: Pa
             (external / "baseline.py").write_text("VALUE = 42\n")
             imported = client.put(f"/api/projects/{name}/code-folder", json={"path": str(external)})
             assert imported.status_code == 200, imported.text
-            assert imported.json()["name"] == name and imported.json()["repo_path"] == str(external)
+            assert imported.json()["name"] == name
+            assert Path(imported.json()["repo_path"]).is_relative_to(folder / "code")
             assert imported.json()["folder_path"] == str(folder)
             # Real registered code implementation resolves the imported folder.
             import asyncio
@@ -252,6 +256,6 @@ def test_created_project_can_resume_setup_without_changing_identity(tmp_path: Pa
             context_after = client.get(f"/api/projects/{name}/auto-context").json()
             assert context_after["files"] == context["files"]
             reopened_again = client.post("/api/projects/folder", json={"path": str(folder)})
-            assert reopened_again.json()["repo_path"] == str(external)
+            assert reopened_again.json()["repo_path"] == imported.json()["repo_path"]
     finally:
         reset_settings_cache()

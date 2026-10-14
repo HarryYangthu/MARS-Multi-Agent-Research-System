@@ -54,6 +54,7 @@ class PersistedCodeWorkspaceResolver:
     """Filesystem resolver that remains valid after process restart."""
 
     runs_root: Path
+    project_storage: bool = False
 
     async def resolve(
         self,
@@ -69,7 +70,14 @@ class PersistedCodeWorkspaceResolver:
     ) -> CodeWorkspaceTransferPackage | None:
         if _SAFE_IDENTIFIER.fullmatch(request.candidate_id) is None:
             return None
-        root = _trusted_runs_root(self.runs_root)
+        root_path = self.runs_root
+        if self.project_storage:
+            from app.storage.run_store import RunStore
+            run = RunStore(self.runs_root, project_storage=True).get(request.run_id)
+            if run is None or run.project != request.project:
+                raise PersistedWorkspaceResolutionError("candidate run does not belong to the requested project")
+            root_path = run.root.parent
+        root = _trusted_runs_root(root_path)
         located = _find_candidate(root, request.candidate_id)
         if located is None:
             return None

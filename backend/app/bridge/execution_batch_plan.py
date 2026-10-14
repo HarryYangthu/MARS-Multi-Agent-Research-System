@@ -81,6 +81,11 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
                 plan_source = "execution_run_log"
         except Exception:
             abl_specs = []
+    if not abl_specs and has_delivery:
+        rows = delivery_experiments(plan_text, coding, project=run.project, plan_required=required)
+        abl_specs = [(row['name'], row['config']) for row in rows]
+        plan_source = 'coding_delivery'
+        deterministic = True
     if plan_path.exists():
         try:
             md = parse_fm(plan_path.read_text(encoding="utf-8")).metadata
@@ -97,11 +102,6 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
                     plan_source = "experiment_plan"
         except Exception:
             abl_specs = []
-    if not abl_specs and has_delivery:
-        rows = delivery_experiments(plan_text, coding, project=run.project, plan_required=required)
-        abl_specs = [(row['name'], row['config']) for row in rows]
-        plan_source = 'coding_delivery'
-        deterministic = True
     planned_before_intent = len(abl_specs)
     if not abl_specs:
         raise RuntimeError("no valid approved experiment configurations; execution was not started")

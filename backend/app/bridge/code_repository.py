@@ -14,7 +14,7 @@ from typing import Any, Iterator
 import yaml
 
 from app.harness.runtime.project_scope import forbidden_source_path
-from app.harness.tools.project_repo import ProjectRepo, load_project_repo, resolve_allowed_path
+from app.harness.tools.project_repo import ProjectRepo, load_run_project_repo, resolve_allowed_path
 from app.settings import repo_root
 from app.storage.run_store import RunHandle
 
@@ -181,4 +181,4 @@ class CodeRepository:
 def run_code_repository(run: RunHandle, *, project: str) -> CodeRepository:
     if run.project != project:
         raise ValueError('代码工程所属项目不匹配')
-    return CodeRepository(load_project_repo(project), BrowsePolicy.load())
+    return CodeRepository(load_run_project_repo(project, run.root, run.run_id), BrowsePolicy.load())

@@ -172,6 +172,12 @@ def open_folder(path: str, *, create: bool = False, registry: Path | None = None
         if create:
             (root / "context").mkdir(exist_ok=True)
             (root / "AGENTS.md").write_text(AGENTS_TEMPLATE, encoding="utf-8")
+        from app.harness.project_storage import folder_directory, storage_policy
+        for kind in storage_policy()["directories"]:
+            folder_directory(project, kind)
+        from app.harness.runtime.project_scope import safe_scope_path
+        atomic_json(safe_scope_path(root, ".mars/storage.json"), {"schema": "project_folder.v1",
+                    "directories": storage_policy()["directories"]})
         entries[project.name] = str(root)
         atomic_json(index, entries)
         return project

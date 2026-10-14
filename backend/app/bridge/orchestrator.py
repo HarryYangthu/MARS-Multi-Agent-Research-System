@@ -1180,7 +1180,7 @@ class Orchestrator:
                         await asyncio.to_thread(save_confirmation, session.run, node_key, view['token'], actor='auto_approve')
                         return True
                 if session.request.review_mode == "commander":
-                    from app.bridge.managed_review import review_once, finish_review
+                    from app.bridge.managed_review import review_once, finish_review, execution_review_payload
                     generation = session.request.review_generation
                     token = view.get('token')
                     def eligible() -> bool:
@@ -1188,8 +1188,7 @@ class Orchestrator:
                                 and not self._stopping(session) and not session.read_only
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
-                        payload={"goal": session.request.user_request, "configuration": view,
-                                 "evidence_refs": ["execution_configuration"]},
+                        payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():

@@ -5,6 +5,7 @@ agent Protocol, but not on concrete agent classes). Concrete classes are
 already inside the registry by the time this runs.
 """
 from __future__ import annotations
+import asyncio
 
 from collections.abc import Mapping
 import asyncio
@@ -529,8 +530,8 @@ def load_agent_handoff_context(
             upstream["data_description"] = selection_summary(selected_data_source)
         if stage == "execution" and not upstream.get("data_description", "").strip():
             from app.bridge.repository_handoff import baseline_data_description
-            from app.harness.tools.project_repo import load_project_repo
-            description = baseline_data_description(load_project_repo(run.project), upstream)
+            from app.harness.tools.project_repo import load_run_project_repo
+            description = baseline_data_description(load_run_project_repo(run.project, run.root, run.run_id), upstream)
             if description:
                 upstream["data_description"] = description
     return upstream, feedback_context
@@ -800,6 +801,10 @@ async def _run_execution_batch(
             bus_publish=_publish,
             check_inputs=check_inputs,
         )
+        from app.execution.tensorboard_artifacts import sync_run_visualizations
+        coverage = await asyncio.to_thread(sync_run_visualizations, run.root)
+        await _publish(f"run.{run.run_id}.execution", {
+            "event": "execution.visualizations_ready", "coverage": coverage})
         phase = "failed" if outcome.failures else "completed"
     finally:
         scalars.close()

@@ -45,6 +45,8 @@ def git_failure(stderr: str, *, returncode: int | None = None) -> GitRuntimeErro
         return GitRuntimeError("Git 无法访问代码仓，请检查文件权限。", "git_permission_denied")
     if "dubious ownership" in text:
         return GitRuntimeError("Git 检测到代码仓所有者不匹配，请核对目录归属与 Git 信任设置。", "git_unsafe_repository")
+    if "filename too long" in text:
+        return GitRuntimeError("Git 路径过长，请使用支持长路径的 Git 或较短的工作区路径。", "git_path_too_long")
     if "index.lock" in text or "another git process" in text:
         return GitRuntimeError("代码仓正在被其他 Git 操作占用，请等待完成后重试。", "git_repository_locked")
     if "not a git repository" in text:
@@ -184,7 +186,10 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
     # unusable system shim, just like configured coding commands do.
     child_environment["PATH"] = str(Path(runtime.executable).parent) + os.pathsep + child_environment.get("PATH", "")
     try:
-        result = subprocess.run([runtime.executable, *arguments], cwd=cwd, env=child_environment,
+        # Isolated clones add staging and object paths beneath the workspace.
+        # Enable Git for Windows long paths without changing host configuration.
+        options = ["-c", "core.longpaths=true"] if sys.platform == "win32" else []
+        result = subprocess.run([runtime.executable, *options, *arguments], cwd=cwd, env=child_environment,
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=limit)
     except subprocess.TimeoutExpired as exc:
         raise GitRuntimeError("Git 操作超时，进度已保留，请核对后重试。", "git_timeout") from exc

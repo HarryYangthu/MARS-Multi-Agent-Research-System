@@ -12,6 +12,7 @@ import yaml
 
 from app.bridge.code_workspace_resolver import PersistedCodeWorkspaceResolver
 from app.execution.adapters.base import ProjectAdapter
+from app.execution.adapters.base import AdapterRequest
 from app.execution.adapters.process import ProcessAdapter
 from app.execution.adapters.registry import AdapterRegistry
 from app.execution.remote import (
@@ -28,6 +29,15 @@ from app.harness.project_packs.registry import (
 )
 from app.harness.runtime.distribution import DistributionProfile, profile_for
 from app.settings import get_settings, repo_root
+
+
+def _project_run_artifact_root(request: AdapterRequest) -> Path:
+    """Select the persisted run, never a model-provided filesystem root."""
+    from app.storage.run_store import RunStore
+    run = RunStore().get(request.run_id)
+    if run is None or run.project != request.project:
+        raise ValueError("adapter run does not belong to the requested project")
+    return run.root
 
 
 @dataclass(frozen=True)
@@ -68,7 +78,8 @@ def build_extension_runtime(
     effective_remote_config: RemoteExecutorConfig | None = None
     effective_remote_client: RemoteJobClient | None = None
     workspace_resolver = PersistedCodeWorkspaceResolver(
-        runs_root=workspace_runs_root or (repo_root() / "runs")
+        runs_root=workspace_runs_root or (repo_root() / "runs"),
+        project_storage=workspace_runs_root is None,
     )
     if selected_device == "gpu":
         effective_remote_config = remote_config or load_remote_executor_config()
@@ -106,6 +117,7 @@ def build_extension_runtime(
                         python_executable=effective_remote_config.python,
                     ),
                     artifact_root=(remote_artifact_root or (repo_root() / "runs")),
+                    artifact_root_resolver=_project_run_artifact_root if remote_artifact_root is None else None,
                     workspace_resolver=workspace_resolver,
                     remote_worker_python=effective_remote_config.python,
                     adapter_timeout_seconds=declaration.timeout_seconds,

@@ -110,6 +110,7 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
 def test_preview_and_execution_share_all_prepared_experiments(execution: tuple[Orchestrator, RunSession, Path, Path]) -> None:
     _, session, _, _ = execution
     view = execution_preview(session.run, 'execution')
+    assert view['budget']['unit'] == 'model_requests'
     plan = prepare_execution(session.run, 'execution')
     assert not view['blockers'] and not view['confirmed']
     assert [(row['name'], row['seed'], row['config']) for row in view['experiments']] == [
@@ -344,6 +345,7 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
     from app.bridge.research_branch import research_branch_scope
     from app.harness.project_workspace import open_folder
     from app.harness.tools.git_branch import git
+    from app.harness.tools.project_repo import load_project_repo
     monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
     reset_settings_cache()
     project = open_folder(str(tmp_path / 'git-project'), create=True)
@@ -357,7 +359,8 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'read_only': True, 'allowed_paths': ['main.py'], 'protected_paths': [], 'ignore_patterns': ['.git/']}))
     run = RunStore(tmp_path / 'git-runs').create(task='real-git-confirmation', project=project.name)
     with research_branch_scope(run, 'coding'):
-        (source / 'main.py').write_text('VALUE = 2\n')
+        candidate = load_project_repo(run.project).root
+        (candidate / 'main.py').write_text('VALUE = 2\n')
     artifacts = ArtifactStore(run)
     artifacts.approve(artifacts.write(text=dumps({'schema': 'code_spec.v1', 'project': run.project, 'agent': 'coding',
         'target_lang': 'python', 'baseline_compat': {'preserved': True},
@@ -366,14 +369,91 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'run_id': run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 1}, 'fingerprint_hash': 'sha256:00',
         'planned_experiments': [{'name': 'baseline', 'config': {'seed': 2026}}]}, 'Human-authored execution plan.')))
     view = execution_preview(run, 'execution')
-    assert view['defaults']['repository'] == str(source.resolve())
+    assert view['defaults']['repository'] == str(candidate)
     save_confirmation(run, 'execution', view['token'])
     with research_branch_scope(run, 'execution'):
         require_confirmation(run, 'execution')
     assert execution_preview(run, 'execution')['confirmed']
     assert git(source, 'show', 'baseline:main.py') == 'VALUE = 1'
-    (source / 'main.py').write_text('VALUE = 3\n')
+    assert (source / 'main.py').read_text() == 'VALUE = 1\n'
+    (candidate / 'main.py').write_text('VALUE = 3\n')
     assert not execution_preview(run, 'execution')['confirmed']
+
+
+@pytest.mark.asyncio
+async def test_legacy_delivery_reads_run_config_data_and_invalidates_after_inputs_change(
+    execution: tuple[Orchestrator, RunSession, Path, Path], tmp_path: Path,
+) -> None:
+    """Actual cloned Git files and deterministic intake, without simulated training."""
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.execution.agent import ExecutionAgent
+    from app.bridge.agent_runner import load_agent_handoff_context
+    from app.harness.project_workspace import project_root
+    from app.harness.schema.experiment_contract import document_hash
+    from app.harness.tools.git_branch import git, prepare
+    orch, fixture_session, _, _ = execution
+    session = orch.create_session(RunRequest(task='legacy-data-configuration', project=fixture_session.run.project,
+        entrypoint='execution', standalone=True, auto_approve=False))
+    source = tmp_path / 'source'
+    source.mkdir()
+    git(source, 'init', '-b', 'main')
+    first_data = tmp_path / 'baseline.json'
+    first_data.write_text('[1,2,3]')
+    actual_data = tmp_path / 'candidate.json'
+    actual_data.write_text('[4,5,6]')
+    (source / 'job.yaml').write_text(yaml.safe_dump({'data_path': str(first_data), 'seed': 2026}))
+    git(source, 'add', '.')
+    git(source, '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false',
+        'commit', '-m', 'Real configuration input')
+    (project_root(session.run.project) / 'repo_link.yaml').write_text(yaml.safe_dump({
+        'repo_path': str(source), 'read_only': True, 'allowed_paths': [''], 'protected_paths': []}))
+    branch = prepare(source, session.run.root, session.run.project, session.run.run_id)
+    (branch.root / 'job.yaml').write_text(yaml.safe_dump({'data_path': str(actual_data), 'seed': 2026}))
+    rows = [{'name': 'candidate', 'config': {'seed': 2026, 'budget_steps': 50, 'config_path': 'job.yaml'}}]
+    plan = dumps({'schema': 'experiment_plan.v1', 'project': session.run.project, 'agent': 'experiment',
+        'variables': {'independent': ['method'], 'dependent': ['mse']}, 'metrics': {'primary': 'mse'},
+        'ablations': rows, 'estimated_runs': 1}, 'Human-authored data selection, not a measured result.')
+    store = ArtifactStore(session.run)
+    store.approve(store.write(text=plan))
+    code = dumps({'schema': 'code_spec.v1', 'project': session.run.project, 'agent': 'coding',
+        'target_lang': 'python', 'baseline_compat': {'preserved': True},
+        'files_changed': [{'path': 'job.yaml', 'type': 'modified'}],
+        'experiment_plan_sha256': document_hash(plan), 'execution_jobs': [
+            {'name': 'candidate', 'config': {'command_id': 'python-environment'}}]},
+        'Human-authored execution binding to real configuration.')
+    store.approve(store.write(text=code))
+    supplied, _ = load_agent_handoff_context(session.run, 'execution')
+    described = json.loads(supplied['data_description'])
+    assert described['repo_path'] == str(branch.root)
+    assert described['sources'][0]['data']['path'] == str(actual_data)
+    assert not (session.run.root / 'input/selected_data_source.json').exists()
+    # Preview uses the merged, validated code binding even before intake approval.
+    prepared = prepare_execution(session.run, 'execution')
+    assert prepared.plan_source == 'coding_delivery'
+    assert prepared.specs[0].config['command_id'] == 'python-environment'
+    before = execution_preview(session.run, 'execution')
+    assert before['defaults']['data_path'] == str(actual_data)
+    assert before['experiments'][0]['effective']['config_path'] == 'job.yaml'
+    assert any('尚未生成并审核通过' in item for item in before['blockers'])
+    agent = ExecutionAgent()
+    request = AgentRequest(project=session.run.project, user_request='Execute approved protocol',
+        upstream_artifacts=supplied, extra={'run_id': session.run.run_id})
+    artifact = await agent.run_loop(request, await agent.build_context(request))
+    store.approve(store.write(text=artifact.text))
+    view = execution_preview(session.run, 'execution')
+    assert not view['blockers']
+    save_confirmation(session.run, 'execution', view['token'])
+    assert execution_preview(session.run, 'execution')['confirmed']
+    # Config changes and missing datasets must never inherit earlier confirmation.
+    (branch.root / 'job.yaml').write_text(yaml.safe_dump({'data_path': str(actual_data), 'seed': 2026, 'scale': 2}))
+    changed = execution_preview(session.run, 'execution')
+    assert changed['token'] != view['token'] and not changed['confirmed']
+    actual_data.unlink()
+    missing = execution_preview(session.run, 'execution')
+    assert any('数据路径不可访问' in item for item in missing['blockers'])
+    assert not missing['confirmed']
+    assert (source / 'job.yaml').read_text() == yaml.safe_dump({'data_path': str(first_data), 'seed': 2026})
+    assert not (session.run.root / 'execution/local_commands').exists()
 
 
 def test_execution_boundary_is_durable_and_blocks_writing_dispatch(

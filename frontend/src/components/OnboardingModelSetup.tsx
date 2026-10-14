@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { getAgentLlmConfig, updateAgentLlmConfig, testModelConnection, type ModelConnectionResult, type AgentLlmConfigView } from "@/lib/api";
+import { getAgentLlmConfig, updateAgentLlmConfig, testModelConnection, saveProjectModelReference, type ModelConnectionResult, type AgentLlmConfigView } from "@/lib/api";
 
 const INPUT = "mt-2 w-full rounded-lg border border-mars-border bg-mars-bg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400";
 const BUTTON = "rounded-lg border border-mars-border px-4 py-2 text-sm hover:bg-mars-panel2 disabled:opacity-40";
 
-export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: boolean) => void; onBusy?: (busy: boolean) => void }): JSX.Element {
+export function OnboardingModelSetup({ project, onStatus, onBusy }: { project?: string; onStatus: (saved: boolean) => void; onBusy?: (busy: boolean) => void }): JSX.Element {
   const [config, setConfig] = useState<AgentLlmConfigView | null>(null);
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
@@ -31,10 +31,11 @@ export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: b
       setProvider(first?.provider || ""); setModel(first?.model || "");
       setUrl(first?.base_url || value.provider_defaults[first?.provider || ""]?.base_url || "");
       const enabled = value.agents.filter((row) => row.enabled);
+      if (project) void saveProjectModelReference(project, value.agents).catch(() => { if (active) setError("模型连接可用，但项目内的配置记录未能保存，请重新读取重试。"); });
       onStatus(enabled.length > 0 && enabled.every((row) => row.api_key_configured && !!row.model));
     }).catch(() => { if (active) setError("暂时无法读取模型配置，请检查本地服务后重试。"); });
     return () => { active = false; };
-  }, [revision, onStatus]);
+  }, [revision, onStatus, project]);
   const enabled = config?.agents.filter((row) => row.enabled) || [];
   const savedCredential = config?.provider_defaults[provider]?.configured;
   async function testConnection(): Promise<void> {
@@ -63,6 +64,7 @@ export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: b
         max_tokens: row.max_tokens, api_key_env: defaults.api_key_env, base_url: url.trim(), base_url_env: "",
         ...(index === 0 && key.trim() ? { api_key: key.trim() } : {}),
       })) });
+      if (project) await saveProjectModelReference(project, value.agents);
       setConfig(value); setKey("");
       onStatus(value.agents.filter((row) => row.enabled).every((row) => row.api_key_configured && !!row.model));
       setMessage("模型配置已保存。密钥已交给本地服务保存，输入框已清空；适用于本机所有项目；尚未进行模型连接验证。");
@@ -70,7 +72,7 @@ export function OnboardingModelSetup({ onStatus, onBusy }: { onStatus: (saved: b
     finally { setBusy(false); }
   }
   return <div className="space-y-4">
-    <p className="text-sm leading-6 text-slate-400">模型连接为本机所有项目共享。已配置的连接会自动复用，无需为每个项目重复填写。默认使用智谱 GLM-5.3。</p>
+    <p className="text-sm leading-6 text-slate-400">模型连接为本机共享，项目内保存所用模型和连接引用。密钥保存在本机安全配置中。已配置的连接会自动复用。</p>
     {config ? <form onSubmit={(event) => void save(event)} className="space-y-4">
       <fieldset disabled={busy} className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm">服务商<select className={INPUT} value={provider} onChange={(event) => { const next = event.target.value; setProvider(next); setUrl(config.provider_defaults[next]?.base_url || ""); setModel(""); setKey(""); setMessage(""); setConnection(null); }}>{config.providers.map((item) => <option key={item} value={item}>{item === "zhipu" ? "智谱（GLM）" : item}</option>)}</select></label>
