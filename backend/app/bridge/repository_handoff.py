@@ -40,7 +40,25 @@ def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> 
             checks = method.get("code_check") if isinstance(method, dict) else None
             checked_files = checks.get("files") if isinstance(checks, dict) else None
             if isinstance(checked_files, list):
-                candidates.extend(item.get("path") for item in checked_files if isinstance(item, dict))
+                handoff = metadata.get("handoff")
+                changes = handoff.get("changes", []) if isinstance(handoff, dict) else []
+                operations: dict[str, set[str]] = {}
+                for change in changes if isinstance(changes, list) else []:
+                    if isinstance(change, dict) and isinstance(change.get("target"), str):
+                        operations.setdefault(change["target"], set()).add(str(change.get("operation")))
+                additions = {target for target, kinds in operations.items() if kinds == {"add"}}
+                for item in checked_files:
+                    ref = item.get("path") if isinstance(item, dict) else None
+                    if isinstance(ref, str) and ref in additions:
+                        # code_check may describe the full implementation plan,
+                        # including files explicitly declared as new outputs.
+                        # They are not baseline evidence and need not exist yet.
+                        # Explicit evidence_refs above still require real files.
+                        if forbidden_source_path(ref):
+                            raise ValueError(f"Baseline handoff cannot reference a control or credential file: {ref}")
+                        resolve_allowed_path(repo, ref, require_text=True)
+                        continue
+                    candidates.append(ref)
         elif metadata.get("schema") == "experiment_plan.v1":
             # A proposal may omit optional evidence_refs. The approved plan
             # still names the exact source configuration for its experiments.

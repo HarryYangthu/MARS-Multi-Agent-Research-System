@@ -133,6 +133,40 @@ def test_focused_code_checks_keep_path_and_availability_guards(tmp_path: Path, s
         baseline_repository_context(repo(tmp_path), checked_proposal([source]))
 
 
+def planned_proposal(target: str, operations: tuple[str, ...] = ("add",), *, source_claim: bool = False) -> dict[str, str]:
+    return {"proposal": dumps({"schema": "proposal.v1", "project": "local",
+        "evidence_refs": [{"kind": "code", "ref": target}] if source_claim else [],
+        "method_spec": {"code_check": {"files": [{"path": "train.py"}, {"path": target}]}},
+        "handoff": {"changes": [{"target": target, "operation": operation} for operation in operations]}},
+        "Authored implementation plan, not execution evidence.")}
+
+
+def test_explicit_new_outputs_are_not_required_or_claimed_as_baseline_sources(tmp_path: Path) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    context = json.loads(baseline_repository_context(repo(tmp_path), planned_proposal("analyze_branches.py")))
+    assert [item["path"] for item in context["files"]] == ["train.py"]
+    assert context["contents_loaded"] is False
+    assert not (tmp_path / "analyze_branches.py").exists()
+    (tmp_path / "analyze_branches.py").write_text("# a later output is still not baseline evidence\n")
+    assert json.loads(baseline_repository_context(repo(tmp_path), planned_proposal("analyze_branches.py"))) == context
+
+
+@pytest.mark.parametrize("operations,source_claim", [(("modify",), False), (("add", "modify"), False), (("add",), True)])
+def test_new_output_classification_does_not_hide_missing_or_conflicting_source_claims(
+    tmp_path: Path, operations: tuple[str, ...], source_claim: bool,
+) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    with pytest.raises(ValueError, match="does not exist"):
+        baseline_repository_context(repo(tmp_path), planned_proposal("missing.py", operations, source_claim=source_claim))
+
+
+@pytest.mark.parametrize("target", ["../outside.py", ".env.py", ".git/config.py"])
+def test_new_outputs_still_require_safe_repository_paths(tmp_path: Path, target: str) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    with pytest.raises(ValueError):
+        baseline_repository_context(repo(tmp_path), planned_proposal(target))
+
+
 def test_focused_source_declarations_cannot_guess_paths_or_cross_projects(tmp_path: Path) -> None:
     (tmp_path / "train.py").write_text("value = 1\n")
     assert baseline_repository_context(repo(tmp_path), checked_proposal(["train.py"], "other")) == ""
