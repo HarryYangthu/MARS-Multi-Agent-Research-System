@@ -183,7 +183,14 @@ def _command(job: LocalCommandJob, tool_name: str, *, validation: bool = False) 
             argument = argument.replace("{code_root}", str(code_root))
         path = Path(argument)
         if index and branch is not None and branch.source_repo_path:
-            if path.is_absolute() and path.is_relative_to(branch.source_root):
+            if (path.is_absolute() and path.is_relative_to(branch.root)
+                    and str(branch.source_root) in argument):
+                # Isolated directories normally include the source name as a
+                # prefix. Verify the actual path before scanning inline text
+                # for shared-source references; a prefix is not ownership.
+                path = safe_scope_path(branch.root, path.relative_to(branch.root).as_posix(), must_exist=True)
+                argument = str(path)
+            elif path.is_absolute() and path.is_relative_to(branch.source_root):
                 path = safe_scope_path(branch.root, path.relative_to(branch.source_root).as_posix(), must_exist=True)
                 argument = str(path)
             elif str(branch.source_root) in argument:

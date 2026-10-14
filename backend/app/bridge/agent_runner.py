@@ -232,18 +232,27 @@ async def _execute_agent_node(
             "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
     failure_phase = "build_context"
     try:
-        context = await agent.build_context(request)
-
-        if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
-            failure_phase = "resource_revision"
-            RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
-
-        failure_phase = "draft"
-        run_loop = getattr(agent, "run_loop", None)
-        if callable(run_loop):
-            artifact = await run_loop(request, context)
+        reused = None
+        if (stage == 'coding' and attempt == 1 and research_stage is None
+                and not revision_reason and resume_invocation is None
+                and not (run.root / 'experiment/experiment_plan.approved.md').exists()):
+            from app.bridge.coding_reuse import prepare_reused_artifact
+            reused = await prepare_reused_artifact(run, request)
+        if reused is not None:
+            artifact = reused
         else:
-            artifact = await agent.draft(request, context)
+            context = await agent.build_context(request)
+
+            if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
+                failure_phase = "resource_revision"
+                RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
+
+            failure_phase = "draft"
+            run_loop = getattr(agent, "run_loop", None)
+            if callable(run_loop):
+                artifact = await run_loop(request, context)
+            else:
+                artifact = await agent.draft(request, context)
     except Exception as exc:
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
             code="agent_execution_failed", message=("Contract Agent execution failed; inspect its native receipts"
@@ -323,17 +332,22 @@ async def _execute_agent_node(
     # knowledge after execution and mislabel that reconstruction as consumed.
     try:
         from app.harness.context.compiler import write_compiled_manifest
-        compiled_manifest = context.metadata.get("last_compiled_manifest")
+        context_metadata = context.metadata if reused is None else {
+            "execution_reuse": artifact.metadata.get("execution_reuse", {}),
+            "model_calls": 0,
+        }
+        compiled_manifest = context_metadata.get("last_compiled_manifest")
         if isinstance(compiled_manifest, dict):
             write_compiled_manifest(run_root=run.root, manifest=compiled_manifest, agent_name=node_key)
         atomic_json(run.root / "context" / (task.invocation_id + ".source_receipt.json"), {
             "schema_id": "context.consumed_sources.v1", "invocation_id": task.invocation_id,
-            "task_id": task.task_id, "source": "actual_agent_context_metadata",
+            "task_id": task.task_id, "source": ("actual_agent_context_metadata" if reused is None
+                                                 else "host_verified_execution_reuse"),
             "compiled_manifest_available": isinstance(compiled_manifest, dict),
-            "required_upstream_refs": context.metadata.get("required_upstream_refs", []),
+            "required_upstream_refs": context_metadata.get("required_upstream_refs", []),
             "feedback_context": feedback_context,
-            "sources": {key: value for key, value in context.metadata.items()
-                        if "skill" in key or "memory" in key or key in {"project_knowledge", "folder_context"}},
+            "sources": {key: value for key, value in context_metadata.items()
+                        if "skill" in key or "memory" in key or key in {"project_knowledge", "folder_context", "execution_reuse", "model_calls"}},
         })
     except Exception as exc:
         logger.warning("actual context manifest persistence failed: {}", type(exc).__name__)

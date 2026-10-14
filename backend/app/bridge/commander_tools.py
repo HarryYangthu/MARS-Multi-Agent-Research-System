@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -75,6 +76,51 @@ def configure_discovery_commander_tools(service: DiscoveryService | None) -> Non
 # --------------------------------------------------------------------- tools
 
 
+def existing_execution_job_for_route(
+    args: dict[str, Any], routing: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Normalize explicit no-code intent; source admission remains host-owned.
+
+    This is a request to inspect a reusable delivery, never evidence that one
+    exists or has been approved. Missing exact configuration reads retain the
+    ordinary Coding path instead of adding another creation blocker.
+    """
+    raw = args.get("existing_execution_job")
+    if raw is None:
+        return None
+    fields = {"config_path", "entrypoint", "max_iters", "budget_unit", "seed"}
+    if not isinstance(raw, dict) or set(raw) != fields:
+        raise ValueError("existing_execution_job 必须只包含 config_path、entrypoint、max_iters、budget_unit、seed。")
+    normalized: dict[str, Any] = {}
+    for key in ("config_path", "entrypoint"):
+        value = raw[key]
+        if not isinstance(value, str) or not value or value != value.strip() or "\x00" in value:
+            raise ValueError(f"existing_execution_job.{key} 必须是非空的代码仓相对文件路径。")
+        name = value.replace("\\", "/")
+        path = PurePosixPath(name)
+        if (path.is_absolute() or PureWindowsPath(value).drive or ".." in path.parts
+                or name in {".", ".."} or name.endswith("/")):
+            raise ValueError(f"existing_execution_job.{key} 必须是代码仓内的相对文件路径，不能逃逸目录。")
+        normalized[key] = path.as_posix()
+    if not isinstance(raw["budget_unit"], str) or raw["budget_unit"] not in {"steps", "epochs"}:
+        raise ValueError("existing_execution_job.budget_unit 必须为 steps 或 epochs。")
+    if type(raw["max_iters"]) is not int or raw["max_iters"] < 1:
+        raise ValueError("existing_execution_job.max_iters 必须是正整数，按本次用户预算填写。")
+    if type(raw["seed"]) is not int or raw["seed"] < 0:
+        raise ValueError("existing_execution_job.seed 必须是非负整数。")
+    normalized.update({key: raw[key] for key in ("max_iters", "budget_unit", "seed")})
+    if (args.get("entrypoint", "pipeline") != "coding" or args.get("standalone")
+            or args.get("seed_artifact") or routing.get("ok") is not True
+            or routing.get("repository_scope") != "required"):
+        return None
+    evidence = routing.get("evidence", [])
+    if not isinstance(evidence, list) or not any(
+        isinstance(row, dict) and row.get("path") == normalized["config_path"] for row in evidence
+    ):
+        return None
+    return normalized
+
+
 async def _create_and_start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     created = await _create_run(args, ctx)
     if not created.get("ok"):
@@ -90,6 +136,10 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     if entrypoint == 'execution':
         return {'ok': False, 'status': 'execution_delivery_required',
                 'error': '新任务尚未绑定编码交付与 execution_jobs 运行清单，任务未创建。已有模型/训练 YAML 不等于系统可消费的执行交接。请从 coding 复用现有模型、只补必要运行交付；需设计比较协议才从 experiment 开始。已有任务的执行清单通过 run.recovery_status/run.recover 复用，不要重新研究模型。'}
+    try:
+        existing_job = existing_execution_job_for_route(args, routing)
+    except ValueError as exc:
+        return {"ok": False, "status": "existing_execution_job_invalid", "error": str(exc)}
     user_request = str(args.get("user_request", ""))
     seed_artifact = args.get("seed_artifact")
     task = str(args.get("task") or user_request[:60] or "commander_run")
@@ -101,7 +151,9 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
         review_mode="commander" if ctx.session.auto_mode else "manual",
-        extra={"routing": routing, **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
+        extra={"routing": routing,
+               **({"existing_execution_job": existing_job} if existing_job is not None else {}),
+               **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
     )
     rsession = ctx.orchestrator.create_session(request)
     run_id = rsession.run.run_id
@@ -577,7 +629,7 @@ TOOLS: dict[str, ToolSpec] = {
         handler=_read_context_material),
     "run.create": ToolSpec(
         name="run.create",
-        description="Create without starting. Inspect task-relevant connected source in this turn before choosing entrypoint. Existing-model simulation is not new research; for unrelated tasks explain repository_scope=not_applicable in routing_reason.",
+        description="Create without starting. Inspect task-relevant connected source in this turn before choosing entrypoint. For an explicit unchanged existing model/configuration with a supported entrypoint and resolved budget/seed, always pass coding plus existing_execution_job after reading the exact configuration. No history lookup is required: the host checks actual approved delivery and execution receipts plus fresh validation. Old memory summaries, failed short checks or reuse_allowed=false cannot reject this reuse request; they cannot certify it either. The host may generate a fresh validated delivery without Coding model calls; unavailable evidence falls back to ordinary Coding. This does not approve artifacts or start simulation. Do not use it for code changes or new methods. For unrelated tasks explain repository_scope=not_applicable in routing_reason.",
         parameters={
             "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
             "repository_scope": "required (default) or not_applicable for tasks unrelated to code",
@@ -585,6 +637,7 @@ TOOLS: dict[str, ToolSpec] = {
             "user_request": "natural-language task",
             "task": "optional short slug",
             "seed_artifact": "optional complete schema-valid markdown doc",
+            "existing_execution_job": "optional no-code execution intent object: {config_path: exact inspected relative configuration path, entrypoint: existing relative training entry, max_iters: positive integer from current budget, budget_unit: steps|epochs, seed: nonnegative integer}; only with coding, never command_id/data/output paths or code modifications",
         },
         handler=_create_run,
     ),
@@ -655,7 +708,14 @@ TOOLS: dict[str, ToolSpec] = {
             "Create and immediately start a pipeline/standalone run. Use the "
             "task-relevant source read in this turn to choose the earliest necessary stage. "
             "For a NEW existing-model simulation use coding to bind execution delivery; "
-            "this creation tool cannot import an approved coding manifest into a fresh execution run. "
+            "for an explicit unchanged configuration and resolved budget/seed, always pass "
+            "existing_execution_job after reading that exact configuration. No Commander history "
+            "lookup is required. Old memory summaries, failed short checks or reuse_allowed=false "
+            "neither reject nor certify reuse: the host checks actual receipts and fresh validation. "
+            "This requests host-verified delivery reuse without Coding model calls. The host creates a fresh "
+            "artifact for the current inputs and budget, retaining review and simulation confirmation; "
+            "missing or changed evidence falls back to normal Coding. Do not request this for code "
+            "changes or new methods, and never treat it as an imported approval or old result. "
             "Use recovery tools for existing execution runs. "
             "Running an existing model must not be expanded into designing a new one. "
             "`entrypoint` to SKIP agents the user doesn't need: 'pipeline' runs "
@@ -674,6 +734,7 @@ TOOLS: dict[str, ToolSpec] = {
             "repository_scope": "required (default); not_applicable only for tasks unrelated to the connected code",
             "routing_reason": "evidence-backed reason for the selected stage; required when repository_scope=not_applicable",
             "seed_artifact": "RARELY used — only a complete schema-valid markdown doc",
+            "existing_execution_job": "optional no-code execution intent object: {config_path: exact inspected relative configuration path, entrypoint: existing relative training entry, max_iters: positive integer from current budget, budget_unit: steps|epochs, seed: nonnegative integer}; only with coding, never command_id/data/output paths or code modifications",
         },
         handler=_create_and_start_run,
     ),

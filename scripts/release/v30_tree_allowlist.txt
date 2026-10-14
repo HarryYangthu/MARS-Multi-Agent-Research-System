@@ -115,6 +115,8 @@ backend/app/bridge/__init__.py
 backend/app/bridge/agent_progress.py
 backend/app/bridge/agent_registry.py
 backend/app/bridge/agent_runner.py
+backend/app/bridge/coding_reuse.py
+backend/app/bridge/coding_reuse_evidence.py
 backend/app/bridge/bridge_agent.py
 backend/app/bridge/candidate_workspace.py
 backend/app/bridge/cli_research_report.py
