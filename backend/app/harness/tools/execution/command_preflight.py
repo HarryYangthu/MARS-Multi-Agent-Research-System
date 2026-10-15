@@ -6,6 +6,7 @@ Only the host registration can declare its no-training environment or argv.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -56,15 +57,36 @@ _VALIDATION_SCHEMA: dict[str, Any] = {
         'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
             'type': 'object', 'additionalProperties': False, 'required': ['name', 'ready'],
             'properties': {'name': {'type': 'string', 'minLength': 1}, 'ready': {'const': True},
-                           'details': {'type': 'object'}}}},
+                           'details': {'type': 'object', 'properties': {
+                               'input_files': {'type': 'array', 'maxItems': 256, 'items': {
+                                   'type': 'object', 'required': ['path', 'sha256'],
+                                   'properties': {
+                                       'path': {'type': 'string', 'minLength': 1},
+                                       'sha256': {'type': 'string', 'pattern': r'^(sha256:)?[0-9a-f]{64}$'},
+                                       'bytes': {'type': 'integer', 'minimum': 0},
+                                   },
+                               }},
+                           }}}}},
     },
 }
 
 
 def validation_protocol() -> dict[str, Any]:
-    return {'result_schema': _VALIDATION_SCHEMA,
+    return {'result_schema': deepcopy(_VALIDATION_SCHEMA),
+            'input_evidence': {
+                'location': 'checks[].details.input_files',
+                'required_fields': ['path', 'sha256'],
+                'semantics': '每个 path 必须是本次实际读取的代码、配置或数据文件的绝对路径；'
+                             'sha256 是该文件内容的实际 SHA-256，不是路径/mtime 的摘要。'
+                             '宿主会独立复核路径范围、内容哈希和文件版本。'
+                             'files 或顶层 input_files 不会被当作此输入证据；'
+                             '没有 input_files 的旧协议检查不提供输入指纹保证。',
+            },
             'instruction': '验证模式只检查本次实际解释器、代码、配置、数据与预算，不训练；'
-                           '从 MARS_JOB_REQUEST 读取实际请求，向 MARS_RESULT_PATH 写验证结果。'}
+                           '从 MARS_JOB_REQUEST 读取实际请求，向 MARS_RESULT_PATH 写验证结果。'
+                           '逐项检查实际内容是否满足模型要求，不能只以文件存在宣称兼容。'
+                           '用 checks[].details.input_files 提交输入证据；缓存配置/模型检查结果时，'
+                           '数据、配置或相关源码变化必须使旧结论失效。'}
 
 
 def validation_configuration(selected: Mapping[str, Any]) -> dict[str, Any] | None:

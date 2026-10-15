@@ -17,6 +17,7 @@ import yaml
 
 from app.harness.tools.execution.command_preflight import (
     _verified_inputs, bounded_error, known_input_changes, preflight_state, run_command_preflight,
+    validation_protocol,
 )
 from app.harness.tools.execution.local_command import LocalCommandJob, _command, command_request, run_local_command
 from app.settings import repo_root, reset_settings_cache
@@ -33,7 +34,7 @@ def genuine_checker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
     source = tmp_path / 'check_and_measure.py'
     source.write_text(
         "import hashlib,json,os,pathlib\n"
-        "r=json.loads(pathlib.Path(os.environ['MARS_JOB_REQUEST']).read_text())\n"
+        "r=json.loads(pathlib.Path(os.environ['MARS_JOB_REQUEST']).read_text(encoding='utf-8'))\n"
         "path=pathlib.Path(r['config']['data_path'])\n"
         "samples=json.loads(path.read_text())\n"
         "assert os.environ['MARS_DATA_PATH']==str(path)\n"
@@ -115,6 +116,29 @@ def test_actual_preflight_checks_data_budget_without_executing_measurement(genui
     failed = run_command_preflight(job, 'approved-token')
     assert failed['status'] == 'failed' and 'JSONDecodeError' in failed['error']
     assert preflight_state(job, 'approved-token')['status'] == 'failed'
+
+
+def test_advertised_protocol_matches_real_checker_and_verified_inputs(
+    genuine_checker: tuple[LocalCommandJob, Path, Path],
+) -> None:
+    from jsonschema import ValidationError, validate
+
+    job, _, data = genuine_checker
+    checked = run_command_preflight(job, 'protocol-roundtrip')
+    assert checked['status'] == 'passed'
+    result = json.loads(Path(checked['receipt_path']).with_name('result.json').read_text())
+    protocol = validation_protocol()
+    validate(result, protocol['result_schema'])
+    assert protocol['input_evidence']['location'] == 'checks[].details.input_files'
+    records = _verified_inputs(job, result, deadline=time.monotonic() + 2, max_bytes=4096)
+    assert [(row['path'], row['sha256']) for row in records] == [
+        (str(data), hashlib.sha256(data.read_bytes()).hexdigest())]
+    assert not (data.parent / 'actual_execution.txt').exists()
+
+    # Malformed evidence must fail the advertised schema before filesystem verification.
+    result['checks'][0]['details']['input_files'][0]['sha256'] = 'a-path-is-not-a-content-digest'
+    with pytest.raises(ValidationError):
+        validate(result, protocol['result_schema'])
 
 
 def test_multiple_checked_inputs_revalidate_real_git_binding_between_operations(
