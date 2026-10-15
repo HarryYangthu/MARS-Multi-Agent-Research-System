@@ -88,6 +88,11 @@ class CodingAgent(BaseAgent):
         return await super().run_loop(request, context)
 
     async def build_context(self, request: RunRequest) -> ContextPack:
+        from app.harness.tools.execution.handoff import execution_delivery_blocker, execution_delivery_context
+        if request.extra.get('execution_delivery_required'):
+            blocker = execution_delivery_blocker(request.project)
+            if blocker:
+                raise ValueError(blocker)
         context = await super().build_context(request)
         from app.harness.tools.config import check_commands
         context.upstream['configured_code_checks'] = json.dumps({
@@ -97,9 +102,8 @@ class CodingAgent(BaseAgent):
             'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
-        from app.harness.tools.execution.handoff import execution_delivery_context
         context.upstream['configured_execution_delivery'] = json.dumps(
-            execution_delivery_context(), ensure_ascii=False)
+            execution_delivery_context(project=request.project), ensure_ascii=False)
         from app.harness.schema.experiment_contract import document_hash, document_metadata
         for supplied in request.upstream_artifacts.values():
             text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied

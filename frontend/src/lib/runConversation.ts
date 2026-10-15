@@ -1,6 +1,12 @@
 import { boundedFetch } from "./clientPolicy";
 import type { Conversation } from "./api";
 
+export function runDetailsUrl(runId: string, node = ""): string {
+  const params = new URLSearchParams({ view: "advanced" });
+  if (node) params.set("agent", node.replace(/_attempt_\d+$/, ""));
+  return `/runs/${encodeURIComponent(runId)}?${params}`;
+}
+
 export function researchConversationUrl(runId: string, project: string, experimentId = ""): string {
   const params = new URLSearchParams({ run: runId, project });
   if (experimentId) params.set("experiment", experimentId);

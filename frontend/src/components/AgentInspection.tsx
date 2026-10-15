@@ -15,9 +15,10 @@ const button = "rounded-lg border border-mars-border px-3 py-2 text-xs hover:bg-
 
 export function AgentInspection({ runId }: { runId: string }): JSX.Element {
   const search = useSearchParams();
-  const requested = search?.get("agent") || "commander";
-  const agent = AGENTS.includes(requested) ? requested : "commander";
+  const requested = search?.get("agent");
   const [run, setRun] = useState<RunDetail | null>(null);
+  const failedAgent = run?.run_id === runId ? latestStages(run).find(item => item.state === "failed")?.stage : undefined;
+  const agent = requested && AGENTS.includes(requested) ? requested : failedAgent || "commander";
   const [catalog, setCatalog] = useState<InspectionCatalog | null>(null);
   const [tab, setTab] = useState<"trace" | "prompts" | "quality">("trace");
   const [selected, setSelected] = useState("");

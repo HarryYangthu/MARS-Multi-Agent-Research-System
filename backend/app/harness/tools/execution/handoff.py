@@ -9,11 +9,25 @@ from app.harness.tools.project_repo import load_project_repo
 from app.settings import get_settings
 
 
-def execution_delivery_context() -> dict[str, Any]:
+def project_local_commands(policy: dict[str, Any], project: str) -> list[dict[str, Any]]:
+    from app.harness.tools.execution.local_command import command_supports_project
+    rows = policy.get('local_commands', [])
+    return [row for row in rows if isinstance(row, dict) and command_supports_project(row, project)] if isinstance(rows, list) else []
+
+
+def execution_delivery_blocker(project: str) -> str:
+    if (get_settings().mars_execution_backend == 'local_command'
+            and not project_local_commands(load_execution_config()['execution'], project)):
+        return ('当前项目没有匹配的已登记训练命令；请在宿主执行配置中绑定当前项目、入口与配置文件，'
+                '再重试编码。其他项目的命令不可直接复用；未调用编码模型。')
+    return ''
+
+
+def execution_delivery_context(*, project: str) -> dict[str, Any]:
     """Expose the same host bindings the coding handoff validator consumes."""
     backend = get_settings().mars_execution_backend
     policy = load_execution_config()['execution']
-    rows = policy.get('local_commands', [])
+    rows = project_local_commands(policy, project)
     commands = [{key: row[key] for key in ('id', 'label', 'argv', 'required_metrics', 'project_ids',
                 'entrypoints', 'config_paths', 'consumes_data_path', 'validation') if key in row}
                 for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -21,6 +35,7 @@ def execution_delivery_context() -> dict[str, Any]:
     from app.harness.tools.execution.command_preflight import validation_protocol
     return {
         'backend': backend,
+        'project': project,
         'local_commands': commands if backend == 'local_command' else [],
         'paper_static': policy.get('paper_static', {}) if backend == 'paper_static' else {},
         'protocol': local_command_protocol() if backend == 'local_command' else {},
@@ -93,7 +108,7 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                 from app.harness.tools.execution.local_command import LocalCommandJob, _command
                 command_id = config.get('command_id')
                 if not isinstance(command_id, str) or not command_id:
-                    rows = policy.get('local_commands', [])
+                    rows = project_local_commands(policy, project)
                     ids = [str(row['id']) for row in rows if isinstance(row, dict) and row.get('id')] if isinstance(rows, list) else []
                     raise ValueError('当前执行方式 local_command 要求交付实际 command_id；可用登记 ID：'
                                      + (', '.join(ids) if ids else '无，请先配置真实执行命令'))

@@ -126,6 +126,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     if legacy:
         for agent in agents:
             if getattr(agent, 'name', '') == 'coding':
+                from app.storage.artifact_handoff import execution_delivery_required
+                from app.harness.tools.execution.handoff import execution_delivery_blocker
+                if execution_delivery_required(session.run, latest['coding']):
+                    blocker = execution_delivery_blocker(project)
+                    if blocker:
+                        return finish('blocked', blocker)
                 from app.bridge.research_branch import coding_workspace_blocker
                 try:
                     blocker = coding_workspace_blocker(session.run)

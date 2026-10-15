@@ -47,7 +47,7 @@ def test_coding_receives_the_actual_registered_command_contract(tmp_path: Path, 
     monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
     reset_settings_cache()
     try:
-        context = execution_delivery_context()
+        context = execution_delivery_context(project='pimc')
         assert context['backend'] == 'local_command'
         assert context['local_commands'] == [{key: registered[key] for key in ('id', 'label', 'argv', 'required_metrics')}]
         assert 'command_id' in context['instruction'] and 'MARS_RESULT_PATH' in context['instruction']
@@ -58,6 +58,6 @@ def test_coding_receives_the_actual_registered_command_contract(tmp_path: Path, 
         protocol['result_schema']['required'].clear()
         assert local_command_protocol()['result_schema']['required'] == _RESULT_SCHEMA['required']
         config.write_text(yaml.safe_dump({'execution': {'local_commands': []}}))
-        assert execution_delivery_context()['local_commands'] == []
+        assert execution_delivery_context(project='pimc')['local_commands'] == []
     finally:
         reset_settings_cache()

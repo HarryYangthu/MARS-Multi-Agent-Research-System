@@ -128,6 +128,13 @@ def _relative_capability(value: Any, name: str) -> str:
     return value.replace('\\', '/')
 
 
+def command_supports_project(command: dict[str, Any], project: str) -> bool:
+    """Use the same explicit project scope for discovery and execution."""
+    projects = command.get('project_ids')
+    return projects is None or (isinstance(projects, list) and bool(projects)
+        and all(isinstance(item, str) and bool(item) for item in projects) and project in projects)
+
+
 def _registered_command(job: LocalCommandJob) -> dict[str, Any]:
     cfg = load_execution_config()["execution"]
     rows = cfg.get("local_commands", [])
@@ -149,7 +156,7 @@ def _registered_command(job: LocalCommandJob) -> dict[str, Any]:
         if not isinstance(patterns, list) or not patterns or any(not isinstance(p, str) or not p for p in patterns):
             raise ValueError('registered command ' + field + ' must be a nonempty string list')
         if field == 'project_ids':
-            if value not in patterns:
+            if not command_supports_project(selected, job.project):
                 raise ValueError('registered command does not support this project')
         else:
             name = _relative_capability(value, field)

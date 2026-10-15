@@ -6,6 +6,7 @@ import { getRunRecovery, recoverRun, type RecoveryAction, type RunRecovery } fro
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { reviewResultUncertain } from "@/lib/apiError";
 import { agentLabel } from "@/lib/researchActivity";
+import { runDetailsUrl } from "@/lib/runConversation";
 
 export function RunRecoveryControl({ runId, project, disabled = false, onChanged }: { runId: string; project: string; disabled?: boolean; onChanged?: () => void | Promise<void> }): JSX.Element | null {
   const [view, setView] = useState<RunRecovery | null>(null);
@@ -70,7 +71,7 @@ export function RunRecoveryControl({ runId, project, disabled = false, onChanged
         {busy ? "正在提交…" : `${action.label} · ${agentLabel(action.node.replace(/_attempt_\d+$/, ""))}`}
       </button>)}
       {(error || uncertain) ? <button type="button" disabled={busy} onClick={() => { setUncertain(false); setView(null); setMessage(""); setRevision(value => value + 1); }} className="text-xs text-indigo-300">核对状态</button> : null}
-      <Link href={`/runs/${encodeURIComponent(runId)}`} className="text-xs text-slate-400 hover:underline">查看任务详情</Link>
+      <Link href={runDetailsUrl(runId, view?.actions[0]?.node)} className="text-xs text-slate-400 hover:underline">查看任务详情</Link>
     </div>
   </section>;
 }

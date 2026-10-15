@@ -44,6 +44,8 @@ def _terminal_provider(events: list[dict[str, Any]], request_index: int,
 
 
 def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
+    if status == 'validation_failed':
+        return _validation_failure_hint(events)
     if status == 'blocked':
         return _tool_approval_hint(events)
     if status == 'protocol_exhausted':
@@ -105,6 +107,26 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ('GLM 账户余额不足或无可用资源包（1113）。请核对额度或在设置中更换可用 API 后，在原任务重试当前阶段；'
                 '进度和累计调用预算已保留，系统不会自动重复调用。')
     return ''
+
+
+def _validation_failure_hint(events: list[dict[str, Any]]) -> str:
+    # Attribute a terminal rejection only to its own invocation, never to a
+    # previous draft or to provider text that merely quotes an error.
+    terminal = events[-1] if events else {}
+    if terminal.get('kind') != 'finished' or terminal.get('status') != 'validation_failed':
+        return ''
+    validations = [event for event in events[:-1] if event.get('kind') == 'validation'
+                   and event.get('correlation') == terminal.get('correlation')]
+    if not validations:
+        return ''
+    errors = validations[-1].get('errors')
+    if not isinstance(errors, list) or not errors or any(not isinstance(error, str) for error in errors):
+        return ''
+    if any(error.endswith(': registered command does not support this project') for error in errors):
+        return ('上次编码交付被拒绝：登记的训练命令不支持当前项目。'
+                '请核对宿主命令的项目绑定后重试编码；已有代码和失败记录保留，此次交付未进入后续执行。')
+    return ('本阶段交付未通过校验。请打开任务详情中的“产物校验”记录核对未通过项，'
+            '修正后重试当前阶段；已有代码和原始记录保留。')
 
 
 def _tool_approval_hint(events: list[dict[str, Any]]) -> str:
@@ -174,7 +196,7 @@ def _model_call_limit_hint(root: Path) -> str:
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:
     if status == 'budget_exhausted':
         return _model_call_limit_hint(root) or _zcode_budget_hint(root)
-    if status not in {'model_error', 'protocol_exhausted', 'blocked'}:
+    if status not in {'model_error', 'protocol_exhausted', 'blocked', 'validation_failed'}:
         return ''
     path = root / 'events.jsonl'
     try:
@@ -197,7 +219,8 @@ def checkpoint_failure_hint(root: Path, *, status: str) -> str:
                     continue
                 if isinstance(event, dict):
                     events.append(event)
-            if any(event.get('kind') == 'model_request' for event in events) or not offset:
+            required_kind = 'validation' if status == 'validation_failed' else 'model_request'
+            if any(event.get('kind') == required_kind for event in events) or not offset:
                 return provider_failure_hint(events, status=status)
             limit *= 2
         return ''

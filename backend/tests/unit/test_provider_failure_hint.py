@@ -312,3 +312,30 @@ def test_actual_zcode_budget_failure_explains_preserved_incomplete_work() -> Non
     hint = checkpoint_failure_hint(root, status='budget_exhausted')
     assert '工具调用次数上限' in hint and '40 次' in hint and '人工审核' in hint
     assert [path.read_bytes() for path in paths] == before
+
+
+def test_validation_hint_requires_current_terminal_rejection() -> None:
+    correlation = {'invocation_id': 'current'}
+    rejection = {'kind': 'validation', 'correlation': correlation,
+                 'errors': ['/execution_jobs/0/config: registered command does not support this project']}
+    terminal = {'kind': 'finished', 'status': 'validation_failed', 'correlation': correlation}
+    assert '训练命令不支持当前项目' in provider_failure_hint([rejection, terminal], status='validation_failed')
+    assert provider_failure_hint([rejection], status='validation_failed') == ''
+    assert provider_failure_hint([rejection, {**terminal, 'correlation': {'invocation_id': 'other'}}], status='validation_failed') == ''
+    assert provider_failure_hint([rejection, {**terminal, 'status': 'passed'}], status='validation_failed') == ''
+    corrected = {**rejection, 'errors': []}
+    assert provider_failure_hint([rejection, corrected, terminal], status='validation_failed') == ''
+    another = {**rejection, 'errors': ['private draft contents']}
+    hint = provider_failure_hint([rejection, another, terminal], status='validation_failed')
+    assert '产物校验' in hint and 'private draft' not in hint and '训练命令不支持' not in hint
+
+
+def test_actual_project_mismatch_trace_preserves_original_evidence() -> None:
+    configured = os.environ.get('MARS_TEST_PROJECT_MISMATCH_TRACE')
+    if not configured:
+        pytest.skip('requires actual project mismatch receipts')
+    root = Path(configured)
+    paths = [root / 'checkpoint.json', root / 'events.jsonl']
+    before = [path.read_bytes() for path in paths]
+    assert '训练命令不支持当前项目' in checkpoint_failure_hint(root, status='validation_failed')
+    assert [path.read_bytes() for path in paths] == before
