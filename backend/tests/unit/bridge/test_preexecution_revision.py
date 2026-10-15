@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.bridge.preexecution_revision import enqueue_revision, finish_revision, pending_revision
-from app.bridge.workflow_service import build_pipeline
+from app.bridge.workflow_service import build_pipeline, ready_batch
 from app.harness.runtime.state_machine import NodeState
 from app.storage.run_store import RunStore
 
@@ -39,6 +39,54 @@ def test_prelaunch_repair_preserves_history_and_blocks_downstream(tmp_path: Path
     finish_revision(run, row)
     assert pending_revision(run) is None
     assert artifact.read_bytes() == before
+
+
+def test_review_recovery_resumes_execution_before_report(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task='resume-reviewed-repair', project='synthetic_regression')
+    graph = build_pipeline('coding')
+    graph.restore_state('coding', NodeState.DONE)
+    graph.restore_state('execution', NodeState.APPROVED)
+    row = enqueue_revision(run, graph, 'coding', 'execution', 'Complete the pending data adaptation')
+    assert ready_batch(graph, 2) == [row['node']]
+    graph.restore_state(row['node'], NodeState.WAITING_REVIEW)
+    assert ready_batch(graph, 2) == []
+    graph.restore_state(row['node'], NodeState.APPROVED)
+    assert ready_batch(graph, 2) == [row['node']]
+    graph.restore_state(row['node'], NodeState.DONE)
+    restored = type(graph).from_dict(graph.to_dict())
+    assert ready_batch(restored, 2) == ['execution']
+    for state in (NodeState.RUNNING, NodeState.WAITING_REVIEW, NodeState.FAILED):
+        restored.restore_state('execution', state)
+        assert ready_batch(restored, 2) == []
+    restored.restore_state('execution', NodeState.DONE)
+    assert ready_batch(restored, 2) == ['writing']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['scheduler', 'report_retry'])
+async def test_missing_execution_intake_does_not_start_report_after_review(tmp_path: Path, entry: str) -> None:
+    from app.bridge.agent_registry import AgentRegistry
+    from app.bridge.orchestrator import Orchestrator, RunRequest
+
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='resume-missing-intake',
+        project='synthetic_regression', entrypoint='coding', review_mode='commander'))
+    session.graph.restore_state('coding', NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    row = enqueue_revision(session.run, session.graph, 'coding', 'execution', 'Inspect recovered continuation')
+    session.graph.restore_state(row['node'], NodeState.DONE)
+    if entry == 'scheduler':
+        await orch._run(session.run.run_id)
+        assert session.graph.state('writing') == NodeState.PENDING
+    else:
+        session.graph.restore_state('writing', NodeState.FAILED)
+        await orch._run_revision_flow(session=session, node_key='writing', reason='Explicit recovery')
+        assert session.graph.state('writing') == NodeState.FAILED
+    # Real missing-agent failure. No provider response, training result or
+    # approval is substituted, and downstream task binding never happens.
+    assert session.graph.state('execution') == NodeState.FAILED
+    assert not (session.run.root / 'input/task_contracts/writing.json').exists()
+    assert not (session.run.root / 'execution/batch_summary.json').exists()
 
 
 @pytest.mark.parametrize('record', ['confirmations/approval.json', 'jobs/admitted.json',

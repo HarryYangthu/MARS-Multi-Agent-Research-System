@@ -786,7 +786,10 @@ class Orchestrator:
                 for node_key in ready:
                     if self._stopping(session):
                         break
-                    group.create_task(self._advance(session, node_key), name=f"node:{run_id}:{node_key}")
+                    continuation = (self._complete_approved_node(session, node_key)
+                                    if graph.state(node_key) == NodeState.APPROVED
+                                    else self._advance(session, node_key))
+                    group.create_task(continuation, name=f"node:{run_id}:{node_key}")
             if session.waiting_for_feedback:
                 self._persist_state(session, status="waiting_feedback")
                 return
@@ -1875,6 +1878,18 @@ class Orchestrator:
         try:
             if self._stopping(session):
                 return
+            if parse_node_key(node_key).stage == 'writing':
+                # A historical report may have started before an APPROVED
+                # execution continuation was resumed. An explicit report retry
+                # must finish those prerequisites, never draft around them.
+                for parent in session.graph.topological_order():
+                    if parent not in session.graph.predecessors(node_key):
+                        continue
+                    if session.graph.state(parent) == NodeState.APPROVED:
+                        await self._complete_approved_node(session, parent)
+                    if (self._stopping(session) or session.waiting_for_feedback
+                            or session.graph.state(parent) not in {NodeState.DONE, NodeState.SKIPPED}):
+                        return
             retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
             if retry_existing_execution and parse_node_key(node_key).stage == 'execution':
                 from app.bridge.execution_confirmation import renew_execution_confirmation
