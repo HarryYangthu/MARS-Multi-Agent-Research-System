@@ -13,10 +13,11 @@ from typing import Any
 from app.harness.agent_loop.executor import LoopInput, LoopResult, generation_fingerprint
 from app.harness.agent_loop.trace import LoopTrace, audit_trace, digest, canonical
 from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
-from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, wire_tools
+from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, run_root, wire_tools
 from app.harness.agent_loop.zcode.limits import invocation_limits
 from app.harness.agent_loop.zcode.protocol import ZCodeClient, ZCodeProtocolError
 from app.harness.llm.usage_policy import agent_quota_mode
+from app.harness.context.runtime_pack import store_material
 
 
 class ZCodeLoopExecutor:
@@ -154,6 +155,13 @@ class ZCodeLoopExecutor:
                 raise ValueError("ZCode checkpoint cannot be safely resumed; reconcile unknown tool outcomes before retry")
             state.update(status="running", pending=None)
             return state
+        # ZCode receives a joined prompt instead of passing through the native
+        # context packer. Persist its original messages before any model call,
+        # so revision recovery and context.read_material can resolve the same
+        # hash-addressed references recorded in context_metadata.
+        if request.context_metadata.get("materials"):
+            for message in request.messages:
+                store_material(run_root(request), message)
         return {"backend": "zcode", "fingerprint": fingerprint, "status": "running", "pending": None,
                 "counts": {key: 0 for key in ("model_requests", "model_responses", "tool_dispatches", "observations",
                     "sdk_attempts", "action_rounds", "protocol_repairs", "validation_repairs", "reflections")},

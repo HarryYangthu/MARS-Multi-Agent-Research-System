@@ -251,7 +251,10 @@ class ZCodeGateway:
             self.save()
             await self.progress("action", tool="model", reason="ZCode 调用模型")
             try:
-                config = replace(self.request.config, max_retries=0, tools=tuple(tools),
+                # Keep the configured bounded retry policy. guarded_complete
+                # reserves and records every upstream attempt; no tool is
+                # dispatched until a complete model response is received.
+                config = replace(self.request.config, tools=tuple(tools),
                     attempt_observer=lambda kind, data: self.trace.record_attempt(self.state, kind, data))
                 # Entire raw wire payload is reserved conservatively, including
                 # tool metadata and any private history required by the SDK.
