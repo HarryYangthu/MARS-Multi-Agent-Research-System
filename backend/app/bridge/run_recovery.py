@@ -6,7 +6,7 @@ from typing import Any
 
 from app.bridge.node_key import parse_node_key
 from app.bridge.orchestrator import Orchestrator
-from app.bridge.task_runtime import resumable_task, task_contract_path
+from app.bridge.task_runtime import RESUME_INPUT_CHANGED, resumable_task, task_contract_path
 from app.bridge.research_run_service import research_execution_admission, load_run_research_contract
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.accounting import (
@@ -147,6 +147,18 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     retryable: list[str] = []
     provider_hint = ''
     for node in candidates:
+        binding_changed = False
+        failure: dict[str, Any] = {}
+        failure_path = session.run.root / 'input/node_failures' / (node + '.json')
+        if failure_path.is_file():
+            try:
+                raw_failure = json.loads(failure_path.read_text())
+            except (OSError, ValueError):
+                return finish('blocked', '阶段失败记录无法核验，请先核对记录。')
+            if not isinstance(raw_failure, dict):
+                return finish('blocked', '阶段失败记录格式异常，请先核对记录。')
+            failure = raw_failure
+            evidence.append(failure)
         if parse_node_key(node).stage == 'execution' and states[node] == 'failed':
             from app.bridge.execution_batch_deadline import execution_failure_hint
             try:
@@ -161,6 +173,10 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if contract.run_id != run_id or contract.node_id != node or contract.project != project:
                 return finish('blocked', '任务检查点所属信息不匹配，请核对任务记录。')
             evidence.append(contract.model_dump())
+            binding_changed = (failure.get('task_id') == contract.task_id
+                and failure.get('invocation_id') == contract.invocation_id
+                and failure.get('code') == 'agent_node_failed'
+                and failure.get('message') == RESUME_INPUT_CHANGED)
             checkpoint = session.run.root / 'agent_traces' / contract.agent / contract.invocation_id / 'checkpoint.json'
             if not checkpoint.resolve().is_relative_to(session.run.root.resolve()):
                 return finish('blocked', '检查点路径异常，请核对任务记录。')
@@ -186,16 +202,14 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     raise HandoffBlockedError(handoffs)
             except (OSError, ValueError, RuntimeError) as exc:
                 return finish('blocked', str(exc))
-            failure_path = session.run.root / 'input/node_failures' / (node + '.json')
-            if failure_path.is_file():
-                try:
-                    failure = json.loads(failure_path.read_text())
-                except (OSError, ValueError):
-                    return finish('blocked', '阶段失败记录无法核验，请先核对记录。')
-                if not isinstance(failure, dict):
-                    return finish('blocked', '阶段失败记录格式异常，请先核对记录。')
-                if failure.get('code') == 'handoff_context_missing':
-                    provider_hint = '交接资料绑定已核验，可仅重试当前阶段；已有研究方案和代码保留。'
+            if failure.get('code') == 'handoff_context_missing':
+                provider_hint = '交接资料绑定已核验，可仅重试当前阶段；已有研究方案和代码保留。'
+        if binding_changed:
+            # A new bridge failure can occur before the loop writes a checkpoint.
+            # Do not advertise that rejected replay or mask it with an older 503.
+            resumable = False
+            provider_hint = ('当前任务输入与旧检查点不一致，不能直接续接；请重试当前阶段。'
+                             '已完成的上游阶段、现有代码与原始记录保留。')
         try:
             resumable_task(session.run, node)
         except (OSError, ValueError, KeyError):
