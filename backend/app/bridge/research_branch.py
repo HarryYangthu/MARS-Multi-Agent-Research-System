@@ -121,7 +121,11 @@ def checkpoint_approved_code(run: RunHandle) -> None:
     rows = metadata.get("files_changed", [])
     declared = {str(row.get("path", "")) for row in rows if isinstance(row, dict)} if isinstance(rows, list) else set()
     if not changed.issubset(declared):
-        raise GitWorkspaceError("实验分支有未纳入已审核代码方案的改动，请先核对；不会自动提交其他文件。",
+        undeclared = sorted(changed - declared)
+        details = "、".join(undeclared[:10])
+        if len(undeclared) > 10:
+            details += f"（共 {len(undeclared)} 个文件）"
+        raise GitWorkspaceError("实验分支有未纳入已审核代码方案的改动，请先核对；不会自动提交其他文件：" + details,
                                 "git_workspace_unreviewed_changes")
     for name in changed:
         resolve_allowed_path(repo, name, for_write=True)

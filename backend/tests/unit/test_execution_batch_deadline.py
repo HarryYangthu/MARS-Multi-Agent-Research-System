@@ -1,9 +1,11 @@
 """Deadline policy and real local-process cancellation; no execution substitutes."""
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -88,8 +90,15 @@ async def test_real_process_timeout_has_a_cause_and_acknowledged_cleanup(tmp_pat
         assert '5s' in str(result.error)
         assert result.metadata['timeout_scope'] == 'tool_dispatch'
         pid = int(pid_path.read_text())
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        if sys.platform == 'win32':
+            # os.kill(pid, 0) is not a POSIX existence probe on Windows.
+            tasklist = Path(os.environ['SystemRoot']) / 'System32/tasklist.exe'
+            listing = subprocess.run([str(tasklist), '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
+                                     check=True, capture_output=True, text=True, errors='replace')
+            assert not any(len(row) > 1 and row[1] == str(pid) for row in csv.reader(listing.stdout.splitlines()))
+        else:
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
         receipt = json.loads(next((tmp_path / 'execution/local_commands').glob('*/*/execution_receipt.json')).read_text())
         assert receipt['status'] == 'cancelled' and receipt['returncode'] != 0
     finally:
@@ -115,7 +124,13 @@ def test_explicit_retry_archives_interruption_and_refuses_changed_or_unknown_inp
         assert path.exists()
 
 
-def test_recovery_uses_persisted_cause_and_rejects_another_run(tmp_path: Path) -> None:
+@pytest.mark.parametrize('code,message', [
+    ('execution_dispatch_timeout', 'Tool dispatch exceeded 6000 seconds; cleanup acknowledged.'),
+    ('git_workspace_unreviewed_changes', '未纳入已审核代码方案的改动：libs/new_model.py'),
+    ('git_workspace_code_unapproved', '编码改动尚未审核'),
+    ('git_workspace_dirty', '代码仓有非本任务记录的未提交改动'),
+])
+def test_recovery_uses_persisted_cause_and_rejects_another_run(tmp_path: Path, code: str, message: str) -> None:
     from app.bridge.execution_batch_deadline import execution_failure_hint
     from app.harness.runtime.task_contract import FailureEnvelope
     from app.storage.run_store import RunStore
@@ -123,12 +138,13 @@ def test_recovery_uses_persisted_cause_and_rejects_another_run(tmp_path: Path) -
     assert execution_failure_hint(run, 'execution') == ('', {})
     path = run.root / 'input/node_failures/execution.json'
     path.parent.mkdir(parents=True)
-    failure = FailureEnvelope(task_id=f'{run.run_id}:execution', code='execution_dispatch_timeout',
-                              message='Tool dispatch exceeded 6000 seconds; cleanup acknowledged.', outcome_known=False)
+    failure = FailureEnvelope(task_id=f'{run.run_id}:execution', code=code, message=message, outcome_known=False)
     path.write_text(failure.model_dump_json())
     before = path.read_bytes()
     hint, evidence = execution_failure_hint(run, 'execution')
-    assert '6000' in hint and evidence['code'] == 'execution_dispatch_timeout'
+    assert message in hint and evidence['code'] == code
+    if code.startswith('git_workspace_'):
+        assert hint.startswith('启动实验前核对未通过：')
     assert path.read_bytes() == before
     failure = failure.model_copy(update={'task_id': 'different-run:execution'})
     path.write_text(failure.model_dump_json())

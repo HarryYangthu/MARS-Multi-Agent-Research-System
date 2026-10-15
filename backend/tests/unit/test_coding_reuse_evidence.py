@@ -31,7 +31,7 @@ from app.storage.run_store import RunHandle, RunStore
 
 _RUNNER = '''import hashlib, json, os
 from pathlib import Path
-request = json.loads(Path(os.environ['MARS_JOB_REQUEST']).read_text())
+request = json.loads(Path(os.environ['MARS_JOB_REQUEST']).read_text(encoding='utf-8'))
 code = Path(request['code_workspace'])
 data = Path(request['config']['data_path'])
 files = [code / 'existing_runner.py', code / 'configs/example.yaml', data]
@@ -306,7 +306,7 @@ async def test_real_host_preparation_runs_current_validation_without_model_train
         assert fresh_job['run_id'] == current.run_id and fresh_job['seed'] == 2027
         assert fresh_job['steps'] == 35 and fresh_job['config']['data_source_id'] == 'current_values'
         assert fresh_job['config']['fs_mhz'] == 100 and fresh_job['config']['channel_count'] == 1
-        assert fresh_job['invocation_id'] != reuse['source']['source_receipt_path'].split('/')[-2]
+        assert fresh_job['invocation_id'] != Path(reuse['source']['source_receipt_path']).parent.name
         assert 'metrics' not in artifact.metadata and '4.5' not in artifact.body
         assert not list((current.root / 'execution').rglob('execution_receipt.json'))
         assert not list((current.root / 'execution').rglob('observed_statistics.json'))
