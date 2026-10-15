@@ -37,6 +37,19 @@ def test_flat_loader_needs_an_explicit_host_bound_file(tmp_path: Path) -> None:
     assert configured_data_path({}, {}, {'data': {'path': str(actual)}}) == str(actual)
 
 
+@pytest.mark.parametrize('seconds', [60, 600, 1200.5])
+def test_preflight_batch_deadline_can_cover_multiple_real_checks(seconds: float) -> None:
+    from app.bridge.execution_confirmation import preflight_total_timeout
+    assert preflight_total_timeout({'preflight_total_timeout_seconds': seconds}) == seconds
+
+
+@pytest.mark.parametrize('seconds', [0, -1, float('inf'), float('nan'), True, '600'])
+def test_preflight_deadline_rejects_unbounded_or_invalid_values(seconds: object) -> None:
+    from app.bridge.execution_confirmation import preflight_total_timeout
+    with pytest.raises(ValueError):
+        preflight_total_timeout({'preflight_total_timeout_seconds': seconds})
+
+
 def test_data_summary_uses_resolved_adapter_inputs() -> None:
     from app.bridge.execution_confirmation import effective_data_summary
     rows = [{'config': {}, 'effective': {'data_path': '/actual/input.pth'}} for _ in range(2)]

@@ -45,11 +45,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if not blocker:
                 result['actions'] = [{'action': 'retry', 'node': nodes[0], 'label': '重新核对并恢复仿真'}]
                 return finish('recoverable', '作业中断清理已确认；重新核对配置后开启明确的新尝试，旧收据保留。')
-        if len(nodes) == 1 and parse_node_key(nodes[0]).stage in {'idea', 'experiment', 'writing'}:
-            from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
+        from app.bridge.stopped_draft_retry import stopped_draft_node, stopped_draft_retry_blocker
+        draft_node = stopped_draft_node(termination, states)
+        if draft_node is not None:
             try:
-                draft_blocker = stopped_draft_retry_blocker(session.run, nodes[0],
-                    stage=parse_node_key(nodes[0]).stage, termination=termination, states=states)
+                draft_blocker = stopped_draft_retry_blocker(session.run, draft_node,
+                    stage=parse_node_key(draft_node).stage, termination=termination, states=states)
             except (OSError, ValueError, KeyError) as exc:
                 draft_blocker = str(exc)
             if draft_blocker:

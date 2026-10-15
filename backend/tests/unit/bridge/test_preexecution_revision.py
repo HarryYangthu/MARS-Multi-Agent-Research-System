@@ -63,7 +63,7 @@ def test_review_recovery_resumes_execution_before_report(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('entry', ['scheduler', 'report_retry'])
+@pytest.mark.parametrize('entry', ['scheduler', 'report_retry', 'shutdown_report_retry'])
 async def test_missing_execution_intake_does_not_start_report_after_review(tmp_path: Path, entry: str) -> None:
     from app.bridge.agent_registry import AgentRegistry
     from app.bridge.orchestrator import Orchestrator, RunRequest
@@ -80,7 +80,18 @@ async def test_missing_execution_intake_does_not_start_report_after_review(tmp_p
         assert session.graph.state('writing') == NodeState.PENDING
     else:
         session.graph.restore_state('writing', NodeState.FAILED)
-        await orch._run_revision_flow(session=session, node_key='writing', reason='Explicit recovery')
+        if entry == 'shutdown_report_retry':
+            import asyncio
+            session.termination = {'type': 'cancelled', 'reason': 'server_shutdown',
+                'scope': 'owned_async_tasks', 'cleanup_complete': True, 'interrupted_nodes': []}
+            result = await orch.request_artifact_revision(run_id=session.run.run_id, agent='writing',
+                reason='Explicit retry after service update', restart_stopped=True)
+            assert result['ok']
+            owner = orch.owned_tasks.active(session.run.run_id)
+            assert owner is not None
+            await asyncio.wait_for(owner, timeout=20)
+        else:
+            await orch._run_revision_flow(session=session, node_key='writing', reason='Explicit recovery')
         assert session.graph.state('writing') == NodeState.FAILED
     # Real missing-agent failure. No provider response, training result or
     # approval is substituted, and downstream task binding never happens.

@@ -5,6 +5,7 @@ import json
 from typing import Any, Mapping
 
 from app.bridge.task_runtime import task_contract_path
+from app.bridge.node_key import parse_node_key
 from app.harness.agent_loop.trace import audit_trace
 from app.harness.llm.accounting import ResourceBudgetError, RunModelBudget
 from app.harness.runtime.task_contract import TaskEnvelope
@@ -13,12 +14,24 @@ from app.storage.run_store import RunHandle
 DRAFT_STAGES = frozenset({"idea", "experiment", "writing"})
 
 
+def stopped_draft_node(termination: Mapping[str, Any], states: Mapping[str, str]) -> str | None:
+    nodes = termination.get('interrupted_nodes', [])
+    if (nodes == [] and termination.get('reason') == 'server_shutdown'
+            and 'running' not in states.values()):
+        # A retry waiting on its execution prerequisite retains FAILED until
+        # generation actually starts. Shutdown may therefore interrupt no node.
+        nodes = [node for node, state in states.items() if state == 'failed']
+    if len(nodes) == 1 and parse_node_key(nodes[0]).stage in DRAFT_STAGES:
+        return str(nodes[0])
+    return None
+
+
 def stopped_draft_retry_blocker(run: RunHandle, node: str, *, stage: str,
                                 termination: Mapping[str, Any], states: Mapping[str, str]) -> str | None:
     if (stage not in DRAFT_STAGES or termination.get("type") != "cancelled"
             or termination.get("scope") != "owned_async_tasks"
             or termination.get("cleanup_complete") is not True
-            or termination.get("interrupted_nodes") != [node]
+            or stopped_draft_node(termination, states) != node
             or states.get(node) != "failed" or "running" in states.values()):
         return "停止清理或节点状态尚未确认，不能开始新的方案尝试。"
     path = task_contract_path(run, node)

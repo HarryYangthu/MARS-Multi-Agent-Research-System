@@ -1266,6 +1266,7 @@ class Orchestrator:
             if pending_revision(session.run) is not None:
                 if not await self._perform_preexecution_revision(session):
                     return False
+            review_identity = ''
             try:
                 view = await asyncio.to_thread(execution_preview, session.run, node_key)
                 if not view['blockers']:
@@ -1288,6 +1289,7 @@ class Orchestrator:
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
+                        review_identity = decision._identity
                         current = await asyncio.to_thread(execution_preview, session.run, node_key)
                         if current['confirmed']:
                             return True
@@ -1300,13 +1302,17 @@ class Orchestrator:
                             return True
                         else:
                             await finish_review(session.run, session.bus, "needs_user", decision.reason, identity=decision._identity)
-            except (OSError, ValueError, RuntimeError):
+            except (OSError, ValueError, RuntimeError) as error:
                 # A changed/unreadable input never becomes permission to launch.
-                view = {'blockers': ['仿真配置无法核验，请刷新配置核对窗口。']}
+                from app.harness.tools.execution.command_preflight import bounded_error
+                reason = '运行前核对未通过：' + bounded_error(str(error))
+                view = {'blockers': [reason]}
                 if session.request.review_mode == "commander":
                     from app.bridge.managed_review import record_state, review_state
                     state = review_state(session.run) or {}
-                    if state.get("node") != node_key or state.get("generation") != session.request.review_generation or state.get("status") != "needs_user":
+                    if review_identity:
+                        await finish_review(session.run, session.bus, 'needs_user', reason, identity=review_identity)
+                    elif state.get("node") != node_key or state.get("generation") != session.request.review_generation or state.get("status") != "needs_user" or state.get('reason') != reason:
                         await record_state(session.run, session.bus, {"node": node_key, "kind": "execution_configuration",
                             "generation": session.request.review_generation, "status": "needs_user", "reason": view['blockers'][0]})
             if not announced:
@@ -1795,9 +1801,11 @@ class Orchestrator:
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
+            from app.bridge.stopped_draft_retry import stopped_draft_node
+            stopped_draft = stopped_draft_node(termination, {key: value.value for key, value in session.graph.all_states().items()})
             if (not restart_stopped or agent not in {"idea", "experiment", "coding", "execution", "writing"} or stopped_node is None
                     or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
-                    or stopped_node not in termination.get("interrupted_nodes", [])
+                    or (stopped_node not in termination.get("interrupted_nodes", []) and stopped_node != stopped_draft)
                     or self.owned_tasks.active(run_id) is not None
                     or session.graph.state(stopped_node) != NodeState.FAILED):
                 return {"ok": False, "status": "stopped_run_requires_new_execution"}

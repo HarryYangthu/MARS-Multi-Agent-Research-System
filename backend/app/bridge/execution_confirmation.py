@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -28,10 +29,16 @@ def confirmation_policy() -> dict[str, Any]:
     raw: dict[str, Any] = yaml.safe_load((repo_root() / 'configs/execution_review.yaml').read_text())
     if raw.get('poll_interval_seconds', 0) <= 0 or raw.get('max_source_bytes', 0) < 1:
         raise ValueError('仿真配置核对策略无效')
-    timeout = raw.get('preflight_total_timeout_seconds', 45)
-    if type(timeout) not in {int, float} or not 0 < timeout <= 60:
-        raise ValueError('仿真配置运行前验证的总时限无效')
+    preflight_total_timeout(raw)
     return raw
+
+
+def preflight_total_timeout(policy: dict[str, Any]) -> float:
+    """A configured batch deadline, independent of any one checker's deadline."""
+    value = policy.get('preflight_total_timeout_seconds', 600)
+    if type(value) not in {int, float} or not math.isfinite(value) or value <= 0:
+        raise ValueError('仿真配置运行前验证的总时限必须为有限正数')
+    return float(value)
 
 
 def _file_hash(path: Path) -> str:
@@ -401,7 +408,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                     blockers.append(f'{spec.experiment_id} 的数据路径不可访问。')
     base_inputs_token = digest({'run': run.run_id, 'project': run.project, 'node': node_key, 'files': files,
         'runtime': settings.mars_execution_backend, 'config': config, 'defaults': defaults,
-        'experiments': experiments, 'policy': ledger['configuration_sha256'], 'environment': environment_hash})
+        'experiments': experiments, 'policy': ledger['configuration_sha256'], 'environment': environment_hash,
+        'confirmation_policy': confirmation_policy()})
     from app.harness.tools.execution.command_preflight import known_input_changes
     input_changes = [{'name': job.experiment_id, 'files': changes} for job in validation_jobs
                      if (changes := known_input_changes(job, base_inputs_token))]
@@ -450,7 +458,7 @@ def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str =
                 from app.harness.tools.execution.local_command import LocalCommandJob
                 from app.harness.tools.execution.command_preflight import run_command_preflight
                 prepared = prepare_execution(run, node_key)
-                deadline = time.monotonic() + float(confirmation_policy().get('preflight_total_timeout_seconds', 45))
+                deadline = time.monotonic() + preflight_total_timeout(confirmation_policy())
                 for spec in prepared.specs:
                     job = LocalCommandJob(run_id=run.run_id, experiment_id=spec.experiment_id,
                         project=run.project, run_root=run.root, config=spec.config, seed=spec.seed,
