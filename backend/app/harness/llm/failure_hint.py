@@ -44,6 +44,8 @@ def _terminal_provider(events: list[dict[str, Any]], request_index: int,
 
 
 def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
+    if status == 'blocked':
+        return _tool_approval_hint(events)
     if status == 'protocol_exhausted':
         errors = [event for event in events if event.get('kind') == 'protocol_error']
         if not errors:
@@ -72,6 +74,11 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ''
     provider = _terminal_provider(events, index, attempt_indices[-1])
     details = attempts[-1].get('details', {})
+    http_status = details.get('http_status') if isinstance(details, dict) else None
+    if provider and type(http_status) is int and 500 <= http_status <= 599:
+        label = {'deepseek': 'DeepSeek', 'zhipu': 'GLM'}.get(provider, '模型服务')
+        return (f'{label} 服务返回 HTTP {http_status}（已尝试 {len(attempts)} 次），本次未取得模型回复。'
+                '已有代码、草稿与调用记录已保留；请核对服务可用性后在原任务恢复或重试。')
     if (provider == 'deepseek' and isinstance(details, dict)
             and details.get('http_status') == 402):
         return ('DeepSeek 账户余额不足（HTTP 402）。请充值或切换有余额的 API 密钥后重试当前阶段；'
@@ -98,6 +105,26 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
         return ('GLM 账户余额不足或无可用资源包（1113）。请核对额度或在设置中更换可用 API 后，在原任务重试当前阶段；'
                 '进度和累计调用预算已保留，系统不会自动重复调用。')
     return ''
+
+
+def _tool_approval_hint(events: list[dict[str, Any]]) -> str:
+    relevant = [event for event in events if event.get('kind') in {
+        'model_request', 'tool_dispatch', 'observation'}]
+    if len(relevant) < 2:
+        return ''
+    dispatch, observation = relevant[-2:]
+    visible = observation.get('visible')
+    if (dispatch.get('kind') != 'tool_dispatch' or observation.get('kind') != 'observation'
+            or observation.get('tool') != dispatch.get('tool')
+            or observation.get('correlation') != dispatch.get('correlation')
+            or not isinstance(visible, dict) or visible.get('status') != 'requires_approval'
+            or visible.get('ok') is not False):
+        return ''
+    if observation.get('tool') == 'code.delete_file':
+        return ('编码在删除文件时遇到人工审批要求，系统未自动批准。'
+                '若删除只是可选清理，可保留文件并修正交付后重试；'
+                '若确实必须删除，请先核对具体文件及审批记录。')
+    return '工具操作需要人工审批，任务已暂停；请先核对操作及审批记录，系统未自动批准。'
 
 
 def _truncation_hint(request: dict[str, Any], tail: list[dict[str, Any]]) -> str:
@@ -147,7 +174,7 @@ def _model_call_limit_hint(root: Path) -> str:
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:
     if status == 'budget_exhausted':
         return _model_call_limit_hint(root) or _zcode_budget_hint(root)
-    if status not in {'model_error', 'protocol_exhausted'}:
+    if status not in {'model_error', 'protocol_exhausted', 'blocked'}:
         return ''
     path = root / 'events.jsonl'
     try:

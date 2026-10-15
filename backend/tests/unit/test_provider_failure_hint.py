@@ -154,6 +154,41 @@ def _zcode_quota_events() -> list[dict[str, Any]]:
                          'exception_type': 'RateLimitError'}}]
 
 
+@pytest.mark.parametrize('http_status', [500, 502, 503, 504])
+def test_server_error_hint_uses_verified_receipt_only(http_status: int) -> None:
+    events = _zcode_quota_events()
+    events[1]['provider'] = 'deepseek'
+    events[-1]['details'] = {'http_status': http_status, 'exception_type': 'InternalServerError',
+                              'message': 'private credential and provider response body'}
+    hint = provider_failure_hint(events, status='model_error')
+    assert f'HTTP {http_status}' in hint and 'DeepSeek' in hint and '已尝试 1 次' in hint
+    assert 'private' not in hint and 'credential' not in hint
+    assert provider_failure_hint(events + [{'kind': 'sdk_attempt_succeeded'}], status='model_error') == ''
+    events[1]['request'] = 19
+    assert provider_failure_hint(events, status='model_error') == ''
+
+
+def test_delete_approval_hint_requires_terminal_matching_observation(tmp_path: Path) -> None:
+    events: list[dict[str, Any]] = [
+        {'kind': 'tool_dispatch', 'tool': 'code.delete_file', 'correlation': {'invocation_id': 'a'}},
+        {'kind': 'observation', 'tool': 'code.delete_file', 'correlation': {'invocation_id': 'a'},
+         'visible': {'status': 'requires_approval', 'ok': False, 'args': {'path': 'private path'}}},
+        {'kind': 'finished', 'status': 'blocked'},
+    ]
+    hint = provider_failure_hint(events, status='blocked')
+    assert '删除文件' in hint and '系统未自动批准' in hint and '可保留文件' in hint
+    assert 'private' not in hint
+    (tmp_path / 'events.jsonl').write_text('\n'.join(json.dumps(e) for e in events), encoding='utf-8')
+    assert checkpoint_failure_hint(tmp_path, status='blocked') == hint
+    assert provider_failure_hint(events, status='passed') == ''
+    assert provider_failure_hint(events + [{'kind': 'model_request'}], status='blocked') == ''
+    events[1]['correlation'] = {'invocation_id': 'b'}
+    assert provider_failure_hint(events, status='blocked') == ''
+    events[1]['correlation'] = {'invocation_id': 'a'}
+    events[1]['visible']['status'] = 'success'
+    assert provider_failure_hint(events, status='blocked') == ''
+
+
 def test_zcode_provider_receipt_binds_the_terminal_request_without_prompt_content() -> None:
     events = _zcode_quota_events()
     events[0]['visible'] = {'provider': 'openai', 'content': 'private prompt, credential, URL'}
