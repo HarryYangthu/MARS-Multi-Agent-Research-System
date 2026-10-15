@@ -1,7 +1,7 @@
 """Shared config readers for tool implementations."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +78,12 @@ def load_tool_configs() -> dict[str, ToolConfig]:
 
 
 def tool_config(name: str) -> ToolConfig:
-    return load_tool_configs().get(name, ToolConfig())
+    config = load_tool_configs().get(name, ToolConfig())
+    if name == 'execution.simulation_runner':
+        from app.harness.tools.execution.registrations import registered_commands
+        prefixes = tuple(tuple(row['argv']) for row in registered_commands().values())
+        config = replace(config, command_allowlist=(*config.command_allowlist, *prefixes))
+    return config
 
 
 def load_execution_config() -> dict[str, Any]:
@@ -88,6 +93,11 @@ def load_execution_config() -> dict[str, Any]:
     execution = raw.get("execution", {})
     if not isinstance(execution, dict):
         execution = {}
+    from app.harness.tools.execution.registrations import registered_commands
+    managed = list(registered_commands().values())
+    if managed:
+        existing = execution.get('local_commands', [])
+        execution['local_commands'] = [*managed, *(existing if isinstance(existing, list) else [])]
     # Runtime selection has one precedence order; every consumer sees the same
     # effective backend. Keep the declared value only as configuration provenance.
     execution['declared_backend'] = execution.get('backend')

@@ -85,7 +85,8 @@ def test_code_binding_rejects_redirected_metadata(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("filename,data", [("../escape.md", b"x"), ("x\\escape.md", b"x"), (".hidden.md", b"x"),
-    ("script.py", b"x"), ("empty.md", b" \n"), ("binary.md", b"\xff"), ("null.md", b"a\x00b"), ("oversize.md", b"x" * 4_000_001)])
+    ("script.py", b"x"), ("empty.md", b" \n"), ("binary.md", b"\xff"), ("null.md", b"a\x00b"), ("oversize.md", b"x" * 4_000_001)],
+    ids=['parent-path', 'windows-path', 'hidden', 'script', 'empty', 'binary', 'null', 'oversize'])
 def test_invalid_background_never_creates_a_file(tmp_path: Path, filename: str, data: bytes) -> None:
     folder = project(tmp_path)
     with pytest.raises(ValueError):

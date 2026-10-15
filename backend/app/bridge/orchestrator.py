@@ -301,6 +301,8 @@ class Orchestrator:
             assert_ready_for_run(project=request.project)
             from app.bridge.project_execution_config import require_project_execution
             require_project_execution(request.project)
+            from app.bridge.project_training import require_training_for_run
+            require_training_for_run(request.project, entrypoint=request.entrypoint, standalone=request.standalone)
         from app.harness.context.folder_context import load_folder_context
         from app.harness.agent_loop.trace import atomic_json
         # A contract-backed project is not an alias for mutable global project

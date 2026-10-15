@@ -18,7 +18,7 @@ def project_local_commands(policy: dict[str, Any], project: str) -> list[dict[st
 def execution_delivery_blocker(project: str) -> str:
     if (get_settings().mars_execution_backend == 'local_command'
             and not project_local_commands(load_execution_config()['execution'], project)):
-        return ('当前项目没有匹配的已登记训练命令；请在宿主执行配置中绑定当前项目、入口与配置文件，'
+        return ('当前项目没有匹配的已登记训练命令；请打开「项目 → 项目配置 → 训练启动」保存本项目的训练入口，'
                 '再重试编码。其他项目的命令不可直接复用；未调用编码模型。')
     return ''
 
@@ -47,6 +47,9 @@ def execution_delivery_context(*, project: str) -> dict[str, Any]:
             '登记命令的项目、入口和配置能力必须与本项匹配；旧命令不能作为其他模型的通用入口。'
             '声明 consumes_data_path 时必须消费宿主交付的数据；验证模式只检查，不训练。'
             '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
+            '登记入口尚不存在时，它是本阶段需要创建的交付文件，不是用户遗漏的输入资料；'
+            '实现读取 MARS_JOB_REQUEST、写入 MARS_RESULT_PATH 和 MARS_VALIDATE_ONLY 无训练验证协议，'
+            '调用本项目真实训练代码，不得伪造结果。'
             if backend == 'local_command' else
             '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'
         ),

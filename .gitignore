@@ -51,6 +51,10 @@ posttrain/tensorboard/
 posttrain/wandb/
 workspace/uploads/
 workspace/folder_projects.json
+workspace/removed_projects.json
+workspace/folder_projects.lock
+configs/execution.projects.json
+configs/execution.projects.lock
 workspace/repos/*
 !workspace/repos/README.md
 

@@ -2197,6 +2197,29 @@ export async function openProjectFolder(path: string, create = false): Promise<P
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, create }),
   }));
 }
+
+export type TrainingDraft = { python: string; entrypoint: string; config_pattern: string; required_metrics: string[]; consumes_data_path: boolean };
+export type ProjectTraining = { project: string; backend: string; configured: boolean; command_id: string; draft: TrainingDraft; python_options: string[]; code_root: string; entrypoint_exists: boolean; execution_verified: boolean; message: string };
+export async function getProjectTraining(project: string, signal?: AbortSignal): Promise<ProjectTraining> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/training`, { signal, cache: "no-store" }));
+}
+export async function saveProjectTraining(project: string, draft: TrainingDraft): Promise<ProjectTraining> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/training`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) }));
+}
+export type ProjectRemoval = { project: string; display_name: string; path: string; blockers: string[]; recycle_blockers: string[]; message: string };
+export type RemovedProject = ProjectRemoval & { id: string; mode: "detach" | "recycle"; stored_path: string; removed_at: string };
+export async function previewProjectRemoval(project: string, signal?: AbortSignal): Promise<ProjectRemoval> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/removal`, { signal, cache: "no-store" }));
+}
+export async function removeProject(project: string, payload: { mode: "detach" | "recycle"; expected_path: string; confirmation: string }): Promise<RemovedProject> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }));
+}
+export async function listRemovedProjects(): Promise<RemovedProject[]> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/removed/list`, { cache: "no-store" }));
+}
+export async function restoreRemovedProject(id: string): Promise<{ project: string; path: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/projects/removed/${encodeURIComponent(id)}/restore`, { method: "POST" }));
+}
 export async function browseProjectFolders(path = "", signal?: AbortSignal): Promise<ProjectFolders> {
   const url = apiUrl(`${BASE}/api/projects/folders`);
   if (path) url.searchParams.set("path", path);
