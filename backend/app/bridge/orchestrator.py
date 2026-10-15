@@ -1776,6 +1776,10 @@ class Orchestrator:
                 and session.graph.state(execution_node) == NodeState.APPROVED):
             return self._request_preexecution_revision(session, coding_node, execution_node, reason,
                                                        restart_stopped=restart_stopped)
+        report_node = self._latest_node_for_stage(session, 'writing')
+        if agent == 'writing' and report_node is not None and session.graph.state(report_node) == NodeState.DONE:
+            return self._request_completed_report_revision(session, report_node, reason,
+                                                            restart_stopped=restart_stopped)
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
@@ -1908,6 +1912,40 @@ class Orchestrator:
                 node_key,
                 exc,
             )
+
+    def _request_completed_report_revision(self, session: RunSession, previous: str, reason: str,
+                                           *, restart_stopped: bool) -> dict[str, Any]:
+        from app.bridge.report_revision import append_report_revision
+        run_id = session.run.run_id
+        if self.owned_tasks.active(run_id) is not None:
+            return {'ok': True, 'status': 'already_running', 'node': previous}
+        if blocked := self._contract_execution_block(session):
+            return blocked
+        termination = session.termination
+        if self._stopping(session) and (not restart_stopped or termination is None
+                or termination.get('type') != 'cancelled' or termination.get('cleanup_complete') is not True
+                or termination.get('interrupted_nodes') != []):
+            return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
+        try:
+            revised, node = append_report_revision(session.graph, previous, reason)
+        except ValueError as exc:
+            return {'ok': False, 'status': 'report_revision_blocked', 'error': str(exc)}
+        previous_graph = session.graph
+        session.graph, session.termination = revised, None
+        try:
+            # Persist the pending attempt/reason before a model call; preserve
+            # completed nodes, documents, job receipts and approval history.
+            self._persist_state(session, status='queued')
+        except Exception:
+            session.graph, session.termination = previous_graph, termination
+            raise
+        session.run.write_event('run_lifecycle', {'event': 'run.report_revision_requested',
+            'node': node, 'previous_node': previous, 'reason': reason, 'previous_termination': termination})
+        self.owned_tasks.release_after_explicit_review(run_id)
+        async def revise_report() -> None:
+            await self._run_revision_flow(session=session, node_key=node, reason=reason)
+        started = self._spawn_owned(session, 'report_revision', revise_report)
+        return {'ok': started, 'status': 'revision_started' if started else 'not_startable', 'node': node}
 
     def _request_preexecution_revision(self, session: RunSession, coding: str, execution: str,
                                       reason: str, *, restart_stopped: bool) -> dict[str, Any]:

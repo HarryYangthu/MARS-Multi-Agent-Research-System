@@ -24,6 +24,8 @@ class WritingAgent(BaseAgent):
         "上下文材料标签不是文件路径，不得猜测作业哈希；保留完整路径、目录与后缀。"
         "执行证据的 source 是当前 run 的引用路径；按其 reader/material_ref 用 context.read_material 读取，"
         "不能把 run 路径交给 code.repo_reader。代码仓读取失败不能据此声称执行证据不存在。"
+        "文件的 preview/哈希不代表已读取全文；只能引用完整 text 或实际读取观察中的数值。"
+        "摘要、表格和推论须逐项核对原始字段，不得猜测预览外的数据；缺值明确写未核验。"
     )
 
     async def build_context(self, request: RunRequest) -> ContextPack:
@@ -35,7 +37,7 @@ class WritingAgent(BaseAgent):
             from app.harness.reporting.execution_evidence import execution_job_evidence
             context.upstream['execution.job_files'] = execution_job_evidence(
                 Path(str(request.extra['run_root'])), str(request.extra.get('run_id') or Path(str(request.extra['run_root'])).name),
-                request.project, admit_materials=True)
+                request.project, admit_materials=True, inline_text=True)
         return context
 
     async def validate_candidate(self, request: RunRequest, text: str,

@@ -51,3 +51,24 @@ def test_direct_checkpoint_requires_current_primary_receipt(archive: tuple[Path,
     receipt['sha256'] = 'sha256:' + '0' * 64
     with pytest.raises(ValueError, match='Primary receipt'):
         _receipt_checkpoints(root, job, job['evidence'])
+
+
+def test_complete_evidence_includes_verified_text_after_preview_boundary(
+    archive: tuple[Path, dict[str, Any]],
+) -> None:
+    root, job = archive
+    rows = [json.loads(line) for line in execution_job_evidence(
+        root, job['run_id'], job['project'], inline_text=True).splitlines() if line.startswith('{')]
+    checked = 0
+    for row in rows:
+        assert 'evidence_error' not in row
+        for item in row['files']:
+            if item.get('text_complete') and item['source'].endswith('branch_analysis.json'):
+                raw = (root / item['source']).read_bytes()
+                assert len(raw) > 1600
+                assert json.loads(item['text']) == json.loads(raw)
+                assert 'preview' not in item
+                checked += 1
+            if not item.get('text_readable'):
+                assert 'text' not in item
+    assert checked >= 1

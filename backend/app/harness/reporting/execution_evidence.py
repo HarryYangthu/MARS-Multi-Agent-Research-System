@@ -161,7 +161,7 @@ def _step_summary(path: Path, text: str) -> dict[str, Any]:
 
 
 def _file_item(root: Path, name: str, raw: bytes, *, integrity: str,
-               admit_materials: bool, text_budget: list[int]) -> dict[str, Any]:
+               admit_materials: bool, text_budget: list[int], inline_text: bool = False) -> dict[str, Any]:
     item: dict[str, Any] = {"source": name, "sha256": hashlib.sha256(raw).hexdigest(),
                             "bytes": len(raw), "integrity": integrity}
     path = Path(name)
@@ -179,7 +179,13 @@ def _file_item(root: Path, name: str, raw: bytes, *, integrity: str,
     text_budget[0] -= len(raw)
     from app.harness.tools.execution.command_preflight import bounded_error
     text = bounded_error(text, max_chars=16777216)
-    item.update(text_readable=True, preview=text[:1600], preview_truncated=len(text) > 1600)
+    item['text_readable'] = True
+    if inline_text:
+        # A reviewer without tools cannot inspect the tail of a preview. Send
+        # the verified text; the normal context budget must admit or reject it.
+        item.update(text=text, text_complete=True)
+    else:
+        item.update(preview=text[:1600], preview_truncated=len(text) > 1600)
     try:
         item.update(_step_summary(path, text))
     except (ValueError, TypeError, csv.Error):
@@ -229,7 +235,8 @@ def _receipt_checkpoints(root: Path, job: dict[str, Any], evidence_rows: list[An
     return declared
 
 
-def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_materials: bool = False) -> str:
+def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_materials: bool = False,
+                           inline_text: bool = False) -> str:
     """Verify actual receipts/index entries and optionally admit bounded text readback.
 
     Never construct filenames from a presumed adapter layout. Legacy sibling
@@ -243,6 +250,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
              "source is a run-relative citation path, not a code.repo_reader path. Use each text file's paired reader with its exact material_ref.",
              "sha256 is only an integrity digest, never a context.read_material ref. Read only with file.reader.args.ref / material_ref; a digest without a paired reader is not readable through that tool.",
              "Each completed job includes its actual stored metrics; use all paired jobs, not only abbreviated aggregate previews.",
+             "A preview or digest does not establish unseen values. Only text or an actual material read supplies file content; never fill missing numbers from expectation.",
              "Min/max loss does not establish monotonic convergence or statistical significance."]
     paths = sorted(jobs.glob("*.json")) if jobs.exists() else []
     text_budget, file_budget, byte_budget = [1048576], 256, 134217728
@@ -424,7 +432,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                     byte_budget -= len(artifact)
             for source, content in verified.items():
                 record["files"].append(_file_item(root, source, content, integrity="recorded_sha256_verified",
-                    admit_materials=admit_materials, text_budget=text_budget))
+                    admit_materials=admit_materials, text_budget=text_budget, inline_text=inline_text))
             record["files"].extend(opaque.values())
             if not indexed:
                 for directory in sorted(legacy_directories):
@@ -440,7 +448,7 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
                         file_budget -= 1
                         byte_budget -= len(content)
                         record["files"].append(_file_item(root, source, content, integrity="observed_only_no_recorded_digest",
-                            admit_materials=admit_materials, text_budget=text_budget))
+                            admit_materials=admit_materials, text_budget=text_budget, inline_text=inline_text))
             if job.get('status') == 'completed':
                 record["metrics"] = measured_metrics(job.get("result", {}).get("metrics"))
             lines.append(json.dumps(record, ensure_ascii=False, allow_nan=False))

@@ -602,7 +602,7 @@ def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
             "optimizer step. The PNG alone does not prove convergence."
         )
     from app.bridge.execution_evidence_handoff import execution_job_evidence
-    out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project)
+    out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project, inline_text=True)
     return out
 
 
