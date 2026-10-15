@@ -96,4 +96,5 @@ async def test_real_missing_agent_failure_never_advances_execution(tmp_path: Pat
     assert session.graph.state('writing') == NodeState.PENDING
     assert not (session.run.root / 'execution/local_commands').exists()
     from app.bridge.managed_review import review_state
-    assert review_state(session.run)['node'] == 'coding_attempt_2'
+    state = review_state(session.run)
+    assert state is not None and state['node'] == 'coding_attempt_2'

@@ -121,13 +121,16 @@ def test_new_review_does_not_reuse_an_older_approval(tmp_path: Path) -> None:
     first = art.write(text=_proposal_text())
     approved = art.approve(first)
     original = approved.path.read_bytes()
-    assert art.review_candidate(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    candidate = art.review_candidate(agent_dir='idea', stem='idea_proposal')
+    assert candidate is not None and candidate.version == 'approved'
     revised = art.write(text=_proposal_text() + '\nHuman-authored revision requiring a separate review.\n')
     assert art.review_candidate(agent_dir='idea', stem='idea_proposal') == revised
-    assert art.latest(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    latest = art.latest(agent_dir='idea', stem='idea_proposal')
+    assert latest is not None and latest.version == 'approved'
     assert approved.path.read_bytes() == original
     art.approve(revised)
-    assert art.review_candidate(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    candidate = art.review_candidate(agent_dir='idea', stem='idea_proposal')
+    assert candidate is not None and candidate.version == 'approved'
     # Even byte-identical newer versions cannot silently inherit another version's
     # approval. Numeric ordering remains correct beyond v9.
     tenth = art.write(text=revised.path.read_text(), version='v10')
