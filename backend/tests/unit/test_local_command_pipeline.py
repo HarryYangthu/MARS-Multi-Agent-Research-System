@@ -127,6 +127,16 @@ async def test_registered_python_placeholder_measures_without_a_login_path(
     receipt = json.loads((directory / 'execution_receipt.json').read_text())
     assert set(local_command_protocol()['request']['fields']) <= request.keys()
     assert receipt['argv'][0] == sys.executable
+    layout = local_command_protocol()['artifact_layout']
+    expected = layout['output_dir'].replace('<safe_experiment_id>', 'actual').replace(
+        '<invocation_id>', request['invocation_id'])
+    assert directory == tmp_path / 'run' / expected
+    for field in ('request_file', 'result_file', 'host_receipt_file'):
+        assert (directory / layout[field]).is_file()
+    import hashlib
+    for filename, hash_key in ((layout['request_file'], 'request_sha256'),
+                               (layout['result_file'], 'result_sha256')):
+        assert receipt[hash_key] == 'sha256:' + hashlib.sha256((directory / filename).read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("fault", ["stdout_only", "wrong_id"])

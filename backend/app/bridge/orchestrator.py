@@ -1250,6 +1250,10 @@ class Orchestrator:
         interval = float(confirmation_policy()['poll_interval_seconds'])
         announced = False
         while not self._stopping(session):
+            from app.bridge.preexecution_revision import pending_revision
+            if pending_revision(session.run) is not None:
+                if not await self._perform_preexecution_revision(session):
+                    return False
             try:
                 view = await asyncio.to_thread(execution_preview, session.run, node_key)
                 if not view['blockers']:
@@ -1265,6 +1269,7 @@ class Orchestrator:
                     def eligible() -> bool:
                         return (session.request.review_mode == "commander" and session.request.review_generation == generation
                                 and not self._stopping(session) and not session.read_only
+                                and pending_revision(session.run) is None
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
                         payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
@@ -1764,6 +1769,13 @@ class Orchestrator:
             return {"ok": False, "status": "read_only", "run_id": run_id}
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
+        coding_node = self._latest_node_for_stage(session, 'coding')
+        execution_node = self._latest_node_for_stage(session, 'execution')
+        if (agent == 'coding' and coding_node is not None and execution_node is not None
+                and session.graph.state(coding_node) == NodeState.DONE
+                and session.graph.state(execution_node) == NodeState.APPROVED):
+            return self._request_preexecution_revision(session, coding_node, execution_node, reason,
+                                                       restart_stopped=restart_stopped)
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
@@ -1845,6 +1857,7 @@ class Orchestrator:
         session: RunSession,
         node_key: str,
         reason: str,
+        continue_run: bool = True,
     ) -> None:
         try:
             if self._stopping(session):
@@ -1880,7 +1893,14 @@ class Orchestrator:
                 await self._await_hitl_or_auto(session, node_key)
             if not self._stopping(session):
                 await self._complete_approved_node(session, node_key)
-                await self.run(session.run.run_id)
+                if continue_run:
+                    from app.bridge.preexecution_revision import pending_revision
+                    pending = pending_revision(session.run)
+                    if pending and pending['node'] == node_key and session.graph.state(node_key) == NodeState.DONE:
+                        if not await self._perform_preexecution_revision(session):
+                            return
+                        await self._complete_approved_node(session, pending['execution_node'])
+                    await self.run(session.run.run_id)
         except Exception as exc:  # pragma: no cover - background safety net
             logger.warning(
                 "artifact revision flow failed: run={} node={} error={}",
@@ -1888,6 +1908,63 @@ class Orchestrator:
                 node_key,
                 exc,
             )
+
+    def _request_preexecution_revision(self, session: RunSession, coding: str, execution: str,
+                                      reason: str, *, restart_stopped: bool) -> dict[str, Any]:
+        from app.bridge.preexecution_revision import enqueue_revision
+        run_id = session.run.run_id
+        termination = session.termination
+        if self._stopping(session):
+            if (not restart_stopped or termination is None or termination.get('type') != 'cancelled'
+                    or termination.get('cleanup_complete') is not True or termination.get('interrupted_nodes') != []
+                    or self.owned_tasks.active(run_id) is not None):
+                return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
+        try:
+            row = enqueue_revision(session.run, session.graph, coding, execution, reason)
+        except (OSError, ValueError) as exc:
+            return {'ok': False, 'status': 'preexecution_revision_blocked', 'error': str(exc)}
+        session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_requested',
+            'node': row['node'], 'execution_node': execution, 'reason': reason,
+            'previous_termination': termination, 'revision_id': row['id']})
+        session.termination = None
+        self._persist_state(session, status='waiting_execution_confirmation')
+        if self.owned_tasks.active(run_id) is None:
+            self.owned_tasks.release_after_explicit_review(run_id)
+            async def repair_then_execute() -> None:
+                await self._complete_approved_node(session, execution)
+                if not self._stopping(session):
+                    await self.run(run_id)
+            if not self._spawn_owned(session, 'preexecution_revision', repair_then_execute):
+                return {'ok': False, 'status': 'not_startable', 'node': row['node']}
+        return {'ok': True, 'status': 'revision_requested', 'node': row['node']}
+
+    async def _perform_preexecution_revision(self, session: RunSession) -> bool:
+        from app.bridge.preexecution_revision import assert_no_execution, attach_revision, finish_revision, pending_revision
+        row = pending_revision(session.run)
+        if row is None:
+            return True
+        assert_no_execution(session.run)
+        attach_revision(session.graph, row)
+        node, execution = row['node'], row['execution_node']
+        if session.graph.state(node) == NodeState.PENDING:
+            await self._run_revision_flow(session=session, node_key=node, reason=row['reason'], continue_run=False)
+        if self._stopping(session) or session.graph.state(node) != NodeState.DONE:
+            return False
+        # Rebuild the deterministic execution intake from the newly reviewed code.
+        # Neither this method nor the API approves scientific content.
+        await self._transition(session, execution, NodeState.RUNNING)
+        if not await self._run_node_runner(session, execution, revision_reason=row['reason']):
+            return False
+        if session.graph.state(execution) == NodeState.RUNNING:
+            await self._transition(session, execution, NodeState.WAITING_REVIEW)
+        if session.graph.state(execution) == NodeState.WAITING_REVIEW:
+            await self._await_hitl_or_auto(session, execution)
+        if self._stopping(session) or session.graph.state(execution) != NodeState.APPROVED:
+            return False
+        finish_revision(session.run, row)
+        session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_reviewed',
+            'node': node, 'execution_node': execution, 'revision_id': row['id']})
+        return True
 
     def _latest_node_for_stage(self, session: RunSession, stage: str) -> str | None:
         candidates = [

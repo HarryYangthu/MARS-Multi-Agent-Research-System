@@ -38,7 +38,10 @@ def execution_delivery_context() -> dict[str, Any]:
     }
 
 def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: str,
-                          plan_required: bool = False) -> list[str]:
+                          plan_required: bool = False, run_id: str | None = None,
+                          run_root: Path | None = None) -> list[str]:
+    if (run_id is None) != (run_root is None):
+        return ['编码交接核验必须同时提供任务标识与运行目录']
     try:
         jobs = delivery_experiments(plan_text, coding, project=project, plan_required=plan_required)
     except ValueError as exc:
@@ -96,11 +99,12 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                                      + (', '.join(ids) if ids else '无，请先配置真实执行命令'))
                 from app.harness.tools.git_branch import current_git_branch
                 from app.harness.runtime.project_scope import current_project_scope
-                branch = current_git_branch(project)
-                scope = current_project_scope(project)
-                run_id = branch.run_id if branch is not None else scope.run_id if scope is not None else 'handoff-check'
-                _command(LocalCommandJob(run_id=run_id, experiment_id=job['name'],
-                    project=project, run_root=scope.run_root if scope is not None else Path('.'),
+                branch = current_git_branch(project, run_id)
+                scope = current_project_scope(project, run_id)
+                bound_id = run_id or (branch.run_id if branch is not None else scope.run_id if scope is not None else 'handoff-check')
+                bound_root = run_root if run_root is not None else scope.run_root if scope is not None else Path('.')
+                _command(LocalCommandJob(run_id=bound_id, experiment_id=job['name'],
+                    project=project, run_root=bound_root,
                     command_id=command_id, config=config), 'execution.simulation_runner')
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(prefix + ': ' + str(exc))

@@ -68,7 +68,8 @@ def inspect_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[st
                 errors.append('/coding: 缺少批准的编码交付')
             else:
                 from app.execution.handoff_validation import coding_handoff_errors
-                errors.extend(coding_handoff_errors(plan_text, document_metadata(coding_path.read_text()), project=run.project))
+                errors.extend(coding_handoff_errors(plan_text, document_metadata(coding_path.read_text()),
+                    project=run.project, run_id=run.run_id, run_root=run.root))
         if errors:
             raise ValueError('上游交接未通过；请修正实验设计或编码交付：' + '；'.join(dict.fromkeys(errors)))
     handoffs: list[HandoffEnvelope] = []

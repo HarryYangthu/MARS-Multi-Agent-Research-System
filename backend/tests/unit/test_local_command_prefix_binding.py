@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 import os
+import json
 from pathlib import Path
 import sys
 
@@ -132,4 +133,39 @@ def test_distinct_project_directory_retains_unrelated_output_argument(
             os.environ.pop(name, None)
         else:
             os.environ[name] = saved
+        reset_settings_cache()
+
+
+def test_handoff_preview_resolves_saved_checkout_without_live_agent_context(
+    tmp_path: Path, checkout: GitBranch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.harness.tools.execution.handoff import coding_handoff_errors
+    from app.harness.tools.git_branch import current_git_branch, receipt_path
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'preview-registry.json'))
+    reset_settings_cache()
+    try:
+        project = open_folder(str(tmp_path / 'preview-project'), create=True)
+        (project.metadata_root / 'repo_link.yaml').write_text(
+            yaml.safe_dump({'local_path': str(checkout.source_root)}))
+        run_root = tmp_path / 'preview-run'
+        run_root.mkdir()
+        branch = prepare(checkout.source_root, run_root, project.name, 'preview-run')
+        coding = {'schema': 'code_spec.v1', 'project': project.name, 'agent': 'coding',
+                  'target_lang': 'python', 'baseline_compat': {'preserved': True}, 'files_changed': [],
+                  'execution_jobs': [{'name': 'candidate', 'config': {
+                      'command_id': 'prefix-bound', 'seed': 42, 'budget_steps': 1}}]}
+        before = receipt_path(run_root).read_bytes()
+        with _host_command(tmp_path, [sys.executable, '{code_root}/runner.py']):
+            assert current_git_branch(project.name) is None
+            assert any('bound research checkout' in error for error in
+                       coding_handoff_errors('', coding, project=project.name))
+            assert not coding_handoff_errors('', coding, project=project.name,
+                                             run_id=branch.run_id, run_root=run_root)
+            assert coding_handoff_errors('', coding, project=project.name,
+                                         run_id='another-run', run_root=run_root)
+            assert current_git_branch(project.name) is None
+        assert receipt_path(run_root).read_bytes() == before
+        assert json.loads(before)['run_id'] == branch.run_id
+        assert git(branch.root, 'status', '--porcelain') == ''
+    finally:
         reset_settings_cache()

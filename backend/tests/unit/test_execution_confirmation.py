@@ -25,6 +25,18 @@ from app.storage.artifact_store import ArtifactStore
 from app.storage.run_store import RunStore
 
 
+def test_flat_loader_needs_an_explicit_host_bound_file(tmp_path: Path) -> None:
+    from app.bridge.execution_confirmation import configured_data_path
+    source = {'data': {'data_dir': '/original', 'data_name': 'capture_without_extension'}}
+    actual = tmp_path / 'uploaded-capture.mat'
+    actual.write_bytes(b'Explicit file path test; no scientific measurement.')
+    assert configured_data_path({'data_binding': {'path': str(actual)}}, {}, source) == str(actual)
+    assert configured_data_path({}, {'data_path': str(actual)}, source) == str(actual)
+    with pytest.raises(ValueError, match='未绑定'):
+        configured_data_path({}, {}, source)
+    assert configured_data_path({}, {}, {'data': {'path': str(actual)}}) == str(actual)
+
+
 def test_data_summary_uses_resolved_adapter_inputs() -> None:
     from app.bridge.execution_confirmation import effective_data_summary
     rows = [{'config': {}, 'effective': {'data_path': '/actual/input.pth'}} for _ in range(2)]

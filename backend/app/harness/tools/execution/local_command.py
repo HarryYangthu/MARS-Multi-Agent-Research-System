@@ -82,6 +82,27 @@ def local_command_protocol() -> dict[str, Any]:
                             '该值由宿主解析并核验，不能忽略后沿用另一份数据。',
         },
         'result_schema': deepcopy(_RESULT_SCHEMA),
+        'artifact_layout': {
+            'run_root_env': 'MARS_RUN_ROOT',
+            'output_dir': 'execution/local_commands/<safe_experiment_id>/<invocation_id>/',
+            'request_file': 'job.json',
+            'result_file': 'result.json',
+            'host_receipt_file': 'execution_receipt.json',
+            'host_hash_format': 'sha256:<64 lowercase hex digits>, including request_sha256/result_sha256/evidence[].sha256',
+            'host_data_binding_fields': ['path', 'bytes', 'mtime_ns', 'binding_sha256'],
+            'host_data_binding_semantics': 'binding_sha256 hashes path/bytes/mtime metadata, not the dataset content. '
+                'Read the exact data_binding.path and verify content against your frozen dataset digest if required. '
+                'The result schema has no data field; dataset provenance belongs in a separate evidence file. '
+                'Receipt evidence rows contain absolute path, bytes and prefixed SHA256; verify checkpoint/config/measurement bytes before reuse.',
+            'dependent_jobs': (
+                '不同实验的 output_dir 不在同一 experiment_id 目录下。需要复用前序权重时，'
+                '从本任务 MARS_RUN_ROOT 内核对实际 job.json、result.json 和 execution_receipt.json；'
+                'receipt 由宿主验收后写入，核对 run_id/experiment_id/invocation_id、completed 状态、'
+                'returncode=0、request_sha256/result_sha256（sha256: 前缀）及实际证据。'
+                '同时核对数据、配置、种子和预算；没有匹配或多个匹配无法区分时明确报错。'
+                '不能猜测目录、采用其他任务权重或把存在 measurement.json 当作宿主验收成功。'
+            ),
+        },
         'result_delivery': (
             'MARS_RESULT_PATH 是结果文件路径；成功结果严格符合上述 schema，三个标识原样复制请求。'
             'metrics 仅放真实有限数值，布尔门控转换为 0/1。evidence_paths 是相对 request.output_dir '

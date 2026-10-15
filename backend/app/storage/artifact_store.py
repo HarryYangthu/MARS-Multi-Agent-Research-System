@@ -240,7 +240,8 @@ class ArtifactStore:
                 from app.storage.artifact_handoff import execution_delivery_required, experiment_plan_required
                 if plan.is_file() or 'execution_jobs' in result.metadata or execution_delivery_required(self.run, 'coding'):
                     errors = coding_handoff_errors(plan.read_text() if plan.is_file() else '', result.metadata,
-                        project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'))
+                        project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'),
+                        run_id=self.run.run_id, run_root=self.run.root)
             elif result.schema_id == 'run_log.v1' and 'planned_experiments' in result.metadata:
                 plan = self.run.root / 'experiment/experiment_plan.approved.md'
                 coding = self.run.root / 'coding/code_spec.approved.md'

@@ -96,6 +96,15 @@ def effective_data_summary(experiments: list[dict[str, Any]]) -> str:
     return '各组不同，详见实验清单' if paths else ''
 
 
+def configured_data_path(bound_request: dict[str, Any], config: dict[str, Any], source: dict[str, Any]) -> str:
+    """Use host-bound data before a loader declaration; never invent an extension."""
+    value = (bound_request.get('data_binding', {}).get('path')
+             or config.get('data_path') or source.get('data', {}).get('path'))
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('数据配置未绑定可核验的实际文件；请选择数据源或指定 data_path')
+    return value
+
+
 def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     """Read-only preview. The batch consumes the same preparation function."""
     from app.bridge.agent_runner import _load_selected_data_source
@@ -103,6 +112,9 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     config = load_execution_config()['execution']
     configured = str(config['backend'])
     blockers: list[str] = []
+    from app.bridge.preexecution_revision import pending_revision
+    if pending_revision(run) is not None:
+        blockers.append('编码返工尚未完成并重新审核，执行配置不能确认。')
     warnings: list[str] = []
     defaults: dict[str, Any] = {
         'device': '远端 GPU' if settings.mars_execution_backend == 'remote_gpu' else '本地',
@@ -307,7 +319,10 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                         data_source = repository_data_configuration(
                             load_run_project_repo(run.project, run.root, run.run_id), ref)
                         if data_source is not None:
-                            raw_path = str(spec.config.get('data_path') or data_source['data']['path'])
+                            # Flat loaders declare data_dir/data_name, not data.path.
+                            # The registered command's host binding is authoritative;
+                            # never guess a file extension from a dataset stem.
+                            raw_path = configured_data_path(bound_request, spec.config, data_source)
                             data_path = Path(raw_path).expanduser()
                             if not data_path.is_absolute():
                                 data_path = branch.root / data_path

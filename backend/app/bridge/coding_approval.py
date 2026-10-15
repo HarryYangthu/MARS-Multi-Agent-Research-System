@@ -54,5 +54,6 @@ def coding_candidate_errors(run: RunHandle, text: str) -> list[str]:
     if validation.metadata.get('execution_jobs') or execution_delivery_required(run, 'coding'):
         plan = run.root / 'experiment/experiment_plan.approved.md'
         return coding_handoff_errors(plan.read_text() if plan.is_file() else '', validation.metadata,
-            project=run.project, plan_required=experiment_plan_required(run, 'coding'))
+            project=run.project, plan_required=experiment_plan_required(run, 'coding'),
+            run_id=run.run_id, run_root=run.root)
     return []

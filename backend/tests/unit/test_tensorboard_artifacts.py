@@ -62,3 +62,35 @@ def test_missing_curves_and_external_images_are_reported(tmp_path: Path) -> None
     report = sync_run_visualizations(run)
     assert report['images'] == 0
     assert len(report['warnings']) == 2
+
+
+def test_sparse_csv_observations_link_figures_without_filling_missing_epochs(tmp_path: Path) -> None:
+    # Caller-authored visualization input only; no execution success is asserted.
+    run = tmp_path / 'csv-run'
+    attempt = run / 'execution/local_commands/candidate/invocation'
+    model = attempt / 'training'
+    model.mkdir(parents=True)
+    (attempt / 'job.json').write_text(json.dumps({'run_id': run.name, 'experiment_id': 'candidate'}))
+    source = model / 'training.csv'
+    source.write_text('epoch,updates,loss_mse,lr,train_PIM,train_RES,validation_PIM,validation_RES\n'
+                      '1,79,0.05,0.004,25,22,25,23\n'
+                      '25,1975,0.001,0.004,25,6,25,5\n'
+                      '50,3950,0.0008')  # incomplete concurrent write
+    Image.new('RGB', (12, 10), 'blue').save(model / 'spectrum.png')
+    original = source.read_bytes()
+    report = sync_run_visualizations(run)
+    assert len(report['models']) == 1 and report['images'] == 1 and not report['warnings']
+    record = report['models'][0]
+    assert record['label'] == 'candidate' and record['validation_points'] == 2
+    assert record['training_steps'] == 1975
+    assert record['image_tags'] == ['figures/training/spectrum.png']
+    assert sync_run_visualizations(run) == report and source.read_bytes() == original
+    events = EventAccumulator(str(run / record['scalar_run'])).Reload()
+    assert [x.step for x in events.Scalars('validation/RES_db')] == [79, 1975]
+    assert [x.value for x in events.Scalars('validation/RES_db')] == [23, 5]
+    with source.open('a') as handle:
+        handle.write(',0.001,25,5,25,4\n')
+    updated = sync_run_visualizations(run)
+    assert updated['models'][0]['validation_points'] == 3
+    events.Reload()
+    assert [x.step for x in events.Scalars('train/loss')] == [79, 1975, 3950]
