@@ -1947,6 +1947,11 @@ class Orchestrator:
         attach_revision(session.graph, row)
         node, execution = row['node'], row['execution_node']
         if session.graph.state(node) == NodeState.PENDING:
+            if session.request.review_mode == 'commander':
+                from app.bridge.managed_review import record_state
+                await record_state(session.run, session.bus, {'node': node, 'kind': 'artifact',
+                    'generation': session.request.review_generation, 'status': 'revision_requested',
+                    'reason': '正在按明确反馈修正编码；完成后由主控重新审核，再核对执行配置。'})
             await self._run_revision_flow(session=session, node_key=node, reason=row['reason'], continue_run=False)
         if self._stopping(session) or session.graph.state(node) != NodeState.DONE:
             return False

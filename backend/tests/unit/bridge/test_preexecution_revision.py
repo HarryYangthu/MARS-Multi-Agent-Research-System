@@ -68,3 +68,32 @@ def test_other_active_stage_prevents_repair(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='活动'):
         enqueue_revision(run, graph, 'coding', 'execution', 'Not a safe review boundary')
     assert pending_revision(run) is None
+
+
+@pytest.mark.asyncio
+async def test_real_missing_agent_failure_never_advances_execution(tmp_path: Path) -> None:
+    import asyncio
+    from app.bridge.agent_registry import AgentRegistry
+    from app.bridge.orchestrator import Orchestrator, RunRequest
+
+    # Explicitly missing dependencies must fail through the real driver. No
+    # provider, tool, review response or scientific result is substituted.
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='prelaunch-missing-agent',
+        project='synthetic_regression', entrypoint='pipeline', review_mode='commander'))
+    for node in ('idea', 'experiment', 'coding'):
+        session.graph.restore_state(node, NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    result = await orch.request_artifact_revision(run_id=session.run.run_id, agent='coding',
+                                                 reason='Explicit admission test with no configured agent')
+    assert result['ok'] and result['node'] == 'coding_attempt_2'
+    owner = orch.owned_tasks.active(session.run.run_id)
+    assert owner is not None
+    await asyncio.wait_for(owner, timeout=20)
+    assert session.graph.state('coding_attempt_2') == NodeState.FAILED
+    assert session.graph.state('coding') == NodeState.DONE
+    assert session.graph.state('execution') == NodeState.APPROVED
+    assert session.graph.state('writing') == NodeState.PENDING
+    assert not (session.run.root / 'execution/local_commands').exists()
+    from app.bridge.managed_review import review_state
+    assert review_state(session.run)['node'] == 'coding_attempt_2'
