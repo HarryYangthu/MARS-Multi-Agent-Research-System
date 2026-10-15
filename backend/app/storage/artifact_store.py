@@ -129,6 +129,30 @@ class ArtifactStore:
 
     # ------------------------------------------------------------------ write
 
+    def review_candidate(self, *, agent_dir: str, stem: str) -> ArtifactRef | None:
+        """Newest draft unless that exact version has already been approved.
+
+        ``latest`` intentionally prefers published approvals for consumers. A
+        review must not use that policy: an older approval cannot approve a new
+        revision merely because both share a stem.
+        """
+        self._validate_stem(stem)
+        with path_lock(self.lock_path):
+            self._recover_approval(agent_dir=agent_dir, stem=stem)
+            versions = self.list_versions(agent_dir=agent_dir, stem=stem)
+            drafts = [ref for ref in versions if re.fullmatch(r'v[1-9]\d*', ref.version)]
+            approved = next((ref for ref in versions if ref.version == 'approved'), None)
+            if not drafts:
+                return approved
+            candidate = max(drafts, key=lambda ref: int(ref.version[1:]))
+            receipts = sorted(self._approval_dir(agent_dir, stem).glob('*.json'))
+            if approved is not None and receipts:
+                receipt = json.loads(receipts[-1].read_text(encoding='utf-8'))
+                if (receipt.get('source_version') == candidate.version
+                        and receipt.get('source_sha256') == hashlib.sha256(candidate.path.read_bytes()).hexdigest()):
+                    return approved
+            return candidate
+
     def _next_version(
         self, *, agent_dir: str, stem: str
     ) -> str:

@@ -236,7 +236,7 @@ class Orchestrator:
                                       evidence_refs=["artifact_evaluation"])
             decision._identity = original_identity
         from app.storage.artifact_store import ArtifactStore
-        current_ref = ArtifactStore(session.run).latest(agent_dir=ref.agent_dir, stem=ref.stem)
+        current_ref = ArtifactStore(session.run).review_candidate(agent_dir=ref.agent_dir, stem=ref.stem)
         if current_ref is None or current_ref.path != ref.path or load_folder_context(session.run.project, session.run.root) != folder_context:
             await finish_review(session.run, session.bus, "needs_user", "审核期间当前方案版本或项目约束已变化，请重新核对。", identity=decision._identity)
             return
@@ -1028,7 +1028,7 @@ class Orchestrator:
             await self._transition(session, node_key, NodeState.FAILED)
             return
 
-        latest = store.latest(agent_dir=agent_dir, stem=stem)
+        latest = store.review_candidate(agent_dir=agent_dir, stem=stem)
         if latest is None:
             # Agent didn't produce any artifact (real error). Halt the chain
             # — silently auto-approving here used to skip HITL entirely.
@@ -1130,7 +1130,7 @@ class Orchestrator:
                         node_key,
                         NodeState.WAITING_REVIEW,
                     )
-                latest = store.latest(agent_dir=agent_dir, stem=stem)
+                latest = store.review_candidate(agent_dir=agent_dir, stem=stem)
                 if latest is None:
                     await self._transition(session, node_key, NodeState.FAILED)
                     return
@@ -1461,7 +1461,7 @@ class Orchestrator:
         for _, (dir_name, stem) in SCHEMA_TO_AGENT.items():
             if dir_name != stage:
                 continue
-            latest = store.latest(agent_dir=dir_name, stem=stem)
+            latest = store.review_candidate(agent_dir=dir_name, stem=stem)
             if stage == "execution":
                 versions = [ref for ref in store.list_versions(agent_dir=dir_name, stem=stem) if ref.version != "approved"]
                 if versions:

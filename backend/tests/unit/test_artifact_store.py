@@ -113,3 +113,23 @@ def test_latest_prefers_approved(tmp_path: Path) -> None:
     versions = art.list_versions(agent_dir="idea", stem="idea_proposal")
     assert {v.version for v in versions} == {"v1", "v2", "approved"}
     assert ref2.version == "v2"
+
+
+def test_new_review_does_not_reuse_an_older_approval(tmp_path: Path) -> None:
+    run = RunStore(tmp_path).create(task='review-version-admission', project='pimc')
+    art = ArtifactStore(run)
+    first = art.write(text=_proposal_text())
+    approved = art.approve(first)
+    original = approved.path.read_bytes()
+    assert art.review_candidate(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    revised = art.write(text=_proposal_text() + '\nHuman-authored revision requiring a separate review.\n')
+    assert art.review_candidate(agent_dir='idea', stem='idea_proposal') == revised
+    assert art.latest(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    assert approved.path.read_bytes() == original
+    art.approve(revised)
+    assert art.review_candidate(agent_dir='idea', stem='idea_proposal').version == 'approved'
+    # Even byte-identical newer versions cannot silently inherit another version's
+    # approval. Numeric ordering remains correct beyond v9.
+    tenth = art.write(text=revised.path.read_text(), version='v10')
+    assert art.review_candidate(agent_dir='idea', stem='idea_proposal') == tenth
+    assert approved.path.read_bytes() == revised.path.read_bytes()
