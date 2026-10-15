@@ -39,6 +39,13 @@ def test_writer_omits_nonfinite_and_nonmeasurement_values(tmp_path: Path) -> Non
     assert events.Scalars("validation/RES_db")[0].step == 42
 
 
+def test_idle_writer_does_not_create_empty_event_files(tmp_path: Path) -> None:
+    with ScalarWriter(tmp_path / 'idle') as writer:
+        writer.scalar('invalid', float('nan'), 0)
+        writer.flush()
+    assert not list(tmp_path.rglob('events.out.tfevents.*'))
+
+
 @pytest.mark.asyncio
 async def test_real_tensorboard_loads_and_reloads_run_scoped_events(tmp_path: Path) -> None:
     manager = TensorBoardManager(tmp_path / "service")
@@ -64,7 +71,7 @@ async def test_real_tensorboard_loads_and_reloads_run_scoped_events(tmp_path: Pa
                 rows: list[list[float]] = []
                 while time.monotonic() < deadline:
                     response = await client.get(base + "/data/plugin/scalars/scalars",
-                        params={"run": "execution/tensorboard", "tag": "train/loss"})
+                        params={"run": str(event_dir.relative_to(run.root)), "tag": "train/loss"})
                     if response.status_code == 200:
                         rows = response.json()
                         if rows and rows[-1][1] == 2:

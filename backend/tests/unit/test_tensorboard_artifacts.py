@@ -84,7 +84,10 @@ def test_sparse_csv_observations_link_figures_without_filling_missing_epochs(tmp
     assert record['label'] == 'candidate' and record['validation_points'] == 2
     assert record['training_steps'] == 1975
     assert record['image_tags'] == ['figures/training/spectrum.png']
-    assert sync_run_visualizations(run) == report and source.read_bytes() == original
+    event_files = set(run.rglob('events.out.tfevents.*'))
+    for _ in range(3):
+        assert sync_run_visualizations(run) == report and source.read_bytes() == original
+    assert set(run.rglob('events.out.tfevents.*')) == event_files
     events = EventAccumulator(str(run / record['scalar_run'])).Reload()
     assert [x.step for x in events.Scalars('validation/RES_db')] == [79, 1975]
     assert [x.value for x in events.Scalars('validation/RES_db')] == [23, 5]
