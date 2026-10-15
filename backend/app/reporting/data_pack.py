@@ -272,6 +272,30 @@ def _collect_plots(run: RunHandle, source_refs: list[str], report_markdown: str 
     out: list[dict[str, Any]] = []
     candidates = list(plots_dir.iterdir()) if plots_dir.exists() else []
     candidates.extend(run.subdir("execution").glob("*.png"))
+    # The lab's figure manifest also covers derived plots in nested directories.
+    # Prose citations need not use Markdown image syntax to keep these assets.
+    manifest_ref = 'execution/visualizations/figures.json'
+    manifest_path = safe_scope_path(run.root, manifest_ref)
+    if manifest_path.is_file():
+        if manifest_path.stat().st_size > 1048576:
+            raise ValueError('报告图件清单过大')
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if not isinstance(manifest, dict) or manifest.get('schema') != 'research_figures.v1':
+            raise ValueError('报告图件清单格式无效')
+        figures = manifest.get('figures', [])
+        if not isinstance(figures, list) or len(figures) > 256:
+            raise ValueError('报告图件清单超出容量')
+        for figure in figures:
+            if not isinstance(figure, dict) or not isinstance(figure.get('path'), str):
+                raise ValueError('报告图件缺少路径')
+            name = figure['path']
+            if not name.startswith('visualizations/'):
+                raise ValueError('报告图件越出可视化目录')
+            target = _report_image_path(run, 'execution/' + name)
+            if target is None or figure.get('sha256') != 'sha256:' + hashlib.sha256(target.read_bytes()).hexdigest():
+                raise ValueError('报告图件与清单哈希不一致')
+            candidates.append(target)
+        source_refs.append(manifest_ref)
     report_refs: dict[str, list[str]] = {}
     for reference in markdown_image_references(report_markdown):
         path = _report_image_path(run, reference['url'])

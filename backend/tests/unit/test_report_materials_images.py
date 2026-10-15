@@ -32,6 +32,29 @@ def png(path: Path, color: str) -> bytes:
     return path.read_bytes()
 
 
+def test_lab_manifest_exports_nested_images_without_markdown_embedding(tmp_path: Path) -> None:
+    run = RunStore(tmp_path / 'runs').create(task='Manifest image archive, no scientific claims', project='generic')
+    original = png(run.root / 'execution/visualizations/nested/diagram.png', 'blue')
+    manifest = run.root / 'execution/visualizations/figures.json'
+    manifest.write_text(json.dumps({'schema': 'research_figures.v1', 'figures': [
+        {'path': 'visualizations/nested/diagram.png', 'sha256': 'sha256:' + hashlib.sha256(original).hexdigest()}]}))
+    approved = approve(run, '# File export fixture\n\nA plain text citation, no image embedding.')
+    before = approved.read_bytes()
+    bundle = generate_report_bundle(run)
+    metadata = bundle['metadata']
+    assert len(metadata['images']) == 1
+    assert metadata['images'][0]['source_path'] == 'execution/visualizations/nested/diagram.png'
+    assert 'execution/visualizations/figures.json' in metadata['source_hashes']
+    with zipfile.ZipFile(run.root / metadata['materials_archive']['path']) as archive:
+        image_name = 'images/' + Path(metadata['images'][0]['path']).name
+        assert archive.read(image_name) == original
+    assert approved.read_bytes() == before
+    # Changing the source must never silently refresh the recorded digest.
+    png(run.root / 'execution/visualizations/nested/diagram.png', 'red')
+    with pytest.raises(ValueError, match='哈希'):
+        collect_report_data_pack(run)
+
+
 def test_every_nested_body_plot_is_hash_bound_and_portable_in_genuine_zip(tmp_path: Path) -> None:
     run = RunStore(tmp_path / 'runs').create(task='PNG export fixture, no scientific claims', project='generic')
     paths = ['execution/local_commands/baseline/invocation/baseline/figs/loss_live.png',

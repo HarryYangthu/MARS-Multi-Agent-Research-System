@@ -49,10 +49,11 @@ export function TrainingCharts({ runId }: { runId: string }): JSX.Element {
           }
           return { path: file.relative_path, ...identity, points, raw: source.text, status };
         }));
-        const manifest = tree.entries.find(entry => entry.relative_path === "visualizations/figures.json");
+        // The file browser tree is bounded. Old event files can fill that list
+        // before visualizations, so load the known manifest independently.
+        const file = await getWorkspaceFile(runId, "execution", "visualizations/figures.json", controller.signal);
         let images: Figure[] = [];
-        if (manifest) {
-          const file = await getWorkspaceFile(runId, "execution", manifest.relative_path, controller.signal);
+        if (file.exists) {
           if (figureCache.current.manifest === file.text) images = figureCache.current.figures;
           else {
           const doc: unknown = JSON.parse(file.text);
