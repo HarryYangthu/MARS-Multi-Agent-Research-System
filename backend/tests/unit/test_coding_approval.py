@@ -248,6 +248,63 @@ async def test_real_code_checks_use_the_selected_git_in_child_commands(
 
 
 @pytest.mark.asyncio
+async def test_managed_review_reads_real_checks_and_complete_current_source(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.bridge.coding_review_evidence import coding_check_evidence, coding_review_evidence
+    from app.bridge.task_runtime import bind_task
+    from app.harness.agent_loop.trace import LoopTrace, atomic_json
+
+    _, session, _ = research
+    run = session.run
+    # Human-authored input plus real governed commands; no model or tool substitute.
+    content = "VALUE = 2\n" + "# full source beyond the first page\n" * 600
+    await write(run, content=content)
+    candidate = spec(run, [("main.py", "modified")])
+    task = bind_task(run, "coding", goal="Review actual code", upstream={}, output_schema="code_spec.v1")
+    root = run.root / "agent_traces/coding" / task.invocation_id
+    trace = LoopTrace(root, "full", correlation={"invocation_id": task.invocation_id,
+                      "trace_id": run.run_id, "node_id": "coding"})
+    observations = []
+    with research_branch_scope(run, "coding"):
+        for tool, command in (("code.lint", "python_compile"), ("code.test_runner", "pytest_quick")):
+            args = {"command_id": command}
+            result = await get_registry().dispatch(tool, args,
+                ToolContext(run_id=run.run_id, project=run.project, agent="coding", extra={"run_root": str(run.root)}))
+            observation = {"tool": tool, "args": args, "ok": result.ok,
+                           "output": result.output, "error": result.error, "status": result.status}
+            observations.append(observation)
+            trace.emit("observation", {"tool": tool, "ok": result.ok}, visible=observation)
+    assert observations[0]["ok"]  # Actual Python compilation.
+    assert not observations[1]["ok"]  # Real pytest exit 5: no tests collected.
+    atomic_json(root / "checkpoint.json", {"status": "passed", "candidate": candidate})
+    evidence = coding_review_evidence(run, "coding", candidate)
+    assert [row["observation"] for row in evidence["actual_code_checks"]] == observations
+    assert evidence["code_source_evidence"]["files"][0]["content"] == content
+    assert evidence["code_check_context"]["status"] == "available"
+    assert all(not row["later_code_mutation_events"] for row in evidence["actual_code_checks"])
+    assert coding_check_evidence(run, "coding", candidate + "Changed review\n")["checks"] == []
+    assert coding_check_evidence(run, "coding_attempt_2", candidate)["checks"] == []
+
+    # A later real write is visible and must not inherit the previous check's assurance.
+    await write(run, content="VALUE = 3\n")
+    trace.emit("observation", {"tool": "code.write_file"})
+    changed = coding_review_evidence(run, "coding", candidate)
+    assert changed != evidence
+    assert all(row["later_code_mutation_events"] == [3] for row in changed["actual_code_checks"])
+    assert changed["code_source_evidence"]["files"][0]["content"] == "VALUE = 3\n"
+    # Corruption is rejected rather than presenting old/edited stdout as trustworthy.
+    rows = (root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    row = json.loads(rows[0])
+    row["visible"]["ok"] = False
+    rows[0] = json.dumps(row)
+    (root / "events.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="摘要不匹配"):
+        coding_check_evidence(run, "coding", candidate)
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["external_edit", "partial", "extra", "wrong_type", "wrong_project"])
 async def test_partial_or_changed_code_is_not_approved(research: tuple[Orchestrator, RunSession, Path], case: str) -> None:
     _, session, source = research

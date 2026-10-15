@@ -206,9 +206,13 @@ class Orchestrator:
                     for path in session.run.subdir(directory).glob("*.approved.md") if directory != ref.agent_dir}
         artifact_ref = ref.path.relative_to(session.run.root).as_posix()
         folder_context = load_folder_context(session.run.project, session.run.root)
-        tool_log = session.run.root / "events/tool_calls.jsonl"
-        code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
-                       if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        code_evidence: dict[str, Any] = {}
+        if ref.agent_dir == "coding" and not blocker:
+            from app.bridge.coding_review_evidence import coding_review_evidence
+            try:
+                code_evidence = coding_review_evidence(session.run, node_key, text)
+            except (OSError, ValueError, RuntimeError) as error:
+                blocker = f"编码审核证据读取失败：{error}"
         # run_log.approved.md is the plan frozen at approval time, not the
         # measured outcome. Without the post-run receipts a writing review
         # cannot verify reported numbers and flags them as unverified claims.
@@ -219,11 +223,11 @@ class Orchestrator:
             measurement_evidence = _execution_result_handoffs(session.run)
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
                    "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
-                   "project_context": folder_context, "actual_code_checks": code_checks,
+                   "project_context": folder_context, **code_evidence,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
                    **measurement_evidence,
                    "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *measurement_evidence.keys(),
-                                     *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+                                     *(["input/folder_context.v1.json"] if folder_context else []), *code_evidence.keys()]}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
@@ -254,6 +258,9 @@ class Orchestrator:
                 with research_branch_scope(session.run, node_key):
                     if not verify_written_code(session.run, text):
                         raise ValueError("真实代码写入记录未通过复核")
+                    if coding_review_evidence(session.run, node_key, text) != code_evidence:
+                        await finish_review(session.run, session.bus, "needs_user", "审核期间代码或测试记录已变化，请重新核对。", identity=decision._identity)
+                        return
                     await approve(session=review, bus=session.bus, actor="commander")
             else:
                 await approve(session=review, bus=session.bus, actor="commander")
