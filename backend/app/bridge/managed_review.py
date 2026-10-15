@@ -55,16 +55,19 @@ def review_policy() -> ReviewPolicy:
 
 def review_input_manifest(messages: list[Message], policy: ReviewPolicy, agent: AgentConfig,
                           context_policy: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Account for the complete review using the same input/model ceilings.
+    """Account for the complete review using its explicit input/model ceilings.
 
     UTF-8 wire bytes are a conservative bound, not measured provider tokens.
     Large output capacity must never enlarge the configured input budget.
     """
     context = context_policy if context_policy is not None else load_policy()
     configured = policy.input_token_budget or int(context['input_budget'])
+    # An explicit review budget is independent of ordinary agent-loop input.
+    # The role's own limit and physical model window still cap the review.
+    review_context = {**context, 'input_budget': configured}
     loop_budget = agent.raw.get('loop', {}).get('input_token_budget', configured)
     window = agent.raw.get('model', {}).get('context_window')
-    budget = input_budget(context, min(configured, int(loop_budget)),
+    budget = input_budget(review_context, min(configured, int(loop_budget)),
                           output_reserve=min(agent.max_tokens, policy.max_output_tokens), model_window=window)
     used = token_upper_bound(messages)
     return {'input_token_budget': budget, 'estimated_upper_bound_tokens': used,

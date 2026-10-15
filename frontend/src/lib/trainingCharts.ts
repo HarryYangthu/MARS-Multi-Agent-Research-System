@@ -20,18 +20,23 @@ const number = (value: string | undefined): number | null => value?.trim() && Nu
 
 export function parseTraining(text: string): TrainingPoint[] {
   const [header, ...rows] = csvRows(text.replace(/^\uFEFF/, ""));
-  if (!header || !["circle", "updates", "mean_loss_sum", "train_PIM_native", "train_RES_native"].every(key => header.includes(key))) {
+  const formats = [
+    { circle: "circle", loss: "mean_loss_sum", pim: "train_PIM_native", res: "train_RES_native" },
+    { circle: "epoch", loss: "loss_mse", pim: "train_PIM", res: "train_RES" },
+  ];
+  const format = header && formats.find(columns => ["updates", ...Object.values(columns)].every(key => header.includes(key)));
+  if (!format) {
     throw new Error("训练记录尚未写完，或未提供支持的指标列；不推测曲线含义。");
   }
   return rows.filter(row => row.length === header.length).flatMap(row => {
     const get = (key: string): number | null => number(row[header.indexOf(key)]);
-    const updates = get("updates"), circle = get("circle");
+    const updates = get("updates"), circle = get(format.circle);
     if (updates === null || circle === null || !Number.isInteger(updates) || updates < 0) return [];
-    return [{ updates, circle, loss: get("mean_loss_sum"), pim: get("train_PIM_native"), res: get("train_RES_native"), lr: get("lr") }];
+    return [{ updates, circle, loss: get(format.loss), pim: get(format.pim), res: get(format.res), lr: get("lr") }];
   });
 }
 
 export function trainingIdentity(path: string): { experiment: string; invocation: string } | null {
-  const match = /^local_commands\/([^/]+)\/([^/]+)\/training\.csv$/.exec(path);
+  const match = /^local_commands\/([^/]+)\/([^/]+)\/(?:training\/)?training\.csv$/.exec(path);
   return match ? { experiment: match[1], invocation: match[2] } : null;
 }

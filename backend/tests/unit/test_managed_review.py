@@ -87,6 +87,16 @@ def test_review_counts_multibyte_input_and_keeps_all_evidence_when_too_large() -
     assert messages[0].content == "证" * 50000
 
 
+def test_explicit_review_budget_does_not_modify_ordinary_context() -> None:
+    context = {"input_budget": 128000, "safety_margin": 1000}
+    policy = review_policy().model_copy(update={"input_token_budget": 256000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {}, "model": {"context_window": 1048576}})
+    manifest = review_input_manifest([Message("user", "证" * 60000)], policy, agent, context)
+    assert manifest['within_budget'] and manifest['input_token_budget'] == 256000
+    assert context['input_budget'] == 128000 and not manifest['truncated']
+
+
 @pytest.mark.parametrize("loop_budget,window,expected", [(64000, 1048576, 64000), (128000, 420000, 25784)])
 def test_review_respects_smaller_role_or_model_input_space(loop_budget: int, window: int, expected: int) -> None:
     policy = review_policy().model_copy(update={"input_token_budget": 128000, "max_output_tokens": 393216})

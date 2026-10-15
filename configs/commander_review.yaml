@@ -1,7 +1,7 @@
 # Source defaults; a desktop workspace may override this file in its configs/.
 poll_interval_seconds: 0.25
 max_revisions_per_node: 2
-# Shares the runtime input ceiling; output capacity does not enlarge context.
-input_token_budget: 128000
+# Explicit review-only input ceiling; ordinary agent context stays at 128000.
+input_token_budget: 256000
 max_output_tokens: 393216
 timeout_seconds: 3600

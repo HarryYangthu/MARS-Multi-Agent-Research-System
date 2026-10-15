@@ -195,6 +195,40 @@ def _file_item(root: Path, name: str, raw: bytes, *, integrity: str,
     return item
 
 
+def _receipt_checkpoints(root: Path, job: dict[str, Any], evidence_rows: list[Any]) -> dict[str, dict[str, Any]]:
+    """Admit opaque checkpoints only from this completed job's primary host receipt."""
+    declared: dict[str, dict[str, Any]] = {}
+    if job.get('status') != 'completed' or not any(
+            Path(str(item.get('path', ''))).suffix.casefold() in _CHECKPOINT_SUFFIXES for item in evidence_rows):
+        return declared
+    fingerprint = job.get('result', {}).get('fingerprint_hash')
+    for evidence in evidence_rows:
+        if Path(str(evidence.get('path', ''))).name != 'execution_receipt.json':
+            continue
+        name = _execution_relative(root, evidence.get('path'))
+        receipt_path, raw = _read(root, name)
+        if not _digest_matches(fingerprint, raw):
+            continue
+        if not _digest_matches(evidence.get('sha256'), raw):
+            raise ValueError('Primary receipt differs from job evidence')
+        receipt = json.loads(raw)
+        if (receipt.get('schema') != 'local_command_receipt.v1' or receipt.get('status') != 'completed'
+                or receipt.get('returncode') != 0 or receipt.get('run_id') != job.get('run_id')
+                or receipt.get('experiment_id') != job.get('experiment_id')
+                or receipt.get('invocation_id') != receipt_path.parent.name):
+            raise ValueError('Checkpoint receipt identity/status differs from completed job')
+        for entry in receipt.get('evidence', []):
+            if Path(str(entry.get('path', ''))).suffix.casefold() not in _CHECKPOINT_SUFFIXES:
+                continue
+            source = _execution_relative(root, entry.get('path'), indexed_checkpoint=True)
+            if not (root / source).resolve().is_relative_to(receipt_path.parent.resolve()):
+                raise ValueError('Checkpoint is outside its completed invocation')
+            if source in declared and declared[source] != entry:
+                raise ValueError('Receipt checkpoint declarations disagree')
+            declared[source] = entry
+    return declared
+
+
 def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_materials: bool = False) -> str:
     """Verify actual receipts/index entries and optionally admit bounded text readback.
 
@@ -233,9 +267,29 @@ def execution_job_evidence(root: Path, run_id: str, project: str, *, admit_mater
             evidence_rows = job.get("evidence", [])
             if not isinstance(evidence_rows, list) or len(evidence_rows) > 64:
                 raise ValueError("Job evidence exceeds bounded receipt capacity")
+            checkpoint_entries = _receipt_checkpoints(root, job, evidence_rows)
             for evidence in evidence_rows:
-                relative = _execution_relative(root, evidence.get("path"))
+                relative = _execution_relative(root, evidence.get("path"), indexed_checkpoint=True)
                 target = safe_scope_path(root, relative, must_exist=True)
+                if target.suffix.casefold() in _CHECKPOINT_SUFFIXES:
+                    entry = checkpoint_entries.get(relative)
+                    if entry is None:
+                        raise ValueError('Direct checkpoint lacks a matching completed host receipt')
+                    if evidence.get('sha256', '').removeprefix('sha256:') != str(entry.get('sha256', '')).removeprefix('sha256:'):
+                        raise ValueError('Checkpoint digest differs between job and host receipt')
+                    if file_budget <= 0:
+                        raise ValueError('Job evidence exceeds bounded receipt capacity')
+                    item = _checkpoint_item(target, relative, entry, byte_budget)
+                    previous = opaque.get(relative)
+                    if previous is not None:
+                        if item != previous:
+                            raise ValueError('Repeated checkpoint declarations disagree')
+                        continue
+                    opaque[relative] = item
+                    file_budget -= 1
+                    if item['integrity'] == 'recorded_sha256_verified':
+                        byte_budget -= int(item['bytes'])
+                    continue
                 if _tensorboard_event(target):
                     existing = opaque.get(relative)
                     if existing is not None:

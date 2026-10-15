@@ -40,7 +40,7 @@ export function TrainingCharts({ runId }: { runId: string }): JSX.Element {
           const source = await getWorkspaceFile(runId, "execution", file.relative_path, controller.signal);
           const points = parseTraining(source.text);
           if (!points.length) throw new Error("训练记录正在写入，暂时保留上次图表。");
-          const receiptPath = file.relative_path.replace(/training\.csv$/, "execution_receipt.json");
+          const receiptPath = `local_commands/${identity.experiment}/${identity.invocation}/execution_receipt.json`;
           let status = "running";
           if (tree.entries.some(entry => entry.relative_path === receiptPath)) {
             const receipt = await getWorkspaceFile(runId, "execution", receiptPath, controller.signal);

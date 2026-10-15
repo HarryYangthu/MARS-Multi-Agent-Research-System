@@ -12,4 +12,12 @@ assert.equal(points[1].res, 9.8);
 assert.throws(() => parseTraining("step,loss\n1,0.5\n"));
 assert.deepEqual(trainingIdentity("local_commands/B/run123/training.csv"), { experiment: "B", invocation: "run123" });
 assert.equal(trainingIdentity("local_commands/B/training.csv"), null);
+assert.deepEqual(trainingIdentity("local_commands/B/run123/training/training.csv"), { experiment: "B", invocation: "run123" });
+assert.equal(trainingIdentity("local_commands/B/run123/unrelated/training.csv"), null);
+const sparse = parseTraining("epoch,updates,loss_mse,lr,train_PIM,train_RES,validation_PIM,validation_RES\n1,79,.05,.004,25,22,25,23\n25,1975,.001,.004,25,6,25,5\n50,3950,.0008");
+assert.equal(sparse.length, 2);
+assert.equal(sparse[1].updates, 1975);
+assert.equal(sparse[1].circle, 25);
+assert.equal(sparse[1].loss, .001);
+assert.equal(sparse[1].res, 6); // Training and validation columns must not be interchanged.
 console.log("Training chart CSV checks passed");
