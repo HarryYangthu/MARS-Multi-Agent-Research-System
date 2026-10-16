@@ -34,7 +34,7 @@ def test_execution_review_carries_exact_approvals_and_separates_budget_units(tmp
     assert payload['review_contract']['confirmed_false_means'] == 'awaiting_this_decision'
     assert payload['review_contract']['empty_jobs_means'] == 'no_simulations_launched'
     assert payload['review_contract']['model_budget_unit'] == 'model_requests'
-    assert set(payload['evidence_refs']) == {'execution_configuration', *contents}
+    assert set(payload['evidence_refs']) == {'execution_configuration', 'execution_recovery', *contents}
     for item in payload['approved_artifacts']:
         assert item['content'] == contents[item['ref']]
         assert item['sha256'] == hashlib.sha256(contents[item['ref']].encode()).hexdigest()
@@ -62,6 +62,41 @@ async def test_execution_review_identity_tracks_approvals_not_live_usage(tmp_pat
     assert not list((run.root / 'agent_traces/commander').glob('*/events.jsonl'))
 from app.storage.run_store import RunStore
 from app.storage.run_state_store import RunStateStore
+
+
+@pytest.mark.asyncio
+async def test_retry_evidence_keeps_cleanup_and_later_stop_without_automatic_approval(tmp_path: Path) -> None:
+    from app.bridge.managed_review import execution_review_payload
+    run = RunStore(tmp_path).create(project='regression', task='explicit recovery evidence')
+    # Authored lifecycle records exercise the reader; no service/model response is replaced.
+    stop = {'type': 'cancelled', 'cleanup_complete': True, 'interrupted_nodes': ['execution']}
+    run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': run.run_id, 'termination': stop})
+    run.write_event('run_lifecycle', {'event': 'run.explicit_execution_retry', 'run_id': run.run_id,
+        'node': 'execution', 'previous_termination': stop, 'reason': 'User requested recovery after cleanup',
+        'automatic_resume': False})
+    config = {'node': 'execution', 'token': 'decision', 'inputs_token': 'inputs', 'blockers': ['Pending actual checks']}
+    payload = execution_review_payload(run, goal='Review only', configuration=config)
+    recovery = payload['execution_recovery']
+    assert recovery['retry_after_latest_stop'] is True
+    assert recovery['latest_explicit_retry']['event']['previous_termination']['cleanup_complete'] is True
+    async def blocked_review(data: dict) -> None:
+        assert await review_once(run=run, node='execution', kind='execution_configuration', payload=data,
+            generation=1, eligible=lambda: True, bus=InProcessEventBus(), blocker='Pending actual checks') is None
+    await blocked_review(payload)
+    run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_reviewed', 'node': 'coding'})
+    unchanged = execution_review_payload(run, goal='Review only', configuration=config)
+    assert unchanged == payload
+    await blocked_review(unchanged)
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 1
+    run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': run.run_id, 'termination': stop})
+    later = execution_review_payload(run, goal='Review only', configuration=config)
+    assert later['execution_recovery']['retry_after_latest_stop'] is False
+    await blocked_review(later)
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 2
+    assert not list((run.root / 'execution/confirmations').glob('*.json'))
+    run.write_event('run_lifecycle', {'event': 'run.explicit_execution_retry', 'run_id': 'another-run'})
+    with pytest.raises(ValueError, match='不匹配'):
+        execution_review_payload(run, goal='Review only', configuration=config)
 
 
 def test_complete_review_over_legacy_character_limit_fits_configured_context() -> None:

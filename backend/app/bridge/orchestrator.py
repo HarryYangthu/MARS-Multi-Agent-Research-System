@@ -1284,8 +1284,9 @@ class Orchestrator:
                                 and not self._stopping(session) and not session.read_only
                                 and pending_revision(session.run) is None
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
+                    review_payload = execution_review_payload(session.run, goal=session.request.user_request, configuration=view)
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
-                        payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
+                        payload=review_payload,
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
@@ -1293,7 +1294,10 @@ class Orchestrator:
                         current = await asyncio.to_thread(execution_preview, session.run, node_key)
                         if current['confirmed']:
                             return True
-                        if current['token'] != token or current['blockers']:
+                        from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+                        recovery_changed = (execution_recovery_evidence(session.run, node_key)
+                                            != review_payload['execution_recovery'])
+                        if current['token'] != token or current['blockers'] or recovery_changed:
                             await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
                             await asyncio.to_thread(save_confirmation, session.run, node_key,
@@ -1803,11 +1807,17 @@ class Orchestrator:
             stopped_node = self._latest_node_for_stage(session, agent)
             from app.bridge.stopped_draft_retry import stopped_draft_node
             stopped_draft = stopped_draft_node(termination, {key: value.value for key, value in session.graph.all_states().items()})
+            stopped_execution_review = (agent == 'execution' and stopped_node is not None
+                and session.graph.state(stopped_node) == NodeState.APPROVED
+                and termination.get('interrupted_nodes') == []
+                and NodeState.RUNNING not in session.graph.all_states().values()
+                and (session.run.root / 'execution/run_log.approved.md').is_file())
             if (not restart_stopped or agent not in {"idea", "experiment", "coding", "execution", "writing"} or stopped_node is None
                     or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
-                    or (stopped_node not in termination.get("interrupted_nodes", []) and stopped_node != stopped_draft)
+                    or (stopped_node not in termination.get("interrupted_nodes", []) and stopped_node != stopped_draft
+                        and not stopped_execution_review)
                     or self.owned_tasks.active(run_id) is not None
-                    or session.graph.state(stopped_node) != NodeState.FAILED):
+                    or (session.graph.state(stopped_node) != NodeState.FAILED and not stopped_execution_review)):
                 return {"ok": False, "status": "stopped_run_requires_new_execution"}
             from app.bridge.research_branch import stopped_coding_retry_blocker
             from app.execution.job_journal import stopped_execution_retry_blocker
@@ -1898,14 +1908,15 @@ class Orchestrator:
                     if (self._stopping(session) or session.waiting_for_feedback
                             or session.graph.state(parent) not in {NodeState.DONE, NodeState.SKIPPED}):
                         return
-            retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
+            retry_existing_execution = (session.graph.state(node_key) == NodeState.FAILED or
+                (parse_node_key(node_key).stage == 'execution' and session.graph.state(node_key) == NodeState.APPROVED))
             if retry_existing_execution and parse_node_key(node_key).stage == 'execution':
                 from app.bridge.execution_confirmation import renew_execution_confirmation
                 renew_execution_confirmation(session.run, node_key)
             await self._transition(session, node_key, NodeState.RUNNING)
             if (retry_existing_execution and parse_node_key(node_key).stage == 'execution'
                     and (session.run.subdir('execution') / 'run_log.approved.md').is_file()
-                    and self._has_interrupted_execution_jobs(session)):
+                    and self._has_retryable_execution_jobs(session)):
                 # Execution retries run the already-approved deterministic intake.
                 # Keep completed measurement identities while requiring a fresh
                 # confirmation decision before recovering cleaned interrupted jobs.
@@ -1913,7 +1924,7 @@ class Orchestrator:
                 await self._transition(session, node_key, NodeState.APPROVED)
                 await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
                     'event': 'execution.explicit_retry', 'node': node_key,
-                    'message': '沿用已批准执行清单；核验已完成作业，仅恢复已清理的中断作业。'})
+                    'message': '沿用已批准执行清单；重新审核失败或中断作业，核验并保留已完成作业。'})
                 await self._complete_approved_node(session, node_key, retry_interrupted_jobs=True)
                 await self.run(session.run.run_id)
                 return
@@ -2052,9 +2063,9 @@ class Orchestrator:
         return max(candidates, key=lambda key: parse_node_key(key).attempt)
 
     @staticmethod
-    def _has_interrupted_execution_jobs(session: RunSession) -> bool:
+    def _has_retryable_execution_jobs(session: RunSession) -> bool:
         from app.execution.job_journal import job_states
-        return any(row['status'] == 'interrupted' for row in job_states(session.run.root))
+        return any(row['status'] in {'failed', 'interrupted'} for row in job_states(session.run.root))
 
     def _recover_session(self, run_id: str) -> RunSession | None:
         run = self.run_store.get(run_id)

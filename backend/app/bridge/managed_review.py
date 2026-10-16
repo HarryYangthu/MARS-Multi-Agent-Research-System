@@ -152,6 +152,8 @@ def revision_count(run: RunHandle, node: str) -> int:
 
 def execution_review_payload(run: RunHandle, *, goal: str, configuration: dict[str, Any]) -> dict[str, Any]:
     """Give the reviewer the actual upstream approvals and explicit decision semantics."""
+    from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+    recovery = execution_recovery_evidence(run, str(configuration.get('node') or 'execution'))
     artifacts = []
     for ref in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md'):
         path = run.root / ref
@@ -162,13 +164,14 @@ def execution_review_payload(run: RunHandle, *, goal: str, configuration: dict[s
             artifacts.append({'ref': ref, 'sha256': hashlib.sha256(content).hexdigest(),
                               'content': content.decode('utf-8')})
     return {'goal': goal, 'configuration': configuration, 'approved_artifacts': artifacts,
+        'execution_recovery': recovery,
         'review_contract': {'schema_id': 'managed.execution_confirmation.v1',
             'decision_scope': 'confirm_approved_inputs_before_launch',
             'confirmed_false_means': 'awaiting_this_decision',
             'empty_jobs_means': 'no_simulations_launched',
             'model_budget_unit': 'model_requests',
             'training_budget_source': 'experiments[].config.budget_unit and max_iters'},
-        'evidence_refs': ['execution_configuration', *(item['ref'] for item in artifacts)]}
+        'evidence_refs': ['execution_configuration', 'execution_recovery', *(item['ref'] for item in artifacts)]}
 
 
 async def review_once(
@@ -190,6 +193,7 @@ async def review_once(
         identity_input = {"goal": payload["goal"], "token": configuration.get("token"),
                           "inputs_token": configuration.get("inputs_token"), "blockers": configuration.get("blockers"),
                           "review_contract": payload.get("review_contract"),
+                          "execution_recovery": payload.get("execution_recovery"),
                           "approved_artifacts": [{key: item[key] for key in ('ref', 'sha256')}
                                                  for item in payload.get('approved_artifacts', [])]}
     identity = digest({"node": node, "kind": kind, "payload": identity_input, "generation": generation})
@@ -221,6 +225,9 @@ async def review_once(
         "执行配置与反馈决策只能 approve 或 needs_user，不能擅自改参数、放宽预算或继续被要求暂停的阶段。"
         "执行配置审核中，confirmed=false 表示等待你本次作出确认，不能要求用户先确认才允许托管审批；"
         "jobs 是实际已启动作业，启动前为空正常，待启动清单在 experiments。"
+        "execution_recovery 保留原始失败、清理回执与显式恢复请求；较新的显式重试表示用户要求重新审核，"
+        "不是仍要求暂停，也不等于已批准或故障已修复。核对失败原因、清理、重试理由和当前配置；"
+        "没有新证据的相同连续失败仍需 needs_user。重试后更晚的停止优先，不能继续。"
         "configuration.budget 只计累计模型请求次数，与训练 epoch/step 预算独立；"
         "训练预算以批准方案及 experiments[].config.budget_unit/max_iters 为准。"
         "只输出 JSON：{\"decision\":\"approve|revise|needs_user\",\"reason\":\"中文审核理由\","

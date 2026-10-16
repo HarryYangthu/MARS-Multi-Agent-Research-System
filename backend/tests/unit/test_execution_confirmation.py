@@ -92,6 +92,67 @@ def job_states_for_test(root: Path) -> list[dict[str, object]]:
     return [json.loads(path.read_text()) for path in (root / 'execution/jobs').glob('*.json')]
 
 
+@pytest.mark.asyncio
+async def test_failed_job_review_has_real_receipts_and_new_retry_keeps_history(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.bridge.execution_batch_deadline import prepare_interrupted_execution_retry
+    from app.bridge.execution_confirmation import renew_execution_confirmation
+    from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+    from app.bridge.tensorboard_service import shutdown_tensorboard
+    orch, session, _, _ = execution
+    first = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', first['token'])
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    try:
+        # Python --version really exits, but supplies no measurements: a real failure.
+        await orch._complete_approved_node(session, 'execution')
+        journals = {p: p.read_bytes() for p in (session.run.root / 'execution/jobs').glob('*.json')}
+        assert journals and all(json.loads(raw)['status'] == 'failed' for raw in journals.values())
+        evidence = execution_recovery_evidence(session.run, 'execution')
+        assert evidence['latest_explicit_retry'] is None
+        for job in evidence['jobs']:
+            assert job['record']['status'] == 'failed'
+            assert job['receipts'] and job['result_error']
+            receipt = json.loads(job['receipts'][0]['text'])
+            assert receipt['status'] == 'failed' and receipt['returncode'] == 0
+            assert any('Python' in log['text'] for log in job['receipts'][0]['logs'])
+        renew_execution_confirmation(session.run, 'execution')
+        fresh = execution_preview(session.run, 'execution')
+        save_confirmation(session.run, 'execution', fresh['token'])
+        # Previously used inputs_token and collided with the old failed job.
+        prepare_interrupted_execution_retry(session.run, 'execution')
+        assert all(p.read_bytes() == raw for p, raw in journals.items())
+        # Restarting while waiting for config review leaves APPROVED, not RUNNING.
+        # Explicit retry must renew that review without silently launching a job.
+        session.graph.restore_state('execution', NodeState.APPROVED)
+        session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks', 'cleanup_complete': True,
+                               'reason': 'server_shutdown', 'interrupted_nodes': []}
+        rejected = await orch.request_artifact_revision(run_id=session.run.run_id, agent='execution',
+            reason='Explicit recovery', restart_stopped=False)
+        assert rejected['status'] == 'stopped_run_requires_new_execution'
+        accepted = await orch.request_artifact_revision(run_id=session.run.run_id, agent='execution',
+            reason='Explicit recovery', restart_stopped=True)
+        assert accepted['status'] == 'revision_started'
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if not execution_preview(session.run, 'execution')['confirmed']:
+                break
+        assert session.termination is None
+        assert not execution_preview(session.run, 'execution')['confirmed']
+        assert all(p.read_bytes() == raw for p, raw in journals.items())
+        assert len(list((session.run.root / 'execution/jobs').glob('*.json'))) == len(journals)
+        stopped = await orch.stop_owned_run(session.run.run_id)
+        assert stopped['ok'], stopped
+        assert execution_recovery_evidence(session.run, 'execution')['retry_after_latest_stop'] is False
+        damaged = session.run.root / evidence['jobs'][0]['receipts'][0]['ref']
+        damaged.write_bytes(damaged.read_bytes() + b'\n')
+        with pytest.raises(ValueError, match='收据已改变'):
+            execution_recovery_evidence(session.run, 'execution')
+    finally:
+        await shutdown_tensorboard()
+
+
 @pytest.fixture
 def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Orchestrator, RunSession, Path, Path]]:
     configuration = tmp_path / 'execution.yaml'
