@@ -5,6 +5,32 @@ from functools import partial
 from dataclasses import replace
 
 import pytest
+
+
+def test_design_review_does_not_treat_old_downstream_as_current_prerequisites(tmp_path: Path) -> None:
+    from app.bridge.managed_review import artifact_review_materials
+    run = RunStore(tmp_path).create(task='review-stage-boundary', project='synthetic_regression')
+    for ref, value in {'idea/proposal.approved.md': 'Approved goal',
+                       'experiment/experiment_plan.approved.md': 'Current design',
+                       'coding/code_spec.approved.md': 'Old three-band implementation',
+                       'execution/run_log.approved.md': 'Old unstarted execution'}.items():
+        (run.root / ref).write_text(value)
+    design = artifact_review_materials(run, 'experiment_attempt_2')
+    assert design['approved_upstream'] == {'idea/proposal.approved.md': 'Approved goal'}
+    assert design['review_contract']['stage'] == 'experiment'
+    assert 'coding/code_spec.approved.md' in design['review_contract']['historical_downstream_refs']
+    assert design['review_contract']['implementation_due_at'] == 'coding'
+    coding = artifact_review_materials(run, 'coding_attempt_2')
+    assert coding['approved_upstream']['experiment/experiment_plan.approved.md'] == 'Current design'
+    assert 'execution/run_log.approved.md' not in coding['approved_upstream']
+    writing = artifact_review_materials(run, 'writing')
+    assert writing['approved_upstream']['execution/run_log.approved.md'] == 'Old unstarted execution'
+    assert writing['review_contract']['real_results_due_at'] == 'writing'
+    # The full current data selection also participates in review identity.
+    source = run.root / 'input/selected_data_source.json'
+    source.write_text(json.dumps({'id': 'new-data', 'description': 'User confirmed dual-band 80M'}))
+    updated = artifact_review_materials(run, 'experiment_attempt_2')
+    assert updated != design and 'User confirmed dual-band 80M' in updated['selected_data']
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review

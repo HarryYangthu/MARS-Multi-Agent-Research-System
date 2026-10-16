@@ -201,9 +201,9 @@ class Orchestrator:
                         blocker = "缺少真实代码写入记录，主控未执行或批准旧补丁，请接管审核。"
             except (OSError, ValueError, RuntimeError) as error:
                 blocker = f"真实代码核对未通过：{error}"
-        upstream = {str(path.relative_to(session.run.root)): path.read_text(encoding="utf-8")
-                    for directory in ("idea", "experiment", "coding", "execution")
-                    for path in session.run.subdir(directory).glob("*.approved.md") if directory != ref.agent_dir}
+        from app.bridge.managed_review import artifact_review_materials
+        review_materials = artifact_review_materials(session.run, node_key)
+        upstream = review_materials['approved_upstream']
         artifact_ref = ref.path.relative_to(session.run.root).as_posix()
         folder_context = load_folder_context(session.run.project, session.run.root)
         code_evidence: dict[str, Any] = {}
@@ -222,12 +222,14 @@ class Orchestrator:
 
             measurement_evidence = _execution_result_handoffs(session.run)
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
-                   "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
+                   "artifact_ref": artifact_ref, "candidate": text, **review_materials,
                    "project_context": folder_context, **code_evidence,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
                    **measurement_evidence,
                    "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *measurement_evidence.keys(),
-                                     *(["input/folder_context.v1.json"] if folder_context else []), *code_evidence.keys()]}
+                                     *(["input/folder_context.v1.json"] if folder_context else []), *code_evidence.keys(),
+                                     *(['input/selected_data_source.json'] if review_materials['selected_data'] else []),
+                                     *(['revision_request'] if review_materials['revision_request'] else []), 'review_contract']}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
@@ -244,7 +246,7 @@ class Orchestrator:
         if current_ref is None or current_ref.path != ref.path or load_folder_context(session.run.project, session.run.root) != folder_context:
             await finish_review(session.run, session.bus, "needs_user", "审核期间当前方案版本或项目约束已变化，请重新核对。", identity=decision._identity)
             return
-        if ref.path.read_text(encoding="utf-8") != text or any((session.run.root / path).read_text(encoding="utf-8") != value for path, value in upstream.items()):
+        if ref.path.read_text(encoding="utf-8") != text or artifact_review_materials(session.run, node_key) != review_materials:
             await finish_review(session.run, session.bus, "needs_user", "审核期间方案或上游依据已变化，请重新核对。", identity=decision._identity)
             return
         if decision.decision == "approve":
