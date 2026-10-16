@@ -256,6 +256,7 @@ def selection_summary(profile: dict[str, Any]) -> str:
         ("file", "original_name"),
         ("stored_path", "stored_path"),
         ("checksum", "checksum"),
+        ("user_description", "description"),
         ("fs_mhz", "fs_mhz"),
         ("channel_count", "channel_count"),
         ("shape", "shape"),
@@ -290,7 +291,14 @@ def selection_summary(profile: dict[str, Any]) -> str:
                 suffix.append(f"dtype={dtype}")
             if points not in (None, "", []):
                 suffix.append(f"sample_points={points}")
+            if "scalar_value" in item:
+                suffix.append(f"observed_scalar={item['scalar_value']} (unit as stored; do not infer units)")
             lines.append(f"  - {key}: " + ", ".join(suffix))
+    lines.append("- Data compatibility requirement: inspect these actual file fields and values before designing or coding. "
+                 "Compare the loader's required fields, shapes, bands, sampling rate and split bounds. "
+                 "Repository example configurations and filenames are not evidence of compatibility. "
+                 "Adapt and re-review incompatible configurations; ask about scientific semantics or units that the file cannot establish. "
+                 "Never silently substitute a different dataset.")
     return "\n".join(lines)
 
 
@@ -1204,6 +1212,15 @@ def _public_preview_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
                 "sample_points": item.get("sample_points") or 0,
             }
         )
+        # Only a complete numeric scalar is metadata. A preview's first sample
+        # must never be presented as the value of a larger signal array.
+        shape = item.get("shape")
+        sample = item.get("_sample")
+        if (isinstance(shape, (list, tuple)) and all(isinstance(n, int) for n in shape)
+                and int(np.prod(shape)) == 1 and isinstance(sample, np.ndarray) and sample.size == 1):
+            value = sample.reshape(-1)[0]
+            if np.isfinite(value) and np.imag(value) == 0:
+                public[-1]["scalar_value"] = float(np.real(value))
     return public
 
 

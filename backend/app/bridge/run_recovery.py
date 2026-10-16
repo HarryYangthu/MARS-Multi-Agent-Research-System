@@ -33,6 +33,49 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
 
     if orch.owned_tasks.active(run_id) is not None:
         return finish('running', '任务正在运行，无需重复恢复。')
+    # Shutdown during configuration review interrupts no node: execution is
+    # APPROVED, but there are no jobs. This is a recoverable boundary, not an
+    # unknown running experiment. Admission is repeated by the mutation path.
+    from app.bridge.preexecution_revision import assert_no_execution, pending_revision
+    latest_prelaunch: dict[str, str] = {}
+    for key in states:
+        stage = parse_node_key(key).stage
+        if stage not in latest_prelaunch or parse_node_key(key).attempt > parse_node_key(latest_prelaunch[stage]).attempt:
+            latest_prelaunch[stage] = key
+    termination = session.termination
+    clean_wait = not termination or (termination.get('type') == 'cancelled'
+        and termination.get('scope') == 'owned_async_tasks' and termination.get('cleanup_complete') is True
+        and termination.get('interrupted_nodes') == [])
+    if (not session.read_only and not orch.owned_tasks.closing and clean_wait
+            and states.get(latest_prelaunch.get('coding', '')) == 'done'
+            and states.get(latest_prelaunch.get('execution', '')) == 'approved'
+            and not any(value in {'running', 'failed', 'waiting_review'} for value in states.values())
+            and pending_revision(session.run) is None):
+        try:
+            assert_no_execution(session.run)
+        except ValueError as exc:
+            return finish('blocked', str(exc))
+        if research_execution_admission(session.run, session.request.extra) is not None:
+            return finish('blocked', '研究执行约束尚未就绪，请先核对项目执行配置。')
+        ledger_path = session.run.root / 'resources/model_budget.v1.json'
+        if ledger_path.is_file():
+            try:
+                prelaunch_ledger = RunModelBudget(session.run.root, active_model_time=True).recovery_snapshot()
+                evidence.append(prelaunch_ledger)
+                if any(item.get('status') in {'in_flight', 'reconciliation_required'} for item in prelaunch_ledger['requests'].values()):
+                    return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
+            except (OSError, ValueError, ResourceBudgetError):
+                return finish('blocked', '模型调用记录暂不可核验，请先核对记录。')
+        execution = latest_prelaunch['execution']
+        selected_path = session.run.root / 'input/selected_data_source.json'
+        evidence.append(selected_path.read_text(encoding='utf-8') if selected_path.is_file() else None)
+        result['actions'] = [{'action': 'revise_data', 'node': execution, 'label': '选择数据并修订方案'}]
+        # Without a data snapshot, restoring the old configuration is precisely
+        # the dead end the user is trying to fix. Require explicit selection.
+        if selected_path.is_file():
+            result['actions'].insert(0, {'action': 'retry', 'node': execution, 'label': '重新核对执行配置'})
+        return finish('recoverable', '实验尚未启动，可在此选择数据并修订方案、代码；原记录保留，修订后正常审核。'
+                      if not selected_path.is_file() else '实验尚未启动，可重新核对执行配置，或更换数据后修订方案与代码。')
     if session.termination and not session.read_only and not orch.owned_tasks.closing:
         termination = session.termination
         nodes = termination.get('interrupted_nodes', [])
@@ -241,7 +284,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
 
 
 async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
-                      action: str, node: str, token: str) -> dict[str, Any]:
+                      action: str, node: str, token: str, source_id: str = '', reason: str = '') -> dict[str, Any]:
     view = recovery_status(orch, run_id, project=project)
     if view['status'] == 'running':
         return {'ok': True, 'status': 'already_running', 'run_id': run_id,
@@ -254,7 +297,20 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
         assert_ready_for_run(project=project)
     except ProductionReadinessError:
         return {'ok': False, 'status': 'not_ready', 'error': '执行配置未就绪，请先检查项目与 API 配置。'}
-    if action == 'resume':
+    if action == 'revise_data':
+        from app.storage.data_source_store import DataSourceStore
+        from app.bridge.run_data_selection import resolve_run_data_source
+        try:
+            if not source_id or not reason.strip():
+                raise ValueError('请选择本项目数据，并说明需要核对的内容')
+            source = resolve_run_data_source(project, entrypoint='experiment', standalone=False,
+                selection=DataSourceStore().load(source_id))
+        except (OSError, ValueError) as exc:
+            return {'ok': False, 'status': 'data_revision_blocked', 'error': str(exc)}
+        result = await orch.request_artifact_revision(run_id=run_id, agent='experiment',
+            reason='用户选择数据后要求重新核对实验设计、适配编码并正常审核。' + reason.strip(),
+            restart_stopped=bool(orch.session(run_id).termination), data_source=source)
+    elif action == 'resume':
         result = orch.resume_owned_run(run_id)
     else:
         result = await orch.request_artifact_revision(run_id=run_id, agent=parse_node_key(node).stage,
@@ -262,7 +318,8 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
             restart_stopped=bool(orch.session(run_id).termination))
     result['run_id'] = run_id
     if result.get('ok'):
-        result['message'] = '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。'
+        result['message'] = ('已选择数据，正在原任务中修订方案及代码；完成后正常审核。' if action == 'revise_data'
+                             else '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。')
     else:
         result.setdefault('error', '恢复暂未启动，请刷新状态并查看任务记录。')
     return result

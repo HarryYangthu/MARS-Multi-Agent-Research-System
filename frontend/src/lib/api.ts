@@ -2088,7 +2088,7 @@ export class ChatMessageFailure extends Error {
   constructor(message: string, public readonly messageSaved: boolean) { super(message); }
 }
 
-export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
+export type RecoveryAction = { action: "resume" | "retry" | "revise_data"; node: string; label: string };
 export type CodeChange = { id: string; path: string; additions: number | null; deletions: number | null; change: string; status: string; source: string; timestamp: string; truncated: boolean; warning?: string };
 export type ApprovedCodeHistory = {
   source?: string; approved?: boolean; historical?: boolean; current_mismatch?: boolean; execution_eligible?: boolean;
@@ -2106,9 +2106,9 @@ export type RunRecovery = { run_id: string; project: string; status: string; mes
 export async function getRunRecovery(runId: string, project: string, signal?: AbortSignal): Promise<RunRecovery> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
 }
-export async function recoverRun(runId: string, project: string, action: RecoveryAction, token: string): Promise<{ ok: boolean; status: string; message: string }> {
+export async function recoverRun(runId: string, project: string, action: RecoveryAction, token: string, selection?: { source_id: string; reason: string }): Promise<{ ok: boolean; status: string; message: string }> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/recovery`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, ...action, token }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, ...action, token, ...selection }),
   }));
 }
 

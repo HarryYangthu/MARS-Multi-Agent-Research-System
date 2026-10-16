@@ -25,6 +25,39 @@ from app.harness.runtime.state_machine import NodeState
 from app.storage.run_store import RunStore
 
 
+@pytest.mark.parametrize('stopped', [False, True])
+def test_unstarted_approved_execution_offers_data_revision(tmp_path: Path, stopped: bool) -> None:
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='unstarted-review', project='pimc', entrypoint='pipeline'))
+    for stage in ('idea', 'experiment', 'coding'):
+        session.graph.restore_state(stage, NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    if stopped:
+        session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks', 'reason': 'server_shutdown',
+                               'cleanup_complete': True, 'interrupted_nodes': []}
+    before = session.graph.to_dict()
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'recoverable'
+    assert [row['action'] for row in view['actions']] == ['revise_data']
+    assert session.graph.to_dict() == before
+    assert orch.owned_tasks.active(session.run.run_id) is None
+    evidence = session.run.root / 'execution/confirmations/record.json'
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{}')
+    blocked = recovery_status(orch, session.run.run_id, project='pimc')
+    assert blocked['status'] == 'blocked' and not blocked['actions']
+
+
+def test_incomplete_shutdown_does_not_offer_prelaunch_revision(tmp_path: Path) -> None:
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='unverified-stop', project='pimc', entrypoint='coding'))
+    session.graph.restore_state('coding', NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks',
+                           'cleanup_complete': False, 'interrupted_nodes': []}
+    assert recovery_status(orch, session.run.run_id, project='pimc')['actions'] == []
+
+
 def session_at(root: Path) -> tuple[Orchestrator, RunSession]:
     registry = AgentRegistry()
     registry.register('idea', IdeaAgent())

@@ -85,9 +85,11 @@ def _code_changes(run_id: str, project: str, change_id: str | None = None) -> di
 
 class RecoveryPayload(BaseModel):
     project: str
-    action: Literal['resume', 'retry']
+    action: Literal['resume', 'retry', 'revise_data']
     node: str
     token: str = Field(min_length=1)
+    source_id: str = ''
+    reason: str = ''
 
 
 class ExecutionConfirmationPayload(BaseModel):
@@ -192,7 +194,8 @@ async def post_recovery(run_id: str, payload: RecoveryPayload) -> dict[str, Any]
     from app.bridge.run_recovery import recover_run
     try:
         result = await recover_run(get_orchestrator(), run_id, project=payload.project,
-                                  action=payload.action, node=payload.node, token=payload.token)
+                                   action=payload.action, node=payload.node, token=payload.token,
+                                   source_id=payload.source_id, reason=payload.reason)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail='任务或执行记录不存在。') from exc
     except (OSError, ValueError) as exc:

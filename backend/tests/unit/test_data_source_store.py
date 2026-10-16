@@ -11,6 +11,25 @@ from app.storage.data_source_store import DataSourceStore, selection_summary
 from app.storage.run_store import RunStore
 
 
+def test_numeric_scalars_are_retained_without_inventing_units(tmp_path: Path) -> None:
+    store = DataSourceStore(base=tmp_path / 'data')
+    source_id, path = store.allocate(original_name='capture.npz', project='pimc')
+    np.savez(path, txa=np.ones((2, 64)), txb=np.ones((2, 64)), rxa=np.zeros((2, 64)),
+             lo_txb=np.array([[3450]]), sample_rate=np.array([[245.76]]),
+             unknown=np.array([[np.nan]]), complex_scalar=np.array([[2 + 1j]]))
+    profile = store.profile_uploaded_file(source_id=source_id, path=path, project='pimc', original_name='capture.npz')
+    entries = {item['key']: item for item in profile['dict_entries']}
+    assert entries['lo_txb']['scalar_value'] == 3450
+    assert entries['sample_rate']['scalar_value'] == 245.76
+    assert 'scalar_value' not in entries['txa']
+    assert 'scalar_value' not in entries['unknown']
+    assert 'scalar_value' not in entries['complex_scalar']
+    assert profile['fs_mhz'] is None  # unitless field is evidence, not a unit declaration
+    summary = selection_summary(profile)
+    assert 'observed_scalar=3450.0' in summary and 'do not infer units' in summary
+    assert 'Data compatibility requirement' in summary
+
+
 def test_data_source_profile_generates_spectrum(tmp_path: Path) -> None:
     store = DataSourceStore(base=tmp_path / "datasets")
     source_id, target = store.allocate(original_name="capture.npz", project="pimc")

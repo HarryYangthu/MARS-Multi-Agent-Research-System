@@ -9,6 +9,64 @@ from app.harness.runtime.state_machine import NodeState
 from app.storage.run_store import RunStore
 
 
+def test_data_revision_preserves_history_and_requires_both_reviews(tmp_path: Path) -> None:
+    import json
+    from app.bridge.preexecution_revision import apply_revision_data
+    from app.storage.data_source_store import sha256_file
+    run = RunStore(tmp_path / 'runs').create(task='data-change', project='synthetic_regression')
+    graph = build_pipeline('pipeline')
+    for stage in ('idea', 'experiment', 'coding'):
+        graph.restore_state(stage, NodeState.DONE)
+    graph.restore_state('execution', NodeState.APPROVED)
+    artifact = run.root / 'experiment/experiment_plan.approved.md'
+    artifact.write_text('Historical human-authored plan')
+    data = tmp_path / 'data.json'
+    data.write_text('[1, 2, 3]')
+    source = {'id': 'selected', 'project': run.project, 'stored_path': str(data), 'checksum': sha256_file(data)}
+    row = enqueue_revision(run, graph, 'coding', 'execution', 'Change dataset and check the loader', data_source=source)
+    assert row['nodes'] == ['experiment_attempt_2', 'coding_attempt_2']
+    assert graph.ready_nodes() == ['experiment_attempt_2']
+    assert row['previous_data_source'] is None
+    assert apply_revision_data(run, row) == source
+    assert json.loads((run.root / 'input/selected_data_source.json').read_text()) == source
+    graph.restore_state('experiment_attempt_2', NodeState.FAILED)
+    assert ready_batch(graph, 2) == []
+    graph.restore_state('experiment_attempt_2', NodeState.WAITING_REVIEW)
+    assert ready_batch(graph, 2) == []
+    graph.restore_state('experiment_attempt_2', NodeState.DONE)
+    assert ready_batch(graph, 2) == ['coding_attempt_2']
+    graph.restore_state('coding_attempt_2', NodeState.FAILED)
+    assert ready_batch(graph, 2) == []
+    assert artifact.read_text() == 'Historical human-authored plan'
+    with pytest.raises(ValueError, match='未完成'):
+        enqueue_revision(run, graph, 'coding', 'execution', 'Different selection', data_source={**source, 'id': 'another'})
+
+
+@pytest.mark.parametrize('invalid', ['other_project', 'missing', 'changed'])
+def test_bad_data_selection_cannot_change_graph_or_inputs(tmp_path: Path, invalid: str) -> None:
+    from app.storage.data_source_store import sha256_file
+    run = RunStore(tmp_path / 'runs').create(task='bad-data', project='synthetic_regression')
+    graph = build_pipeline('pipeline')
+    for stage in ('idea', 'experiment', 'coding'):
+        graph.restore_state(stage, NodeState.DONE)
+    graph.restore_state('execution', NodeState.APPROVED)
+    data = tmp_path / 'data.json'
+    data.write_text('[1, 2]')
+    source = {'project': run.project, 'stored_path': str(data), 'checksum': sha256_file(data)}
+    if invalid == 'other_project':
+        source['project'] = 'other'
+    elif invalid == 'missing':
+        data.unlink()
+    else:
+        data.write_text('[3, 4]')
+    before = graph.to_dict()
+    with pytest.raises(ValueError):
+        enqueue_revision(run, graph, 'coding', 'execution', 'Check file', data_source=source)
+    assert graph.to_dict() == before
+    assert pending_revision(run) is None
+    assert not (run.root / 'input/selected_data_source.json').exists()
+
+
 def test_prelaunch_repair_preserves_history_and_blocks_downstream(tmp_path: Path) -> None:
     run = RunStore(tmp_path).create(task='prelaunch-admission', project='synthetic_regression', entrypoint='pipeline')
     graph = build_pipeline('pipeline')
@@ -157,3 +215,36 @@ async def test_real_missing_agent_failure_never_advances_execution(tmp_path: Pat
     from app.bridge.managed_review import review_state
     state = review_state(session.run)
     assert state is not None and state['node'] == 'coding_attempt_2'
+
+
+@pytest.mark.asyncio
+async def test_data_revision_after_shutdown_cannot_skip_failed_design(tmp_path: Path) -> None:
+    import asyncio
+    import json
+    from app.bridge.agent_registry import AgentRegistry
+    from app.bridge.orchestrator import Orchestrator, RunRequest
+    from app.storage.data_source_store import sha256_file
+    orch = Orchestrator(run_store=RunStore(tmp_path / 'runs'), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='data-revision-failure', project='synthetic_regression',
+                                            entrypoint='experiment', review_mode='commander'))
+    for stage in ('experiment', 'coding'):
+        session.graph.restore_state(stage, NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks', 'cleanup_complete': True,
+                           'interrupted_nodes': [], 'reason': 'server_shutdown'}
+    data = tmp_path / 'data.json'
+    data.write_text('[1, 2]')
+    source = {'project': session.run.project, 'stored_path': str(data), 'checksum': sha256_file(data)}
+    result = await orch.request_artifact_revision(run_id=session.run.run_id, agent='experiment',
+        reason='User-selected data requires design and code review', restart_stopped=True, data_source=source)
+    assert result['ok']
+    owner = orch.owned_tasks.active(session.run.run_id)
+    assert owner is not None
+    await asyncio.wait_for(owner, timeout=20)
+    assert session.graph.state('experiment_attempt_2') == NodeState.FAILED
+    assert session.graph.state('coding_attempt_2') == NodeState.PENDING
+    assert session.graph.state('experiment') == NodeState.DONE
+    assert session.graph.state('execution') == NodeState.APPROVED
+    assert session.graph.state('writing') == NodeState.PENDING
+    assert json.loads((session.run.root / 'input/selected_data_source.json').read_text()) == source
+    assert not (session.run.root / 'execution/confirmations').exists()

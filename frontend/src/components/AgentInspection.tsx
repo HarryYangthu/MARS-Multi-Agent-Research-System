@@ -8,6 +8,7 @@ import { latestStages } from "@/lib/runReview";
 import { agentLabel, statusLabel } from "@/lib/researchActivity";
 import { readInspection, objectValue, promptMessages, type InspectionCatalog, type InspectionEvent } from "@/lib/agentInspection";
 import { ArtifactReviewDocument } from "./ArtifactReviewDocument";
+import { RunRecoveryControl } from "./RunRecoveryControl";
 
 const AGENTS = ["commander", "idea", "experiment", "coding", "execution", "writing"];
 const KIND: Record<string, string> = { model_request: "模型请求", model_response: "模型输出", tool_dispatch: "执行工具", observation: "工具结果", provider_request: "实际发送的请求", context_packed: "拼接上下文", validation: "产物校验", model_error: "模型错误", sdk_attempt_failed: "调用失败", sdk_attempt_started: "开始调用", sdk_attempt_succeeded: "调用完成", completed: "阶段完成", interrupted: "中断", context_compressed: "压缩上下文" };
@@ -54,6 +55,7 @@ export function AgentInspection({ runId }: { runId: string }): JSX.Element {
   return <div className="min-h-screen bg-mars-bg"><main className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
     <header className="flex flex-wrap items-center justify-between gap-3"><Link href={`/runs/${encodeURIComponent(runId)}`} className="text-sm text-slate-400 hover:text-white">← 返回研究对话</Link><div className="flex gap-2"><Link href={workbench} className={button}>文档编辑与高级操作</Link><button type="button" onClick={() => setRevision(value => value + 1)} disabled={loading} className={button}>刷新记录</button></div></header>
     <div><h1 className="text-2xl font-semibold">{agentLabel(agent)} Agent 详情</h1><p className="mt-2 break-words text-sm text-slate-400">{run?.task || runId} · {statusLabel(state)}</p></div>
+    {run ? <RunRecoveryControl runId={runId} project={run.project} disabled={!!error} onChanged={() => setRevision(value => value + 1)} /> : null}
     <nav aria-label="选择 Agent" className="flex flex-wrap gap-2">{AGENTS.map(key => <Link key={key} href={`/runs/${encodeURIComponent(runId)}?view=advanced&agent=${key}`} aria-current={key === agent ? "page" : undefined} className={`${button} ${key === agent ? "border-indigo-400/60 bg-indigo-400/10 text-indigo-200" : "text-slate-400"}`}>{agentLabel(key)}</Link>)}</nav>
     <nav aria-label="Agent 详情栏目" className="flex gap-2 border-b border-mars-border pb-3">{([['trace', 'Agent Trace'], ['prompts', 'LLM 提示词与拼接'], ['quality', '最终输出质量']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => { setTab(key); setSelected(""); }} className={`${button} ${tab === key ? "bg-mars-accent text-white" : "text-slate-400"}`}>{label}</button>)}</nav>
     {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}

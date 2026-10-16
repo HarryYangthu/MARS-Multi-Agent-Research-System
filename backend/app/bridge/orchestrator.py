@@ -1785,6 +1785,7 @@ class Orchestrator:
         agent: str,
         reason: str,
         restart_stopped: bool = False,
+        data_source: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         session = self.session(run_id)
         if session.read_only:
@@ -1793,11 +1794,14 @@ class Orchestrator:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
         coding_node = self._latest_node_for_stage(session, 'coding')
         execution_node = self._latest_node_for_stage(session, 'execution')
-        if (agent == 'coding' and coding_node is not None and execution_node is not None
+        if ((agent == 'coding' or (agent == 'experiment' and data_source is not None))
+                and coding_node is not None and execution_node is not None
                 and session.graph.state(coding_node) == NodeState.DONE
                 and session.graph.state(execution_node) == NodeState.APPROVED):
             return self._request_preexecution_revision(session, coding_node, execution_node, reason,
-                                                       restart_stopped=restart_stopped)
+                                                       restart_stopped=restart_stopped, data_source=data_source)
+        if data_source is not None:
+            return {'ok': False, 'status': 'data_revision_blocked', 'error': '仅支持实验尚未启动时修订数据与方案'}
         report_node = self._latest_node_for_stage(session, 'writing')
         if agent == 'writing' and report_node is not None and session.graph.state(report_node) == NodeState.DONE:
             return self._request_completed_report_revision(session, report_node, reason,
@@ -1943,7 +1947,7 @@ class Orchestrator:
                 if continue_run:
                     from app.bridge.preexecution_revision import pending_revision
                     pending = pending_revision(session.run)
-                    if pending and pending['node'] == node_key and session.graph.state(node_key) == NodeState.DONE:
+                    if pending and node_key in pending.get('nodes', [pending['node']]) and session.graph.state(node_key) == NodeState.DONE:
                         if not await self._perform_preexecution_revision(session):
                             return
                         await self._complete_approved_node(session, pending['execution_node'])
@@ -1991,7 +1995,8 @@ class Orchestrator:
         return {'ok': started, 'status': 'revision_started' if started else 'not_startable', 'node': node}
 
     def _request_preexecution_revision(self, session: RunSession, coding: str, execution: str,
-                                      reason: str, *, restart_stopped: bool) -> dict[str, Any]:
+                                      reason: str, *, restart_stopped: bool,
+                                      data_source: dict[str, Any] | None = None) -> dict[str, Any]:
         from app.bridge.preexecution_revision import enqueue_revision
         run_id = session.run.run_id
         termination = session.termination
@@ -2001,7 +2006,7 @@ class Orchestrator:
                     or self.owned_tasks.active(run_id) is not None):
                 return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
         try:
-            row = enqueue_revision(session.run, session.graph, coding, execution, reason)
+            row = enqueue_revision(session.run, session.graph, coding, execution, reason, data_source=data_source)
         except (OSError, ValueError) as exc:
             return {'ok': False, 'status': 'preexecution_revision_blocked', 'error': str(exc)}
         session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_requested',
@@ -2020,22 +2025,28 @@ class Orchestrator:
         return {'ok': True, 'status': 'revision_requested', 'node': row['node']}
 
     async def _perform_preexecution_revision(self, session: RunSession) -> bool:
-        from app.bridge.preexecution_revision import assert_no_execution, attach_revision, finish_revision, pending_revision
+        from app.bridge.preexecution_revision import (
+            apply_revision_data, assert_no_execution, attach_revision, finish_revision, pending_revision,
+        )
         row = pending_revision(session.run)
         if row is None:
             return True
         assert_no_execution(session.run)
         attach_revision(session.graph, row)
+        if source := apply_revision_data(session.run, row):
+            session.request.data_source = source
+            self._persist_state(session, status='running')
         node, execution = row['node'], row['execution_node']
-        if session.graph.state(node) == NodeState.PENDING:
-            if session.request.review_mode == 'commander':
-                from app.bridge.managed_review import record_state
-                await record_state(session.run, session.bus, {'node': node, 'kind': 'artifact',
-                    'generation': session.request.review_generation, 'status': 'revision_requested',
-                    'reason': '正在按明确反馈修正编码；完成后由主控重新审核，再核对执行配置。'})
-            await self._run_revision_flow(session=session, node_key=node, reason=row['reason'], continue_run=False)
-        if self._stopping(session) or session.graph.state(node) != NodeState.DONE:
-            return False
+        for revised_node in row.get('nodes', [node]):
+            if session.graph.state(revised_node) == NodeState.PENDING:
+                if session.request.review_mode == 'commander':
+                    from app.bridge.managed_review import record_state
+                    await record_state(session.run, session.bus, {'node': revised_node, 'kind': 'artifact',
+                        'generation': session.request.review_generation, 'status': 'revision_requested',
+                        'reason': '正在按明确反馈修订方案及编码；完成后正常审核，再核对执行配置。'})
+                await self._run_revision_flow(session=session, node_key=revised_node, reason=row['reason'], continue_run=False)
+            if self._stopping(session) or session.graph.state(revised_node) != NodeState.DONE:
+                return False
         # Rebuild the deterministic execution intake from the newly reviewed code.
         # Neither this method nor the API approves scientific content.
         await self._transition(session, execution, NodeState.RUNNING)
