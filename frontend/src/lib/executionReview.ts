@@ -10,6 +10,7 @@ export type ExecutionConfiguration = {
   experiments: { name: string; seed: unknown; config: Record<string, unknown>; effective?: Record<string, unknown> }[];
   source_configs: { path: string; seed: unknown; epochs: unknown }[];
   blockers: string[]; warnings: string[]; budget: { used: number; limit: number | null; required: number };
+  missing_data_binding?: boolean;
   validation?: { name: string; status: "required" | "unverified" | "passed" | "failed" | "stale"; configured: boolean; error?: string; receipt_path?: string; receipt_sha256?: string; checks?: { name: string; ready: boolean; details?: Record<string, unknown> }[] }[];
 };
 export class ExecutionReviewError extends Error {

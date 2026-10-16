@@ -145,6 +145,12 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     user_request = str(args.get("user_request", ""))
     seed_artifact = args.get("seed_artifact")
     task = str(args.get("task") or user_request[:60] or "commander_run")
+    from app.bridge.run_data_selection import resolve_run_data_source
+    try:
+        selected_data = resolve_run_data_source(ctx.session.project, entrypoint=entrypoint,
+            standalone=bool(args.get("standalone", False)), store=ctx.data_source_store)
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "status": "data_selection_required", "error": str(exc)}
 
     request = RunRequest(
         task=task,
@@ -155,7 +161,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         review_mode="commander" if ctx.session.auto_mode else "manual",
         # Match the direct run API: snapshot the user's saved project selection
         # at creation, never infer a dataset from uploads or later defaults.
-        data_source=ctx.data_source_store.default_profile(ctx.session.project),
+        data_source=selected_data,
         extra={"routing": routing,
                **({"existing_execution_job": existing_job} if existing_job is not None else {}),
                **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},

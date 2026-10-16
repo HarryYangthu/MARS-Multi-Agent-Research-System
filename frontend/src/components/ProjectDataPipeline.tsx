@@ -10,7 +10,9 @@ const INPUT = "mt-1 w-full rounded border border-mars-border bg-mars-panel px-3 
 const BUTTON = "rounded border border-mars-border px-3 py-2 text-sm hover:bg-mars-panel2 disabled:opacity-40";
 const STATUS: Record<string, string> = { processing: "正在处理数据", processed: "处理完成", analyzing: "正在生成简报", analyzed: "简报已生成", failed: "处理失败", analysis_failed: "简报生成失败", interrupted: "处理已中断" };
 
-export function ProjectDataPipeline({ project }: { project: string }): JSX.Element {
+export function ProjectDataPipeline({ project, onBusy, onPendingSelection }: {
+  project: string; onBusy?: (busy: boolean) => void; onPendingSelection?: (pending: boolean) => void;
+}): JSX.Element {
   const [sources, setSources] = useState<DataSourceProfile[]>([]);
   const [source, setSource] = useState("");
   const [defaultId, setDefaultId] = useState("");
@@ -30,14 +32,18 @@ export function ProjectDataPipeline({ project }: { project: string }): JSX.Eleme
   const [jobs, setJobs] = useState<DataPipelineJob[]>([]);
   const [selectedJob, setSelectedJob] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const job = jobs.find(item => item.id === selectedJob) ?? jobs[0];
   const running = jobs.some(item => item.status === "processing" || item.status === "analyzing");
+  useEffect(() => { onBusy?.(busy || loading); return () => onBusy?.(false); }, [busy, loading, onBusy]);
+  useEffect(() => { onPendingSelection?.(Boolean(source && source !== defaultId)); }, [source, defaultId, onPendingSelection]);
 
   useEffect(() => {
     let alive = true;
-    void listDataSources(project).then(items => { if (alive) { setSources(items); const saved = items.find(item => item.is_default)?.id || ""; setDefaultId(saved); setSource(saved || items[0]?.id || ""); } }).catch(e => { if (alive) setError(String(e)); });
+    setLoading(true);
+    void listDataSources(project).then(items => { if (alive) { setSources(items); const saved = items.find(item => item.is_default)?.id || ""; setDefaultId(saved); setSource(saved || items[0]?.id || ""); } }).catch(e => { if (alive) setError(String(e)); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [project]);
   useEffect(() => {
@@ -69,27 +75,32 @@ export function ProjectDataPipeline({ project }: { project: string }): JSX.Eleme
     catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
   async function upload(file: File): Promise<void> {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNotice("");
     try {
       const profile = await uploadDataSource({ file, project, kind: "auto" });
       setSources(items => [profile, ...items]); setSource(profile.id);
       if (profile.fs_mhz) setFs(String(profile.fs_mhz));
+      await setDefaultDataSource(project, profile.id);
+      setDefaultId(profile.id);
+      setNotice("已上传并设为本项目新任务的研究数据。已有任务的输入不会自动改变，需先修订方案并重新审核。");
     } catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
   async function selectForResearch(): Promise<void> {
     setBusy(true); setError(""); setNotice("");
-    try { await setDefaultDataSource(project, source); setDefaultId(source); setNotice("已设置本项目的默认数据，仿真启动前还会核对数据和划分方式。"); }
+    try { await setDefaultDataSource(project, source); setDefaultId(source); setNotice("已设置本项目新任务的研究数据。已有任务的输入不会自动改变，需先修订方案并重新审核。"); }
     catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "设置未确认，请重新读取数据列表核对。"); }
     finally { setBusy(false); }
   }
 
   return <section className="space-y-4">
-    <p className="text-sm leading-6 text-slate-400">数据可保留在自己的目录，在研究目标中提供绝对路径；也可上传并设为本项目默认数据。没有数据时可稍后接入。</p>
+    <p className="text-sm leading-6 text-slate-400">上传后会同时保存为本项目新任务的研究数据；从已有文件中切换时，请点击「用于本项目研究」。已有任务仍保留原输入。</p>
     <div className="flex flex-wrap items-center gap-3">
-      <label className={BUTTON}>上传数据<input type="file" aria-label="上传研究数据" accept=".mat,.npz,.pth,.pt,.npy,.csv,.json,.h5,.hdf5" className="sr-only" disabled={busy || running} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void upload(file); }} /></label>
+      <label className={BUTTON}>上传并用于研究<input type="file" aria-label="上传并用于本项目研究" accept=".mat,.npz,.pth,.pt,.npy,.csv,.json,.h5,.hdf5" className="sr-only" disabled={busy || loading || running} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void upload(file); }} /></label>
       <span className="text-xs text-slate-500">MAT / NPZ / PTH / CSV / JSON / HDF5 · 原始数据保留</span>
     </div>
-    <label className="block text-xs text-slate-400">数据文件<select className={INPUT} value={source} disabled={busy || running} onChange={e => { setSource(e.target.value); const item = sources.find(s => s.id === e.target.value); setFs(item?.fs_mhz ? String(item.fs_mhz) : ""); }}><option value="">请选择</option>{sources.map(item => <option key={item.id} value={item.id}>{item.original_name}</option>)}</select></label>
+    <label className="block text-xs text-slate-400">数据文件<select className={INPUT} value={source} disabled={busy || loading || running} onChange={e => { setSource(e.target.value); setNotice(""); const item = sources.find(s => s.id === e.target.value); setFs(item?.fs_mhz ? String(item.fs_mhz) : ""); }}><option value="">请选择</option>{sources.map(item => <option key={item.id} value={item.id}>{item.original_name}</option>)}</select></label>
+    {busy || loading ? <p role="status" className="text-sm text-slate-300">{loading ? "正在核对已保存的数据…" : "正在处理并保存，请稍候…"}</p> : null}
+    {!loading && source && source !== defaultId ? <p role="status" className="text-sm text-amber-200">所选文件尚未保存为研究数据，请点击下方「用于本项目研究」。</p> : null}
     <button type="button" className={BUTTON} disabled={busy || !source || defaultId === source} onClick={() => void selectForResearch()}>{defaultId && defaultId === source ? "已设为本项目默认数据" : "用于本项目研究"}</button>
     {notice ? <p role="status" className="text-xs text-emerald-200">{notice}</p> : null}
     {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}

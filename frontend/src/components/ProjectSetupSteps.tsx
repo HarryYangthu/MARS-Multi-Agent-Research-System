@@ -22,13 +22,24 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
   const [modelBusy, setModelBusy] = useState(false);
   const [codeBusy, setCodeBusy] = useState(false);
   const [trainingBusy, setTrainingBusy] = useState(false);
+  const [dataBusy, setDataBusy] = useState(false);
+  const [dataPending, setDataPending] = useState(false);
+  const [dataNotice, setDataNotice] = useState("");
   const [uploading, setUploading] = useState(false);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [backupPath, setBackupPath] = useState("");
-  const busy = modelBusy || uploading || codeBusy || trainingBusy;
+  const busy = modelBusy || uploading || codeBusy || trainingBusy || dataBusy;
   useEffect(() => { onBusy(busy); }, [busy, onBusy]);
+  function goTo(next: number): void {
+    if (busy) return;
+    if (step === 3 && next > step && dataPending) {
+      setDataNotice("研究数据尚未保存，请先点击「用于本项目研究」，再继续下一步。");
+      return;
+    }
+    setDataNotice(""); setStep(next);
+  }
 
   async function upload(file: File): Promise<void> {
     if (busy) return;
@@ -47,7 +58,7 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
     <ol aria-label="新建项目步骤" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-7">
       {STEPS.map((title, index) => <li key={title}>
         <button type="button" aria-current={index === step ? "step" : undefined} disabled={busy}
-          onClick={() => setStep(index)}
+          onClick={() => goTo(index)}
           className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${index === step ? "border-indigo-400 bg-indigo-500/10 text-indigo-100" : "border-mars-border text-slate-400 hover:bg-mars-panel2 hover:text-slate-200"}`}>
           {index === 0 ? "✓" : index + 1} {title}
         </button>
@@ -69,7 +80,8 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
       {error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
       <ProjectContextFiles key={revision} project={project.name} />
     </div>
-    {step === 3 ? <ProjectDataPipeline key={project.name} project={project.name} /> : null}
+    <div hidden={step !== 3}><ProjectDataPipeline key={project.name} project={project.name} onBusy={setDataBusy} onPendingSelection={setDataPending} /></div>
+    {step === 3 && dataNotice && dataPending ? <p role="alert" className="text-sm text-amber-200">{dataNotice}</p> : null}
     {step === 4 ? project.project_type === "folder" ? <ProjectTrainingSetup key={project.name} project={project.name} onBusy={setTrainingBusy} /> : <p>此项目使用预设执行配置。</p> : null}
     {step === 5 ? <div className="space-y-4"><p className="rounded-lg border border-mars-border p-4 text-sm text-slate-400">在本机执行可跳过此步骤。使用远程 GPU 时再配置 SSH、代码和数据路径，仿真启动前还会再次核对。</p><ProjectGpuConfig key={project.name} project={project.name} /></div> : null}
     {step === 6 ? <div className="space-y-4 text-sm leading-6">
@@ -79,8 +91,8 @@ export function ProjectSetupSteps({ project, onDone, onBusy }: {
       <p className="text-sm text-emerald-200">准备就绪后，从项目卡片点击「启动研究」，直接描述研究目标即可。</p>
     </div> : null}
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-mars-border pt-4">
-      {step > 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => setStep((value) => value - 1)}>上一步</button> : <span className="text-xs text-slate-500">已保存的内容会保留</span>}
-      <div className="flex flex-wrap gap-2">{step === 6 ? <><button type="button" className={`${BUTTON} bg-mars-accent text-white`} onClick={onDone}>完成</button></> : <>{step === 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => setStep(2)}>稍后配置</button> : null}<button type="button" disabled={busy} className={`${BUTTON} bg-mars-accent text-white`} onClick={() => setStep((value) => value + 1)}>{`下一步：${STEPS[step + 1]}`}</button></>}</div>
+      {step > 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => goTo(step - 1)}>上一步</button> : <span className="text-xs text-slate-500">已保存的内容会保留</span>}
+      <div className="flex flex-wrap gap-2">{step === 6 ? <><button type="button" disabled={busy} className={`${BUTTON} bg-mars-accent text-white`} onClick={onDone}>完成</button></> : <>{step === 1 ? <button type="button" disabled={busy} className={BUTTON} onClick={() => goTo(2)}>稍后配置</button> : null}<button type="button" disabled={busy} className={`${BUTTON} bg-mars-accent text-white`} onClick={() => goTo(step + 1)}>{`下一步：${STEPS[step + 1]}`}</button></>}</div>
     </footer>
   </div>;
 }

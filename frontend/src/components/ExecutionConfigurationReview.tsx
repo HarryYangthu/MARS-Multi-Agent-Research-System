@@ -7,6 +7,7 @@ import { executionExperimentFields } from "@/lib/executionReviewPresentation";
 import type { RunDetail } from "@/lib/api";
 import { managedReviewPending, managedReviewReason } from "@/lib/managedReview";
 import { latestStages } from "@/lib/runReview";
+import { ProjectDataPipeline } from "./ProjectDataPipeline";
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
@@ -173,6 +174,12 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-mars-border px-5 py-4"><div><h2 ref={heading} tabIndex={-1} id={`${id}-title`} className="text-lg font-semibold outline-none">启动仿真前核对配置</h2><p id={`${id}-description`} className="mt-1 text-xs text-slate-400">直接使用已批准实验与编码交付，不重新设计方案。下面的配置与实际启动一致；调整后须重新核对。</p></div><button type="button" disabled={busy} onClick={() => dialog.current?.close()} className="shrink-0 rounded-lg border border-mars-border px-3 py-2 text-xs disabled:opacity-40">稍后核对</button></header>
         <div className="min-h-0 space-y-5 overflow-y-auto p-5">
           {view.blockers.length ? <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4"><p className="text-sm font-medium text-amber-200">尚不能启动仿真</p><ul className="mt-2 list-disc space-y-2 pl-4 text-xs leading-6 text-amber-100/80">{view.blockers.map(item => <li key={item}>{item}</li>)}</ul></div> : null}
+          {view.missing_data_binding ? <section className="space-y-3 rounded-lg border border-amber-500/30 p-4">
+            <h3 className="text-sm font-medium">先核对数据与方案</h3>
+            <p className="text-sm leading-6 text-slate-300">这次任务创建时没有绑定数据。请先确认要用的文件，并核对实验方案、代码配置是否适用。已有方案需要修订并重新审核；仅设置默认数据或刷新页面不会解除当前阻塞。</p>
+            <details><summary className="cursor-pointer py-2 text-sm text-indigo-200">查看本项目的数据选择</summary><div className="mt-3"><ProjectDataPipeline project={project} /></div></details>
+            <p className="text-sm leading-6 text-slate-400">选定后回到研究对话，说明“使用哪份数据，修订当前实验方案及编码配置后继续”；主控托管仍会按正常流程审核。</p>
+          </section> : null}
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">{Object.entries(view.defaults).map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-xs text-slate-500">{labels[key] || key}</dt><dd className="mt-1 break-all text-sm text-slate-200">{display(value)}</dd></div>)}</dl>
           <section><h3 className="text-sm font-medium">实验清单</h3><div className="mt-2 divide-y divide-mars-border rounded-lg border border-mars-border">{view.experiments.map(item => <article key={item.name} className="p-3">
             <h4 className="text-xs font-medium text-slate-200">{item.name}</h4>

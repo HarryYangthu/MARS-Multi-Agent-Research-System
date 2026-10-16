@@ -103,12 +103,16 @@ def effective_data_summary(experiments: list[dict[str, Any]]) -> str:
     return '各组不同，详见实验清单' if paths else ''
 
 
+class MissingDataBinding(ValueError):
+    """An existing run needs explicit data selection and plan reconciliation."""
+
+
 def configured_data_path(bound_request: dict[str, Any], config: dict[str, Any], source: dict[str, Any]) -> str:
     """Use host-bound data before a loader declaration; never invent an extension."""
     value = (bound_request.get('data_binding', {}).get('path')
              or config.get('data_path') or source.get('data', {}).get('path'))
     if not isinstance(value, str) or not value.strip():
-        raise ValueError('数据配置未绑定可核验的实际文件；请选择数据源或指定 data_path')
+        raise MissingDataBinding('本任务未绑定实际数据文件；上传数据或修改项目默认值不会自动更新已生成的实验方案')
     return value
 
 
@@ -119,6 +123,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
     config = load_execution_config()['execution']
     configured = str(config['backend'])
     blockers: list[str] = []
+    missing_data_binding = False
     from app.bridge.preexecution_revision import pending_revision
     if pending_revision(run) is not None:
         blockers.append('编码返工尚未完成并重新审核，执行配置不能确认。')
@@ -344,6 +349,8 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
                             files['command:' + resolved] = (_file_hash(source) if source.suffix in {'.py', '.sh', '.js'}
                                 else digest([str(source), stat.st_size, stat.st_mtime_ns, stat.st_ino]))
                 except (OSError, ValueError, RuntimeError) as exc:
+                    if isinstance(exc, MissingDataBinding):
+                        missing_data_binding = True
                     blockers.append(f'{spec.experiment_id} 的启动配置未就绪：{exc}')
         elif not config.get('local_commands'):
             blockers.append('尚未配置实际启动命令。')
@@ -441,6 +448,7 @@ def execution_preview(run: RunHandle, node_key: str) -> dict[str, Any]:
         'base_inputs_token': base_inputs_token, 'validated_input_changes': input_changes,
         'confirmed': confirmed, 'defaults': defaults, 'experiments': _public_config(experiments),
         'source_configs': source_configs, 'blockers': list(dict.fromkeys(blockers)),
+        'missing_data_binding': missing_data_binding,
         'warnings': warnings, 'budget': budget_view, 'validation': _public_config(validation_states)}
 
 

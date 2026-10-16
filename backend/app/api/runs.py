@@ -338,6 +338,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
     data_source = _resolve_data_source_selection(
         selection=payload.data_source,
         project=payload.project,
+        entrypoint=payload.entrypoint,
+        standalone=payload.standalone,
     )
     # Project execution target: selecting GPU must never silently fall back to
     # local simulation. Unmet prerequisites or a non-remote runtime block the
@@ -444,10 +446,17 @@ def _resolve_data_source_selection(
     selection: DataSourceSelection | None,
     *,
     project: str,
+    entrypoint: str = "pipeline",
+    standalone: bool = False,
+    store: DataSourceStore | None = None,
 ) -> dict[str, Any] | None:
-    store = DataSourceStore()
+    from app.bridge.run_data_selection import resolve_run_data_source
+    store = store if store is not None else DataSourceStore()
     if selection is None:
-        return store.default_profile(project)
+        try:
+            return resolve_run_data_source(project, entrypoint=entrypoint, standalone=standalone, store=store)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         profile = store.load(selection.id)
     except FileNotFoundError as exc:
@@ -461,7 +470,11 @@ def _resolve_data_source_selection(
         profile["channel_count"] = selection.channel_count
     if selection.description is not None:
         profile["description"] = selection.description
-    return profile
+    try:
+        return resolve_run_data_source(project, entrypoint=entrypoint, standalone=standalone,
+                                       selection=profile, store=store)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[RunSummary])

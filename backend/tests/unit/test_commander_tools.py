@@ -118,7 +118,15 @@ async def test_commander_does_not_choose_unselected_upload_or_other_project_defa
     store = RunStore(tmp_path / "runs")
     orch = Orchestrator(run_store=store, bus=InProcessEventBus())
     ctx = ToolContext(orch, CommanderSession(conv_id="no-selection", project="pimc"), store, datasets)
+    rejected = await execute_tool("run.create", {"entrypoint": "experiment",
+        "user_request": "Compare an uploaded dataset.", "repository_scope": "not_applicable",
+        "routing_reason": "Check data admission before any stage model or code change."}, ctx)
+    assert rejected["ok"] is False
+    assert rejected["status"] == "data_selection_required"
+    assert ctx.session.linked_run_id is None
+    assert not list((tmp_path / "runs").iterdir())
     created = await execute_tool("run.create", {"entrypoint": "idea",
+        "standalone": True,
         "user_request": "Draft a literature-only proposal.", "repository_scope": "not_applicable",
         "routing_reason": "Literature-only task, no execution."}, ctx)
     assert created["ok"] is True
