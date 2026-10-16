@@ -11,6 +11,31 @@ from app.storage.data_source_store import DataSourceStore, selection_summary
 from app.storage.run_store import RunStore
 
 
+def test_sanitized_upload_aliases_remain_distinct_in_research_context(tmp_path: Path) -> None:
+    store = DataSourceStore(base=tmp_path / 'data')
+    run_store = RunStore(runs_root=tmp_path / 'runs')
+    sources = []
+    for index, original in enumerate(('capture_T+F.npz', 'capture_T_F.npz')):
+        source_id, path = store.allocate(original_name=original, project='pimc')
+        np.savez(path, samples=np.arange(16) + index)
+        profile = store.profile_uploaded_file(source_id=source_id, path=path,
+            project='pimc', original_name=original)
+        run = run_store.create(task=f'alias-{index}', project='pimc', user_request='Use this file',
+                               data_source=profile)
+        saved = json.loads((run.root / 'input/selected_data_source.json').read_text(encoding='utf-8'))
+        summary = (run.root / 'input/user_request.md').read_text(encoding='utf-8')
+        assert saved['original_name'] == original and saved['stored_path'] == str(path)
+        assert f'file: {original}' in summary and f'stored_path: {path}' in summary
+        assert 'stored_filename: capture_T_F.npz' in summary
+        assert ('This is a storage alias' in summary) == (index == 0)
+        assert 'keep logical dataset/registry keys separate' in summary
+        sources.append(saved)
+    # A lossy filename conversion must never merge different uploads or provenance.
+    assert Path(sources[0]['stored_path']).name == Path(sources[1]['stored_path']).name
+    for field in ('id', 'stored_path', 'checksum'):
+        assert sources[0][field] != sources[1][field]
+
+
 def test_numeric_scalars_are_retained_without_inventing_units(tmp_path: Path) -> None:
     store = DataSourceStore(base=tmp_path / 'data')
     source_id, path = store.allocate(original_name='capture.npz', project='pimc')

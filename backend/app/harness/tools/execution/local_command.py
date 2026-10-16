@@ -79,7 +79,11 @@ def local_command_protocol() -> dict[str, Any]:
                        'config', 'seed', 'steps', 'output_dir'],
             'config_location': 'execution_jobs.config 在 request["config"] 中，不在请求顶层。',
             'data_binding': '声明 consumes_data_path 的命令须消费 request.config.data_path 或 MARS_DATA_PATH；'
-                            '该值由宿主解析并核验，不能忽略后沿用另一份数据。',
+                            '该值由宿主解析并核验，不能忽略后沿用另一份数据。'
+                            '上传存储名可能经过字符转换，与原始文件名或代码注册表键不同；'
+                            '逻辑数据集键应与物理路径分开，不得用路径 stem 覆盖已核验的配置键，'
+                            '也不能按注册表键重新拼接文件路径。验证和训练必须使用同一实际文件，'
+                            '并核对该文件内容是否符合逻辑配置。',
         },
         'result_schema': deepcopy(_RESULT_SCHEMA),
         'artifact_layout': {

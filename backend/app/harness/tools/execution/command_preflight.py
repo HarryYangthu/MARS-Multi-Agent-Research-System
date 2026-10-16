@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import time
 from typing import Any, TYPE_CHECKING
 import uuid
@@ -270,7 +271,7 @@ def preflight_state(job: LocalCommandJob, inputs_token: str) -> dict[str, Any]:
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
-    if os.name == 'nt':
+    if sys.platform == 'win32':
         subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
     else:
@@ -279,6 +280,23 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
         except ProcessLookupError:
             pass
     process.wait(timeout=10)
+
+
+def _sanitize_log(path: Path, max_bytes: int) -> None:
+    with path.open('rb') as stream:
+        output = stream.read(max_bytes)
+    safe = bounded_error(output, max_chars=max_bytes)
+    deadline = time.monotonic() + 0.5
+    while True:
+        try:
+            atomic_write_text(path, safe)
+            return
+        except PermissionError:
+            # Windows can retain inherited log handles briefly after child exit.
+            # Keep redaction mandatory; a persistent lock must still fail closed.
+            if os.name != 'nt' or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.025)
 
 
 def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_budget: float | None = None,
@@ -354,9 +372,7 @@ def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_bu
     # Public diagnostics never contain unrestricted child output.
     for path in (stdout_path, stderr_path):
         if path.is_file():
-            with path.open('rb') as stream:
-                output = stream.read(policy['max_output_bytes'])
-            atomic_write_text(path, bounded_error(output, max_chars=policy['max_output_bytes']))
+            _sanitize_log(path, policy['max_output_bytes'])
     receipt_path = directory / 'validation_receipt.json'
     atomic_write_json(receipt_path, {'schema': 'local_command_validation_receipt.v1',
         'run_id': job.run_id, 'project': job.project, 'experiment_id': job.experiment_id,

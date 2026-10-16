@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
 
@@ -16,7 +17,7 @@ import pytest
 import yaml
 
 from app.harness.tools.execution.command_preflight import (
-    _verified_inputs, bounded_error, known_input_changes, preflight_state, run_command_preflight,
+    _sanitize_log, _verified_inputs, bounded_error, known_input_changes, preflight_state, run_command_preflight,
     validation_protocol,
 )
 from app.harness.tools.execution.local_command import LocalCommandJob, _command, command_request, run_local_command
@@ -195,17 +196,47 @@ def test_each_input_still_checks_hash_scope_symlinks_and_control_paths(
     other.write_text('[7,8,9]')
     with pytest.raises(ValueError, match='hash does not match'):
         _verified_inputs(job, saved, deadline=time.monotonic() + 2, max_bytes=4096)
-    link = data.parent / 'symbolic.json'
-    link.symlink_to(data)
     forbidden = [tmp_path / 'outside.json', data.parent / '.env.private',
                  data.parent / '.git' / 'config', data.parent / '.ssh' / 'identity',
                  data.parent / 'private.pem']
     for path in forbidden:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('human-authored boundary fixture')
-    for path in [link, *forbidden]:
+    for path in forbidden:
         with pytest.raises(ValueError, match='absolute regular file|control/credential files'):
             _verified_inputs(job, inputs(data, path), deadline=time.monotonic() + 2, max_bytes=4096)
+
+
+def test_validation_rejects_real_symbolic_input(genuine_checker: tuple[LocalCommandJob, Path, Path]) -> None:
+    job, _, data = genuine_checker
+    link = data.parent / 'symbolic.json'
+    try:
+        link.symlink_to(data)
+    except OSError as exc:
+        if getattr(exc, 'winerror', None) == 1314:
+            pytest.skip('Windows account cannot create symbolic links')
+        raise
+    result = {'checks': [{'details': {'input_files': [
+        {'path': str(link), 'sha256': hashlib.sha256(data.read_bytes()).hexdigest()}
+    ]}}]}
+    with pytest.raises(ValueError, match='absolute regular file'):
+        _verified_inputs(job, result, deadline=time.monotonic() + 2, max_bytes=4096)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows log sharing semantics')
+def test_log_redaction_waits_for_a_real_windows_file_handle(tmp_path: Path) -> None:
+    path = tmp_path / 'stdout.log'
+    path.write_text('token=private-value\nvalidation timed out\n')
+    handle = path.open('rb')
+    release = threading.Timer(0.1, handle.close)
+    release.start()
+    try:
+        _sanitize_log(path, 1024)
+    finally:
+        release.join()
+        handle.close()
+    assert 'private-value' not in path.read_text()
+    assert 'validation timed out' in path.read_text()
 
 
 def _actual_legacy_zero_exit(

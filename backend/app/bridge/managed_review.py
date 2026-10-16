@@ -199,7 +199,10 @@ def artifact_review_materials(run: RunHandle, node: str) -> dict[str, Any]:
             'implementation_due_at': 'coding', 'real_results_due_at': 'writing',
             'design_review': 'Assess scientific design, feasibility, constraints and explicit implementation requirements. '
                 'Missing future code or unstarted experiment results are not design defects; unsafe or infeasible requirements still block.',
-            'coding_review': 'Require actual changed code and checks against the currently approved design; no assumed future fixes.',
+            'coding_review': 'Require actual changed code and checks against the currently approved design; no assumed future fixes. '
+                'With selected data, require no-training validation of each delivered configuration against that actual file. '
+                'Synthetic forward tests do not establish real-data compatibility. Verify approved parameters reach the computation, '
+                'rather than merely appearing in configuration metadata while hardcoded values remain active.',
             'execution_review': 'Require launchable approved inputs; never waive actual data/code/preflight blockers.'}}
 
 

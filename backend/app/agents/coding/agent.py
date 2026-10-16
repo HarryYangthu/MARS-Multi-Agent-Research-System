@@ -34,6 +34,9 @@ class CodingAgent(BaseAgent):
         "测试只能核对纯函数、schema、真实文件和真实进程；禁止用替身训练器、Mock、monkeypatch "
         "或固定指标伪造模型/工具/执行成功。新增作业适配器时先读取 configured_execution_delivery "
         "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆宿主包装入口与训练入口。"
+        "已选数据时，交付前逐组以真实选定文件运行无训练入口验证；合成数据或随机前向只证明局部实现，"
+        "不能代替实际数据加载、字段/频率/划分与执行协议核验。报告检查读取的真实文件与指纹。"
+        "核对批准参数是否真正进入计算路径；配置中写有某个值而算法仍使用硬编码旧值不算落实。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
         "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
         "按用户指定的 entrypoint 与 config_path 精确选择宿主执行能力；没有匹配能力时明确报告缺失。"
@@ -101,7 +104,10 @@ class CodingAgent(BaseAgent):
         context.upstream['configured_code_checks_usage'] = (
             'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
-            '避免上一组残留的 scheduler 等字段污染下一组。')
+            '避免上一组残留的 scheduler 等字段污染下一组。'
+            '测试子进程可从宿主 MARS_TEST_DATA_PATH / MARS_TEST_PROJECT_ROOT 读取本次真实选定数据；'
+            '需要实际数据的验证应显式使用这些绑定，不要只测试临时合成文件或从文件名推断数据配置。'
+            '验证代码须显式启用登记的无训练模式，不得在编码检查中启动完整仿真。')
         context.upstream['configured_execution_delivery'] = json.dumps(
             execution_delivery_context(project=request.project), ensure_ascii=False)
         from app.harness.schema.experiment_contract import document_hash, document_metadata

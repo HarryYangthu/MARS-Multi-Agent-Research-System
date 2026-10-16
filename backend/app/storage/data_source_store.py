@@ -271,6 +271,13 @@ def selection_summary(profile: dict[str, Any]) -> str:
         value = profile.get(key)
         if value not in (None, "", []):
             lines.append(f"- {label}: {value}")
+    if stored_path := profile.get('stored_path'):
+        # Upload names are sanitized and are not reversible dataset identifiers.
+        stored_name = str(stored_path).replace('\\', '/').rsplit('/', 1)[-1]
+        lines.append(f"- stored_filename: {stored_name}")
+        if profile.get('original_name') and stored_name != profile['original_name']:
+            lines.append('- Storage filename differs from the original filename. This is a storage alias, '
+                         'not a change to the dataset or its scientific configuration.')
     warnings = profile.get("warnings")
     if isinstance(warnings, list) and warnings:
         lines.append("- warnings: " + "; ".join(str(item) for item in warnings))
@@ -296,6 +303,8 @@ def selection_summary(profile: dict[str, Any]) -> str:
             lines.append(f"  - {key}: " + ", ".join(suffix))
     lines.append("- Data compatibility requirement: inspect these actual file fields and values before designing or coding. "
                  "Compare the loader's required fields, shapes, bands, sampling rate and split bounds. "
+                 "Read the exact stored_path; keep logical dataset/registry keys separate from the physical filename. "
+                 "Do not overwrite a verified configured dataset key with Path(stored_path).stem or reverse filename sanitization. "
                  "Repository example configurations and filenames are not evidence of compatibility. "
                  "Adapt and re-review incompatible configurations; ask about scientific semantics or units that the file cannot establish. "
                  "Never silently substitute a different dataset.")
