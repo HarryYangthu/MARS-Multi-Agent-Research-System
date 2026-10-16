@@ -62,7 +62,7 @@ def execution_recovery_evidence(run: RunHandle, node: str) -> dict[str, Any]:
                 target = Path(ref)
                 if not target.is_absolute():
                     target = run.root / target
-                if target.name != 'execution_receipt.json':
+                if target.name not in {'execution_receipt.json', 'validation_receipt.json'}:
                     continue
                 receipt_raw, receipt_item = _read(run, target)
                 if 'sha256:' + receipt_item['sha256'] != result['fingerprint_hash']:
@@ -73,6 +73,7 @@ def execution_recovery_evidence(run: RunHandle, node: str) -> dict[str, Any]:
                         or receipt.get('status') != job.get('status')):
                     raise ValueError('失败收据与作业身份或状态不匹配')
                 receipt_item['text'] = bounded_error(receipt_raw.decode('utf-8'), max_chars=len(receipt_raw) + 1)
+                receipt_item['process_exit_recorded'] = type(receipt.get('returncode')) is int
                 receipt_item['logs'] = []
                 for stream in ('stdout', 'stderr'):
                     capture = receipt.get('log_capture', {}).get(stream)
@@ -91,8 +92,20 @@ def execution_recovery_evidence(run: RunHandle, node: str) -> dict[str, Any]:
             if not item['receipts']:
                 raise ValueError('失败作业缺少与指纹匹配的原始收据')
         jobs.append(item)
-    return {'latest_explicit_retry': retry, 'latest_stop': stop,
+    diagnostics: list[dict[str, Any]] = []
+    for path in sorted((run.root / 'execution/recovery_checks').glob('*.json')):
+        raw, item = _read(run, path)
+        diagnostic = json.loads(raw)
+        if (diagnostic.get('run_id'), diagnostic.get('project')) != (run.run_id, run.project):
+            raise ValueError('补充恢复检查与当前任务或项目不匹配')
+        item.update(text=bounded_error(raw.decode('utf-8'), max_chars=len(raw) + 1),
+                    provenance='independent_diagnostic_not_execution_approval')
+        diagnostics.append(item)
+    return {'latest_explicit_retry': retry, 'latest_stop': stop, 'diagnostics': diagnostics,
             'retry_after_latest_stop': retry_after_stop, 'jobs': jobs,
             'scope': 'Historical failures remain failures. An explicit retry requests a fresh review; it is not '
                      'execution approval. Caller explanations are not verified tests. Cleanup acknowledgements '
-                     'must be checked; a stop after the retry takes precedence. Fresh configuration checks remain required.'}
+                     'must be checked; a stop after the retry takes precedence. An integer returncode in a verified '
+                     'host receipt records child process exit; a failed job need not have the cancellation-only '
+                     'cleanup_complete field. This does not establish unrelated process/resource availability. '
+                     'Independent diagnostics are evidence to inspect, not a replacement for fresh host checks or approval.'}

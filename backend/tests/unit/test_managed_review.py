@@ -94,6 +94,18 @@ async def test_retry_evidence_keeps_cleanup_and_later_stop_without_automatic_app
     await blocked_review(later)
     assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 2
     assert not list((run.root / 'execution/confirmations').glob('*.json'))
+    diagnostic = run.root / 'execution/recovery_checks/authored_reader_test.json'
+    diagnostic.parent.mkdir(parents=True)
+    diagnostic.write_text(json.dumps({'run_id': run.run_id, 'project': run.project,
+        'description': 'Authored file-reader regression input, no actual check or result asserted.'}))
+    supplied = execution_review_payload(run, goal='Review only', configuration=config)
+    assert supplied['execution_recovery']['diagnostics'][0]['provenance'].startswith('independent_diagnostic')
+    assert 'no actual check' in supplied['execution_recovery']['diagnostics'][0]['text']
+    assert supplied != later
+    diagnostic.write_text(json.dumps({'run_id': run.run_id, 'project': 'different'}))
+    with pytest.raises(ValueError, match='补充恢复检查'):
+        execution_review_payload(run, goal='Review only', configuration=config)
+    diagnostic.unlink()
     run.write_event('run_lifecycle', {'event': 'run.explicit_execution_retry', 'run_id': 'another-run'})
     with pytest.raises(ValueError, match='不匹配'):
         execution_review_payload(run, goal='Review only', configuration=config)

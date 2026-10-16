@@ -116,6 +116,7 @@ async def test_failed_job_review_has_real_receipts_and_new_retry_keeps_history(
             assert job['receipts'] and job['result_error']
             receipt = json.loads(job['receipts'][0]['text'])
             assert receipt['status'] == 'failed' and receipt['returncode'] == 0
+            assert job['receipts'][0]['process_exit_recorded'] is True
             assert any('Python' in log['text'] for log in job['receipts'][0]['logs'])
         renew_execution_confirmation(session.run, 'execution')
         fresh = execution_preview(session.run, 'execution')
