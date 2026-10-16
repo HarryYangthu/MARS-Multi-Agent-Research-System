@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +30,7 @@ from app.harness.tools.registry import (
     get_registry as get_tool_registry,
 )
 from app.storage.artifact_store import SCHEMA_TO_AGENT, ArtifactStore
+from app.storage.data_source_store import DataSourceStore
 from app.storage.run_store import RunStore
 
 if TYPE_CHECKING:
@@ -46,6 +47,7 @@ class ToolContext:
     orchestrator: Orchestrator
     session: "CommanderSession"
     run_store: RunStore
+    data_source_store: DataSourceStore = field(default_factory=DataSourceStore)
 
 
 ToolHandler = Callable[[dict[str, Any], ToolContext], Awaitable[dict[str, Any]]]
@@ -151,6 +153,9 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
         review_mode="commander" if ctx.session.auto_mode else "manual",
+        # Match the direct run API: snapshot the user's saved project selection
+        # at creation, never infer a dataset from uploads or later defaults.
+        data_source=ctx.data_source_store.default_profile(ctx.session.project),
         extra={"routing": routing,
                **({"existing_execution_job": existing_job} if existing_job is not None else {}),
                **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
