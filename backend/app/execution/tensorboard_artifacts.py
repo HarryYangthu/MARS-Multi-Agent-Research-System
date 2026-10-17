@@ -151,7 +151,9 @@ def _sync(root: Path, destination: Path) -> dict[str, Any]:
                         if model_record["attempt"] != identity:
                             continue
                         method_name = Path(model_record["name"]).name
-                        if key.startswith(model_record["name"] + "/") or key.startswith("visualizations/" + method_name + "/"):
+                        if (model_record["name"] == "."
+                            or key.startswith(model_record["name"] + "/")
+                            or key.startswith("visualizations/" + method_name + "/")):
                             model_record["image_tags"].append("figures/" + key)
                         if path.name.startswith("comparison_"):
                             model_record["comparison_tags"].append("figures/" + key)

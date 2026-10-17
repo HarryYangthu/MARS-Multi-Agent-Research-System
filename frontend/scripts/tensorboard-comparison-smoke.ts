@@ -23,6 +23,9 @@ assert(!portableFilter.test(candidate.scalar_run.replace("+", "")));
 assert(!portableFilter.test(candidate.scalar_run + "/other-attempt"));
 assert.equal(scalarSettings.get("_smoothingWeight"), "0");
 assert(new RegExp(scalarSettings.get("tagFilter") || "").test("validation/RES_db"));
+for (const tag of ["train/native_PIM_db", "train/native_RES_db", "train/mean_loss_sum"]) {
+  assert(new RegExp(scalarSettings.get("tagFilter") || "").test(tag));
+}
 assert(canOverlayImages(pair, pair));
 assert(!canOverlayImages(pair, [...pair, source("another-candidate")]));
 assert(!canOverlayImages([baseline, { ...candidate, attempt: "different" }], pair));

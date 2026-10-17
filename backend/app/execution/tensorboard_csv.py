@@ -1,4 +1,4 @@
-"""Import the explicit epoch/updates training CSV format without inventing points."""
+"""Import explicit trainer CSV schemas without inferring metrics or missing points."""
 from __future__ import annotations
 
 import csv
@@ -9,9 +9,13 @@ from typing import Any
 
 from app.execution.tensorboard_writer import ScalarWriter
 
-_TAGS = {'epoch': 'runtime/epoch', 'loss_mse': 'train/loss', 'lr': 'train/learning_rate',
+_EPOCH_TAGS = {'epoch': 'runtime/epoch', 'loss_mse': 'train/loss', 'lr': 'train/learning_rate',
          'train_PIM': 'train/PIM_db', 'train_RES': 'train/RES_db',
          'validation_PIM': 'validation/PIM_db', 'validation_RES': 'validation/RES_db'}
+_CIRCLE_TAGS = {'circle': 'runtime/circle', 'mean_loss_sum': 'train/mean_loss_sum',
+                'lr': 'train/learning_rate', 'train_PIM_native': 'train/native_PIM_db',
+                'train_RES_native': 'train/native_RES_db'}
+_TAGS = {**_EPOCH_TAGS, **_CIRCLE_TAGS}
 
 
 def training_csv_rows(path: Path) -> list[dict[str, float]]:
@@ -20,13 +24,20 @@ def training_csv_rows(path: Path) -> list[dict[str, float]]:
     text = path.read_text(encoding='utf-8-sig')
     # The trainer can still be flushing a row. Import only complete lines.
     reader = csv.DictReader(text[:text.rfind('\n') + 1].splitlines())
-    if not reader.fieldnames or not {'updates', *_TAGS}.issubset(reader.fieldnames):
+    columns = set(reader.fieldnames or [])
+    if {'updates', *_EPOCH_TAGS}.issubset(columns):
+        tags = _EPOCH_TAGS
+    elif {'updates', *_CIRCLE_TAGS, 'rx_centers_mhz', 'err_centers_mhz'}.issubset(columns):
+        # These measurements use the trainer's native frequency windows. They
+        # must never be presented as fixed-window validation/test results.
+        tags = _CIRCLE_TAGS
+    else:
         raise ValueError('unsupported training.csv columns; no curve was inferred')
     rows = []
     for raw in reader:
         if None in raw or any(value is None for value in raw.values()):
             continue
-        row = {key: float(raw[key]) for key in ('updates', *_TAGS) if raw[key].strip()}
+        row = {key: float(raw[key]) for key in ('updates', *tags) if raw[key].strip()}
         step = row.get('updates', float('nan'))
         if not math.isfinite(step) or step < 0 or not step.is_integer():
             raise ValueError('training.csv contains an invalid optimizer update index')
