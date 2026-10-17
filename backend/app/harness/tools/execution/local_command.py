@@ -212,9 +212,12 @@ def _command(job: LocalCommandJob, tool_name: str, *, validation: bool = False) 
 def command_request(job: LocalCommandJob, invocation_id: str, output_dir: Path) -> dict[str, Any]:
     """Bind the same approved job to preview validation and actual execution."""
     from app.harness.schema.experiment_contract import budget
-    steps = budget(job.config)[1] if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else job.steps
+    declared_budget = budget(job.config) if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else None
+    steps = declared_budget[1] if declared_budget is not None else job.steps
     code_root, project_path = _bound_workspace(job)
     config = deepcopy(job.config)
+    if declared_budget is not None:
+        config['budget_unit'], config['max_iters'] = declared_budget
     selected = _registered_command(job)
     if selected.get('consumes_data_path') is True:
         path_text = config.get('data_path')
@@ -312,12 +315,15 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
 
 def _scientific_request(request: dict[str, Any]) -> dict[str, Any]:
     """Only delivery IDs and explicit retry decisions are administrative."""
+    from app.harness.schema.experiment_contract import budget
     result = {key: value for key, value in request.items() if key not in {'invocation_id', 'output_dir'}}
     config = result.get('config')
     if not isinstance(config, dict):
         raise ValueError('local command request has no scientific configuration')
     result['config'] = {key: value for key, value in config.items()
                         if key not in {'attempt', 'confirmation_token', 'confirmation_inputs_token'}}
+    if any(key in config for key in ('budget_steps', 'budget_unit', 'max_iters')):
+        result['config']['budget_unit'], result['config']['max_iters'] = budget(config)
     return result
 
 

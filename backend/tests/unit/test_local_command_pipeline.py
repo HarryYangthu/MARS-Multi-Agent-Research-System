@@ -100,7 +100,10 @@ async def test_direct_command_request_uses_explicit_job_budget(
         config={'budget_steps': 7, 'scale': 2, 'data_path': str(actual_regression_command)}))
     assert result.status == 'completed' and result.metrics == {'mse': 0}
     request = next((tmp_path / 'run/execution/local_commands/exact').glob('*/job.json'))
-    assert json.loads(request.read_text())['steps'] == 7
+    actual = json.loads(request.read_text())
+    assert actual['steps'] == 7
+    assert actual['config']['budget_steps'] == actual['config']['max_iters'] == 7
+    assert actual['config']['budget_unit'] == 'steps'
 
 
 @pytest.mark.asyncio

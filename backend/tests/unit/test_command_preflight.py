@@ -45,6 +45,7 @@ def genuine_checker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
         " json.loads(extra.read_text())\n"
         " input_files.append({'path':str(extra),'sha256':hashlib.sha256(extra.read_bytes()).hexdigest()})\n"
         "if os.environ.get('MARS_VALIDATE_ONLY')=='1':\n"
+        " assert r['config']['budget_unit']=='steps' and r['config']['max_iters']==r['steps']\n"
         " result={'schema':'local_command_validation.v1','status':'ready','invocation_id':r['invocation_id'],"
         "'run_id':r['run_id'],'experiment_id':r['experiment_id'],'checks':[{'name':'actual_data_and_budget',"
         "'ready':True,'details':{'samples':len(samples),'steps':r['steps'],'data_path':str(path),'input_files':input_files}}]}\n"
@@ -105,6 +106,8 @@ def test_actual_preflight_checks_data_budget_without_executing_measurement(genui
     request = json.loads(Path(state['receipt_path']).with_name('job.json').read_text())
     assert receipt['returncode'] == 0
     assert request['steps'] == 3 and request['seed'] == 2026
+    assert request['config']['budget_unit'] == 'steps' and request['config']['max_iters'] == 3
+    assert 'budget_unit' not in job.config and 'max_iters' not in job.config
     assert request['config']['data_path'] == str(data)
     assert request['data_binding']['path'] == str(data)
     assert receipt['checks'][0]['details']['samples'] == 3
@@ -115,6 +118,50 @@ def test_actual_preflight_checks_data_budget_without_executing_measurement(genui
     failed = run_command_preflight(job, 'approved-token')
     assert failed['status'] == 'failed' and 'JSONDecodeError' in failed['error']
     assert preflight_state(job, 'approved-token')['status'] == 'failed'
+
+
+@pytest.mark.parametrize(('declared', 'expected_unit', 'expected_count'), [
+    ({'budget_steps': 7}, 'steps', 7),
+    ({'budget_unit': 'steps', 'max_iters': 7}, 'steps', 7),
+    ({'budget_steps': 7, 'budget_unit': 'steps', 'max_iters': 7}, 'steps', 7),
+    ({'budget_unit': 'epochs', 'max_iters': 2}, 'epochs', 2),
+    ({}, None, 50),
+])
+def test_command_request_preserves_budget_unit_and_original_configuration(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], declared: dict[str, Any],
+    expected_unit: str | None, expected_count: int,
+) -> None:
+    job, _, _ = genuine_checker
+    config = {key: value for key, value in job.config.items()
+              if key not in {'budget_steps', 'budget_unit', 'max_iters'}}
+    config.update(declared)
+    original = dict(config)
+    request = command_request(replace(job, config=config), 'actual-budget', job.run_root / 'request')
+    assert request['steps'] == expected_count
+    assert config == original
+    if expected_unit is None:
+        assert 'budget_unit' not in request['config'] and 'max_iters' not in request['config']
+    else:
+        assert request['config']['budget_unit'] == expected_unit
+        assert request['config']['max_iters'] == expected_count
+    assert ('budget_steps' in request['config']) == ('budget_steps' in declared)
+
+
+@pytest.mark.parametrize('declared', [
+    {'budget_steps': 7, 'max_iters': 8},
+    {'budget_steps': 7, 'budget_unit': 'epochs'},
+    {'budget_steps': True},
+    {'max_iters': 7},
+])
+def test_command_request_rejects_conflicting_or_ambiguous_budgets(
+    genuine_checker: tuple[LocalCommandJob, Path, Path], declared: dict[str, Any],
+) -> None:
+    job, _, _ = genuine_checker
+    config = {key: value for key, value in job.config.items()
+              if key not in {'budget_steps', 'budget_unit', 'max_iters'}}
+    config.update(declared)
+    with pytest.raises(ValueError):
+        command_request(replace(job, config=config), 'invalid-budget', job.run_root / 'request')
 
 
 def test_multiple_checked_inputs_revalidate_real_git_binding_between_operations(
