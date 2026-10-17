@@ -209,13 +209,16 @@ def prepare_project_scope(run: RunHandle, *, candidate_id: str,
         for name, content in values.items():
             path = safe_scope_path(metadata, name)
             if path.exists():
-                if path.read_text(encoding="utf-8") != content:
+                if path.read_text(encoding="utf-8") != content.replace("\r\n", "\n").replace("\r", "\n"):
                     raise ValueError("Saved project context differs; prepare a new candidate")
             else:
-                with path.open("x", encoding="utf-8") as stream:
-                    stream.write(content)
+                # File fingerprints describe bytes, so Windows newline translation
+                # must not silently change newly persisted context.
+                with path.open("xb") as stream:
+                    stream.write(content.encode("utf-8"))
         scope = replace(scope, metadata_hashes=tuple(sorted(
-            (name, hashlib.sha256(content.encode("utf-8")).hexdigest()) for name, content in values.items())))
+            (name, hashlib.sha256(safe_scope_path(metadata, name, must_exist=True).read_bytes()).hexdigest())
+            for name in values)))
         record = {"schema_id": "run_project_scope.v1", "run_id": run.run_id, "project": run.project,
             "task_sha256": frozen.task_sha256, "candidate_id": candidate_id, "snapshot_id": scope.snapshot_id,
             "source_read_policy": snapshot_policy.model_dump(mode="json"), "source_files": list(actual),

@@ -31,6 +31,15 @@ from app.harness.tools.registry import ToolContext, get_registry
 from app.storage.run_store import RunHandle, RunStore
 
 
+def create_symlink(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows user cannot create symbolic links")
+        raise
+
+
 def create_bound_run(root: Path, label: str = "A", *, project_id: str = "pimc",
                      knowledge: bool = True) -> tuple[RunHandle, Path]:
     root = root.resolve()
@@ -70,6 +79,29 @@ def prepare(run: RunHandle, **kwargs: Any) -> ProjectScope:
         snapshot_policy=SnapshotPolicy(allowed_paths=("*",)), **kwargs)
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_context_fingerprints_match_persisted_bytes_and_detect_later_changes(tmp_path: Path, newline: bytes) -> None:
+    run, _ = create_bound_run(tmp_path)
+    scope = prepare(run)
+    # Accept existing Windows CRLF context on re-prepare while retaining strict
+    # byte fingerprints for each live capability. No platform monkeypatching.
+    for name, _ in scope.metadata_hashes:
+        path = scope.metadata_root / name
+        text = path.read_text(encoding="utf-8")
+        path.write_bytes(text.encode("utf-8").replace(b"\n", newline))
+    restored = prepare(run)
+    restored.validate_identity(run.project, run.run_id)
+    for name, digest in restored.metadata_hashes:
+        assert digest == hashlib.sha256((restored.metadata_root / name).read_bytes()).hexdigest()
+    assert prepare(run) == restored
+    with (restored.metadata_root / "AGENTS.md").open("ab") as stream:
+        stream.write(b"unexpected change")
+    with pytest.raises(ValueError, match="fingerprint changed"):
+        restored.validate_identity(run.project, run.run_id)
+    with pytest.raises(ValueError, match="Saved project context differs"):
+        prepare(run)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("marker", ["request", "journal", "broken_link"])
 async def test_missing_contract_cannot_load_legacy_project_context(tmp_path: Path, marker: str) -> None:
@@ -89,7 +121,7 @@ async def test_missing_contract_cannot_load_legacy_project_context(tmp_path: Pat
         RunStateStore(run).write(graph=graph, request={"extra": {"research_task_sha256": task_hash}},
                                 status="created", expected_revision=0)
     else:
-        contract.symlink_to(tmp_path / "absent.json")
+        create_symlink(contract, tmp_path / "absent.json")
     with pytest.raises(ValueError, match="host-bound project scope"):
         await ExperimentAgent().build_context(RunRequest(project=run.project, user_request="context check", extra=extra))
 
@@ -155,7 +187,7 @@ def test_real_symlink_paths_fail_closed(tmp_path: Path, place: str) -> None:
     outside.write_text("PRIVATE = 'outside'\n")
     if place.startswith("source"):
         link = code / "src/link"
-        link.symlink_to(outside if place.endswith("file") else tmp_path, target_is_directory=place.endswith("directory"))
+        create_symlink(link, outside if place.endswith("file") else tmp_path, directory=place.endswith("directory"))
         with pytest.raises(ValueError, match="symbolic"):
             prepare(run)
         return
@@ -163,12 +195,12 @@ def test_real_symlink_paths_fail_closed(tmp_path: Path, place: str) -> None:
     if place == "metadata_directory":
         renamed = scope.metadata_root.with_name("saved_metadata")
         scope.metadata_root.rename(renamed)
-        scope.metadata_root.symlink_to(renamed, target_is_directory=True)
+        create_symlink(scope.metadata_root, renamed, directory=True)
         with pytest.raises(ValueError, match="symbolic"):
             current = scope.resolve_file("src/candidate.py")
         return
     link = scope.candidate_root / "src/link"
-    link.symlink_to(outside if place.endswith("file") else tmp_path, target_is_directory=place.endswith("directory"))
+    create_symlink(link, outside if place.endswith("file") else tmp_path, directory=place.endswith("directory"))
     name = "src/link" if place.endswith("file") else "src/link/outside.py"
     for write in (False, True):
         with pytest.raises(ValueError, match="symbolic"):
@@ -199,7 +231,7 @@ def test_knowledge_must_be_safely_bound_not_silently_dropped(tmp_path: Path, kin
     note = tmp_path / "knowledge.md"
     if kind == "symlink":
         note.unlink()
-        note.symlink_to(tmp_path / "source/baseline.py")
+        create_symlink(note, tmp_path / "source/baseline.py")
     elif kind == "unsupported":
         note.unlink()
         note.mkdir()
@@ -455,7 +487,7 @@ def test_agent_context_storage_symlink_cannot_write_outside_its_run(tmp_path: Pa
     scope = prepare(run)
     outside = tmp_path / "outside-context"
     outside.mkdir()
-    (run.root / "context/resources").symlink_to(outside, target_is_directory=True)
+    create_symlink(run.root / "context/resources", outside, directory=True)
     with bind_project_scope(scope), pytest.raises(ValueError, match="symbolic"):
         asyncio.run(ExperimentAgent().build_context(RunRequest(project="pimc", user_request="Inspect", extra={
             "context_sources": {"agent_resources": False}})))
@@ -494,7 +526,11 @@ def test_independent_full_candidate_audit_rejects_changes_without_trusting_tool_
     elif mutation == "new_directory":
         (candidate / "ungranted_empty").mkdir()
     elif mutation == "mode":
-        (candidate / "dependency.py").chmod(0o755)
+        target = candidate / "dependency.py"
+        before = target.stat().st_mode
+        target.chmod(0o755)
+        if target.stat().st_mode == before:
+            pytest.skip("Filesystem does not support changing POSIX executable bits")
     else:
         marker = candidate / ".mars_candidate_workspace.json"
         raw = json.loads(marker.read_text())
@@ -539,19 +575,19 @@ def test_knowledge_sensitive_directory_components_are_blocked(tmp_path: Path, ne
     assert not (run.root / "context/project_scope").exists()
 
 
-def test_candidate_audit_rejects_external_symlink_and_hardlink_anywhere(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ["symlink", "hardlink"])
+def test_candidate_audit_rejects_external_symlink_and_hardlink_anywhere(tmp_path: Path, kind: str) -> None:
     from app.harness.runtime.project_scope import verify_candidate_scope
     run, _ = create_bound_run(tmp_path)
     scope = prepare(run)
     outside = tmp_path / "outside.py"
     outside.write_text("external data")
     link = scope.candidate_root / "src/alias.py"
-    link.symlink_to(outside)
-    with pytest.raises(ValueError, match="symbolic"):
-        verify_candidate_scope(scope)
-    link.unlink()
-    link.hardlink_to(outside)
-    with pytest.raises(ValueError, match="hard link"):
+    if kind == "symlink":
+        create_symlink(link, outside)
+    else:
+        link.hardlink_to(outside)
+    with pytest.raises(ValueError, match="symbolic" if kind == "symlink" else "hard link"):
         verify_candidate_scope(scope)
 
 

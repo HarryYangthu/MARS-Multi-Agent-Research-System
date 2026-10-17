@@ -9,6 +9,15 @@ from app.harness.context.folder_context import discover_folder_context
 from app.harness.project_workspace import FolderProject, open_folder
 
 
+def create_symlink(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        if getattr(exc, 'winerror', None) == 1314:
+            pytest.skip('Windows user cannot create symbolic links')
+        raise
+
+
 def project(tmp_path: Path) -> FolderProject:
     code = tmp_path / "code"
     code.mkdir()
@@ -78,7 +87,7 @@ def test_code_binding_rejects_redirected_metadata(tmp_path: Path) -> None:
     outside = tmp_path / "outside.yaml"
     outside.write_bytes(link.read_bytes())
     link.unlink()
-    link.symlink_to(outside)
+    create_symlink(link, outside)
     with pytest.raises(ValueError):
         bind_code_folder(folder, str(tmp_path))
     assert yaml.safe_load(outside.read_text())["repo_path"] == ".."
@@ -101,9 +110,9 @@ def test_links_cannot_redirect_upload_or_backup(tmp_path: Path, link_kind: str) 
     outside.write_text("original")
     readme = folder.root / "README.md"
     if link_kind == "file":
-        readme.symlink_to(outside)
+        create_symlink(readme, outside)
     elif link_kind == "dangling":
-        readme.symlink_to(tmp_path / "missing.md")
+        create_symlink(readme, tmp_path / "missing.md")
     elif link_kind == "hardlink":
         readme.hardlink_to(outside)
     else:
@@ -111,10 +120,10 @@ def test_links_cannot_redirect_upload_or_backup(tmp_path: Path, link_kind: str) 
         external = tmp_path / "outside-dir"
         external.mkdir()
         if link_kind == "history":
-            (folder.metadata_root / "background-history").symlink_to(external, target_is_directory=True)
+            create_symlink(folder.metadata_root / "background-history", external, directory=True)
         else:
             folder.metadata_root.rename(tmp_path / "original-metadata")
-            folder.metadata_root.symlink_to(external, target_is_directory=True)
+            create_symlink(folder.metadata_root, external, directory=True)
     with pytest.raises(ValueError):
         save_background(folder, "background.md", b"reference")
     assert outside.read_text() == "original"
