@@ -1,4 +1,5 @@
 import type { ComparisonSource } from "./tensorboardComparison";
+import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
 
 export type TensorBoardSession = {
   key: string; project: string; run_id: string | null;
@@ -8,11 +9,12 @@ export type TensorBoardSession = {
 export type ExecutionDisplay = TensorBoardSession & {
   activation_id: string; phase: string; task: string; attempt: number; started_at: number;
 };
-export async function openTensorBoard(project: string, runId?: string): Promise<TensorBoardSession> {
-  const response = await fetch("/api/tensorboard/sessions", {
+export async function openTensorBoard(project: string, runId?: string, signal?: AbortSignal): Promise<TensorBoardSession> {
+  const response = await boundedFetch("/api/tensorboard/sessions", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ project, run_id: runId || null }),
-  });
+    signal,
+  }, CLIENT_POLICY.connectionTestTimeoutMs);
   if (!response.ok) {
     const error: { detail?: string } = await response.json().catch(() => ({}));
     throw new Error(error.detail || "TensorBoard 暂时不可用");

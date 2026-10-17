@@ -5,12 +5,14 @@ import { openTensorBoard, type TensorBoardSession } from "@/lib/tensorboard";
 import { ExperimentComparison } from "./ExperimentComparison";
 import { TrainingCharts } from "./TrainingCharts";
 import { canOverlayImages, comparisonUrl, type TensorBoardDashboard } from "@/lib/tensorboardComparison";
+import { CLIENT_POLICY } from "@/lib/clientPolicy";
 
 export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   project: string; runId?: string; fullHeight?: boolean;
 }): JSX.Element {
   const [session, setSession] = useState<TensorBoardSession | null>(null);
   const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
   const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"charts" | "tensorboard" | "compare">(runId ? "charts" : "tensorboard");
@@ -50,19 +52,38 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   }, [loadedPreference, preferenceKey, compareBaseline, overlay, reference, candidate]);
   useEffect(() => {
     let alive = true;
-    setSession(null); setError(""); setLoading(true);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let opened = false;
+    const controller = new AbortController();
+    setSession(null); setError(""); setRefreshError(""); setLoading(true);
     // TensorBoard's persistent-settings contract; keep the user's other chart settings.
     try {
       const stored: unknown = JSON.parse(localStorage.getItem("_tb_global_settings") || "{}");
       const settings = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
       localStorage.setItem("_tb_global_settings", JSON.stringify({ ...settings, autoReload: true, autoReloadPeriodInMs: 30000 }));
     } catch { /* TensorBoard's own Reload control remains available. */ }
-    void openTensorBoard(project, runId).then((result) => {
-      if (alive) setSession(result);
-    }).catch((caught: unknown) => {
-      if (alive) setError(caught instanceof Error ? caught.message : String(caught));
-    }).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    const refresh = async (): Promise<void> => {
+      try {
+        const result = await openTensorBoard(project, runId, controller.signal);
+        if (!alive) return;
+        opened = true;
+        setSession(result); setError(""); setRefreshError("");
+      } catch (caught: unknown) {
+        if (!alive) return;
+        const message = caught instanceof Error ? caught.message : String(caught);
+        if (opened) setRefreshError("记录列表更新失败，正在重试；当前图表仍保留。");
+        else setError(message);
+      } finally {
+        if (alive) {
+          setLoading(false);
+          // Refresh coverage as new attempts appear, without remounting the
+          // iframe or overlapping requests. TensorBoard refreshes its own data.
+          timer = setTimeout(() => { void refresh(); }, CLIENT_POLICY.readinessRefreshMs);
+        }
+      }
+    };
+    void refresh();
+    return () => { alive = false; clearTimeout(timer); controller.abort(); };
   }, [project, runId, retry]);
   return (
     <section className={`flex min-h-0 flex-col overflow-hidden rounded-xl border border-mars-border bg-mars-panel ${fullHeight ? "h-full" : "h-[720px]"}`}>
@@ -77,14 +98,15 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
           <button className="rounded border border-mars-border px-3 py-1.5 hover:bg-mars-subtle" onClick={() => setRetry((value) => value + 1)}>{error ? "重试" : "重新加载"}</button>
         </div>
       </header>
+      {refreshError ? <p role="status" className="px-4 py-2 text-xs text-amber-200">{refreshError}</p> : null}
       {runId ? <nav aria-label="实验台视图" className="flex gap-2 border-b border-mars-border px-4 py-3">{([['charts', '训练与分析图'], ['tensorboard', 'TensorBoard'], ['compare', '多实验对比']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={view === key} onClick={() => setView(key)} className={`rounded-lg px-3 py-2 text-xs ${view === key ? "bg-mars-accent text-white" : "border border-mars-border text-slate-400"}`}>{label}</button>)}</nav> : null}
       {view === "tensorboard" && session ? <div className="border-b border-mars-border px-4 py-2 text-xs">
         <nav aria-label="可视化内容" className="flex flex-wrap gap-2">{([['scalars', '训练与性能曲线'], ['images', '频谱与模型图像'], ['histograms', '参数分布'], ['text', '配置与记录来源']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={dashboard === key} onClick={() => setDashboard(key)} className={`rounded px-3 py-1.5 ${dashboard === key ? "bg-mars-accent text-white" : "border border-mars-border text-slate-400"}`}>{label}</button>)}</nav>
         {sources.length >= 2 ? <fieldset className="mt-3 flex flex-wrap items-center gap-3" aria-label="基线对比设置">
           <label className="flex items-center gap-2 text-slate-200"><input type="checkbox" checked={compareBaseline} onChange={(event) => setCompareBaseline(event.target.checked)} />与基线对比</label>
           {compareBaseline ? <>
-            <label className="flex items-center gap-2 text-slate-400">基线<select aria-label="对比基线" value={baseline?.id || ""} onChange={(event) => setReference(event.target.value)} className="max-w-64 rounded border border-mars-border bg-mars-panel px-2 py-1.5 text-slate-200"><option value="">选择基线</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}</select></label>
-            <label className="flex items-center gap-2 text-slate-400">候选<select aria-label="对比候选" value={selectedCandidate?.id || ""} onChange={(event) => setCandidate(event.target.value)} className="max-w-64 rounded border border-mars-border bg-mars-panel px-2 py-1.5 text-slate-200">{sources.filter((source) => source.id !== baseline?.id).map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}</select></label>
+            <label className="flex items-center gap-2 text-slate-400">基线<select aria-label="对比基线" value={baseline?.id || ""} onChange={(event) => setReference(event.target.value)} className="max-w-64 rounded border border-mars-border bg-mars-panel px-2 py-1.5 text-slate-200"><option value="">选择基线</option>{sources.map((source, index) => <option key={source.id} value={source.id}>{source.label} · 记录 {index + 1} · {source.training_steps} 步</option>)}</select></label>
+            <label className="flex items-center gap-2 text-slate-400">候选<select aria-label="对比候选" value={selectedCandidate?.id || ""} onChange={(event) => setCandidate(event.target.value)} className="max-w-64 rounded border border-mars-border bg-mars-panel px-2 py-1.5 text-slate-200">{sources.map((source, index) => source.id === baseline?.id ? null : <option key={source.id} value={source.id}>{source.label} · 记录 {index + 1} · {source.training_steps} 步</option>)}</select></label>
             <label className="flex items-center gap-2 text-slate-200"><input type="checkbox" checked={overlay} onChange={(event) => setOverlay(event.target.checked)} />放在同一张图上</label>
             <span className="text-slate-500">{split ? "基线和候选分开展示" : "同名指标叠加对比"}</span>
           </> : null}
