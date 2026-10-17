@@ -12,13 +12,31 @@ from aiohttp import web
 
 from app.harness.agent_loop.executor import LoopInput
 from app.harness.agent_loop.native_protocol import native_specs, wire_name
+from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import LoopTrace, canonical, atomic_json
 from app.harness.agent_loop.zcode.config import ZCodeConfig
+from app.harness.agent_loop.zcode.limits import invocation_limits
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
-from app.harness.llm.provider_base import Completion, Delta, LLMConfig, LLMProvider, Message
+from app.harness.llm.provider_base import Completion, Delta, LLMCompletionError, LLMConfig, LLMProvider, Message
 from app.harness.schema.frontmatter_parser import dumps
+from app.harness.llm.usage_policy import AgentQuotaMode, agent_quota_mode
+from app.harness.agent_loop.failure_guard import repeated_failure, clear_failure
 
 WireCall = Callable[[dict[str, Any], LLMConfig], Awaitable[dict[str, Any]]]
+
+
+def upstream_payload(payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
+    """Buffer upstream output for accounting while preserving SDK tool history."""
+    result = {**payload, "stream": False, "model": config.model, "max_tokens": config.max_tokens}
+    # DeepSeek rejects streaming-only options when stream is false. Usage still
+    # arrives in the complete response before stream_envelope forwards it.
+    result.pop("stream_options", None)
+    result.pop("max_completion_tokens", None)
+    if config.thinking_enabled is not None:
+        result["thinking"] = {"type": "enabled" if config.thinking_enabled else "disabled"}
+    if config.reasoning_effort:
+        result["reasoning_effort"] = config.reasoning_effort
+    return result
 
 
 class WireProvider(LLMProvider):
@@ -38,13 +56,9 @@ class WireProvider(LLMProvider):
         return self.selected.base_url
 
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
-        payload = {**self.payload, "stream": False, "model": config.model, "max_tokens": config.max_tokens}
-        payload.pop("max_completion_tokens", None)
-        if config.thinking_enabled is not None:
-            payload["thinking"] = {"type": "enabled" if config.thinking_enabled else "disabled"}
-        if config.reasoning_effort:
-            payload["reasoning_effort"] = config.reasoning_effort
+        payload = upstream_payload(self.payload, config)
         response = await self.method(payload, config)
+        validate_wire_completion(response, provider=self.name, model=config.model)
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ValueError("Upstream completion has no choices")
@@ -57,6 +71,49 @@ class WireProvider(LLMProvider):
         result = await self.complete(messages, config)
         reason = result.raw["wire_response"]["choices"][0].get("finish_reason")
         yield Delta(text=result.text, finish_reason=reason, usage=result.raw.get("usage"))
+
+
+def validate_wire_completion(response: dict[str, Any], *, provider: str, model: str) -> None:
+    """Reject incomplete output before the external runtime can execute tools."""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("Upstream completion has no choices")
+    for choice in choices:
+        message = choice.get("message", {})
+        empty = not (str(message.get("content") or "").strip() or message.get("tool_calls"))
+        finish = choice.get("finish_reason")
+        if finish == "length" or empty:
+            usage = response.get("usage")
+            raise LLMCompletionError(code="output_truncated" if finish == "length" else "empty_final_content",
+                provider=provider, model=model, finish_reason=finish, empty_final=empty,
+                usage=usage if isinstance(usage, dict) else None)
+
+
+def record_completion_usage(state: dict[str, Any], usage: Any) -> None:
+    if isinstance(usage, dict):
+        for key in state["usage"]:
+            state["usage"][key] += int(usage.get(key) or 0)
+    else:
+        state["usage_complete"] = False
+
+
+def record_rejected_completion(state: dict[str, Any], trace: LoopTrace, error: LLMCompletionError) -> None:
+    """Record the real rejected response and its usage without partial content."""
+    state["counts"]["model_responses"] += 1
+    record_completion_usage(state, error.usage)
+    state.update(pending=None, last_model_error=error.reason)
+    trace.emit("model_response", {"rejected": True, "reason": error.reason, "usage": error.usage})
+    trace.emit("model_error", {"error_type": type(error).__name__, "reason": error.reason})
+
+
+def invocation_budget(config: ZCodeConfig, policy: AgentLoopPolicy, counts: dict[str, int], *,
+                      quota_mode: AgentQuotaMode = 'limited') -> dict[str, int | None]:
+    """Expose remaining local allowances; shared run admission still applies."""
+    limits = invocation_limits(config, policy.effective(quota_mode))
+    return {
+        'model_calls_remaining': None if limits.model_calls is None else max(0, limits.model_calls - counts['model_requests']),
+        'tool_calls_remaining': None if limits.tool_calls is None else max(0, limits.tool_calls - counts['tool_dispatches']),
+    }
 
 
 def wire_tools(request: LoopInput) -> list[dict[str, Any]]:
@@ -99,8 +156,10 @@ def stream_envelope(response: dict[str, Any]) -> str:
 
 class ZCodeGateway:
     def __init__(self, request: LoopInput, config: ZCodeConfig, token: str,
-                 state: dict[str, Any], trace: LoopTrace) -> None:
+                 state: dict[str, Any], trace: LoopTrace, *, quota_mode: AgentQuotaMode | None = None) -> None:
+        self.quota_mode = quota_mode or agent_quota_mode()
         self.request, self.config, self.token = request, config, token
+        self.limits = invocation_limits(config, request.policy)
         self.state, self.trace = state, trace
         self.tools = wire_tools(request)
         self.names = {wire_name(name): name for name in request.tools}
@@ -171,8 +230,7 @@ class ZCodeGateway:
             counts = self.state["counts"]
             if self.state["status"] != "running":
                 raise web.HTTPConflict(text="MARS invocation stopped")
-            if (counts["model_requests"] >= self.config.max_model_calls
-                    or not self.request.policy.allows_model_calls(counts["model_requests"])):
+            if self.quota_mode == 'limited' and not self.limits.allows_model_call(counts["model_requests"]):
                 self.stop("budget_exhausted", "ZCode model-call limit reached")
                 raise web.HTTPTooManyRequests(text="MARS model budget exhausted")
             tools = payload.get("tools", [])
@@ -186,26 +244,27 @@ class ZCodeGateway:
             self.state["pending"] = "model"
             public_messages = [{k: m[k] for k in ("role", "content", "tool_calls", "tool_call_id") if k in m}
                                for m in payload["messages"] if isinstance(m, dict)]
-            self.trace.emit("model_request", {"backend": "zcode", "model": self.request.config.model},
+            self.trace.emit("model_request", {"backend": "zcode", "model": self.request.config.model,
+                            "provider": self.request.config.provider, "max_tokens": self.request.config.max_tokens,
+                            "phase": "act"},
                             visible={"messages": public_messages, "tools": tools})
             self.save()
             await self.progress("action", tool="model", reason="ZCode 调用模型")
             try:
-                config = replace(self.request.config, max_retries=0, tools=tuple(tools),
+                # Keep the configured bounded retry policy. guarded_complete
+                # reserves and records every upstream attempt; no tool is
+                # dispatched until a complete model response is received.
+                config = replace(self.request.config, tools=tuple(tools),
                     attempt_observer=lambda kind, data: self.trace.record_attempt(self.state, kind, data))
                 # Entire raw wire payload is reserved conservatively, including
                 # tool metadata and any private history required by the SDK.
                 response = await guarded_complete(WireProvider(self.request.provider, payload),
                     [Message("user", canonical(payload))], config,
-                    run_root=run_root(self.request), correlation=self.request.correlation)
+                    run_root=run_root(self.request), active_model_time=True, correlation=self.request.correlation)
                 result = response.raw["wire_response"]
                 counts["model_responses"] += 1
                 usage = result.get("usage")
-                if isinstance(usage, dict):
-                    for key in self.state["usage"]:
-                        self.state["usage"][key] += int(usage.get(key) or 0)
-                else:
-                    self.state["usage_complete"] = False
+                record_completion_usage(self.state, usage)
                 self.state["pending"] = None
                 # Do not save upstream reasoning_content in the MARS trace.
                 visible = [{"content": c.get("message", {}).get("content"),
@@ -220,6 +279,11 @@ class ZCodeGateway:
                 self.state["usage_complete"] = False
                 self.save()
                 raise
+            except LLMCompletionError as exc:
+                record_rejected_completion(self.state, self.trace, exc)
+                self.stop("model_error", "ZCode model gateway: " + str(exc))
+                return web.json_response({"error": {"message": str(exc),
+                    "type": "mars_completion_rejected", "code": exc.reason["code"]}}, status=502)
             except ResourceBudgetError as exc:
                 self.state["pending"] = None
                 # Admission failed before forwarding; it is neither an upstream
@@ -269,11 +333,28 @@ class ZCodeGateway:
                 return mcp_result({"error": "Body is Markdown only; put frontmatter fields in metadata, without duplicate YAML"}, error=True)
             candidate = dumps(args["metadata"], args["body"])
             await self.progress("candidate")
-            errors = await self.request.validate(candidate, self.state["history"])
+            # Preserve attempted delivery even if the host validator crashes.
+            # This file is diagnostic evidence, never a validated submission.
+            atomic_json(self.request.trace_root / 'submission_attempt.json', args)
+            try:
+                errors = await self.request.validate(candidate, self.state["history"])
+            except Exception as exc:
+                from loguru import logger
+                logger.exception('ZCode host submission validation failed')
+                error = type(exc).__name__ + ': ' + str(exc)[:500]
+                self.trace.emit('validation_error', {'error': error, 'accepted': False})
+                self.stop('validation_failed', 'Host submission validation failed: ' + error)
+                return mcp_result({'accepted': False, 'error': error,
+                    'error_code': 'host_validation_error', 'retry_requires_host_repair': True}, error=True)
             self.trace.emit("validation", {"errors": errors}, visible=candidate)
             if errors:
                 self.state["counts"]["validation_repairs"] += 1
-                if self.state["counts"]["validation_repairs"] > self.config.max_validation_repairs:
+                # In statistics mode only unchanged failed submissions stop;
+                # useful revisions never consume a lifetime repair allowance.
+                failed_repeatedly = repeated_failure(self.state, 'validation',
+                    {'candidate': candidate, 'errors': errors}, limit=self.config.max_validation_repairs)
+                if (failed_repeatedly if self.quota_mode == 'statistics_only' or self.limits.validation_repairs is None
+                        else not self.limits.allows_validation_repairs(self.state["counts"]["validation_repairs"])):
                     self.stop("validation_failed", "Candidate did not pass MARS validation")
                 self.save()
                 return mcp_result({"accepted": False, "errors": errors}, error=True)
@@ -286,8 +367,7 @@ class ZCodeGateway:
         if tool is None:
             return mcp_result({"error": "Tool is outside MARS allowlist"}, error=True)
         counts = self.state["counts"]
-        if (counts["tool_dispatches"] >= self.config.max_tool_calls
-                or not self.request.policy.allows_tool_calls(counts["tool_dispatches"])):
+        if self.quota_mode == 'limited' and not self.limits.allows_tool_call(counts["tool_dispatches"]):
             self.stop("budget_exhausted", "ZCode tool-call limit reached")
             return mcp_result({"error": "MARS tool budget exhausted"}, error=True)
         self.state["pending"] = "tool"
@@ -307,12 +387,19 @@ class ZCodeGateway:
         await self.progress("observation", tool=tool, ok=result.ok)
         if result.requires_approval or result.blocked_by_gate:
             self.stop("blocked", result.error or "MARS approval required")
-        rendered = canonical(observation)
+        elif result.ok:
+            clear_failure(self.state, 'tool')
+        elif repeated_failure(self.state, 'tool', observation, limit=self.request.policy.max_protocol_repairs):
+            self.stop('validation_failed', 'Repeated identical tool failure; diagnostic repair required')
+        self.save()
+        budget = invocation_budget(self.config, self.request.policy, counts, quota_mode=self.quota_mode)
+        rendered = canonical({**observation, "invocation_budget": budget})
         if len(rendered) > self.config.max_observation_chars:
             path = self.request.trace_root / "tools" / (str(counts["tool_dispatches"]) + ".json")
             atomic_json(path, observation)
             rendered = canonical({"tool": tool, "ok": result.ok, "status": result.status,
-                                  "preview": rendered[:self.config.max_observation_chars], "raw_ref": str(path)})
+                                  "preview": rendered[:self.config.max_observation_chars], "raw_ref": str(path),
+                                  "invocation_budget": budget})
         return {"content": [{"type": "text", "text": rendered}], "isError": not result.ok}
 
 

@@ -48,11 +48,15 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const [pending, setPending] = useState<PendingMessage | null>(null);
   const sending = useRef(false);
   const alive = useRef(true);
+  const creation = useRef<Promise<StoredConversation> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(!initialRunId);
   const activity = useResearchActivity(conversation?.linked_run_id, project);
+  const refreshActivity = activity.refresh;
   const processing = busy || conversation?.processing === true;
+  const lastStoredMessage = conversation?.messages.at(-1);
+  const settledMessage = processing ? null : `${lastStoredMessage?.id ?? ""}:${lastStoredMessage?.timestamp ?? ""}`;
   const editDisabled = processing || loading || needsRefresh || modeSaving;
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.kind === "model" ? "分析研究任务" : item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
   const toolActivities: Activity[] = (conversation?.messages ?? []).filter(message => message.role === "tool").map((message, index) => ({ id: `tool:${message.id || index}`, turn_id: message.turn_id, timestamp: message.timestamp, agent: "commander", title: `${toolWork(message.tool_name || "任务工具")} · ${message.tool_result?.ok === false ? "未完成" : "已返回结果"}`, detail: "", status: message.tool_result?.ok === false ? "failed" : "completed" }));
@@ -75,18 +79,22 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     let active = true;
     setLoading(true);
     const id = initialConversationId || (fresh ? null : savedConversation(project, experimentId));
-    if (!id && !initialRunId) { setLoading(false); return () => { alive.current = false; }; }
-    void (initialConversationId ? getConversation(initialConversationId) : initialRunId ? openRunConversation(initialRunId, project, experimentId) : getConversation(id!)).then((value) => {
+    if (!id && !initialRunId) creation.current ??= createConversation(project, experimentId);
+    void (initialConversationId ? getConversation(initialConversationId) : initialRunId ? openRunConversation(initialRunId, project, experimentId) : id ? getConversation(id) : creation.current!).then((value) => {
       if (!active) return;
       validateConversationScope(value, project, experimentId, initialConversationId);
       if (initialRunId && value.linked_run_id !== initialRunId) throw new Error("对话与所选研究任务不匹配。");
       setConversation(value);
       remember(project, value.conv_id, value.experiment_id || experimentId);
+      if (!initialConversationId && !initialRunId) {
+        router.replace(`/runs/new?${new URLSearchParams({ project, conversation: value.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`);
+      }
     }).catch(() => {
+      creation.current = null;
       if (active) { setError("暂时无法恢复历史对话，请重新读取或新开对话。"); setNeedsRefresh(true); }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; alive.current = false; };
-  }, [project, experimentId, initialRunId, initialConversationId, fresh]);
+  }, [project, experimentId, initialRunId, initialConversationId, fresh, router]);
 
   // Read actual persisted/in-flight Commander messages, including tool receipts.
   // Polling never sends the user's message again.
@@ -107,6 +115,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   }, [conversation?.conv_id, conversation?.linked_run_id, conversation?.processing, busy]);
 
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
+
+  // Terminal runs stop polling, but a Commander turn can restart or correct
+  // the same run. Revalidate after its persisted reply, including replies
+  // observed through conversation polling from another open tab.
+  useEffect(() => {
+    if (conversation?.linked_run_id && settledMessage !== null) void refreshActivity();
+  }, [conversation?.linked_run_id, settledMessage, refreshActivity]);
 
   async function refresh(): Promise<void> {
     const id = initialConversationId || conversation?.conv_id || savedConversation(project, experimentId);
@@ -168,7 +183,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
       setConversation(current);
       const updated = editing ? await replaceChatMessage(current.conv_id, editing.messageId, text, editing.originalContent, editing.originalTimestamp)
         : await sendChatMessage(current.conv_id, text);
-      if (alive.current) { setConversation(updated); setPending(null); if (fresh) router.replace(`/runs/new?${new URLSearchParams({ project, conversation: updated.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`); }
+      if (alive.current) { setConversation(updated); setPending(null); if (!initialConversationId && !initialRunId) router.replace(`/runs/new?${new URLSearchParams({ project, conversation: updated.conv_id, ...(experimentId ? { experiment: experimentId } : {}) })}`); }
     } catch (cause: unknown) {
       if (alive.current) {
         const saved = cause instanceof ChatMessageFailure && cause.messageSaved;
@@ -179,7 +194,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     } finally { sending.current = false; if (alive.current) setBusy(false); }
   }
 
-  const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
+  const messages = conversation?.messages ?? [];
   const showPending = pending && !pendingSaved && !pending.replaceId;
   return <section aria-label="研究对话" className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
@@ -189,7 +204,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
           主控托管<span className={`relative h-4 w-8 rounded-full ${conversation?.auto_mode ? "bg-mars-accent" : "bg-slate-600"}`} aria-hidden="true"><span className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${conversation?.auto_mode ? "translate-x-4" : "translate-x-0"}`} /></span><span>{modeSaving ? "保存中…" : conversation?.auto_mode ? "开" : "关"}</span>
         </button>
         <Link href={`/projects/${encodeURIComponent(project)}/research`} className="hover:text-white">所有研究</Link>
-        <button type="button" disabled={processing || loading || modeSaving} onClick={() => { remember(project, null, experimentId); setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); if (initialRunId || initialConversationId) { const params = new URLSearchParams({ project }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); } }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <button type="button" disabled={processing || loading || modeSaving} onClick={() => { remember(project, null, experimentId); creation.current = null; setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); const params = new URLSearchParams({ project, new: "1" }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); }} className="hover:text-white disabled:opacity-40">新对话</button>
       </div>
     </header>
     <p id="managed-mode-description" className="border-b border-mars-border px-4 py-2 text-xs text-slate-500 sm:px-6">{conversation?.auto_mode ? "主控代替人工审核方案与仿真配置；需要你决定时会暂停并说明原因。" : "当前由你审批各阶段方案；开启主控托管后，由主控审核并推进流程。"}</p>
@@ -231,7 +246,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
             if (event.key === "Escape" && editing && !processing && !event.nativeEvent.isComposing) { event.preventDefault(); updateDraft({ type: "cancel" }); }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
         </div>
       </div>
     </form>
@@ -242,12 +258,16 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 }
 
 function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: StoredChatMessage; editing: boolean; editDisabled: boolean; onEdit: () => void }): JSX.Element {
+  if (message.role === "system") return <div role="status" className="mx-auto max-w-full rounded-xl border border-mars-border bg-mars-panel/60 px-4 py-2.5 text-center text-xs leading-6 text-slate-300">
+    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+  </div>;
   if (message.role === "tool") return <details className="rounded-lg border border-mars-border bg-mars-panel/40 px-4 py-3 text-xs text-slate-400">
     <summary className="cursor-pointer">工具调用 · {message.tool_name}{message.tool_result?.ok === false ? " · 未完成" : ""}</summary>
     <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words leading-6">{message.content}{message.tool_result ? `\n${JSON.stringify(message.tool_result, null, 2)}` : ""}</pre>
   </details>;
   if (message.role === "user") return <div className="ml-auto flex max-w-[90%] flex-col items-end gap-1">
     <div className={`whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7 ${editing ? "ring-1 ring-indigo-400/60" : ""}`}>{message.content}</div>
+    
     <button type="button" disabled={editDisabled} aria-pressed={editing} onClick={onEdit} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-indigo-200 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5M4 20l4-1L21 6a2.8 2.8 0 0 0-4-4L4 15l-1 6Z" /></svg>
       编辑并重新发送

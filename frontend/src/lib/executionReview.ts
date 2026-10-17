@@ -1,4 +1,4 @@
-import { boundedFetch } from "./clientPolicy";
+import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
 export type ExecutionConfiguration = {
@@ -10,12 +10,14 @@ export type ExecutionConfiguration = {
   experiments: { name: string; seed: unknown; config: Record<string, unknown>; effective?: Record<string, unknown> }[];
   source_configs: { path: string; seed: unknown; epochs: unknown }[];
   blockers: string[]; warnings: string[]; budget: { used: number; limit: number | null; required: number };
+  missing_data_binding?: boolean;
+  validation?: { name: string; status: "required" | "unverified" | "passed" | "failed" | "stale"; configured: boolean; error?: string; receipt_path?: string; receipt_sha256?: string; checks?: { name: string; ready: boolean; details?: Record<string, unknown> }[] }[];
 };
 export class ExecutionReviewError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
-async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await boundedFetch(`${BASE}/api/runs/${path}`, { ...init, cache: "no-store" });
+async function request<T>(path: string, init: RequestInit, timeoutMs = CLIENT_POLICY.requestTimeoutMs): Promise<T> {
+  const response = await boundedFetch(`${BASE}/api/runs/${path}`, { ...init, cache: "no-store" }, timeoutMs);
   const value: unknown = await response.json();
   if (!response.ok) {
     const detail = typeof value === "object" && value !== null && "detail" in value ? value.detail : null;
@@ -29,7 +31,7 @@ export function getExecutionConfiguration(runId: string, project: string, signal
 export function confirmExecutionConfiguration(runId: string, project: string, token: string): Promise<{ ok: boolean; confirmed: boolean; status: string }> {
   return request(`${encodeURIComponent(runId)}/execution-configuration/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, token }),
-  });
+  }, CLIENT_POLICY.executionConfirmationTimeoutMs);
 }
 
 export function setExecutionBoundary(runId: string, project: string, stopAfterExecution: boolean): Promise<ExecutionConfiguration> {

@@ -43,6 +43,10 @@ class ZCodeConfig:
             if binary is None:
                 raise ValueError("Configured ZCode executable is unavailable")
             return (binary, *self.command[1:])
+        from app.harness.agent_loop.zcode.managed_runtime import managed_command
+        managed = managed_command(repo_root())
+        if managed is not None:
+            return managed
         binary = shutil.which("zcode")
         if binary:
             return (binary,)

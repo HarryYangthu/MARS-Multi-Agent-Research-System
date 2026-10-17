@@ -31,6 +31,20 @@ def test_clean_stopped_draft_offers_new_attempt_only(tmp_path: Path) -> None:
     assert orch.owned_tasks.active(session.run.run_id) is None
 
 
+def test_shutdown_while_waiting_on_prerequisites_preserves_explicit_retry(tmp_path: Path) -> None:
+    orch, session = stopped_session(tmp_path)
+    assert session.termination is not None
+    session.termination.update(reason='server_shutdown', interrupted_nodes=[])
+    before = dict(session.termination)
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'recoverable' and [row['action'] for row in view['actions']] == ['retry']
+    assert session.termination == before and orch.owned_tasks.active(session.run.run_id) is None
+    checkpoint(session, pending='tool')
+    assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'
+    session.termination['reason'] = 'user_request'
+    assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'
+
+
 @pytest.mark.parametrize("change", ["cleanup", "node", "tool"])
 def test_ambiguous_stop_is_blocked(tmp_path: Path, change: str) -> None:
     orch, session = stopped_session(tmp_path)

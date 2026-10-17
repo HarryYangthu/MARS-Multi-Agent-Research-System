@@ -51,7 +51,8 @@ def prepare_execution(run: RunHandle, node_key: str) -> PreparedExecution:
     coding = parse_fm(coding_text).metadata if coding_text else {}
     has_delivery = bool(coding_text and (plan_text or 'execution_jobs' in coding))
     if has_delivery:
-        errors = coding_handoff_errors(plan_text, coding, project=run.project, plan_required=required)
+        errors = coding_handoff_errors(plan_text, coding, project=run.project, plan_required=required,
+                                      run_id=run.run_id, run_root=run.root)
         if not errors and approved_execution_path.is_file():
             errors = delivery_execution_errors(plan_text, coding_text,
                 parse_fm(approved_execution_path.read_text()).metadata, project=run.project, plan_required=required)

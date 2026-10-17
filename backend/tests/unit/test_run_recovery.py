@@ -16,13 +16,46 @@ from app.agents.writing.agent import WritingAgent
 from app.bridge.agent_registry import AgentRegistry
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.run_recovery import recover_run, recovery_status
-from app.bridge.task_runtime import bind_task
+from app.bridge.task_runtime import RESUME_INPUT_CHANGED, bind_task
 from app.harness.agent_loop.trace import LoopTrace
 from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
 from app.harness.runtime.event_bus import InProcessEventBus
 from app.harness.runtime.state_machine import NodeState
 from app.storage.run_store import RunStore
+
+
+@pytest.mark.parametrize('stopped', [False, True])
+def test_unstarted_approved_execution_offers_data_revision(tmp_path: Path, stopped: bool) -> None:
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='unstarted-review', project='pimc', entrypoint='pipeline'))
+    for stage in ('idea', 'experiment', 'coding'):
+        session.graph.restore_state(stage, NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    if stopped:
+        session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks', 'reason': 'server_shutdown',
+                               'cleanup_complete': True, 'interrupted_nodes': []}
+    before = session.graph.to_dict()
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'recoverable'
+    assert [row['action'] for row in view['actions']] == ['revise_data']
+    assert session.graph.to_dict() == before
+    assert orch.owned_tasks.active(session.run.run_id) is None
+    evidence = session.run.root / 'execution/confirmations/record.json'
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{}')
+    blocked = recovery_status(orch, session.run.run_id, project='pimc')
+    assert blocked['status'] == 'blocked' and not blocked['actions']
+
+
+def test_incomplete_shutdown_does_not_offer_prelaunch_revision(tmp_path: Path) -> None:
+    orch = Orchestrator(run_store=RunStore(tmp_path), registry=AgentRegistry())
+    session = orch.create_session(RunRequest(task='unverified-stop', project='pimc', entrypoint='coding'))
+    session.graph.restore_state('coding', NodeState.DONE)
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks',
+                           'cleanup_complete': False, 'interrupted_nodes': []}
+    assert recovery_status(orch, session.run.run_id, project='pimc')['actions'] == []
 
 
 def session_at(root: Path) -> tuple[Orchestrator, RunSession]:
@@ -70,6 +103,32 @@ def test_checkpoint_resume_and_unknown_tool_refusal(tmp_path: Path) -> None:
     assert path.read_text() == json.dumps(state)
 
 
+def test_rejected_input_binding_offers_retry_and_preserves_original_checkpoint(tmp_path: Path) -> None:
+    orch, session = session_at(tmp_path)
+    path = checkpoint(session)
+    original = path.read_bytes()
+    task = json.loads((session.run.root / 'input/task_contracts/idea.json').read_text())
+    before = recovery_status(orch, session.run.run_id, project='pimc')
+    failure_path = session.run.root / 'input/node_failures/idea.json'
+    failure_path.parent.mkdir(parents=True, exist_ok=True)
+    failure = {'schema_id': 'task.failure.v1', 'task_id': task['task_id'],
+               'invocation_id': task['invocation_id'], 'code': 'agent_node_failed',
+               'message': RESUME_INPUT_CHANGED, 'retryable': False,
+               'outcome_known': False, 'evidence_refs': []}
+    failure_path.write_text(json.dumps(failure))
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert [action['action'] for action in view['actions']] == ['retry']
+    assert '输入与旧检查点不一致' in view['message']
+    assert view['token'] != before['token']
+    assert path.read_bytes() == original
+    assert json.loads(failure_path.read_text()) == failure
+    # Retained failure receipts from a prior invocation must not poison a new one.
+    checkpoint(session)
+    fresh = recovery_status(orch, session.run.run_id, project='pimc')
+    assert [action['action'] for action in fresh['actions']] == ['resume', 'retry']
+    assert '输入与旧检查点不一致' not in fresh['message']
+
+
 @pytest.mark.asyncio
 async def test_stale_token_cannot_start_or_create_work(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
@@ -111,6 +170,8 @@ def test_unowned_running_stage_cannot_be_restarted_without_checkpoint(tmp_path: 
     session.graph.restore_state('idea', NodeState.RUNNING)
     view = recovery_status(orch, session.run.run_id, project='pimc')
     assert view['status'] == 'blocked' and not view['actions']
+    assert '当前服务未持有' in view['message']
+    assert session.graph.state('idea') == NodeState.RUNNING
 
 
 def test_unknown_model_reservation_is_not_replayed_or_refunded(tmp_path: Path) -> None:
@@ -149,7 +210,7 @@ def test_token_usage_is_statistics_only_but_corrupt_ledger_blocks_recovery(tmp_p
     assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'
 
 
-def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> None:
+def test_approval_idle_time_does_not_expire_recoverable_model_checkpoint(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
     checkpoint(session)
     budget = RunModelBudget(session.run.root)
@@ -159,7 +220,29 @@ def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> 
     budget.path.write_text(json.dumps(state))
     before = budget.path.read_bytes()
     view = recovery_status(orch, session.run.run_id, project='pimc')
-    assert [action['action'] for action in view['actions']] == ['retry']
+    assert [action['action'] for action in view['actions']] == ['resume', 'retry']
+    assert budget.path.read_bytes() == before
+
+
+def test_consumed_model_activity_blocks_recovery_without_refunding_usage(tmp_path: Path) -> None:
+    import time
+    orch, session = session_at(tmp_path)
+    checkpoint(session)
+    initial = RunModelBudget(session.run.root)
+    policy = initial.configuration
+    policy['limits']['max_elapsed_seconds'] = 0.02
+    policy_path = session.run.root / 'resources/model_budget.policy.yaml'
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(yaml.safe_dump(policy))
+    budget = RunModelBudget(session.run.root, active_model_time=True)
+    reservation = budget.reserve([Message(role='user', content='Real budget reservation, no provider called.')],
+        LLMConfig(provider='custom', model='not-called', max_tokens=8, max_retries=0), {})
+    time.sleep(0.03)
+    budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'blocked' and not view['actions']
+    assert '有效模型调用时间' in view['message']
     assert budget.path.read_bytes() == before
 
 

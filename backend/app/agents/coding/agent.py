@@ -31,8 +31,19 @@ class CodingAgent(BaseAgent):
         "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
         "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
+        "测试只能核对纯函数、schema、真实文件和真实进程；禁止用替身训练器、Mock、monkeypatch "
+        "或固定指标伪造模型/工具/执行成功。新增作业适配器时先读取 configured_execution_delivery "
+        "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆宿主包装入口与训练入口。"
+        "已选数据时，交付前逐组以真实选定文件运行无训练入口验证；合成数据或随机前向只证明局部实现，"
+        "不能代替实际数据加载、字段/频率/划分与执行协议核验。报告检查读取的真实文件与指纹。"
+        "修改张量规模或模型结构时，还须在目标设备验证批准的训练批大小及完整评估长度的真实前向；"
+        "只检查配置或小张量不能证明显存可用。记录设备、输入形状、峰值显存及失败原因，"
+        "检查不执行优化器更新；不能为通过检查擅自缩减样本、模型、训练预算或更换设备。"
+        "核对批准参数是否真正进入计算路径；配置中写有某个值而算法仍使用硬编码旧值不算落实。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
         "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "按用户指定的 entrypoint 与 config_path 精确选择宿主执行能力；没有匹配能力时明确报告缺失。"
+        "不能为迁就登记命令扩大用户指定的模型集合、替换配置、改变数据划分或指标口径。"
         "有批准实验方案时 experiment_plan_sha256 必须绑定该完整文档；没有方案时按用户任务交付运行清单，不得捏造方案哈希。"
         "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
         "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
@@ -41,14 +52,20 @@ class CodingAgent(BaseAgent):
         "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
         "宿主为本任务固定一个 Git 分支，并在编码完成、停止或失败时自动提交真实写入改动。"
         "不要自行创建或切换分支，不要执行 stash/reset/pull，也不要重复提交；自动提交不代表方案已批准。"
-        "files_changed 只列本任务成功写入记录形成的净改动；相同内容重写是复用，不能声明新增。"
-        "全部复用时 files_changed=[]，正文列出复用文件、指纹及真实检查；不要为了登记制造改动。"
+        "files_changed 覆盖本任务整条成功写入链形成的净改动；前轮写入且保留的净改动仍须列出。"
+        "相同内容重写是复用，不能声明新增；只有整条写入链没有净差异时 files_changed=[]。"
+        "正文列出复用文件、指纹及真实检查；不要为了登记制造改动或重复应用补丁。"
+        "修改现有文件前分段读完整内容；优先用 code.patch_generator 的 path+content 生成正确行号的补丁，"
+        "再用 code.apply_patch 落地，或用 code.write_file 写入完整文件。"
+        "补丁行数或语法校验失败后改用上述完整内容路径，不要连续猜测 hunk 行数。"
         "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
         "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
         "仿真入口默认启用 TensorBoard，消费宿主 MARS_TENSORBOARD_ENABLED=1；"
         "按真实更新记录损失、学习率、验证指标和参数快照，并将当前代码仓本次生成的"
         "频谱、通道对比、损失图、系数热图及非线性特性全部保存在当前作业目录。"
         "验证日志实际写出，只有最终结果单点不算完整过程；未采集内容明确说明，禁止补造。"
+        "原生 TensorBoard 依赖缺失时可使用宿主明确支持的增量 CSV 格式，保留真实指标语义，"
+        "不能只在训练全部完成后写过程曲线。"
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -79,6 +96,11 @@ class CodingAgent(BaseAgent):
         return await super().run_loop(request, context)
 
     async def build_context(self, request: RunRequest) -> ContextPack:
+        from app.harness.tools.execution.handoff import execution_delivery_blocker, execution_delivery_context
+        if request.extra.get('execution_delivery_required'):
+            blocker = execution_delivery_blocker(request.project)
+            if blocker:
+                raise ValueError(blocker)
         context = await super().build_context(request)
         from app.harness.tools.config import check_commands
         context.upstream['configured_code_checks'] = json.dumps({
@@ -87,7 +109,12 @@ class CodingAgent(BaseAgent):
         context.upstream['configured_code_checks_usage'] = (
             'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
-            '避免上一组残留的 scheduler 等字段污染下一组。')
+            '避免上一组残留的 scheduler 等字段污染下一组。'
+            '测试子进程可从宿主 MARS_TEST_DATA_PATH / MARS_TEST_PROJECT_ROOT 读取本次真实选定数据；'
+            '需要实际数据的验证应显式使用这些绑定，不要只测试临时合成文件或从文件名推断数据配置。'
+            '验证代码须显式启用登记的无训练模式，不得在编码检查中启动完整仿真。')
+        context.upstream['configured_execution_delivery'] = json.dumps(
+            execution_delivery_context(project=request.project), ensure_ascii=False)
         from app.harness.schema.experiment_contract import document_hash, document_metadata
         for supplied in request.upstream_artifacts.values():
             text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied
@@ -104,7 +131,11 @@ class CodingAgent(BaseAgent):
             return errors
         from app.harness.schema.frontmatter_parser import parse
         metadata = parse(text).metadata
-        if metadata.get("files_changed") and not any(
+        # The host validator has already checked the run's durable write ledger,
+        # bound branch and current file hashes above. A retry may reuse those
+        # genuine writes without issuing a redundant mutation in this invocation.
+        # Standalone callers without that host verifier retain the local check.
+        if request.candidate_validator is None and metadata.get("files_changed") and not any(
             item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file"}
             for item in observations
         ):

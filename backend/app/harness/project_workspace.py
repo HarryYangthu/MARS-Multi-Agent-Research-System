@@ -135,7 +135,8 @@ def open_folder(path: str, *, create: bool = False, registry: Path | None = None
     if not candidate.is_absolute():
         raise ValueError("请选择文件夹的完整路径")
     root = candidate.resolve()
-    with _LOCK:
+    from app.harness.persistence import path_lock
+    with path_lock((registry or registry_path()).with_suffix('.lock')), _LOCK:
         if create:
             if not root.parent.is_dir():
                 raise ValueError("新项目的上级文件夹不存在")

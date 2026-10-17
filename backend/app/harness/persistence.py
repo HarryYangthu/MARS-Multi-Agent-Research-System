@@ -1,8 +1,7 @@
 """Durable filesystem writes and portable, reentrant process locks.
 
-The same lock object is shared by local callers. FileLock supplies a Windows
-or POSIX OS lock, while thread-local ownership prevents unrelated threads
-from treating one another as nested lock holders.
+Local RLock ownership serializes threads, while one shared FileLock context
+supplies Windows/POSIX cross-process exclusion and nested acquisition.
 """
 from __future__ import annotations
 
@@ -10,14 +9,15 @@ import json
 import os
 import tempfile
 import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
-_LOCKS: dict[str, FileLock] = {}
+_LOCKS: dict[str, tuple[threading.RLock, FileLock]] = {}
 _LOCKS_GUARD = threading.Lock()
 
 
@@ -25,11 +25,32 @@ _LOCKS_GUARD = threading.Lock()
 def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     """Serialize a logical transaction, including across worker processes."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    key = str(path.resolve())
+    # Resolve the stable parent, not the disposable lock file: Windows can
+    # expose a pending-deletion file as $Extend/$Deleted during contention.
+    key = os.path.normcase(str(path.parent.resolve() / path.name))
+    if os.name == "nt":
+        # realpath may retain the extended prefix when the file is locked.
+        # Both spellings refer to the same OS file and must share one RLock.
+        if key.startswith("\\\\?\\unc\\"):
+            key = "\\\\" + key[8:]
+        elif key.startswith("\\\\?\\"):
+            key = key[4:]
     with _LOCKS_GUARD:
-        lock = _LOCKS.setdefault(key, FileLock(key))
-    with lock.acquire(timeout=timeout):
-        yield
+        if key not in _LOCKS:
+            # Thread ownership is enforced by RLock, while one shared OS-lock
+            # context handles nested acquisitions and cross-process exclusion.
+            # Never let different worker contexts reacquire our own OS handle.
+            _LOCKS[key] = (threading.RLock(), FileLock(key, thread_local=False))
+        local, lock = _LOCKS[key]
+    started = time.monotonic()
+    if not local.acquire(timeout=timeout):
+        raise Timeout(key)
+    try:
+        remaining = max(0.0, timeout - (time.monotonic() - started)) if timeout >= 0 else timeout
+        with lock.acquire(timeout=remaining):
+            yield
+    finally:
+        local.release()
 
 
 def fsync_directory(directory: Path) -> None:

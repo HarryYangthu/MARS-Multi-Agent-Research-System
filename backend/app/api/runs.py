@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies import existing_orchestrator, get_orchestrator, get_run_store
@@ -16,6 +17,7 @@ from app.bridge.research_run_service import (
     CONTRACT_HASH_KEY, ResearchExecutionAdmission, check_research_run_storage_paths, research_execution_admission,
 )
 from app.harness.runtime.readiness import ProductionReadinessError, assert_ready_for_run
+from app.harness.tools.execution.command_preflight import bounded_error
 from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
@@ -69,16 +71,25 @@ def _code_changes(run_id: str, project: str, change_id: str | None = None) -> di
     try:
         return code_changes(run, project=project, change_id=change_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Code changes unavailable: run={} project={} error_type={} reason={}',
+                       run.run_id, run.project, type(exc).__name__, cause)
+        raise HTTPException(status_code=404, detail='代码改动记录不存在或暂不可读取：' + cause) from exc
     except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail='代码改动记录无法校验，请核对项目及记录。') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Code changes invalid: run={} project={} error_type={} reason={}',
+                       run.run_id, run.project, type(exc).__name__, cause)
+        raise HTTPException(status_code=409, detail='代码改动记录无法校验：' + cause
+                            + '。请核对项目及记录。') from exc
 
 
 class RecoveryPayload(BaseModel):
     project: str
-    action: Literal['resume', 'retry']
+    action: Literal['resume', 'retry', 'revise_data']
     node: str
     token: str = Field(min_length=1)
+    source_id: str = ''
+    reason: str = ''
 
 
 class ExecutionConfirmationPayload(BaseModel):
@@ -112,7 +123,11 @@ def _execution_configuration(run_id: str, project: str, *, include_hidden: bool 
     try:
         view = execution_preview(session.run, node)
     except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='仿真配置无法核验，请检查项目配置与任务记录。') from exc
+        cause = bounded_error(str(exc)) or type(exc).__name__
+        logger.warning('Execution configuration invalid: run={} project={} node={} error_type={} reason={}',
+                       session.run.run_id, session.run.project, node, type(exc).__name__, cause)
+        raise HTTPException(status_code=409, detail='仿真配置无法核验：' + cause
+                            + '。请检查项目配置与任务记录。') from exc
     return session, {**view, 'visible': visible,
         'state': state.value, 'launch_ready': state == NodeState.APPROVED,
         'can_confirm': state == NodeState.APPROVED and not view['blockers'] and not session.read_only}
@@ -154,7 +169,9 @@ async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirm
     try:
         receipt = await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
     except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail='配置未确认，请刷新并核对配置变化。') from exc
+        from app.harness.tools.execution.command_preflight import bounded_error
+        raise HTTPException(status_code=409, detail='运行前核对未通过：' + bounded_error(str(exc))
+                            + '。尚未启动新的训练，请按原因修正后重新核对。') from exc
     if not receipt['created']:
         return {'ok': True, 'confirmed': True, 'status': 'already_confirmed', 'run_id': run_id}
     result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')
@@ -162,7 +179,7 @@ async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirm
 
 
 @router.get('/{run_id}/recovery')
-async def get_recovery(run_id: str, project: str) -> dict[str, Any]:
+def get_recovery(run_id: str, project: str) -> dict[str, Any]:
     from app.bridge.run_recovery import recovery_status
     try:
         return recovery_status(get_orchestrator(), run_id, project=project)
@@ -177,7 +194,8 @@ async def post_recovery(run_id: str, payload: RecoveryPayload) -> dict[str, Any]
     from app.bridge.run_recovery import recover_run
     try:
         result = await recover_run(get_orchestrator(), run_id, project=payload.project,
-                                  action=payload.action, node=payload.node, token=payload.token)
+                                   action=payload.action, node=payload.node, token=payload.token,
+                                   source_id=payload.source_id, reason=payload.reason)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail='任务或执行记录不存在。') from exc
     except (OSError, ValueError) as exc:
@@ -323,6 +341,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
     data_source = _resolve_data_source_selection(
         selection=payload.data_source,
         project=payload.project,
+        entrypoint=payload.entrypoint,
+        standalone=payload.standalone,
     )
     # Project execution target: selecting GPU must never silently fall back to
     # local simulation. Unmet prerequisites or a non-remote runtime block the
@@ -429,10 +449,17 @@ def _resolve_data_source_selection(
     selection: DataSourceSelection | None,
     *,
     project: str,
+    entrypoint: str = "pipeline",
+    standalone: bool = False,
+    store: DataSourceStore | None = None,
 ) -> dict[str, Any] | None:
-    store = DataSourceStore()
+    from app.bridge.run_data_selection import resolve_run_data_source
+    store = store if store is not None else DataSourceStore()
     if selection is None:
-        return store.default_profile(project)
+        try:
+            return resolve_run_data_source(project, entrypoint=entrypoint, standalone=standalone, store=store)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         profile = store.load(selection.id)
     except FileNotFoundError as exc:
@@ -446,7 +473,11 @@ def _resolve_data_source_selection(
         profile["channel_count"] = selection.channel_count
     if selection.description is not None:
         profile["description"] = selection.description
-    return profile
+    try:
+        return resolve_run_data_source(project, entrypoint=entrypoint, standalone=standalone,
+                                       selection=profile, store=store)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[RunSummary])
@@ -490,7 +521,7 @@ async def list_trashed_runs(project: str = "") -> list[TrashRunSummary]:
 
 
 @router.get("/{run_id}", response_model=RunDetail)
-async def get_run(run_id: str) -> RunDetail:
+def get_run(run_id: str) -> RunDetail:
     from app.bridge.managed_review import review_state
     _ensure_active_run(run_id)
     session = _execution_session(run_id)
@@ -593,7 +624,7 @@ def get_research_activity(run_id: str, limit: int = 500) -> dict[str, Any]:
 
 
 @router.get("/{run_id}/observability")
-async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
+def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -601,7 +632,7 @@ async def get_run_observability(run_id: str, limit: int = 200) -> dict[str, Any]
 
 
 @router.get("/{run_id}/health")
-async def get_run_health(run_id: str) -> dict[str, Any]:
+def get_run_health(run_id: str) -> dict[str, Any]:
     run = get_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")

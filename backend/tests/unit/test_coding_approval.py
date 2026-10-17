@@ -35,7 +35,7 @@ def research(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[
     source = tmp_path / "code"
     source.mkdir()
     git(source, "init", "-b", "baseline")
-    (source / "main.py").write_text("VALUE = 1\n")
+    (source / "main.py").write_bytes(b"VALUE = 1\n")
     git(source, "add", ".")
     git(source, "-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "Real baseline")
     (project.metadata_root / "repo_link.yaml").write_text(yaml.safe_dump({"repo_path": str(source),
@@ -132,6 +132,86 @@ async def test_host_validation_returns_actual_net_files_before_review(
 
 
 @pytest.mark.asyncio
+async def test_retry_accepts_real_prior_writes_without_replaying_or_approving_them(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, source = research
+    run = session.run
+    await write(run)
+    work = checkout(run)
+    head = git(work, "rev-parse", "HEAD")
+    records = {path.name: path.read_bytes() for path in (run.root / "coding/tool_applications").glob("*.json")}
+    checkpoints = list((run.root / "coding/git_checkpoints").glob("*.json"))
+    assert checkpoints and all(not json.loads(path.read_text())["approved"] for path in checkpoints)
+    request = AgentRequest(project=run.project, user_request="Reuse this task's prior real implementation",
+                           candidate_validator=lambda text: coding_candidate_errors(run, text))
+    with research_branch_scope(run, "coding_attempt_2"):
+        assert await CodingAgent().validate_candidate(request, spec(run, [("main.py", "modified")]), []) == []
+    assert git(work, "rev-parse", "HEAD") == head
+    assert {path.name: path.read_bytes() for path in (run.root / "coding/tool_applications").glob("*.json")} == records
+    assert (source / "main.py").read_text() == "VALUE = 1\n"
+    assert (work / "main.py").read_text() == "VALUE = 2\n"
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+    assert not (run.root / "execution/jobs").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["missing_receipt", "other_run", "snapshot_hash", "file_hash", "other_branch"])
+async def test_retry_rejects_unverified_or_unbound_prior_changes(
+    research: tuple[Orchestrator, RunSession, Path], case: str,
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, _ = research
+    run = session.run
+    await write(run)
+    work = checkout(run)
+    records = [path for path in (run.root / "coding/tool_applications").glob("*.json")
+               if not path.name.startswith("rollback_")]
+    assert len(records) == 1
+    record_path = records[0]
+    record = json.loads(record_path.read_text())
+    if case == "missing_receipt":
+        record_path.unlink()
+    elif case == "other_run":
+        record["run_id"] = "different-research"
+        record_path.write_text(json.dumps(record))
+    elif case == "snapshot_hash":
+        snapshot_path = Path(record["rollback_ref"])
+        if not snapshot_path.is_absolute():
+            snapshot_path = run.root / snapshot_path
+        snapshot = json.loads(snapshot_path.read_text())
+        snapshot["snapshots"][0]["sha256"] = "sha256:" + "0" * 64
+        snapshot_path.write_text(json.dumps(snapshot))
+    elif case == "file_hash":
+        (work / "main.py").write_text("VALUE = 9\n")
+    request = AgentRequest(project=run.project, user_request="Verify the retained implementation",
+                           candidate_validator=lambda text: coding_candidate_errors(run, text))
+    with research_branch_scope(run, "coding_attempt_2"):
+        if case == "other_branch":
+            git(work, "switch", "-c", "unowned-test-branch")
+        errors = await CodingAgent().validate_candidate(request, spec(run, [("main.py", "modified")]), [])
+        assert errors, case
+    assert not (run.root / "coding/code_spec.approved.md").exists()
+    assert not (run.root / "execution/jobs").exists()
+
+
+@pytest.mark.asyncio
+async def test_standalone_candidate_cannot_claim_prior_writes_without_host_verification(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.agents.base import RunRequest as AgentRequest
+    from app.agents.coding.agent import CodingAgent
+    _, session, _ = research
+    await write(session.run)
+    request = AgentRequest(project=session.run.project, user_request="No trusted durable verifier is bound")
+    assert any("real code tools" in error for error in await CodingAgent().validate_candidate(
+        request, spec(session.run, [("main.py", "modified")]), []))
+
+
+@pytest.mark.asyncio
 async def test_legacy_explanatory_patch_fails_without_tool_dispatch(
     research: tuple[Orchestrator, RunSession, Path],
 ) -> None:
@@ -165,6 +245,63 @@ async def test_real_code_checks_use_the_selected_git_in_child_commands(
                         extra={"run_root": str(session.run.root)}))
     assert result.ok, json.dumps(result.output, indent=2)
     assert "1 passed" in str(result.output)
+
+
+@pytest.mark.asyncio
+async def test_managed_review_reads_real_checks_and_complete_current_source(
+    research: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.bridge.coding_review_evidence import coding_check_evidence, coding_review_evidence
+    from app.bridge.task_runtime import bind_task
+    from app.harness.agent_loop.trace import LoopTrace, atomic_json
+
+    _, session, _ = research
+    run = session.run
+    # Human-authored input plus real governed commands; no model or tool substitute.
+    content = "VALUE = 2\n" + "# full source beyond the first page\n" * 600
+    await write(run, content=content)
+    candidate = spec(run, [("main.py", "modified")])
+    task = bind_task(run, "coding", goal="Review actual code", upstream={}, output_schema="code_spec.v1")
+    root = run.root / "agent_traces/coding" / task.invocation_id
+    trace = LoopTrace(root, "full", correlation={"invocation_id": task.invocation_id,
+                      "trace_id": run.run_id, "node_id": "coding"})
+    observations = []
+    with research_branch_scope(run, "coding"):
+        for tool, command in (("code.lint", "python_compile"), ("code.test_runner", "pytest_quick")):
+            args = {"command_id": command}
+            result = await get_registry().dispatch(tool, args,
+                ToolContext(run_id=run.run_id, project=run.project, agent="coding", extra={"run_root": str(run.root)}))
+            observation = {"tool": tool, "args": args, "ok": result.ok,
+                           "output": result.output, "error": result.error, "status": result.status}
+            observations.append(observation)
+            trace.emit("observation", {"tool": tool, "ok": result.ok}, visible=observation)
+    assert observations[0]["ok"]  # Actual Python compilation.
+    assert not observations[1]["ok"]  # Real pytest exit 5: no tests collected.
+    atomic_json(root / "checkpoint.json", {"status": "passed", "candidate": candidate})
+    evidence = coding_review_evidence(run, "coding", candidate)
+    assert [row["observation"] for row in evidence["actual_code_checks"]] == observations
+    assert evidence["code_source_evidence"]["files"][0]["content"] == content
+    assert evidence["code_check_context"]["status"] == "available"
+    assert all(not row["later_code_mutation_events"] for row in evidence["actual_code_checks"])
+    assert coding_check_evidence(run, "coding", candidate + "Changed review\n")["checks"] == []
+    assert coding_check_evidence(run, "coding_attempt_2", candidate)["checks"] == []
+
+    # A later real write is visible and must not inherit the previous check's assurance.
+    await write(run, content="VALUE = 3\n")
+    trace.emit("observation", {"tool": "code.write_file"})
+    changed = coding_review_evidence(run, "coding", candidate)
+    assert changed != evidence
+    assert all(row["later_code_mutation_events"] == [3] for row in changed["actual_code_checks"])
+    assert changed["code_source_evidence"]["files"][0]["content"] == "VALUE = 3\n"
+    # Corruption is rejected rather than presenting old/edited stdout as trustworthy.
+    rows = (root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    row = json.loads(rows[0])
+    row["visible"]["ok"] = False
+    rows[0] = json.dumps(row)
+    (root / "events.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="摘要不匹配"):
+        coding_check_evidence(run, "coding", candidate)
+    assert not (run.root / "coding/code_spec.approved.md").exists()
 
 
 @pytest.mark.asyncio

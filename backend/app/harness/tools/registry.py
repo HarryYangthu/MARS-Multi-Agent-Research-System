@@ -60,6 +60,19 @@ class ToolContext:
     supplemental_read_scope: ConfiguredReadToolScope | None = None
 
 
+# Knowledge observations may be reused within one run. Repository reads use
+# their own versioned material cache, which rechecks scope and actual bytes;
+# an outer argument-only cache would hide external edits or checkout changes.
+_CACHEABLE_READ_TOOLS = frozenset({
+    "knowledge.kb_query", "knowledge.experiment_memory",
+    "knowledge.baseline_match", "knowledge.run_archive",
+})
+_CACHE_INVALIDATING_TOOLS = frozenset({
+    "code.write_file", "code.apply_patch", "code.delete_file", "execution.batch_runner",
+})
+_READ_CACHE_PER_RUN_LIMIT = 64
+
+
 @dataclass
 class ToolResult:
     ok: bool
@@ -137,6 +150,7 @@ class ToolRegistry:
         self._tools: dict[str, ToolFn] = {}
         self._specs: dict[str, ToolSpec] = {}
         self._gates: list[Callable[[str, dict[str, Any], ToolContext], Awaitable["GateDecision"]]] = []
+        self._read_cache: dict[str, dict[tuple[str, str, str], ToolResult]] = {}
 
     def register(
         self,
@@ -372,6 +386,21 @@ class ToolRegistry:
                 )
                 _finalize_and_record(tool_name, audit_args, ctx, result, started, started_at, call_id, span)
                 return result
+        cache_key: tuple[str, str, str] | None = None
+        if tool_name in _CACHEABLE_READ_TOOLS and ctx.run_id:
+            cache_key = (ctx.agent, tool_name, digest(args))
+            cached = self._read_cache.get(ctx.run_id, {}).get(cache_key)
+            if cached is not None:
+                hit = ToolResult(
+                    ok=cached.ok, output=cached.output, error=cached.error, status=cached.status,
+                    metadata={**cached.metadata, "cache_hit": True}, artifacts=cached.artifacts,
+                    metrics=cached.metrics,
+                )
+                _finalize_and_record(tool_name, audit_args, ctx, hit, started, started_at, call_id, span)
+                return hit
+        if tool_name in _CACHE_INVALIDATING_TOOLS and ctx.run_id:
+            self._read_cache.pop(ctx.run_id, None)
+
         try:
             from app.harness.tools.process_runtime import require_process_backend
             require_process_backend(spec.policy.process_backend, require_isolation=spec.policy.require_isolation)
@@ -387,6 +416,10 @@ class ToolRegistry:
                 result.status = "success" if result.ok else "error"
             if result.status == "requires_approval":
                 result.requires_approval = True
+            if cache_key is not None and result.ok and result.status == "success":
+                store = self._read_cache.setdefault(ctx.run_id, {})
+                if len(store) < _READ_CACHE_PER_RUN_LIMIT:
+                    store[cache_key] = result
             if result.ok:
                 try:
                     validate(instance=result.output, schema=spec.output_schema)

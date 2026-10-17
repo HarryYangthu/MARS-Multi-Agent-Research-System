@@ -136,7 +136,7 @@ async def test_real_approval_preview_and_confirmation_share_delivered_jobs(
             store.approve(store.write(text=dumps(missing, 'Incomplete coding delivery.')))
         bad = deepcopy(metadata)
         bad['execution_jobs'][0]['config']['command_id'] = 'not-registered'
-        with pytest.raises(ArtifactValidationError, match='local_command'):
+        with pytest.raises(ArtifactValidationError, match='registered command_id.*not-registered'):
             store.approve(store.write(text=dumps(bad, 'Unknown host command.')))
         approved = store.approve(store.write(text=dumps(metadata, 'Verified host binding.')))
         before = execution_preview(session.run, 'execution')

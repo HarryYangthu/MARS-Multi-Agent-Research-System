@@ -57,9 +57,9 @@ def input_budget(policy: dict[str, Any], configured: int, *, output_reserve: int
     if model_window is not None:
         if type(model_window) is not int or model_window <= 0:
             raise ValueError('model context window must be a positive integer')
-        # A verified deployment window supersedes legacy per-Agent/frozen input
-        # quotas. These values remain only as a fallback for unknown models.
-        ceiling = model_window - output_reserve - int(policy['safety_margin'])
+        # Model capacity is a safety ceiling, not permission to enlarge the
+        # configured input context. Keep input and output budgets independent.
+        ceiling = min(ceiling, model_window - output_reserve - int(policy['safety_margin']))
     if ceiling <= 0:
         raise ValueError('no input space after reserving output and safety margin')
     return ceiling

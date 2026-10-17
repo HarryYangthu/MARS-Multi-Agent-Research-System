@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,27 @@ def test_commander_targets_experiment_for_config_sanity(tmp_path: Path) -> None:
     packet = run.root / decision.feedback_packet_ref
     result = validate_document(packet.read_text(encoding="utf-8"), expected_schema="feedback_packet.v1")
     assert result.valid, result.errors
+
+
+@pytest.mark.parametrize('mode,expected', [('limited', 'exhausted'), ('statistics_only', 'within_budget')])
+def test_feedback_quota_mode_never_turns_failed_metrics_into_success(tmp_path: Path, mode: str, expected: str) -> None:
+    run = RunStore(tmp_path).create(task='quota-diagnostic-input', project='pimc')
+    observation = RunObservation(run=run, attempt=100, config=DiagnosticsConfig(project='pimc'),
+        analysis=DiagnosisAnalysis(passed=False, failed_metrics=(MetricFailure('loss', .5, .04, 'lte', .46, 'max'),),
+            suspected_causes=(SuspectedCause('code_risk', 'Authored diagnostic input'),), evidence_refs=('diagnostic-input',)),
+        metrics_summary={}, curve_summary={}, log_summary={}, approved_artifact_refs={}, attempt_history=[], latest_diagnosis=None)
+    previous = os.environ.get('MARS_AGENT_QUOTA_MODE')
+    try:
+        os.environ['MARS_AGENT_QUOTA_MODE'] = mode
+        attribution = CommanderAgent().diagnose_failure(observation)
+    finally:
+        if previous is None:
+            os.environ.pop('MARS_AGENT_QUOTA_MODE', None)
+        else:
+            os.environ['MARS_AGENT_QUOTA_MODE'] = previous
+    assert attribution.budget_status == expected
+    assert attribution.passed is False
+    assert attribution.failed_metrics[0]['metric'] == 'loss'
 
 
 def test_commander_targets_coding_for_code_risk_and_writes_memory(tmp_path: Path) -> None:

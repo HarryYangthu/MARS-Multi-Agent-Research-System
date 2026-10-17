@@ -24,6 +24,11 @@ from app.harness.tools.process_runtime import communicate_process, start_process
 from app.settings import repo_root
 
 _MAX_READ_BYTES = 20_000
+_PATCH_RECOVERY = (
+    'For patch syntax or hunk errors, do not guess new line counts: read the full current file, '
+    'then call code.patch_generator with path and complete content (omit diff), and apply its generated diff; '
+    'or use code.write_file with path and complete content. Scope/permission errors still require fixing the scope.'
+)
 _TEXT_SUFFIXES = {
     ".c",
     ".cfg",
@@ -76,30 +81,21 @@ async def repo_reader_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
     root, rel, target = resolved
     if target.suffix.lower() not in _TEXT_SUFFIXES:
         return ToolResult(ok=False, error=f"unsupported code file type '{target.suffix}'")
-    raw = target.read_text(encoding="utf-8", errors="replace")
     offset = args.get("char_offset", 0)
-    if type(offset) is not int or offset < 0 or (raw and offset >= len(raw)):
-        return ToolResult(ok=False, error="char_offset must identify a character inside the file")
     limit = _MAX_READ_BYTES
     if ctx.extra.get("run_root"):
         from app.harness.context.runtime_policy import freeze_policy
         policy = freeze_policy(Path(str(ctx.extra["run_root"])))
         if policy.get("version") == 3:
             limit = min(limit, int(policy["read_chars"]))
-    end = min(len(raw), offset + limit)
-    return ToolResult(
-        ok=True,
-        output={
-            "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
-            "repo_root": str(root),
-            "path": rel,
-            "truncated": end < len(raw),
-            "char_start": offset, "char_end": end, "total_chars": len(raw),
-            "next_offset": end if end < len(raw) else None,
-            "content": raw[offset:end],
-        },
-        evidence_refs=[rel],
-    )
+    from app.harness.context.repository_materials import repository_policy, source_window
+    try:
+        output = source_window(target, root, rel, offset=offset, limit=limit,
+            run_root=Path(str(ctx.extra['run_root'])) if ctx.extra.get('run_root') else None,
+            policy=repository_policy())
+    except (OSError, ValueError) as exc:
+        return ToolResult(ok=False, error=str(exc))
+    return ToolResult(ok=True, output=output, evidence_refs=[rel])
 
 
 async def patch_generator_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -108,7 +104,7 @@ async def patch_generator_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRe
     if diff:
         error = _bound_diff_error(ctx, diff)
         if error:
-            return ToolResult(ok=False, error=error)
+            return ToolResult(ok=False, error=error, output={'recovery_hint': _PATCH_RECOVERY})
         return ToolResult(
             ok=True,
             output={"diff": diff, "files": [{"path": p} for p in _extract_diff_paths(diff)]},
@@ -156,7 +152,7 @@ async def write_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if ctx.dry_run:
         return ToolResult(ok=True, output={"dry_run": True, "path": rel})
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    target.write_bytes(content.encode("utf-8"))
     rollback_ref = _write_rollback(ctx, "code.write_file", snapshots)
     _record_branch_write(ctx, [rel])
     return ToolResult(
@@ -222,7 +218,7 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         return ToolResult(ok=False, error="diff or patch_path is required")
     error = _bound_diff_error(ctx, diff)
     if error:
-        return ToolResult(ok=False, error=error)
+        return ToolResult(ok=False, error=error, output={'recovery_hint': _PATCH_RECOVERY})
     root = _project_root(ctx)
     if root is None:
         return ToolResult(ok=False, error=f"project repo for '{ctx.project}' is not connected")
@@ -249,6 +245,8 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
             repo_root=root,
         )
         _write_patch_result(ctx, version, payload)
+        if isinstance(check.output, dict):
+            check.output['recovery_hint'] = _PATCH_RECOVERY
         return check
     applied = await _git_apply(root, diff, check_only=False, isolated=isolated)
     if not applied.ok:
@@ -263,7 +261,8 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         )
         _write_patch_result(ctx, version, payload)
         return applied
-    rollback_ref = _write_rollback(ctx, "code.apply_patch", snapshots)
+    rollback_ref = _write_rollback(ctx, "code.apply_patch", snapshots,
+                                  after_snapshots=[_snapshot(rel, root / rel) for rel in files])
     payload = _patch_result_payload(
         ctx,
         version,
@@ -334,7 +333,7 @@ async def rollback_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRes
         existed = bool(item.get("existed", False))
         if existed:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(item.get("content", "")), encoding="utf-8")
+            target.write_bytes(str(item.get("content", "")).encode("utf-8"))
         elif target.exists():
             target.unlink()
         restored.append(rel)
@@ -384,18 +383,19 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
             )
         from app.harness.tools.check_interpreter import check_argv
         argv = check_argv(command.argv)
-        from app.harness.tools.git_branch import current_git_branch
-        check_environment = None
-        if current_git_branch(ctx.project, ctx.run_id) is not None:
-            from app.harness.runtime.git_runtime import git_child_environment
-            check_environment = git_child_environment()
+        from app.harness.tools.code.check_environment import check_environment
+        try:
+            environment = check_environment(ctx, root, project_binding=command.project_binding)
+        except (OSError, ValueError) as exc:
+            return ToolResult(ok=False, error=f'{command.id} input binding failed: {exc}',
+                              output={'executed': False})
         process = await start_process(
             argv,
             backend=tool_config(tool_name).process_backend,
             require_isolation=tool_config(tool_name).require_isolation,
             cwd=str(root),
-            env=check_environment,
-            replace_environment=check_environment is not None,
+            env=environment,
+            replace_environment=True,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -636,7 +636,7 @@ def _is_ignored_path(project: str, rel: str) -> bool:
 def _snapshot(rel: str, target: Path) -> FileSnapshot:
     if not target.exists():
         return FileSnapshot(path=rel, existed=False, sha256="", content="")
-    text = target.read_text(encoding="utf-8", errors="replace")
+    text = target.read_bytes().decode("utf-8")
     return FileSnapshot(path=rel, existed=True, sha256=_sha_text(text), content=text)
 
 
@@ -645,7 +645,8 @@ def _record_branch_write(ctx: ToolContext, files: list[str]) -> None:
     record_changed_files(ctx.project, ctx.run_id, files)
 
 
-def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapshot]) -> str | None:
+def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapshot], *,
+                    after_snapshots: list[FileSnapshot] | None = None) -> str | None:
     run_root = Path(str(ctx.extra.get("run_root"))) if ctx.extra.get("run_root") else repo_root() / "runs" / ctx.run_id
     scope = current_project_scope(ctx.project, ctx.run_id)
     if scope is not None:
@@ -662,8 +663,11 @@ def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapsh
         "run_id": ctx.run_id,
         "project": ctx.project,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "text_mode": "utf8_exact",
         "snapshots": [asdict(item) for item in snapshots],
     }
+    if after_snapshots is not None:
+        payload["after_snapshots"] = [asdict(item) for item in after_snapshots]
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(target)
 
@@ -736,7 +740,7 @@ def _bound_rollback(ctx: ToolContext, rollback_ref: str) -> ToolResult:
             for _name, target, existed, content in validated:
                 if existed:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(content, encoding="utf-8")
+                    target.write_bytes(content.encode("utf-8"))
                 elif target.exists():
                     target.unlink()
         return ToolResult(ok=True, output={"rolled_back": [item[0] for item in validated], "dry_run": ctx.dry_run})

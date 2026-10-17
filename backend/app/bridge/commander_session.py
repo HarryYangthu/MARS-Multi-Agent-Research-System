@@ -124,6 +124,10 @@ class CommanderSession:
     def context_messages(self) -> list[ChatMessage]:
         return list(self.messages if self.edit_cursor is None else self.messages[:self.edit_cursor])
 
+    def has_system_notice(self, notice: str) -> bool:
+        """True when an identical system notice is already the latest notice."""
+        return any(m.role == "system" and m.content == notice for m in self.messages[-6:])
+
     def to_meta(self) -> dict[str, Any]:
         return {
             "context_version": self.context_version,
@@ -332,6 +336,26 @@ def get_session_store() -> CommanderSessionStore:
     if _store is None:
         _store = CommanderSessionStore()
     return _store
+
+
+def notify_linked_conversations(run_id: str, notice: str) -> None:
+    """Append a system notice to every conversation linked to a run.
+
+    Best effort: a notification failure must never affect the run itself.
+    System messages are not replayed into the commander LLM context and are
+    rendered as status lines by the frontend chat.
+    """
+    try:
+        for session in get_session_store().list():
+            if session.linked_run_id != run_id or session.has_system_notice(notice):
+                continue
+            if session.edit_cursor is not None:
+                # An edit is in progress; appending would splice into history.
+                continue
+            session.add(ChatMessage(role="system", content=notice))
+            get_session_store().persist(session)
+    except Exception:  # noqa: BLE001 - notification is best effort
+        pass
 
 
 def reset_session_store_for_tests() -> None:

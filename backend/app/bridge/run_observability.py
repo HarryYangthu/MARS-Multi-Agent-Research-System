@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from heapq import nlargest
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -47,7 +48,7 @@ def build_run_observability(run: RunHandle, *, limit: int = 200) -> dict[str, An
         if state is not None
         else {}
     )
-    invocations, loop_events, loop_streams = _loop_observability(run)
+    invocations, loop_events, loop_streams = _loop_observability(run, limit=limit)
     timeline = _timeline(run, limit=limit, loop_events=loop_events)
     trace = _trace_summary(run, invocations=invocations)
     execution = _execution_summary(run)
@@ -237,7 +238,7 @@ def _usage_summary(payloads: list[Any]) -> tuple[dict[str, int], bool]:
     return known, complete
 
 
-def _loop_observability(run: RunHandle) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def _loop_observability(run: RunHandle, *, limit: int = 200) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     streams: dict[str, Any] = {}
@@ -247,7 +248,10 @@ def _loop_observability(run: RunHandle) -> tuple[list[dict[str, Any]], list[dict
         summary, rows = _loop_invocation_summary(run, root)
         summaries.append(summary)
         rel_path = (root / "events.jsonl").relative_to(run.root).as_posix()
-        for row in rows:
+        # Audit/count all rows, but only materialize the requested timeline.
+        # Previously the response retained every full model payload across all
+        # invocations before discarding almost all of them at the very end.
+        for row in nlargest(max(0, limit), rows, key=_event_time):
             event = normalize_event(
                 {**row, "event": row.get("kind", "loop.event"), "correlation": _correlation(row)},
                 run_id=run.run_id, project=run.project, default_channel="agent_loop", default_kind="loop.event",
@@ -257,6 +261,7 @@ def _loop_observability(run: RunHandle) -> tuple[list[dict[str, Any]], list[dict
             # is guessed from a directory name or an event's chronological order.
             event["event_id"] = f"loop:{rel_path}:{row.get('event_seq', 'unknown')}"
             events.append(event)
+        events = nlargest(max(0, limit), events, key=lambda item: str(item.get("timestamp", "")))
         event_path = root / "events.jsonl"
         streams[rel_path] = {"path": rel_path, "exists": event_path.exists(),
                              "size_bytes": event_path.stat().st_size if event_path.exists() else 0,

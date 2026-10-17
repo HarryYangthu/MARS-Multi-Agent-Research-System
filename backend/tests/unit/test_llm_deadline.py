@@ -51,9 +51,10 @@ async def test_actual_unavailable_endpoint_terminates_without_a_successful_answe
         if caller == "idea":
             agent = IdeaAgent(agent_config=config)
             context = await agent.build_context(request)
-            with pytest.raises(RuntimeError, match="model_error"):
+            with pytest.raises(RuntimeError):
                 await asyncio.wait_for(agent.run_loop(request, context), timeout=10)
             state = json.loads(next(tmp_path.glob("agent_traces/idea/*/checkpoint.json")).read_text())
+            assert state["status"] == "model_error"
             assert state["candidate"] == "" and state["history"] == []
             assert state["counts"]["sdk_attempts"] == 2 and state["counts"]["model_responses"] == 0
             assert state["usage_complete"] is False

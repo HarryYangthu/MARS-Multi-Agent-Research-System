@@ -25,6 +25,31 @@ from app.storage.artifact_store import ArtifactStore
 from app.storage.run_store import RunStore
 
 
+def test_flat_loader_needs_an_explicit_host_bound_file(tmp_path: Path) -> None:
+    from app.bridge.execution_confirmation import configured_data_path
+    source = {'data': {'data_dir': '/original', 'data_name': 'capture_without_extension'}}
+    actual = tmp_path / 'uploaded-capture.mat'
+    actual.write_bytes(b'Explicit file path test; no scientific measurement.')
+    assert configured_data_path({'data_binding': {'path': str(actual)}}, {}, source) == str(actual)
+    assert configured_data_path({}, {'data_path': str(actual)}, source) == str(actual)
+    with pytest.raises(ValueError, match='未绑定'):
+        configured_data_path({}, {}, source)
+    assert configured_data_path({}, {}, {'data': {'path': str(actual)}}) == str(actual)
+
+
+@pytest.mark.parametrize('seconds', [60, 600, 1200.5])
+def test_preflight_batch_deadline_can_cover_multiple_real_checks(seconds: float) -> None:
+    from app.bridge.execution_confirmation import preflight_total_timeout
+    assert preflight_total_timeout({'preflight_total_timeout_seconds': seconds}) == seconds
+
+
+@pytest.mark.parametrize('seconds', [0, -1, float('inf'), float('nan'), True, '600'])
+def test_preflight_deadline_rejects_unbounded_or_invalid_values(seconds: object) -> None:
+    from app.bridge.execution_confirmation import preflight_total_timeout
+    with pytest.raises(ValueError):
+        preflight_total_timeout({'preflight_total_timeout_seconds': seconds})
+
+
 def test_data_summary_uses_resolved_adapter_inputs() -> None:
     from app.bridge.execution_confirmation import effective_data_summary
     rows = [{'config': {}, 'effective': {'data_path': '/actual/input.pth'}} for _ in range(2)]
@@ -67,6 +92,128 @@ def job_states_for_test(root: Path) -> list[dict[str, object]]:
     return [json.loads(path.read_text()) for path in (root / 'execution/jobs').glob('*.json')]
 
 
+@pytest.mark.asyncio
+async def test_failed_job_review_has_real_receipts_and_new_retry_keeps_history(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.bridge.execution_batch_deadline import prepare_interrupted_execution_retry
+    from app.bridge.execution_confirmation import renew_execution_confirmation
+    from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+    from app.bridge.tensorboard_service import shutdown_tensorboard
+    orch, session, _, _ = execution
+    first = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', first['token'])
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    try:
+        # Python --version really exits, but supplies no measurements: a real failure.
+        await orch._complete_approved_node(session, 'execution')
+        journals = {p: p.read_bytes() for p in (session.run.root / 'execution/jobs').glob('*.json')}
+        assert journals and all(json.loads(raw)['status'] == 'failed' for raw in journals.values())
+        evidence = execution_recovery_evidence(session.run, 'execution')
+        assert evidence['latest_explicit_retry'] is None
+        for job in evidence['jobs']:
+            assert job['record']['status'] == 'failed'
+            assert job['receipts'] and job['result_error']
+            receipt = json.loads(job['receipts'][0]['text'])
+            assert receipt['status'] == 'failed' and receipt['returncode'] == 0
+            assert job['receipts'][0]['process_exit_recorded'] is True
+            assert any('Python' in log['text'] for log in job['receipts'][0]['logs'])
+        renew_execution_confirmation(session.run, 'execution')
+        fresh = execution_preview(session.run, 'execution')
+        save_confirmation(session.run, 'execution', fresh['token'])
+        # Previously used inputs_token and collided with the old failed job.
+        prepare_interrupted_execution_retry(session.run, 'execution')
+        assert all(p.read_bytes() == raw for p, raw in journals.items())
+        # Restarting while waiting for config review leaves APPROVED, not RUNNING.
+        # Explicit retry must renew that review without silently launching a job.
+        session.graph.restore_state('execution', NodeState.APPROVED)
+        session.termination = {'type': 'cancelled', 'scope': 'owned_async_tasks', 'cleanup_complete': True,
+                               'reason': 'server_shutdown', 'interrupted_nodes': []}
+        rejected = await orch.request_artifact_revision(run_id=session.run.run_id, agent='execution',
+            reason='Explicit recovery', restart_stopped=False)
+        assert rejected['status'] == 'stopped_run_requires_new_execution'
+        accepted = await orch.request_artifact_revision(run_id=session.run.run_id, agent='execution',
+            reason='Explicit recovery', restart_stopped=True)
+        assert accepted['status'] == 'revision_started'
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if not execution_preview(session.run, 'execution')['confirmed']:
+                break
+        assert session.termination is None
+        assert not execution_preview(session.run, 'execution')['confirmed']
+        assert all(p.read_bytes() == raw for p, raw in journals.items())
+        assert len(list((session.run.root / 'execution/jobs').glob('*.json'))) == len(journals)
+        stopped = await orch.stop_owned_run(session.run.run_id)
+        assert stopped['ok'], stopped
+        assert execution_recovery_evidence(session.run, 'execution')['retry_after_latest_stop'] is False
+        damaged = session.run.root / evidence['jobs'][0]['receipts'][0]['ref']
+        damaged.write_bytes(damaged.read_bytes() + b'\n')
+        with pytest.raises(ValueError, match='收据已改变'):
+            execution_recovery_evidence(session.run, 'execution')
+    finally:
+        await shutdown_tensorboard()
+
+
+@pytest.mark.asyncio
+async def test_explicit_code_repair_after_real_failed_process_preserves_receipts(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.bridge.failed_execution_repair import failed_execution_snapshot
+    from app.bridge.preexecution_revision import enqueue_revision, assert_revision_boundary, record_revision_request
+    from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+    from app.bridge.tensorboard_service import shutdown_tensorboard
+    from app.bridge.workflow_service import build_pipeline, ready_batch
+
+    orch, session, _, _ = execution
+    view = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', view['token'])
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    try:
+        # Real child exits without required metrics. Never manufacture success.
+        await orch._complete_approved_node(session, 'execution')
+        assert session.graph.state('execution') == NodeState.FAILED
+        original = {path: path.read_bytes() for path in (session.run.root / 'execution').rglob('*.json')}
+        snapshot = failed_execution_snapshot(session.run, 'execution')
+        assert snapshot
+        graph = build_pipeline('coding')
+        graph.restore_state('coding', NodeState.DONE)
+        graph.restore_state('execution', NodeState.APPROVED)  # explicit config-review boundary
+        row = enqueue_revision(session.run, graph, 'coding', 'execution', 'Repair failed adapter',
+                               allow_failed_execution=True)
+        termination = {'type': 'cancelled', 'reason': 'server_shutdown', 'cleanup_complete': True,
+                       'interrupted_nodes': []}
+        session.run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': session.run.run_id,
+                                               'termination': termination})
+        record_revision_request(session.run, row, termination)
+        recovery = execution_recovery_evidence(session.run, 'execution')
+        assert recovery['retry_after_latest_stop'] is True
+        assert recovery['latest_explicit_retry']['event']['revision_id'] == row['id']
+        assert recovery['latest_explicit_retry']['event']['node'] == 'execution'
+        assert recovery['latest_explicit_retry']['event']['automatic_resume'] is False
+        assert all(job['record']['status'] == 'failed' for job in recovery['jobs'])
+        session.run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': session.run.run_id,
+                                               'termination': termination})
+        assert execution_recovery_evidence(session.run, 'execution')['retry_after_latest_stop'] is False
+        assert row['failed_execution_snapshot'] == snapshot
+        assert ready_batch(graph, 2) == [row['node']]
+        assert_revision_boundary(session.run, row)
+        assert all(path.read_bytes() == raw for path, raw in original.items())
+        # Reattach after a service restart, without replaying or approving jobs.
+        assert enqueue_revision(session.run, graph, 'coding', 'execution', 'Resume repair',
+                                allow_failed_execution=True)['id'] == row['id']
+        graph.restore_state(row['node'], NodeState.WAITING_REVIEW)
+        assert ready_batch(graph, 2) == []
+        # A newly started/unresolved invocation blocks repair even before a
+        # journal has been written. The receipt check fails closed.
+        orphan = session.run.root / 'execution/local_commands/orphan/invocation/job.json'
+        orphan.parent.mkdir(parents=True)
+        orphan.write_text(json.dumps({'run_id': session.run.run_id, 'experiment_id': 'orphan'}))
+        with pytest.raises(OSError):
+            assert_revision_boundary(session.run, row)
+    finally:
+        await shutdown_tensorboard()
+
+
 @pytest.fixture
 def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Orchestrator, RunSession, Path, Path]]:
     configuration = tmp_path / 'execution.yaml'
@@ -94,7 +241,7 @@ def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
     metadata = {'schema': 'run_log.v1', 'project': session.run.project, 'agent': 'execution',
         'run_id': session.run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 2},
         'fingerprint_hash': 'sha256:00', 'planned_experiments': [
-            {'name': name, 'config': {'seed': 2026, 'data_path': str(data), 'budget_steps': 50}}
+            {'name': name, 'config': {'command_id': 'python-environment', 'seed': 2026, 'data_path': str(data), 'budget_steps': 50}}
             for name in ('baseline', 'candidate')]}
     artifacts = ArtifactStore(session.run)
     artifacts.approve(artifacts.write(text=dumps(metadata, 'Human-authored execution plan; no measured result is asserted.')))
@@ -367,7 +514,7 @@ def test_real_git_code_change_invalidates_confirmation_but_checkpoint_commit_doe
         'files_changed': [{'path': 'main.py', 'type': 'modified'}]}, 'Human-authored code review.')))
     artifacts.approve(artifacts.write(text=dumps({'schema': 'run_log.v1', 'project': run.project, 'agent': 'execution',
         'run_id': run.run_id, 'status': 'interrupted', 'metrics': {'planned_experiments': 1}, 'fingerprint_hash': 'sha256:00',
-        'planned_experiments': [{'name': 'baseline', 'config': {'seed': 2026}}]}, 'Human-authored execution plan.')))
+        'planned_experiments': [{'name': 'baseline', 'config': {'command_id': 'python-environment', 'seed': 2026}}]}, 'Human-authored execution plan.')))
     view = execution_preview(run, 'execution')
     assert view['defaults']['repository'] == str(candidate)
     save_confirmation(run, 'execution', view['token'])

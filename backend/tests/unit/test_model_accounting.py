@@ -36,6 +36,32 @@ def _messages() -> list[Message]:
     return [Message(role="user", content="Budget contract input; no model success is requested.")]
 
 
+def test_statistics_only_preserves_charges_and_removes_all_run_quota_stops(tmp_path: Path) -> None:
+    from app.harness.llm.accounting import model_request_capacity
+    # Real ledger operations, with unknown failure usage retained conservatively.
+    policy = _policy(max_model_requests=1, max_total_tokens=1, max_elapsed_seconds=0.000001,
+                     max_cost=0.000001, max_parallel_model_calls=1)
+    owner = RunModelBudget(tmp_path, configuration=policy, quota_mode='statistics_only', token_mode='limited')
+    first = owner.reserve(_messages(), _config(), {'case': 'first'})
+    with pytest.raises(ModelConcurrencyBusy):
+        owner.reserve(_messages(), _config(), {'case': 'concurrent'})
+    owner.settle(first, usage=None, complete=False, outcome='failed')
+    first_row = owner.recovery_snapshot()['requests'][first.request_id]
+    for index in range(3):
+        item = owner.reserve(_messages(), _config(), {'case': str(index)})
+        owner.settle(item, usage=None, complete=False, outcome='failed')
+    state = owner.recovery_snapshot()
+    assert state['requests'][first.request_id] == first_row
+    assert len(state['requests']) == 4
+    assert state['configuration'] == policy
+    assert all(row['agent_quota_mode'] == 'statistics_only' for row in state['requests'].values())
+    assert model_request_capacity(state, 2, quota_mode='statistics_only').available
+    assert not model_request_capacity(state, 2, quota_mode='limited').available
+    limited = RunModelBudget(tmp_path, configuration=policy, quota_mode='limited')
+    with pytest.raises(ResourceBudgetError):
+        limited.reserve(_messages(), _config(), {})
+
+
 def _crash_after_reservation(root: str, policy: dict[str, Any], connection: Connection) -> None:
     budget = RunModelBudget(Path(root), configuration=policy)
     reservation = budget.reserve(_messages(), _config(), {"task_id": "interrupted-ledger-operation"})

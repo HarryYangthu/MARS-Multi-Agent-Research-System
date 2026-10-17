@@ -1,6 +1,7 @@
 """Real files and pure packing contracts; no provider or tool substitutes."""
 from pathlib import Path
 from dataclasses import replace
+from typing import Any
 import json
 
 import pytest
@@ -121,10 +122,10 @@ def test_old_checkpoint_keeps_legacy_and_new_policy_freezes(tmp_path: Path) -> N
     assert input_budget(policy, 48000, output_reserve=8192, model_window=32000) == 32000-8192-policy['safety_margin']
 
 
-def test_verified_model_window_supersedes_old_agent_and_run_quotas() -> None:
+def test_verified_model_window_never_enlarges_configured_input_context() -> None:
     policy = {**load_policy(), 'input_budget': 32000}
-    assert input_budget(policy, 48000, output_reserve=8192, model_window=128000) == 117760
-    assert input_budget(policy, 24000, output_reserve=16384, model_window=128000) == 109568
+    assert input_budget(policy, 48000, output_reserve=8192, model_window=128000) == 32000
+    assert input_budget(policy, 24000, output_reserve=16384, model_window=128000) == 24000
     # Unknown model capacity is never guessed or treated as infinite.
     assert input_budget(policy, 48000, output_reserve=8192) == 32000
     with pytest.raises(ValueError, match='no input space'):
@@ -206,3 +207,40 @@ def test_observation_status_comes_from_outer_envelope() -> None:
     assert observation_failed(json.dumps({'ok': False, 'error': 'missing baseline'}))
     assert observation_failed('invalid host envelope')
     assert observation_failed(json.dumps({'output': 'unknown status'}))
+
+
+@pytest.mark.parametrize('observation_history', [False, True])
+def test_latest_batch_survives_compaction_until_next_batch(tmp_path: Path, observation_history: bool) -> None:
+    # Pure renderer inputs from real temporary files; no tool execution is faked.
+    history = []
+    bodies = []
+    for index in range(5):
+        source = tmp_path / f'source-{index}.txt'
+        source.write_text(f'file {index}: distinct evidence\n' * 500, encoding='utf-8')
+        bodies.append(source.read_text(encoding='utf-8'))
+        batch = 1 if index == 0 else 2 if index < 4 else 3
+        history.append({'tool': 'code.repo_reader', 'ok': True, 'output': {'content': bodies[-1]},
+            'native_batch_id': batch, 'native_batch_size': 3 if batch == 2 else 1,
+            'native_call': {'id': f'call-{index}', 'name': 'code_repo_reader',
+                            'arguments': json.dumps({'path': source.name})}})
+
+    def pack(items: list[dict[str, Any]], previous: dict[str, Any] | None = None
+             ) -> tuple[list[Message], dict[str, Any]]:
+        return pack_native(pinned=[Message('user', 'compare sources')], history=items,
+            feedback='', candidate='', budget=12000, tools=(), policy=load_policy(),
+            metadata={}, root=tmp_path / 'archive', previous=previous, agent='experiment',
+            readback_available=True, native=True, native_observation_history=observation_history)
+
+    packed, manifest = pack(history[:4])
+    contents = '\n'.join(m.content for m in packed)
+    assert manifest['triggered']
+    assert json.dumps(bodies[0], ensure_ascii=False)[1:-1] not in contents
+    for body in bodies[1:4]:
+        assert json.dumps(body, ensure_ascii=False)[1:-1] in contents
+    restored, _ = pack(history[:4], manifest['state'])
+    assert restored == packed
+    following, next_manifest = pack(history, manifest['state'])
+    contents = '\n'.join(m.content for m in following)
+    assert json.dumps(bodies[4], ensure_ascii=False)[1:-1] in contents
+    assert json.dumps(bodies[1], ensure_ascii=False)[1:-1] not in contents
+    assert next_manifest['decisions']

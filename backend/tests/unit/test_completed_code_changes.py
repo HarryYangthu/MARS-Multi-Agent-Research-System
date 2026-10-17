@@ -28,7 +28,7 @@ def setup(tmp_path: Path) -> tuple[RunHandle, Path, ToolContext, CodeRepository]
 @pytest.mark.asyncio
 async def test_multiple_writes_show_net_changes_and_new_file(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "existing.py").write_text("value = 1\nkeep = True\n")
+    (root / "existing.py").write_bytes(b"value = 1\nkeep = True\n")
     for path, content in [("existing.py", "value = 2\nkeep = True\n"),
                           ("new.py", "first = 1\n"), ("new.py", "first = 2\nsecond = 3\n"),
                           ("existing.py", "value = 3\nkeep = True\nextra = 4\n")]:
@@ -64,7 +64,7 @@ async def test_hundreds_of_real_reads_do_not_hide_earlier_writes(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_proposals_and_failed_writes_are_excluded(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "value.py").write_text("value = 1\n")
+    (root / "value.py").write_bytes(b"value = 1\n")
     generated = await get_registry().dispatch("code.patch_generator", {"path": "value.py", "content": "value = 2\n"}, ctx)
     assert generated.ok and (root / "value.py").read_text() == "value = 1\n"
     (run.root / "coding/patch.v1.diff").write_text(str(generated.output["diff"]))
@@ -94,7 +94,7 @@ async def test_external_edit_cannot_be_labelled_as_verified(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_reverted_edits_are_not_changes(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "value.py").write_text("value = 1\n")
+    (root / "value.py").write_bytes(b"value = 1\n")
     for content in ["value = 2\n", "value = 1\n"]:
         assert (await get_registry().dispatch("code.write_file", {"path": "value.py", "content": content}, ctx)).ok
     view = completed_code_changes(run, project=run.project, repository=browser)
@@ -105,7 +105,7 @@ async def test_reverted_edits_are_not_changes(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_noop_is_verified_reuse_and_retry_retains_task_net_addition(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "existing.py").write_text("VALUE = 1\n")
+    (root / "existing.py").write_bytes(b"VALUE = 1\n")
     for path in ("existing.py", "new.py", "new.py"):
         result = await get_registry().dispatch("code.write_file", {"path": path, "content": "VALUE = 1\n"}, ctx)
         assert result.ok
@@ -154,6 +154,29 @@ def test_empty_files_no_newline_and_zero_context_insertions() -> None:
     assert _patched("before", item) == "after"
     insertion = parse_diff("--- a/value.py\n+++ b/value.py\n@@ -1,0 +2 @@\n+inserted\n")[0]
     assert _patched("first\nlast\n", insertion) == "first\ninserted\nlast\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('content', ['first\nsecond\n', 'first\r\nsecond\r\n', 'first\r\nsecond\nlast'])
+async def test_new_writes_and_rollback_preserve_exact_bytes(tmp_path: Path, content: str) -> None:
+    import hashlib
+    from app.harness.tools.code import rollback_patch_tool
+
+    run, root, ctx, browser = setup(tmp_path)
+    before = b'original\r\nwith mixed\nend'
+    target = root / 'value.py'
+    target.write_bytes(before)
+    result = await get_registry().dispatch('code.write_file', {'path': 'value.py', 'content': content}, ctx)
+    assert result.ok and result.rollback_ref
+    assert target.read_bytes() == content.encode()
+    assert result.output['sha256'] == 'sha256:' + hashlib.sha256(target.read_bytes()).hexdigest()
+    view = completed_code_changes(run, project=run.project, repository=browser)
+    assert not view['warnings'] and view['items'][0]['verification'] == 'exact_bytes'
+    # Even a newline-only external edit fails verification for new receipts.
+    target.write_bytes(content.encode() + b'\r\n')
+    assert completed_code_changes(run, project=run.project, repository=browser)['warnings']
+    restored = await rollback_patch_tool({'rollback_ref': result.rollback_ref}, ctx)
+    assert restored.ok and target.read_bytes() == before
 
 
 @pytest.mark.asyncio

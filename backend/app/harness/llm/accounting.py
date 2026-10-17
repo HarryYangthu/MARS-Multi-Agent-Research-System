@@ -24,7 +24,7 @@ from filelock import BaseFileLock, FileLock, Timeout as FileLockTimeout
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, MAX_LLM_RETRIES
 from app.harness.persistence import atomic_write_json, path_lock
 from app.settings import repo_root
-from app.harness.llm.usage_policy import TokenUsageMode, token_usage_mode
+from app.harness.llm.usage_policy import AgentQuotaMode, agent_quota_mode, TokenUsageMode, token_usage_mode
 
 _COMPLETION_DRIVEN: ContextVar[bool] = ContextVar("mars_completion_driven", default=False)
 _RUN_ROOT: ContextVar[Path | None] = ContextVar("mars_model_budget_root", default=None)
@@ -119,13 +119,14 @@ class ModelRequestCapacity:
                 f"(used={self.used}, limit={self.limit}, required={self.required})")
 
 
-def model_request_capacity(state: Mapping[str, Any], max_retries: int) -> ModelRequestCapacity:
+def model_request_capacity(state: Mapping[str, Any], max_retries: int, *,
+                           quota_mode: AgentQuotaMode = 'limited') -> ModelRequestCapacity:
     """Admission and recovery use the same worst-case SDK-attempt reservation."""
     if type(max_retries) is not int:
         raise ValueError("max_retries must be an integer")
     return ModelRequestCapacity(
         used=sum(charged_model_attempts(row) for row in state["requests"].values()),
-        limit=state["configuration"]["limits"]["max_model_requests"],
+        limit=None if quota_mode == 'statistics_only' else state["configuration"]["limits"]["max_model_requests"],
         required=min(max(max_retries, 0), MAX_LLM_RETRIES) + 1,
     )
 
@@ -154,7 +155,8 @@ def validate_token_components(row: Mapping[str, Any]) -> None:
 class RunModelBudget:
     def __init__(self, root: Path, *, configuration: Mapping[str, Any] | None = None,
                  active_model_time: bool = False, completion_driven: bool | None = None,
-                 token_mode: TokenUsageMode | None = None) -> None:
+                 token_mode: TokenUsageMode | None = None, quota_mode: AgentQuotaMode | None = None) -> None:
+        self.quota_mode = quota_mode or agent_quota_mode()
         self.token_mode = token_mode or token_usage_mode()
         self.completion_driven = _COMPLETION_DRIVEN.get() if completion_driven is None else completion_driven
         self.active_model_time = active_model_time
@@ -233,6 +235,8 @@ class RunModelBudget:
             return self._remaining_seconds(self._read(), time.time())
 
     def _remaining_seconds(self, state: dict[str, Any], now: float) -> float:
+        if self.quota_mode == 'statistics_only':
+            return math.inf
         # Completion-driven controls local loop counters only. All roles and
         # inherited tasks obey the same durable run limits, including Coding.
         limit = float(state['configuration']['limits']['max_elapsed_seconds'])
@@ -387,14 +391,14 @@ class RunModelBudget:
             if self.active_model_time:
                 state['elapsed_clock'] = 'cumulative_model_activity'
             rows = list(state["requests"].values())
-            model_request_capacity(state, config.max_retries).require()
-            if self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
+            model_request_capacity(state, config.max_retries, quota_mode=self.quota_mode).require()
+            if self.quota_mode == 'limited' and self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
             for component, key, amount in (("input", "max_input_tokens", reserved_input),
                                            ("output", "max_billed_output_tokens", reserved_output)):
-                if self.token_mode == 'limited' and key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
+                if self.quota_mode == 'limited' and self.token_mode == 'limited' and key in limits and sum(charged_token_component(row, component) for row in rows) + amount > limits[key]:
                     raise ResourceBudgetError(f"run {component}-token reservation exceeds remaining budget")
-            if limits.get("max_cost") is not None:
+            if self.quota_mode == 'limited' and limits.get("max_cost") is not None:
                 if cost is None or any(row["charged_cost"] is None for row in rows):
                     raise ResourceBudgetError("monetary limit requires explicit prices for every selected model")
                 if sum(row["charged_cost"] for row in rows) + cost > limits["max_cost"]:
@@ -405,6 +409,7 @@ class RunModelBudget:
                 "provider": config.provider, "model": config.model, "correlation": dict(correlation),
                 "execution_mode": "completion_driven" if self.completion_driven else "bounded",
                 "token_usage_mode": self.token_mode,
+                "agent_quota_mode": self.quota_mode,
                 "reserved_tokens": reserved_tokens, "charged_tokens": reserved_tokens,
                 "reserved_input_tokens": reserved_input, "charged_input_tokens": reserved_input,
                 "reserved_output_tokens": reserved_output, "charged_output_tokens": reserved_output,
@@ -542,7 +547,7 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
             result = await provider.complete(messages, actual)
         else:
             from app.harness.llm.provider_base import llm_call_deadline_seconds
-            remaining = scope.ledger.snapshot().activity_remaining_us / 1_000_000
+            remaining = scope.ledger.remaining_activity_seconds()
             async with asyncio.timeout(min(remaining, llm_call_deadline_seconds(actual))):
                 result = await provider.complete(messages, actual)
         if isinstance(budget, ContractModelBudget):

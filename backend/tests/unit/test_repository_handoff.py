@@ -25,7 +25,8 @@ def test_actual_source_has_path_and_hash_but_no_consumption_claim(tmp_path: Path
     path = tmp_path / "train.py"
     path.write_text("value = 1\n")
     context = json.loads(baseline_repository_context(repo(tmp_path), proposal("train.py")))
-    assert context["files"] == [{"path": "train.py", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": 10}]
+    assert context["files"] == [{"path": "train.py", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                  "bytes": path.stat().st_size}]
     assert context["contents_loaded"] is False
     path.write_text("value = 2\n")
     updated = json.loads(baseline_repository_context(repo(tmp_path), proposal("train.py")))
@@ -54,6 +55,23 @@ def test_actual_baseline_dataset_configuration_is_described_without_loading_data
     assert context["sources"][0]["data"]["path"]
     assert set(context["sources"][0]["data"]) <= {"path", "tx_key", "rx_key", "nf_key"}
     assert 'secret' not in json.dumps(context)
+
+
+def test_flat_dataset_configuration_preserves_loader_fields_without_claiming_data_loaded(tmp_path: Path) -> None:
+    path = tmp_path / 'baseline.yaml'
+    path.write_text('data_dir: ../data\ndata_name: case17\nNtx: 16\ntra_len: 24576\npassword: secret\n')
+    context = json.loads(baseline_data_description(repo(tmp_path), proposal(path.name)))
+    assert context['sources'][0]['data'] == {'data_dir': '../data', 'data_name': 'case17'}
+    assert context['sources'][0]['data_param'] == {'Ntx': 16, 'tra_len': 24576}
+    assert context['dataset_contents_loaded'] is False
+    assert 'secret' not in json.dumps(context)
+
+
+@pytest.mark.parametrize('fields', ['data_dir: ../data', 'data_name: case17', 'data_dir: 1\ndata_name: case17'])
+def test_incomplete_flat_configuration_does_not_supply_data_context(tmp_path: Path, fields: str) -> None:
+    path = tmp_path / 'baseline.yaml'
+    path.write_text(fields)
+    assert baseline_data_description(repo(tmp_path), proposal(path.name)) == ''
 
 
 def test_approved_experiment_base_config_supplies_actual_repository_identity(tmp_path: Path) -> None:
@@ -86,6 +104,78 @@ def test_new_output_config_and_prose_do_not_supply_a_baseline(tmp_path: Path) ->
         plan = dumps({"schema": "experiment_plan.v1", "project": "local",
                       "ablations": [{"config": config}]}, "Authored identity check input.")
         assert baseline_repository_context(repo(tmp_path), {"plan": plan}) == ""
+
+
+def checked_proposal(paths: list[str], project: str = "local") -> dict[str, str]:
+    return {"idea_proposal.approved.md": dumps({"schema": "proposal.v1", "project": project,
+        "evidence_refs": [{"kind": "literature", "ref": "paper-only"}],
+        "method_spec": {"code_check": {"files": [{"path": path, "sha256": "0" * 64,
+            "verified": "Authored assertion, never a host receipt."} for path in paths]}}},
+        "Human-authored source declarations with no execution claims.")}
+
+
+def test_focused_code_checks_resolve_current_files_without_trusting_claims(tmp_path: Path) -> None:
+    path = tmp_path / "train.py"
+    path.write_text("value = 1\n")
+    context = json.loads(baseline_repository_context(repo(tmp_path), checked_proposal([path.name])))
+    assert context["files"] == [{"path": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                  "bytes": path.stat().st_size}]
+    assert context["contents_loaded"] is False
+    assert "Authored assertion" not in json.dumps(context)
+    path.write_text("value = 2\n")
+    updated = json.loads(baseline_repository_context(repo(tmp_path), checked_proposal([path.name])))
+    assert updated["files"][0]["sha256"] != context["files"][0]["sha256"]
+
+
+@pytest.mark.parametrize("source", ["missing.py", "../outside.py", ".env.py"])
+def test_focused_code_checks_keep_path_and_availability_guards(tmp_path: Path, source: str) -> None:
+    with pytest.raises(ValueError):
+        baseline_repository_context(repo(tmp_path), checked_proposal([source]))
+
+
+def planned_proposal(target: str, operations: tuple[str, ...] = ("add",), *, source_claim: bool = False) -> dict[str, str]:
+    return {"proposal": dumps({"schema": "proposal.v1", "project": "local",
+        "evidence_refs": [{"kind": "code", "ref": target}] if source_claim else [],
+        "method_spec": {"code_check": {"files": [{"path": "train.py"}, {"path": target}]}},
+        "handoff": {"changes": [{"target": target, "operation": operation} for operation in operations]}},
+        "Authored implementation plan, not execution evidence.")}
+
+
+def test_explicit_new_outputs_are_not_required_or_claimed_as_baseline_sources(tmp_path: Path) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    context = json.loads(baseline_repository_context(repo(tmp_path), planned_proposal("analyze_branches.py")))
+    assert [item["path"] for item in context["files"]] == ["train.py"]
+    assert context["contents_loaded"] is False
+    assert not (tmp_path / "analyze_branches.py").exists()
+    (tmp_path / "analyze_branches.py").write_text("# a later output is still not baseline evidence\n")
+    assert json.loads(baseline_repository_context(repo(tmp_path), planned_proposal("analyze_branches.py"))) == context
+
+
+@pytest.mark.parametrize("operations,source_claim", [(("modify",), False), (("add", "modify"), False), (("add",), True)])
+def test_new_output_classification_does_not_hide_missing_or_conflicting_source_claims(
+    tmp_path: Path, operations: tuple[str, ...], source_claim: bool,
+) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    with pytest.raises(ValueError, match="does not exist"):
+        baseline_repository_context(repo(tmp_path), planned_proposal("missing.py", operations, source_claim=source_claim))
+
+
+@pytest.mark.parametrize("target", ["../outside.py", ".env.py", ".git/config.py"])
+def test_new_outputs_still_require_safe_repository_paths(tmp_path: Path, target: str) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    with pytest.raises(ValueError):
+        baseline_repository_context(repo(tmp_path), planned_proposal(target))
+
+
+def test_focused_source_declarations_cannot_guess_paths_or_cross_projects(tmp_path: Path) -> None:
+    (tmp_path / "train.py").write_text("value = 1\n")
+    assert baseline_repository_context(repo(tmp_path), checked_proposal(["train.py"], "other")) == ""
+    assert baseline_repository_context(repo(tmp_path), checked_proposal(["train.py with explanation"])) == ""
+    checks: object
+    for checks in (None, [], "train.py", {"files": "train.py"}, {"files": [None, "train.py"]}):
+        text = dumps({"schema": "proposal.v1", "project": "local", "method_spec": {"code_check": checks}},
+                     "Authored malformed optional metadata.")
+        assert baseline_repository_context(repo(tmp_path), {"proposal": text}) == ""
 
 
 def executable_data_plan(ref: str, project: str = "local") -> dict[str, str]:

@@ -8,8 +8,58 @@ from app.harness.tools.config import load_execution_config
 from app.harness.tools.project_repo import load_project_repo
 from app.settings import get_settings
 
+
+def project_local_commands(policy: dict[str, Any], project: str) -> list[dict[str, Any]]:
+    from app.harness.tools.execution.local_command import command_supports_project
+    rows = policy.get('local_commands', [])
+    return [row for row in rows if isinstance(row, dict) and command_supports_project(row, project)] if isinstance(rows, list) else []
+
+
+def execution_delivery_blocker(project: str) -> str:
+    if (get_settings().mars_execution_backend == 'local_command'
+            and not project_local_commands(load_execution_config()['execution'], project)):
+        return ('当前项目没有匹配的已登记训练命令；请打开「项目 → 项目配置 → 训练启动」保存本项目的训练入口，'
+                '再重试编码。其他项目的命令不可直接复用；未调用编码模型。')
+    return ''
+
+
+def execution_delivery_context(*, project: str) -> dict[str, Any]:
+    """Expose the same host bindings the coding handoff validator consumes."""
+    backend = get_settings().mars_execution_backend
+    policy = load_execution_config()['execution']
+    rows = project_local_commands(policy, project)
+    commands = [{key: row[key] for key in ('id', 'label', 'argv', 'required_metrics', 'project_ids',
+                'entrypoints', 'config_paths', 'consumes_data_path', 'validation') if key in row}
+                for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    from app.harness.tools.execution.local_command import local_command_protocol
+    from app.harness.tools.execution.command_preflight import validation_protocol
+    return {
+        'backend': backend,
+        'project': project,
+        'local_commands': commands if backend == 'local_command' else [],
+        'paper_static': policy.get('paper_static', {}) if backend == 'paper_static' else {},
+        'protocol': local_command_protocol() if backend == 'local_command' else {},
+        'validation_protocol': validation_protocol() if backend == 'local_command' else {},
+        'instruction': (
+            '当前执行方式为 local_command：每项 execution_jobs.config 必须填写上述登记命令的 id '
+            '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由宿主执行，不得自行替换。'
+            '命令从 MARS_JOB_REQUEST 读取本项配置和预算，产出 MARS_RESULT_PATH 与真实证据。'
+            '登记命令的项目、入口和配置能力必须与本项匹配；旧命令不能作为其他模型的通用入口。'
+            '声明 consumes_data_path 时必须消费宿主交付的数据；验证模式只检查，不训练。'
+            '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
+            '登记入口尚不存在时，它是本阶段需要创建的交付文件，不是用户遗漏的输入资料；'
+            '实现读取 MARS_JOB_REQUEST、写入 MARS_RESULT_PATH 和 MARS_VALIDATE_ONLY 无训练验证协议，'
+            '调用本项目真实训练代码，不得伪造结果。'
+            if backend == 'local_command' else
+            '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'
+        ),
+    }
+
 def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: str,
-                          plan_required: bool = False) -> list[str]:
+                          plan_required: bool = False, run_id: str | None = None,
+                          run_root: Path | None = None) -> list[str]:
+    if (run_id is None) != (run_root is None):
+        return ['编码交接核验必须同时提供任务标识与运行目录']
     try:
         jobs = delivery_experiments(plan_text, coding, project=project, plan_required=plan_required)
     except ValueError as exc:
@@ -61,9 +111,19 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                 from app.harness.tools.execution.local_command import LocalCommandJob, _command
                 command_id = config.get('command_id')
                 if not isinstance(command_id, str) or not command_id:
-                    raise ValueError('当前执行方式要求交付实际 command_id')
-                _command(LocalCommandJob(run_id='handoff-check', experiment_id=job['name'],
-                    project=project, run_root=Path('.'), command_id=command_id), 'execution.simulation_runner')
+                    rows = project_local_commands(policy, project)
+                    ids = [str(row['id']) for row in rows if isinstance(row, dict) and row.get('id')] if isinstance(rows, list) else []
+                    raise ValueError('当前执行方式 local_command 要求交付实际 command_id；可用登记 ID：'
+                                     + (', '.join(ids) if ids else '无，请先配置真实执行命令'))
+                from app.harness.tools.git_branch import current_git_branch
+                from app.harness.runtime.project_scope import current_project_scope
+                branch = current_git_branch(project, run_id)
+                scope = current_project_scope(project, run_id)
+                bound_id = run_id or (branch.run_id if branch is not None else scope.run_id if scope is not None else 'handoff-check')
+                bound_root = run_root if run_root is not None else scope.run_root if scope is not None else Path('.')
+                _command(LocalCommandJob(run_id=bound_id, experiment_id=job['name'],
+                    project=project, run_root=bound_root,
+                    command_id=command_id, config=config), 'execution.simulation_runner')
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(prefix + ': ' + str(exc))
     return errors

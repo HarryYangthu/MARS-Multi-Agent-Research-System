@@ -1,18 +1,22 @@
+# context_window records total provider capacity (input + output), not input usage.
+# Actual input context uses loop.input_token_budget and context.yaml (128000
+# tokens or lower); protected evidence can exceed this advisory budget.
+# A project-local key binding avoids inheriting another application's old key.
 commander:
   enabled: true
   output_schema: ''
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.2
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 3600
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -40,18 +44,18 @@ idea:
   enabled: true
   output_schema: proposal.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.7
-    max_tokens: 8192
+    max_tokens: 393216
     top_p: 1.0
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 360
+    request_timeout_seconds: 3600
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -100,17 +104,17 @@ idea_research:
   enabled: true
   output_schema: research_report.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.2
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 360
+    request_timeout_seconds: 3600
     retry:
       max_retries: 1
       base_delay_seconds: 1
@@ -145,23 +149,25 @@ experiment:
   enabled: true
   output_schema: experiment_plan.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.3
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 3600
     retry:
       max_retries: 2
       base_delay_seconds: 1
   debate:
     enabled: false
   loop:
+    protocol: native_tools
+    native_observation_history: true
     input_token_budget: 128000
     max_validation_repairs: 1
     max_tool_steps: 8
@@ -173,17 +179,17 @@ coding:
   enabled: true
   output_schema: code_spec.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.1
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 3600
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -231,21 +237,30 @@ execution:
   tools:
   - execution.log_streamer
   - execution.metrics_collector
+  model:
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
+    temperature: 0.7
+    max_tokens: 393216
+    request_timeout_seconds: 3600
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
 writing:
   enabled: true
   output_schema: report.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.4
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 120
+    request_timeout_seconds: 3600
     retry:
       max_retries: 2
       base_delay_seconds: 1
@@ -271,17 +286,17 @@ idea_author:
   enabled: true
   output_schema: proposal.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.2
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 180
+    request_timeout_seconds: 3600
     retry:
       max_retries: 1
       base_delay_seconds: 1
@@ -292,17 +307,17 @@ idea_reviewer:
   enabled: true
   output_schema: proposal.v1
   model:
-    context_window: 128000
-    provider: zhipu
-    model: glm-5.3
+    context_window: 1048576
+    provider: deepseek
+    model: deepseek-flash
     temperature: 0.1
-    max_tokens: 8192
-    api_key_env: ZHIPU_API_KEY
-    base_url: https://open.bigmodel.cn/api/paas/v4
+    max_tokens: 393216
+    api_key_env: MARS_DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com/v1
     thinking:
       enabled: true
     reasoning_effort: low
-    request_timeout_seconds: 240
+    request_timeout_seconds: 3600
     retry:
       max_retries: 0
       base_delay_seconds: 1

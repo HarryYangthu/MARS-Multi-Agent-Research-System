@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 from app.bridge.node_key import parse_node_key
 from app.bridge.orchestrator import Orchestrator
-from app.bridge.task_runtime import resumable_task, task_contract_path
+from app.bridge.task_runtime import RESUME_INPUT_CHANGED, resumable_task, task_contract_path
 from app.bridge.research_run_service import research_execution_admission, load_run_research_contract
 from app.harness.agent_loop.trace import digest
 from app.harness.llm.accounting import (
@@ -34,6 +33,49 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
 
     if orch.owned_tasks.active(run_id) is not None:
         return finish('running', '任务正在运行，无需重复恢复。')
+    # Shutdown during configuration review interrupts no node: execution is
+    # APPROVED, but there are no jobs. This is a recoverable boundary, not an
+    # unknown running experiment. Admission is repeated by the mutation path.
+    from app.bridge.preexecution_revision import assert_no_execution, pending_revision
+    latest_prelaunch: dict[str, str] = {}
+    for key in states:
+        stage = parse_node_key(key).stage
+        if stage not in latest_prelaunch or parse_node_key(key).attempt > parse_node_key(latest_prelaunch[stage]).attempt:
+            latest_prelaunch[stage] = key
+    termination = session.termination
+    clean_wait = not termination or (termination.get('type') == 'cancelled'
+        and termination.get('scope') == 'owned_async_tasks' and termination.get('cleanup_complete') is True
+        and termination.get('interrupted_nodes') == [])
+    if (not session.read_only and not orch.owned_tasks.closing and clean_wait
+            and states.get(latest_prelaunch.get('coding', '')) == 'done'
+            and states.get(latest_prelaunch.get('execution', '')) == 'approved'
+            and not any(value in {'running', 'failed', 'waiting_review'} for value in states.values())
+            and pending_revision(session.run) is None):
+        try:
+            assert_no_execution(session.run)
+        except ValueError as exc:
+            return finish('blocked', str(exc))
+        if research_execution_admission(session.run, session.request.extra) is not None:
+            return finish('blocked', '研究执行约束尚未就绪，请先核对项目执行配置。')
+        ledger_path = session.run.root / 'resources/model_budget.v1.json'
+        if ledger_path.is_file():
+            try:
+                prelaunch_ledger = RunModelBudget(session.run.root, active_model_time=True).recovery_snapshot()
+                evidence.append(prelaunch_ledger)
+                if any(item.get('status') in {'in_flight', 'reconciliation_required'} for item in prelaunch_ledger['requests'].values()):
+                    return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
+            except (OSError, ValueError, ResourceBudgetError):
+                return finish('blocked', '模型调用记录暂不可核验，请先核对记录。')
+        execution = latest_prelaunch['execution']
+        selected_path = session.run.root / 'input/selected_data_source.json'
+        evidence.append(selected_path.read_text(encoding='utf-8') if selected_path.is_file() else None)
+        result['actions'] = [{'action': 'revise_data', 'node': execution, 'label': '选择数据并修订方案'}]
+        # Without a data snapshot, restoring the old configuration is precisely
+        # the dead end the user is trying to fix. Require explicit selection.
+        if selected_path.is_file():
+            result['actions'].insert(0, {'action': 'retry', 'node': execution, 'label': '重新核对执行配置'})
+        return finish('recoverable', '实验尚未启动，可在此选择数据并修订方案、代码；原记录保留，修订后正常审核。'
+                      if not selected_path.is_file() else '实验尚未启动，可重新核对执行配置，或更换数据后修订方案与代码。')
     if session.termination and not session.read_only and not orch.owned_tasks.closing:
         termination = session.termination
         nodes = termination.get('interrupted_nodes', [])
@@ -46,11 +88,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if not blocker:
                 result['actions'] = [{'action': 'retry', 'node': nodes[0], 'label': '重新核对并恢复仿真'}]
                 return finish('recoverable', '作业中断清理已确认；重新核对配置后开启明确的新尝试，旧收据保留。')
-        if len(nodes) == 1 and parse_node_key(nodes[0]).stage in {'idea', 'experiment', 'writing'}:
-            from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
+        from app.bridge.stopped_draft_retry import stopped_draft_node, stopped_draft_retry_blocker
+        draft_node = stopped_draft_node(termination, states)
+        if draft_node is not None:
             try:
-                draft_blocker = stopped_draft_retry_blocker(session.run, nodes[0],
-                    stage=parse_node_key(nodes[0]).stage, termination=termination, states=states)
+                draft_blocker = stopped_draft_retry_blocker(session.run, draft_node,
+                    stage=parse_node_key(draft_node).stage, termination=termination, states=states)
             except (OSError, ValueError, KeyError) as exc:
                 draft_blocker = str(exc)
             if draft_blocker:
@@ -88,12 +131,12 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     elapsed_exhausted = False
     if ledger.exists():
         try:
-            model_budget = RunModelBudget(session.run.root)
+            model_budget = RunModelBudget(session.run.root, active_model_time=True)
             raw = model_budget.recovery_snapshot()
         except (ResourceBudgetError, OSError, ValueError):
             return finish('blocked', '资源记录或预算配置无法校验，请先核对记录和配置。')
         evidence.append(raw)
-        evidence.append({'token_usage_mode': model_budget.token_mode})
+        evidence.append({'token_usage_mode': model_budget.token_mode, 'agent_quota_mode': model_budget.quota_mode})
         if any(row.get('status') in {'in_flight', 'reconciliation_required'}
                for row in raw.get('requests', {}).values()):
             return finish('blocked', '存在结果未确认的模型请求，需先核对记录，避免重复调用。')
@@ -102,7 +145,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
         # Do not offer retry when even the next call's SDK retries cannot fit.
         # A completion-driven loop never exempts its Agent from the run budget.
         capacities = [model_request_capacity(raw, getattr(getattr(agent, 'config', None),
-                       'max_retries', MAX_LLM_RETRIES)) for agent in model_agents]
+                       'max_retries', MAX_LLM_RETRIES), quota_mode=model_budget.quota_mode) for agent in model_agents]
         evidence.append([{'used': item.used, 'limit': item.limit, 'required': item.required}
                          for item in capacities])
         for capacity in capacities:
@@ -111,21 +154,28 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     f'下一次调用需预留 {capacity.required} 次（含网络重试）。进度已保留，'
                     '请调整并核对预算后继续；刷新和重试不会清空已有用量。')
         exhausted = False
-        if model_budget.token_mode == 'limited':
+        if model_budget.quota_mode == 'limited' and model_budget.token_mode == 'limited':
             exhausted = exhausted or sum(row['charged_tokens'] for row in rows) >= limits['max_total_tokens']
             for component, limit in (('input', 'max_input_tokens'), ('output', 'max_billed_output_tokens')):
                 exhausted = exhausted or (limit in limits and sum(charged_token_component(row, component)
                                           for row in rows) >= limits[limit])
-        if limits.get('max_cost') is not None:
+        if model_budget.quota_mode == 'limited' and limits.get('max_cost') is not None:
             exhausted = exhausted or any(row['charged_cost'] is None for row in rows)
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
         if exhausted and model_agents:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
-        elapsed_exhausted = (
-            time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
+        elapsed_exhausted = model_budget.remaining_seconds() <= 0
+        if elapsed_exhausted and model_agents:
+            return finish('blocked', '累计有效模型调用时间已耗尽，请核对时间预算；等待审批和暂停不计入，已有用量不会清空。')
     if legacy:
         for agent in agents:
             if getattr(agent, 'name', '') == 'coding':
+                from app.storage.artifact_handoff import execution_delivery_required
+                from app.harness.tools.execution.handoff import execution_delivery_blocker
+                if execution_delivery_required(session.run, latest['coding']):
+                    blocker = execution_delivery_blocker(project)
+                    if blocker:
+                        return finish('blocked', blocker)
                 from app.bridge.research_branch import coding_workspace_blocker
                 try:
                     blocker = coding_workspace_blocker(session.run)
@@ -147,6 +197,18 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     retryable: list[str] = []
     provider_hint = ''
     for node in candidates:
+        binding_changed = False
+        failure: dict[str, Any] = {}
+        failure_path = session.run.root / 'input/node_failures' / (node + '.json')
+        if failure_path.is_file():
+            try:
+                raw_failure = json.loads(failure_path.read_text())
+            except (OSError, ValueError):
+                return finish('blocked', '阶段失败记录无法核验，请先核对记录。')
+            if not isinstance(raw_failure, dict):
+                return finish('blocked', '阶段失败记录格式异常，请先核对记录。')
+            failure = raw_failure
+            evidence.append(failure)
         if parse_node_key(node).stage == 'execution' and states[node] == 'failed':
             from app.bridge.execution_batch_deadline import execution_failure_hint
             try:
@@ -161,6 +223,10 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             if contract.run_id != run_id or contract.node_id != node or contract.project != project:
                 return finish('blocked', '任务检查点所属信息不匹配，请核对任务记录。')
             evidence.append(contract.model_dump())
+            binding_changed = (failure.get('task_id') == contract.task_id
+                and failure.get('invocation_id') == contract.invocation_id
+                and failure.get('code') == 'agent_node_failed'
+                and failure.get('message') == RESUME_INPUT_CHANGED)
             checkpoint = session.run.root / 'agent_traces' / contract.agent / contract.invocation_id / 'checkpoint.json'
             if not checkpoint.resolve().is_relative_to(session.run.root.resolve()):
                 return finish('blocked', '检查点路径异常，请核对任务记录。')
@@ -186,16 +252,14 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
                     raise HandoffBlockedError(handoffs)
             except (OSError, ValueError, RuntimeError) as exc:
                 return finish('blocked', str(exc))
-            failure_path = session.run.root / 'input/node_failures' / (node + '.json')
-            if failure_path.is_file():
-                try:
-                    failure = json.loads(failure_path.read_text())
-                except (OSError, ValueError):
-                    return finish('blocked', '阶段失败记录无法核验，请先核对记录。')
-                if not isinstance(failure, dict):
-                    return finish('blocked', '阶段失败记录格式异常，请先核对记录。')
-                if failure.get('code') == 'handoff_context_missing':
-                    provider_hint = '交接资料绑定已核验，可仅重试当前阶段；已有研究方案和代码保留。'
+            if failure.get('code') == 'handoff_context_missing':
+                provider_hint = '交接资料绑定已核验，可仅重试当前阶段；已有研究方案和代码保留。'
+        if binding_changed:
+            # A new bridge failure can occur before the loop writes a checkpoint.
+            # Do not advertise that rejected replay or mask it with an older 503.
+            resumable = False
+            provider_hint = ('当前任务输入与旧检查点不一致，不能直接续接；请重试当前阶段。'
+                             '已完成的上游阶段、现有代码与原始记录保留。')
         try:
             resumable_task(session.run, node)
         except (OSError, ValueError, KeyError):
@@ -213,11 +277,14 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             return finish('recoverable', provider_hint)
         return finish('recoverable', '从检查点继续；重试会重新执行当前阶段并保留原任务记录。'
                       if resumable else '检查点不能直接续跑，可在原任务中重试失败阶段。')
+    if 'running' in states.values():
+        return finish('blocked', '历史记录仍标为执行中，但当前服务未持有此任务的运行进程。'
+                      '请先核对原实验进程和作业回执；当前检查点不能直接续跑，系统未重复启动。')
     return finish('blocked', '当前检查点无法安全恢复，请打开任务详情核对执行记录。')
 
 
 async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
-                      action: str, node: str, token: str) -> dict[str, Any]:
+                      action: str, node: str, token: str, source_id: str = '', reason: str = '') -> dict[str, Any]:
     view = recovery_status(orch, run_id, project=project)
     if view['status'] == 'running':
         return {'ok': True, 'status': 'already_running', 'run_id': run_id,
@@ -230,7 +297,20 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
         assert_ready_for_run(project=project)
     except ProductionReadinessError:
         return {'ok': False, 'status': 'not_ready', 'error': '执行配置未就绪，请先检查项目与 API 配置。'}
-    if action == 'resume':
+    if action == 'revise_data':
+        from app.storage.data_source_store import DataSourceStore
+        from app.bridge.run_data_selection import resolve_run_data_source
+        try:
+            if not source_id or not reason.strip():
+                raise ValueError('请选择本项目数据，并说明需要核对的内容')
+            source = resolve_run_data_source(project, entrypoint='experiment', standalone=False,
+                selection=DataSourceStore().load(source_id))
+        except (OSError, ValueError) as exc:
+            return {'ok': False, 'status': 'data_revision_blocked', 'error': str(exc)}
+        result = await orch.request_artifact_revision(run_id=run_id, agent='experiment',
+            reason='用户选择数据后要求重新核对实验设计、适配编码并正常审核。' + reason.strip(),
+            restart_stopped=bool(orch.session(run_id).termination), data_source=source)
+    elif action == 'resume':
         result = orch.resume_owned_run(run_id)
     else:
         result = await orch.request_artifact_revision(run_id=run_id, agent=parse_node_key(node).stage,
@@ -238,7 +318,8 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
             restart_stopped=bool(orch.session(run_id).termination))
     result['run_id'] = run_id
     if result.get('ok'):
-        result['message'] = '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。'
+        result['message'] = ('已选择数据，正在原任务中修订方案及代码；完成后正常审核。' if action == 'revise_data'
+                             else '已提交检查点恢复。' if action == 'resume' else '已在原任务中启动阶段重试。')
     else:
         result.setdefault('error', '恢复暂未启动，请刷新状态并查看任务记录。')
     return result

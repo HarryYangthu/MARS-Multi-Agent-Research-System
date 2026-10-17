@@ -45,6 +45,8 @@ def git_failure(stderr: str, *, returncode: int | None = None) -> GitRuntimeErro
         return GitRuntimeError("Git 无法访问代码仓，请检查文件权限。", "git_permission_denied")
     if "dubious ownership" in text:
         return GitRuntimeError("Git 检测到代码仓所有者不匹配，请核对目录归属与 Git 信任设置。", "git_unsafe_repository")
+    if "filename too long" in text:
+        return GitRuntimeError("Git 路径过长，请使用支持长路径的 Git 或较短的工作区路径。", "git_path_too_long")
     if "index.lock" in text or "another git process" in text:
         return GitRuntimeError("代码仓正在被其他 Git 操作占用，请等待完成后重试。", "git_repository_locked")
     if "not a git repository" in text:
@@ -94,6 +96,45 @@ def git_environment(environment: Mapping[str, str] | None = None) -> dict[str, s
     result = {key: value for key, value in source.items() if key.upper() not in excluded
               and not key.upper().startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))}
     result["GIT_TERMINAL_PROMPT"] = "0"
+    return result
+
+
+def git_helper_environment(runtime: GitRuntime, environment: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Admit helper directories from the selected installation, not a repo override.
+
+    Standalone packages may need their relocated libexec directory. Resolve the
+    actual executable first so a source-repo symlink cannot redefine its origin.
+    Unknown explicit GIT_EXEC_PATH values are discarded; Git's compiled default
+    remains available when no same-installation helper directory is present.
+    """
+    result = git_environment(environment)
+    explicit = next((value for key, value in result.items() if key.upper() == 'GIT_EXEC_PATH'), None)
+    result = {key: value for key, value in result.items() if key.upper() != 'GIT_EXEC_PATH'}
+    executable = Path(runtime.executable).resolve(strict=True)
+    prefix = executable.parent.parent
+    layouts = ('libexec/git-core', 'lib/git-core', 'mingw64/libexec/git-core',
+               'mingw32/libexec/git-core', 'usr/libexec/git-core')
+    admitted: list[Path] = []
+    for layout in layouts:
+        directory = prefix / layout
+        helper = directory / ('git-upload-pack.exe' if sys.platform == 'win32' else 'git-upload-pack')
+        try:
+            resolved = directory.resolve(strict=True)
+            if (directory.is_dir() and resolved.is_relative_to(prefix)
+                    and helper.is_file() and helper.resolve(strict=True).is_relative_to(prefix)):
+                admitted.append(resolved)
+        except (OSError, ValueError, RuntimeError):
+            continue
+    selected: Path | None = None
+    if explicit and Path(explicit).is_absolute():
+        try:
+            candidate = Path(explicit).resolve(strict=True)
+            selected = next((path for path in admitted if path == candidate), None)
+        except (OSError, ValueError, RuntimeError):
+            pass
+    selected = selected or (admitted[0] if admitted else None)
+    if selected is not None:
+        result['GIT_EXEC_PATH'] = str(selected)
     return result
 
 
@@ -178,13 +219,16 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
             timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     runtime = resolve_git(environment=environment)
     limit = timeout or float(_policy(repo_root() / "configs/git_runtime.yaml")["command_timeout_seconds"])
-    child_environment = git_environment(environment)
+    child_environment = git_helper_environment(runtime, environment)
     # Local transports invoke Git again (for example upload-pack during a
     # file fetch). They must discover the verified host binary before an
     # unusable system shim, just like configured coding commands do.
     child_environment["PATH"] = str(Path(runtime.executable).parent) + os.pathsep + child_environment.get("PATH", "")
     try:
-        result = subprocess.run([runtime.executable, *arguments], cwd=cwd, env=child_environment,
+        # Isolated clones add staging and object paths beneath the workspace.
+        # Enable Git for Windows long paths without changing host configuration.
+        options = ["-c", "core.longpaths=true"] if sys.platform == "win32" else []
+        result = subprocess.run([runtime.executable, *options, *arguments], cwd=cwd, env=child_environment,
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=limit)
     except subprocess.TimeoutExpired as exc:
         raise GitRuntimeError("Git 操作超时，进度已保留，请核对后重试。", "git_timeout") from exc
@@ -197,7 +241,8 @@ def run_git(arguments: Sequence[str], *, cwd: Path | None = None,
 
 def git_child_environment() -> dict[str, str]:
     """Use the same verified Git for a coding program's own child commands."""
-    env = git_environment()
-    directory = str(Path(resolve_git().executable).parent)
+    runtime = resolve_git()
+    env = git_helper_environment(runtime)
+    directory = str(Path(runtime.executable).parent)
     env["PATH"] = directory + os.pathsep + env.get("PATH", "")
     return env

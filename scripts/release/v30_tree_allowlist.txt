@@ -115,12 +115,15 @@ backend/app/bridge/__init__.py
 backend/app/bridge/agent_progress.py
 backend/app/bridge/agent_registry.py
 backend/app/bridge/agent_runner.py
+backend/app/bridge/coding_reuse.py
+backend/app/bridge/coding_reuse_evidence.py
 backend/app/bridge/bridge_agent.py
 backend/app/bridge/candidate_workspace.py
 backend/app/bridge/cli_research_report.py
 backend/app/bridge/cli_research_service.py
 backend/app/bridge/code_workspace_resolver.py
 backend/app/bridge/commander.py
+backend/app/bridge/commander_context.py
 backend/app/bridge/commander_code.py
 backend/app/bridge/conversation_edit.py
 backend/app/bridge/commander_agent.py
@@ -336,6 +339,12 @@ backend/app/harness/tools/code_inspection.py
 backend/app/harness/tools/config.py
 backend/app/harness/tools/execution/__init__.py
 backend/app/harness/tools/execution/local_command.py
+backend/app/harness/tools/execution/command_preflight.py
+configs/execution_review.yaml
+frontend/src/components/ExecutionConfigurationReview.tsx
+frontend/src/lib/executionReview.ts
+backend/app/bridge/git_code_delivery.py
+backend/app/harness/reporting/execution_evidence.py
 backend/app/harness/tools/knowledge/__init__.py
 backend/app/harness/tools/mcp_adapters/__init__.py
 backend/app/harness/tools/process_runtime.py
@@ -694,3 +703,5 @@ docs/commander-managed-review.md
 
 configs/project_storage.yaml
 backend/app/harness/project_storage.py
+backend/app/harness/tools/code/check_environment.py
+backend/app/harness/agent_loop/zcode/limits.py

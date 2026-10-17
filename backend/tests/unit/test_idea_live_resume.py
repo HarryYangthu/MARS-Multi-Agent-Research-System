@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -42,6 +44,24 @@ def test_abandoned_model_recovery_is_explicit_and_preserves_state() -> None:
                                has_review=False, recover_abandoned=True)
 
 
+def test_exclusive_run_rejects_an_actual_competing_process(tmp_path: Path) -> None:
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "from scripts.idea_live_resume import exclusive_run\n"
+        "try:\n"
+        "    with exclusive_run(Path(sys.argv[1])): pass\n"
+        "except ValueError as exc:\n"
+        "    assert 'another evaluation' in str(exc)\n"
+        "    sys.exit(17)\n"
+    )
+    argv = [sys.executable, "-X", "utf8", "-c", script, str(tmp_path)]
+    with exclusive_run(tmp_path):
+        blocked = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        assert blocked.returncode == 17, blocked.stderr
+    released = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    assert released.returncode == 0, released.stderr
+
+
 def test_resume_message_guard_accepts_json_roundtrip_but_rejects_changed_input() -> None:
     messages = [Message("user", "Authored task with exact whitespace.\n"),
                 Message("assistant", "", (ToolCall("c", "read", '{"path":"public.txt"}'),))]
@@ -67,16 +87,18 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
         atomic_json(tmp_path / "input/request.json", initial)
         atomic_json(tmp_path / "summary.json", {"run_id": tmp_path.name, "status": "prepared"})
         context = await agent.build_context(request)
-        with pytest.raises(RuntimeError, match="model_error"):
+        with pytest.raises(RuntimeError):
             await agent.run_loop(request, context)
         loaded, _, checkpoint, before = load_resume(tmp_path)
+        assert before["status"] == "model_error"
         assert loaded == initial and before["counts"]["model_requests"] == 1
         journal = record_resumption(tmp_path, checkpoint, {"source_commit": "authored-journal-label", "source_dirty": False})
         assert json.loads((journal / "checkpoint.json").read_text()) == before
         request.extra["resume_invocation"] = checkpoint.parent.name
-        with pytest.raises(RuntimeError, match="model_error"):
+        with pytest.raises(RuntimeError):
             await agent.run_loop(request, context)
     after = json.loads(checkpoint.read_text())
+    assert after["status"] == "model_error"
     assert after["counts"]["model_requests"] == after["counts"]["sdk_attempts"] == 2
     assert after["counts"]["model_responses"] == 0 and after["candidate"] == ""
     assert after["usage_complete"] is False

@@ -192,6 +192,9 @@ class FocusedIdeaAgent(IdeaAgent):
             "blocks_execution=true 且 kind=other 时必须写 context_ref，例如初始化权重对应 checkpoint。"
             "不要把 other 当作输入字段，也不要从描述文字猜测绑定。可用输入名称："
             + json.dumps(sorted(request.upstream_artifacts), ensure_ascii=False))
+        context.task += ("\n引用真实代码仓时，evidence_refs 用 kind=code、ref=仓内精确相对文件路径；"
+            "也可在 method_spec.code_check.files[].path 记录精确路径。说明与行号放在其他字段，"
+            "不要只在 required_context.description 写文件名，否则下游无法可靠核对源文件。")
         policy = quality_policy(self._quality, requirements)
         context.task += ("\n宿主调研验收门槛：" + json.dumps(policy, ensure_ascii=False)
             + "\n流程：检索候选→按相关性筛选→完整阅读方法→比较不同方向→提出方案→独立评审。"

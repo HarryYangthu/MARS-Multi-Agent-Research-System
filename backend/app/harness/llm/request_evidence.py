@@ -5,7 +5,7 @@ from app.harness.llm.provider_base import LLMConfig
 
 BODY_FIELDS = frozenset({"model", "messages", "contents", "system", "systemInstruction", "tools",
                         "max_tokens", "temperature", "top_p", "reasoning_effort", "response_format",
-                        "stream", "generationConfig", "parallel_tool_calls", "tool_choice", "thinking"})
+                        "stream", "stream_options", "generationConfig", "parallel_tool_calls", "tool_choice", "thinking"})
 
 
 def record_provider_request(config: LLMConfig, provider: str, body: dict[str, Any]) -> None:

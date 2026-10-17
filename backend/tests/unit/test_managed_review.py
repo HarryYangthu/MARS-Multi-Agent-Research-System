@@ -2,11 +2,41 @@
 from pathlib import Path
 import json
 from functools import partial
+from dataclasses import replace
 
 import pytest
+
+
+def test_design_review_does_not_treat_old_downstream_as_current_prerequisites(tmp_path: Path) -> None:
+    from app.bridge.managed_review import artifact_review_materials
+    run = RunStore(tmp_path).create(task='review-stage-boundary', project='synthetic_regression')
+    for ref, value in {'idea/proposal.approved.md': 'Approved goal',
+                       'experiment/experiment_plan.approved.md': 'Current design',
+                       'coding/code_spec.approved.md': 'Old three-band implementation',
+                       'execution/run_log.approved.md': 'Old unstarted execution'}.items():
+        (run.root / ref).write_text(value)
+    design = artifact_review_materials(run, 'experiment_attempt_2')
+    assert design['approved_upstream'] == {'idea/proposal.approved.md': 'Approved goal'}
+    assert design['review_contract']['stage'] == 'experiment'
+    assert 'coding/code_spec.approved.md' in design['review_contract']['historical_downstream_refs']
+    assert design['review_contract']['implementation_due_at'] == 'coding'
+    coding = artifact_review_materials(run, 'coding_attempt_2')
+    assert coding['approved_upstream']['experiment/experiment_plan.approved.md'] == 'Current design'
+    assert 'execution/run_log.approved.md' not in coding['approved_upstream']
+    writing = artifact_review_materials(run, 'writing')
+    assert writing['approved_upstream']['execution/run_log.approved.md'] == 'Old unstarted execution'
+    assert writing['review_contract']['real_results_due_at'] == 'writing'
+    # The full current data selection also participates in review identity.
+    source = run.root / 'input/selected_data_source.json'
+    source.write_text(json.dumps({'id': 'new-data', 'description': 'User confirmed dual-band 80M'}))
+    updated = artifact_review_materials(run, 'experiment_attempt_2')
+    assert updated != design and 'User confirmed dual-band 80M' in updated['selected_data']
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review
+from app.bridge.managed_review import ReviewPolicy, review_input_manifest, review_policy
+from app.harness.agent_loop.trace import digest
+from app.harness.llm.provider_base import Message
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.workflow_service import build_standalone
 from app.bridge.commander_session import CommanderSessionStore, ChatMessage
@@ -21,7 +51,7 @@ def test_execution_review_carries_exact_approvals_and_separates_budget_units(tmp
     contents = {'experiment/experiment_plan.approved.md': 'Human-authored plan: 100 epochs.\n',
                 'coding/code_spec.approved.md': 'Human-authored approved command binding.\n'}
     for ref, content in contents.items():
-        (run.root / ref).write_text(content)
+        (run.root / ref).write_bytes(content.encode("utf-8"))
     configuration = {'confirmed': False, 'jobs': [], 'blockers': [],
         'budget': {'unit': 'model_requests', 'used': 92, 'limit': 100, 'required': 0},
         'experiments': [{'name': 'candidate', 'config': {'budget_unit': 'epochs', 'max_iters': 100}}]}
@@ -30,7 +60,7 @@ def test_execution_review_carries_exact_approvals_and_separates_budget_units(tmp
     assert payload['review_contract']['confirmed_false_means'] == 'awaiting_this_decision'
     assert payload['review_contract']['empty_jobs_means'] == 'no_simulations_launched'
     assert payload['review_contract']['model_budget_unit'] == 'model_requests'
-    assert set(payload['evidence_refs']) == {'execution_configuration', *contents}
+    assert set(payload['evidence_refs']) == {'execution_configuration', 'execution_recovery', *contents}
     for item in payload['approved_artifacts']:
         assert item['content'] == contents[item['ref']]
         assert item['sha256'] == hashlib.sha256(contents[item['ref']].encode()).hexdigest()
@@ -58,6 +88,108 @@ async def test_execution_review_identity_tracks_approvals_not_live_usage(tmp_pat
     assert not list((run.root / 'agent_traces/commander').glob('*/events.jsonl'))
 from app.storage.run_store import RunStore
 from app.storage.run_state_store import RunStateStore
+
+
+@pytest.mark.asyncio
+async def test_retry_evidence_keeps_cleanup_and_later_stop_without_automatic_approval(tmp_path: Path) -> None:
+    from app.bridge.managed_review import execution_review_payload
+    run = RunStore(tmp_path).create(project='regression', task='explicit recovery evidence')
+    # Authored lifecycle records exercise the reader; no service/model response is replaced.
+    stop = {'type': 'cancelled', 'cleanup_complete': True, 'interrupted_nodes': ['execution']}
+    run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': run.run_id, 'termination': stop})
+    run.write_event('run_lifecycle', {'event': 'run.explicit_execution_retry', 'run_id': run.run_id,
+        'node': 'execution', 'previous_termination': stop, 'reason': 'User requested recovery after cleanup',
+        'automatic_resume': False})
+    config = {'node': 'execution', 'token': 'decision', 'inputs_token': 'inputs', 'blockers': ['Pending actual checks']}
+    payload = execution_review_payload(run, goal='Review only', configuration=config)
+    recovery = payload['execution_recovery']
+    assert recovery['retry_after_latest_stop'] is True
+    assert recovery['latest_explicit_retry']['event']['previous_termination']['cleanup_complete'] is True
+    async def blocked_review(data: dict) -> None:
+        assert await review_once(run=run, node='execution', kind='execution_configuration', payload=data,
+            generation=1, eligible=lambda: True, bus=InProcessEventBus(), blocker='Pending actual checks') is None
+    await blocked_review(payload)
+    run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_reviewed', 'node': 'coding'})
+    unchanged = execution_review_payload(run, goal='Review only', configuration=config)
+    assert unchanged == payload
+    await blocked_review(unchanged)
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 1
+    run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': run.run_id, 'termination': stop})
+    later = execution_review_payload(run, goal='Review only', configuration=config)
+    assert later['execution_recovery']['retry_after_latest_stop'] is False
+    await blocked_review(later)
+    assert len(list((run.root / 'hitl/managed_reviews').glob('*.json'))) == 2
+    assert not list((run.root / 'execution/confirmations').glob('*.json'))
+    diagnostic = run.root / 'execution/recovery_checks/authored_reader_test.json'
+    diagnostic.parent.mkdir(parents=True)
+    diagnostic.write_text(json.dumps({'run_id': run.run_id, 'project': run.project,
+        'description': 'Authored file-reader regression input, no actual check or result asserted.'}))
+    supplied = execution_review_payload(run, goal='Review only', configuration=config)
+    assert supplied['execution_recovery']['diagnostics'][0]['provenance'].startswith('independent_diagnostic')
+    assert 'no actual check' in supplied['execution_recovery']['diagnostics'][0]['text']
+    assert supplied != later
+    diagnostic.write_text(json.dumps({'run_id': run.run_id, 'project': 'different'}))
+    with pytest.raises(ValueError, match='补充恢复检查'):
+        execution_review_payload(run, goal='Review only', configuration=config)
+    diagnostic.unlink()
+    run.write_event('run_lifecycle', {'event': 'run.explicit_execution_retry', 'run_id': 'another-run'})
+    with pytest.raises(ValueError, match='不匹配'):
+        execution_review_payload(run, goal='Review only', configuration=config)
+
+
+def test_complete_review_over_legacy_character_limit_fits_configured_context() -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {"input_token_budget": 128000}, "model": {"context_window": 1048576}})
+    messages = [Message("system", "Review the entire authored input."), Message("user", "a" * 61000)]
+    manifest = review_input_manifest(messages, policy, agent, {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["within_budget"] and not manifest["truncated"]
+    assert manifest["input_token_budget"] == 128000
+    assert manifest["complete_input_sha256"] == digest([m.to_wire() for m in messages])
+    assert len(messages[-1].content) == 61000
+
+
+def test_review_counts_multibyte_input_and_keeps_all_evidence_when_too_large() -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {}, "model": {"context_window": 1048576}})
+    messages = [Message("user", "证" * 50000)]
+    manifest = review_input_manifest(messages, policy, agent, {"input_budget": 128000, "safety_margin": 1000})
+    assert not manifest["within_budget"] and not manifest["truncated"]
+    assert manifest["estimated_upper_bound_tokens"] > 150000
+    assert messages[0].content == "证" * 50000
+
+
+def test_explicit_review_budget_does_not_modify_ordinary_context() -> None:
+    context = {"input_budget": 128000, "safety_margin": 1000}
+    policy = review_policy().model_copy(update={"input_token_budget": 256000})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {}, "model": {"context_window": 1048576}})
+    manifest = review_input_manifest([Message("user", "证" * 60000)], policy, agent, context)
+    assert manifest['within_budget'] and manifest['input_token_budget'] == 256000
+    assert context['input_budget'] == 128000 and not manifest['truncated']
+
+
+@pytest.mark.parametrize("loop_budget,window,expected", [(64000, 1048576, 64000), (128000, 420000, 25784)])
+def test_review_respects_smaller_role_or_model_input_space(loop_budget: int, window: int, expected: int) -> None:
+    policy = review_policy().model_copy(update={"input_token_budget": 128000, "max_output_tokens": 393216})
+    agent = replace(model_registry.get_agent_config("commander"), max_tokens=393216,
+                    raw={"loop": {"input_token_budget": loop_budget}, "model": {"context_window": window}})
+    manifest = review_input_manifest([Message("user", "Authored review")], policy, agent,
+                                     {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["input_token_budget"] == expected
+
+
+def test_legacy_review_policy_migrates_to_common_input_budget() -> None:
+    raw = {**review_policy().model_dump(), "input_token_budget": None, "max_input_characters": 60000}
+    policy = ReviewPolicy.model_validate(raw)
+    assert "max_input_characters" not in policy.model_dump()
+    assert "max_input_characters" not in ReviewPolicy.model_json_schema()["properties"]
+    assert raw["max_input_characters"] == 60000
+    agent = replace(model_registry.get_agent_config("commander"), raw={"loop": {}, "model": {}})
+    manifest = review_input_manifest([Message("user", "a" * 61000)], policy, agent,
+                                     {"input_budget": 128000, "safety_margin": 1000})
+    assert manifest["within_budget"] and manifest["input_token_budget"] == 128000
 
 
 def test_review_parser_requires_bound_evidence() -> None:

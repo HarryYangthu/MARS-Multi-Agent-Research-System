@@ -39,6 +39,13 @@ def test_writer_omits_nonfinite_and_nonmeasurement_values(tmp_path: Path) -> Non
     assert events.Scalars("validation/RES_db")[0].step == 42
 
 
+def test_idle_writer_does_not_create_empty_event_files(tmp_path: Path) -> None:
+    with ScalarWriter(tmp_path / 'idle') as writer:
+        writer.scalar('invalid', float('nan'), 0)
+        writer.flush()
+    assert not list(tmp_path.rglob('events.out.tfevents.*'))
+
+
 @pytest.mark.asyncio
 async def test_real_tensorboard_loads_and_reloads_run_scoped_events(tmp_path: Path) -> None:
     manager = TensorBoardManager(tmp_path / "service")
@@ -64,7 +71,7 @@ async def test_real_tensorboard_loads_and_reloads_run_scoped_events(tmp_path: Pa
                 rows: list[list[float]] = []
                 while time.monotonic() < deadline:
                     response = await client.get(base + "/data/plugin/scalars/scalars",
-                        params={"run": "execution/tensorboard", "tag": "train/loss"})
+                        params={"run": str(event_dir.relative_to(run.root)), "tag": "train/loss"})
                     if response.status_code == 200:
                         rows = response.json()
                         if rows and rows[-1][1] == 2:
@@ -117,7 +124,8 @@ async def test_proxy_directory_routes_do_not_redirect_to_backend_origin() -> Non
 
 
 @pytest.mark.asyncio
-async def test_running_viewer_collects_new_saved_observations(tmp_path: Path) -> None:
+@pytest.mark.parametrize('format', ['history', 'circle_csv'])
+async def test_running_viewer_collects_new_saved_observations(tmp_path: Path, format: str) -> None:
     import json
 
     manager = TensorBoardManager(tmp_path/'service')
@@ -126,19 +134,28 @@ async def test_running_viewer_collects_new_saved_observations(tmp_path: Path) ->
     model = attempt/'training/model'
     model.mkdir(parents=True)
     (attempt/'job.json').write_text(json.dumps({'run_id': run.run_id, 'experiment_id': 'study'}))
-    (model/'history.json').write_text('[{"optimizer_steps": 0, "validation_RES_db": 9.0}]')
-    (model/'steps.jsonl').write_text('')
+    if format == 'history':
+        (model/'history.json').write_text('[{"optimizer_steps": 0, "validation_RES_db": 9.0}]')
+        (model/'steps.jsonl').write_text('')
+    else:
+        (model/'training.csv').write_text(
+            'circle,updates,lr,mean_loss_sum,train_PIM_native,train_RES_native,rx_centers_mhz,err_centers_mhz\n')
+    tag = 'train/loss' if format == 'history' else 'train/mean_loss_sum'
     try:
         await manager.activate(run, 1)
-        (model/'steps.jsonl').write_text('{"optimizer_step": 1, "training_loss": 0.125}\n')
+        if format == 'history':
+            (model/'steps.jsonl').write_text('{"optimizer_step": 1, "training_loss": 0.125}\n')
+        else:
+            with (model/'training.csv').open('a') as handle:
+                handle.write('1,1,0.004,0.125,25.84,22,[34.3],[34.2]\n')
         deadline = time.monotonic()+10
         records = []
         while time.monotonic() < deadline:
             dirs = list((run.root/'execution/tensorboard_artifacts').glob('*/training/model'))
             if dirs:
                 accumulator = EventAccumulator(str(dirs[0])).Reload()
-                if 'train/loss' in accumulator.Tags()['scalars']:
-                    records = accumulator.Scalars('train/loss')
+                if tag in accumulator.Tags()['scalars']:
+                    records = accumulator.Scalars(tag)
                     if records:
                         break
             await asyncio.sleep(.25)

@@ -36,3 +36,14 @@ skills:
       output_schemas:
       - report.v1
       required_tool_successes: []
+  briefing_report:
+    version: 1.0.0
+    name: briefing-report
+    description: 按可对外汇报的结构撰写研究报告：目的/原理公式/方案路径/实验设计/结果/结论/边界，配合导出器的图表与框图渲染。
+    instructions: skills/briefing_report.md
+    required_tools: []
+    projects: []
+    acceptance:
+      output_schemas:
+      - report.v1
+      required_tool_successes: []

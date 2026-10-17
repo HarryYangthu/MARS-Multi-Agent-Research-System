@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import canonical, digest
+from app.harness.llm.usage_policy import agent_quota_mode
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ def review_revision(state: dict[str, Any], review: ExternalReview, policy: Agent
         raise ValueError("external review does not match the current candidate")
     if state.get("pending") is not None:
         raise ValueError("resolve the pending operation before applying external review")
-    if policy.mode == "reflection" and state["counts"]["reflections"] >= policy.max_reflections:
+    if agent_quota_mode() == 'limited' and policy.mode == "reflection" and state["counts"]["reflections"] >= policy.max_reflections:
         raise ValueError("reflection budget exhausted; external review cannot reset it")
     required_calls = 2 if policy.mode == "reflection" else 1
     if not policy.allows_model_calls(state["counts"]["model_requests"], required_calls):

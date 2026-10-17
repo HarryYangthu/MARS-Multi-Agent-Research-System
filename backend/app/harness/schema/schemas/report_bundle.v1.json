@@ -28,7 +28,7 @@
         "required": ["kind", "path", "status"],
         "additionalProperties": true,
         "properties": {
-          "kind": { "enum": ["markdown", "excel", "word", "powerpoint"] },
+          "kind": { "enum": ["markdown", "html", "excel", "word", "powerpoint"] },
           "path": { "type": "string" },
           "status": { "enum": ["completed", "failed", "skipped"] },
           "error": { "type": "string" },

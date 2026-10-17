@@ -19,6 +19,11 @@ def verify_written_code(run: RunHandle, text: str) -> bool:
     validation = validate_document(text, expected_schema="code_spec.v1")
     if not validation.valid or validation.metadata.get("project") != run.project:
         raise ValueError("编码方案校验未通过或不属于当前项目，未批准。")
+    backend = validation.metadata.get('coding_backend')
+    if isinstance(backend, dict) and backend.get('type') == 'git_commit':
+        from app.bridge.git_code_delivery import verify_git_delivery
+        verify_git_delivery(run, validation.metadata)
+        return True
     rows: list[dict[str, Any]] = validation.metadata["files_changed"]
     declared = {row["path"]: row["type"] for row in rows}
     if len(declared) != len(rows):
@@ -49,5 +54,6 @@ def coding_candidate_errors(run: RunHandle, text: str) -> list[str]:
     if validation.metadata.get('execution_jobs') or execution_delivery_required(run, 'coding'):
         plan = run.root / 'experiment/experiment_plan.approved.md'
         return coding_handoff_errors(plan.read_text() if plan.is_file() else '', validation.metadata,
-            project=run.project, plan_required=experiment_plan_required(run, 'coding'))
+            project=run.project, plan_required=experiment_plan_required(run, 'coding'),
+            run_id=run.run_id, run_root=run.root)
     return []

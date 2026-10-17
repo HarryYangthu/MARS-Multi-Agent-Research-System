@@ -46,7 +46,7 @@ def test_default_budget_matches_frozen_plan() -> None:
     assert (budget.proposal_candidates, budget.implemented_candidates, budget.debate_rounds, budget.automatic_iterations) == (2, 1, 1, 2)
     assert (budget.model_requests, budget.tool_executions, budget.research_activity_seconds) == (60, 120, 5400)
     assert (budget.input_tokens, budget.billed_output_tokens, budget.model_cost_cny) == (1_000_000, 128_000, 20)
-    assert (budget.request_input_tokens, budget.request_output_tokens, budget.coding_output_tokens) == (48_000, 8192, 16_384)
+    assert (budget.request_input_tokens, budget.request_output_tokens, budget.coding_output_tokens) == (48_000, 32_768, 32_768)
     assert (budget.training_job_seconds, budget.concurrent_training_jobs, budget.max_gpus,
             budget.training_process_seconds, budget.gpu_seconds) == (600, 1, 1, 3600, 3600)
     assert (budget.operation_retries, budget.repeated_error_limit) == (2, 2)

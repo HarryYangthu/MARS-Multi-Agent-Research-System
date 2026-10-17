@@ -14,7 +14,7 @@ import httpx
 import pytest
 import yaml
 
-from app.agents.base import RunRequest
+from app.agents.base import ContextPack, RunRequest
 from app.agents.experiment.agent import ExperimentAgent
 from app.api import dependencies
 from app.api.artifacts import router
@@ -42,6 +42,29 @@ def code(text: str, project: str = 'regression', **binding: Any) -> dict[str, An
         'baseline_compat': {'preserved': True}, 'files_changed': [],
         'experiment_plan_sha256': document_hash(text),
         'execution_jobs': [{'name': 'baseline', 'config': binding or {'command_id': 'registered'}}]}
+
+
+def test_web_experiment_submission_uses_project_bound_native_schema() -> None:
+    from jsonschema import Draft202012Validator
+    from app.harness.agent_loop.native_protocol import native_specs
+
+    agent = ExperimentAgent()
+    request = RunRequest(project='regression', user_request='Design the comparison')
+    context = ContextPack(system='Contract check', project=request.project, task=request.user_request)
+    assert agent.loop_policy.protocol == 'native_tools'
+    assert agent.loop_policy.native_observation_history
+    schema = agent.submission_schema(request)
+    assert schema is not None
+    submission = native_specs([], schema)[0]['function']
+    assert submission['name'] == 'mars_submit_document'
+    validator = Draft202012Validator(submission['parameters'])
+    # Human-authored contract data; no provider call or claimed experiment.
+    validator.validate({'metadata': plan(), 'body': 'Comparison plan.'})
+    assert list(validator.iter_errors({'metadata': plan('wrong-project'), 'body': 'Comparison plan.'}))
+    assert list(validator.iter_errors({'metadata': plan()}))
+    messages = agent._messages_for_context(request, context, purpose='loop')
+    assert any('mars_submit_document' in message.content for message in messages)
+    assert not any('Return final.metadata' in message.content for message in messages)
 
 
 @pytest.mark.asyncio
@@ -236,6 +259,7 @@ def test_backend_precedence_is_shared_by_settings_and_tool_configuration(tmp_pat
         (runtime / path).mkdir(parents=True)
     (runtime / 'configs/agents.yaml').write_text((repo_root() / 'configs/agents.yaml').read_text())
     (runtime / 'configs/local_runtime.yaml').write_text((repo_root() / 'configs/local_runtime.yaml').read_text())
+    (runtime / 'configs/cli_research.yaml').write_text((repo_root() / 'configs/cli_research.yaml').read_text())
     (runtime / 'configs/execution.yaml').write_text(yaml.safe_dump({'execution': {'backend': 'paper_static'}}))
     environment = {key:value for key,value in os.environ.items() if key not in {'MARS_EXECUTION_BACKEND', 'MARS_EXECUTION_CONFIG_PATH'}}
     environment.update(MARS_RUNTIME_ROOT=str(runtime), PYTHONPATH=str(repo_root() / 'backend'))

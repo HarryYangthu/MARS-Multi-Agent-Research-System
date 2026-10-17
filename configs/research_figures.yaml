@@ -1,0 +1,13 @@
+# The supported fixed-window export protocol. Unknown protocols are not inferred.
+schema: research_figures.v1
+max_source_bytes: 33554432
+max_invocations: 24
+max_channels: 128
+max_samples: 1048576
+max_unpacked_bytes: 134217728
+dpi: 180
+welch:
+  segment: 1024
+  overlap: 256
+  fft: 2048
+  kaiser_beta: 10

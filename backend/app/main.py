@@ -32,6 +32,7 @@ from app.api import discovery as discovery_api
 from app.api import evaluation as evaluation_api
 from app.api import events as events_api
 from app.api import execution_config as execution_config_api
+from app.api import project_management as project_management_api
 from app.api import experiments as experiments_api
 from app.api import execution as execution_api
 from app.api import tensorboard as tensorboard_api
@@ -189,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(experiments_api.router)
     app.include_router(ainative_api.router)
     app.include_router(execution_config_api.router)
+    app.include_router(project_management_api.router)
     app.include_router(readiness_api.router)
     app.include_router(runtime_api.router)
     app.include_router(config_api.router)

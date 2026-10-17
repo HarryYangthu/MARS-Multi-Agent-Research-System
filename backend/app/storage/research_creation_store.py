@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
-from typing import Literal
+from typing import Literal, cast
 
 from filelock import FileLock, Timeout
 
@@ -128,7 +128,8 @@ class ResearchCreationStore:
             raise CreationCatalogIntegrityError("Invalid creation intent identity")
         assert isinstance(binding, str) and (run_id is None or isinstance(run_id, str))
         assert phase in ("pending", "created", "unknown", "rejected")
-        return CreationIntent(request_id, name, task_sha256, binding, run_id, phase)
+        return CreationIntent(request_id, name, task_sha256, binding, run_id,
+                              cast(Literal['pending', 'created', 'unknown', 'rejected'], phase))
 
     def get(self, request_id: str) -> CreationIntent | None:
         validate_request_id(request_id)

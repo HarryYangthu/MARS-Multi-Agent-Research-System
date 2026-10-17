@@ -1,11 +1,21 @@
 frontend:
+  server:
+    # Multi-step Commander calls can exceed Next's 30s rewrite default.
+    # Finite transport ceiling matches the aggregate model time budget;
+    # provider, task and short client-request deadlines remain independent.
+    proxy_timeout_ms: 5400000
+    # Scientific MAT captures exceed Next 15's 10 MiB body-cloning default.
+    upload_max_bytes: 1073741824
   client:
-    request_timeout_ms: 15000
+    request_timeout_ms: 60000
+    # Confirmation runs a bounded real preflight before persisting permission.
+    execution_confirmation_timeout_ms: 60000
     connection_test_timeout_ms: 40000
     control_refresh_ms: 2000
     activity_clock_ms: 1000
     readiness_refresh_ms: 10000
     max_contract_bytes: 1048576
+    upload_max_bytes: 1073741824
   workbench:
     layout: codex_three_pane
     default_left_panel: runs

@@ -6,21 +6,24 @@ files. Stdout, a zero exit code, or old metrics alone cannot establish success.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 import hashlib
 import json
 import math
 import asyncio
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from fnmatch import fnmatchcase
 import time
 import shutil
+import tempfile
 from typing import Any
 import uuid
 
-from jsonschema import validate
+from jsonschema import ValidationError, validate
 
 from app.harness.persistence import atomic_write_json, atomic_write_text
 from app.harness.tools.config import load_execution_config, tool_config
-from app.harness.tools.process_runtime import communicate_process, start_process
+from app.harness.tools.process_runtime import CapturedProcessStream, ProcessOutputCapture, start_process, stream_process_output
 
 LOCAL_COMMAND_CONTROL_FILES = frozenset({
     "result.json", "job.json", "execution_receipt.json", "stdout.log", "stderr.log",
@@ -61,8 +64,57 @@ _RESULT_SCHEMA: dict[str, Any] = {
         "evidence_paths": {"type": "array", "minItems": 1, "maxItems": 32,
                            "uniqueItems": True, "items": {"type": "string", "minLength": 1}},
         "loss_curve": {"type": "array", "items": {"type": "number"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
     },
 }
+
+
+def local_command_protocol() -> dict[str, Any]:
+    """Document the actual file envelope and result validator for code delivery."""
+    return {
+        'request': {
+            'delivery': 'MARS_JOB_REQUEST 是 UTF-8 JSON 文件的绝对路径，不是 JSON 文本；先读取文件再解析。',
+            'schema': 'local_command_request.v1',
+            'fields': ['schema', 'invocation_id', 'run_id', 'experiment_id', 'project',
+                       'config', 'seed', 'steps', 'output_dir'],
+            'config_location': 'execution_jobs.config 在 request["config"] 中，不在请求顶层。',
+            'data_binding': '声明 consumes_data_path 的命令须消费 request.config.data_path 或 MARS_DATA_PATH；'
+                            '该值由宿主解析并核验，不能忽略后沿用另一份数据。'
+                            '上传存储名可能经过字符转换，与原始文件名或代码注册表键不同；'
+                            '逻辑数据集键应与物理路径分开，不得用路径 stem 覆盖已核验的配置键，'
+                            '也不能按注册表键重新拼接文件路径。验证和训练必须使用同一实际文件，'
+                            '并核对该文件内容是否符合逻辑配置。',
+        },
+        'result_schema': deepcopy(_RESULT_SCHEMA),
+        'artifact_layout': {
+            'run_root_env': 'MARS_RUN_ROOT',
+            'output_dir': 'execution/local_commands/<safe_experiment_id>/<invocation_id>/',
+            'request_file': 'job.json',
+            'result_file': 'result.json',
+            'host_receipt_file': 'execution_receipt.json',
+            'host_hash_format': 'sha256:<64 lowercase hex digits>, including request_sha256/result_sha256/evidence[].sha256',
+            'host_data_binding_fields': ['path', 'bytes', 'mtime_ns', 'binding_sha256'],
+            'host_data_binding_semantics': 'binding_sha256 hashes path/bytes/mtime metadata, not the dataset content. '
+                'Read the exact data_binding.path and verify content against your frozen dataset digest if required. '
+                'The result schema has no data field; dataset provenance belongs in a separate evidence file. '
+                'Receipt evidence rows contain absolute path, bytes and prefixed SHA256; verify checkpoint/config/measurement bytes before reuse.',
+            'dependent_jobs': (
+                '不同实验的 output_dir 不在同一 experiment_id 目录下。需要复用前序权重时，'
+                '从本任务 MARS_RUN_ROOT 内核对实际 job.json、result.json 和 execution_receipt.json；'
+                'receipt 由宿主验收后写入，核对 run_id/experiment_id/invocation_id、completed 状态、'
+                'returncode=0、request_sha256/result_sha256（sha256: 前缀）及实际证据。'
+                '同时核对数据、配置、种子和预算；没有匹配或多个匹配无法区分时明确报错。'
+                '不能猜测目录、采用其他任务权重或把存在 measurement.json 当作宿主验收成功。'
+            ),
+        },
+        'result_delivery': (
+            'MARS_RESULT_PATH 是结果文件路径；成功结果严格符合上述 schema，三个标识原样复制请求。'
+            'metrics 仅放真实有限数值，布尔门控转换为 0/1。evidence_paths 是相对 request.output_dir '
+            '的实际证据路径，不得使用控制文件、绝对路径或路径逃逸。附加说明保存到独立证据 JSON，'
+            'warnings 可选且必须为字符串数组；其他附加字段不能塞入结果顶层。'
+            '失败应返回非零退出码，不补造 completed 结果。'
+        ),
+    }
 
 
 def _file_hash(path: Path) -> str:
@@ -73,27 +125,89 @@ def _file_hash(path: Path) -> str:
     return "sha256:" + checksum.hexdigest()
 
 
-def _command(job: LocalCommandJob, tool_name: str) -> tuple[tuple[str, ...], tuple[str, ...], float]:
+def _relative_capability(value: Any, name: str) -> str:
+    if (not isinstance(value, str) or not value or Path(value).is_absolute()
+            or PureWindowsPath(value).drive or '..' in Path(value.replace('\\', '/')).parts):
+        raise ValueError(f'{name} must be a repository-relative path')
+    return value.replace('\\', '/')
+
+
+def command_supports_project(command: dict[str, Any], project: str) -> bool:
+    """Use the same explicit project scope for discovery and execution."""
+    projects = command.get('project_ids')
+    return projects is None or (isinstance(projects, list) and bool(projects)
+        and all(isinstance(item, str) and bool(item) for item in projects) and project in projects)
+
+
+def _registered_command(job: LocalCommandJob) -> dict[str, Any]:
     cfg = load_execution_config()["execution"]
     rows = cfg.get("local_commands", [])
-    selected = next((row for row in rows if isinstance(row, dict)
-                     and (not job.command_id or row.get("id") == job.command_id)), None) if isinstance(rows, list) else None
-    if selected is None:
-        raise RuntimeError("no local_command is configured for execution tools")
-    raw = selected.get("argv")
+    declared = job.config.get('command_id')
+    if job.command_id and declared and job.command_id != declared:
+        raise ValueError('command_id disagrees with the approved job configuration')
+    command_id = job.command_id or declared
+    if not isinstance(command_id, str) or not command_id:
+        raise ValueError('local_command requires an explicit registered command_id; no default command is selected')
+    matching = [row for row in rows if isinstance(row, dict) and row.get('id') == command_id] if isinstance(rows, list) else []
+    if len(matching) != 1:
+        raise ValueError('registered command_id is unavailable or ambiguous: ' + command_id)
+    selected: dict[str, Any] = matching[0]
+    for field, value in (('project_ids', job.project), ('entrypoints', job.config.get('entrypoint')),
+                         ('config_paths', job.config.get('config_path') or job.config.get('cfg'))):
+        patterns = selected.get(field)
+        if patterns is None:
+            continue  # Existing explicit registrations have no new capability restriction.
+        if not isinstance(patterns, list) or not patterns or any(not isinstance(p, str) or not p for p in patterns):
+            raise ValueError('registered command ' + field + ' must be a nonempty string list')
+        if field == 'project_ids':
+            if not command_supports_project(selected, job.project):
+                raise ValueError('registered command does not support this project')
+        else:
+            name = _relative_capability(value, field)
+            if not any(fnmatchcase(name, _relative_capability(pattern, field)) for pattern in patterns):
+                raise ValueError('registered command does not support this ' + field + ': ' + name)
+    return selected
+
+
+def _bound_workspace(job: LocalCommandJob) -> tuple[Path | None, Path | None]:
+    from app.harness.tools.git_branch import current_git_branch, receipt_path, saved_branch
+    from app.harness.runtime.project_scope import current_project_scope
+    branch = current_git_branch(job.project, job.run_id)
+    if branch is None and receipt_path(job.run_root).is_file():
+        from app.harness.tools.project_repo import load_project_repo
+        branch = saved_branch(load_project_repo(job.project).root, job.run_root, job.project, job.run_id)
+    scope = current_project_scope(job.project, job.run_id)
+    code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
+    from app.harness.project_workspace import folder_project, project_root
+    folder = folder_project(job.project)
+    project_path = folder.root if folder is not None else scope.run_root if scope is not None else project_root(job.project)
+    return code_root, project_path.resolve() if project_path.is_dir() else None
+
+
+def _command(job: LocalCommandJob, tool_name: str, *, validation: bool = False) -> tuple[tuple[str, ...], tuple[str, ...], float]:
+    cfg = load_execution_config()['execution']
+    selected = _registered_command(job)
+    from app.harness.tools.execution.command_preflight import validation_configuration
+    checker = validation_configuration(selected) if validation else None
+    execution_argv = selected.get('argv')
+    if not isinstance(execution_argv, list) or not execution_argv or any(not isinstance(part, str) or not part for part in execution_argv):
+        raise ValueError('configured local_command argv must be a nonempty string list')
+    raw = checker.get('argv', execution_argv) if checker is not None else execution_argv
     if not isinstance(raw, list) or not raw or any(not isinstance(part, str) or not part for part in raw):
         raise ValueError("configured local_command argv must be a nonempty string list")
+    if checker is not None and raw[0] != execution_argv[0]:
+        raise ValueError('command validation must use the registered execution interpreter')
     argv = tuple(raw)
     allowlist = tool_config(tool_name).command_allowlist
     if not any(len(argv) >= len(prefix) and argv[:len(prefix)] == prefix for prefix in allowlist if prefix):
         raise ValueError("configured local_command is not allowlisted for " + tool_name)
     from app.harness.tools.git_branch import current_git_branch, receipt_path, saved_branch
     from app.harness.runtime.project_scope import current_project_scope, safe_scope_path
-    branch = current_git_branch(job.project)
+    branch = current_git_branch(job.project, job.run_id)
     if branch is None and receipt_path(job.run_root).exists():
         from app.harness.tools.project_repo import load_project_repo
         branch = saved_branch(load_project_repo(job.project).root, job.run_root, job.project, job.run_id)
-    scope = current_project_scope(job.project)
+    scope = current_project_scope(job.project, job.run_id)
     code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
     routed = []
     for index, argument in enumerate(argv):
@@ -103,27 +217,107 @@ def _command(job: LocalCommandJob, tool_name: str) -> tuple[tuple[str, ...], tup
             argument = argument.replace("{code_root}", str(code_root))
         path = Path(argument)
         if index and branch is not None and branch.source_repo_path:
-            if path.is_absolute() and path.is_relative_to(branch.source_root):
+            if (path.is_absolute() and path.is_relative_to(branch.root)
+                    and str(branch.source_root) in argument):
+                # Isolated directories normally include the source name as a
+                # prefix. Verify the actual path before scanning inline text
+                # for shared-source references; a prefix is not ownership.
+                path = safe_scope_path(branch.root, path.relative_to(branch.root).as_posix(), must_exist=True)
+                argument = str(path)
+            elif path.is_absolute() and path.is_relative_to(branch.source_root):
                 path = safe_scope_path(branch.root, path.relative_to(branch.source_root).as_posix(), must_exist=True)
                 argument = str(path)
-            elif str(branch.source_root) in argument:
+            elif any(source in argument for source in (
+                str(branch.source_root), branch.source_root.as_posix(),
+                str(branch.source_root).replace("\\", "\\\\"),
+            )):
                 raise ValueError("启动命令包含共享代码仓路径，请改用 MARS_CODE_ROOT 或 {code_root} 绑定本研究代码。")
         routed.append(argument)
-    argv = tuple(routed)
+    from app.harness.tools.check_interpreter import check_argv
+    argv = check_argv(tuple(routed))
     required = selected.get("required_metrics", [])
     if not isinstance(required, list) or any(not isinstance(name, str) or not name for name in required):
         raise ValueError("required_metrics must be a list of metric names")
-    timeout = float(cfg.get("command_timeout_seconds", 60))
+    timeout = float(checker['timeout_seconds'] if checker is not None else cfg.get("command_timeout_seconds", 60))
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("local_command timeout must be positive and finite")
     return argv, tuple(required), timeout
+
+
+def command_request(job: LocalCommandJob, invocation_id: str, output_dir: Path) -> dict[str, Any]:
+    """Bind the same approved job to preview validation and actual execution."""
+    from app.harness.schema.experiment_contract import budget
+    steps = budget(job.config)[1] if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else job.steps
+    code_root, project_path = _bound_workspace(job)
+    config = deepcopy(job.config)
+    selected = _registered_command(job)
+    if selected.get('consumes_data_path') is True:
+        path_text = config.get('data_path')
+        chosen = job.run_root / 'input/selected_data_source.json'
+        if not path_text and chosen.is_file():
+            raw = json.loads(chosen.read_text(encoding='utf-8'))
+            path_text = raw.get('stored_path') if isinstance(raw, dict) else None
+        if path_text:
+            if not isinstance(path_text, str):
+                raise ValueError('job data_path must be a string')
+            path = Path(path_text).expanduser()
+            if not path.is_absolute():
+                if code_root is None:
+                    raise ValueError('relative job data requires a bound code workspace')
+                path = code_root / path
+            resolved = path.resolve(strict=True)
+            roots = [root for root in (code_root, project_path) if root is not None]
+            if roots and not any(resolved.is_relative_to(root.resolve()) for root in roots):
+                raise ValueError('job data path is outside the host-bound project and code workspace')
+            if not resolved.is_file():
+                raise ValueError('job data path must identify a real file')
+            config['data_path'] = str(resolved)
+    request: dict[str, Any] = {
+        'schema': 'local_command_request.v1', 'invocation_id': invocation_id,
+        'run_id': job.run_id, 'experiment_id': job.experiment_id, 'project': job.project,
+        'config': config, 'seed': job.seed, 'steps': steps, 'output_dir': str(output_dir),
+    }
+    if code_root is not None:
+        request['code_workspace'] = str(code_root)
+        if (code_root / '.git').exists():
+            from app.harness.tools.git_branch import git
+            request['code_commit'] = git(code_root, 'rev-parse', 'HEAD')
+    if project_path is not None:
+        request['project_workspace'] = str(project_path)
+    if selected.get('consumes_data_path') is True and config.get('data_path'):
+        path = Path(config['data_path'])
+        stat = path.stat()
+        binding = {'path': str(path), 'bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+        request['data_binding'] = {**binding, 'binding_sha256': 'sha256:' + hashlib.sha256(
+            json.dumps(binding, sort_keys=True).encode()).hexdigest()}
+    return request
+
+
+def command_environment(job: LocalCommandJob, request_path: Path, result_path: Path, output_dir: Path) -> dict[str, str]:
+    request = json.loads(request_path.read_text(encoding='utf-8'))
+    env = {'MARS_RUN_ID': job.run_id, 'MARS_EXPERIMENT_ID': job.experiment_id,
+           'MARS_PROJECT': job.project, 'MARS_RUN_ROOT': str(job.run_root.resolve()),
+           'MARS_JOB_REQUEST': str(request_path), 'MARS_RESULT_PATH': str(result_path),
+           'MARS_TENSORBOARD_ENABLED': '1', 'MARS_VISUALIZATIONS_DIR': str(output_dir / 'visualizations')}
+    for field, name in (('code_workspace', 'MARS_CODE_ROOT'), ('project_workspace', 'MARS_PROJECT_ROOT')):
+        if request.get(field):
+            env[name] = str(request[field])
+    if request.get('data_binding'):
+        env['MARS_DATA_PATH'] = str(request['data_binding']['path'])
+    return env
 
 
 def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[str, ...]) -> tuple[dict[str, float], list[float], list[dict[str, Any]]]:
     if not path.is_file() or path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
         raise ValueError("command did not create a bounded result.json in its attempt directory")
     raw = json.loads(path.read_text(encoding="utf-8"))
-    validate(instance=raw, schema=_RESULT_SCHEMA)
+    try:
+        validate(instance=raw, schema=_RESULT_SCHEMA)
+    except ValidationError as exc:
+        from app.harness.tools.execution.command_preflight import bounded_error
+        location = '.'.join(str(part) for part in exc.absolute_path) or '$'
+        raise ValueError('result.json schema validation failed at ' + location + ': '
+                         + bounded_error(exc.message)) from exc
     for key in ("invocation_id", "run_id", "experiment_id"):
         if raw[key] != request[key]:
             raise ValueError("local_command result belongs to a different " + key)
@@ -151,42 +345,186 @@ def _read_result(path: Path, request: dict[str, Any], required_metrics: tuple[st
     return metrics, curve, artifacts
 
 
-async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution.simulation_runner") -> LocalCommandResult:
-    from app.harness.schema.experiment_contract import budget
-    steps = budget(job.config)[1] if any(key in job.config for key in ('budget_steps', 'budget_unit', 'max_iters')) else job.steps
-    argv, required, timeout = _command(job, tool_name)
-    from app.harness.tools.git_branch import current_git_branch
-    from app.harness.runtime.project_scope import current_project_scope
-    branch = current_git_branch(job.project, job.run_id)
-    scope = current_project_scope(job.project, job.run_id)
-    code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
-    code_environment = {"MARS_CODE_ROOT": str(code_root)} if code_root is not None else {}
-    invocation_id = uuid.uuid4().hex
-    safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in job.experiment_id) or "experiment"
-    output_dir = job.run_root.resolve() / "execution/local_commands" / safe_name / invocation_id
-    output_dir.mkdir(parents=True, exist_ok=False)
-    request_path = output_dir / "job.json"
-    result_path = output_dir / "result.json"
-    request: dict[str, Any] = {
-        "schema": "local_command_request.v1", "invocation_id": invocation_id,
-        "run_id": job.run_id, "experiment_id": job.experiment_id, "project": job.project,
-        "config": job.config, "seed": job.seed, "steps": steps, "output_dir": str(output_dir),
-    }
-    if code_root is not None:
-        request["code_workspace"] = str(code_root)
-        if (code_root / ".git").exists():
-            from app.harness.tools.git_branch import git
-            request["code_commit"] = git(code_root, "rev-parse", "HEAD")
-    atomic_write_json(request_path, request)
-    request_sha256 = _file_hash(request_path)
-    command_files = []
+def _scientific_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Only delivery IDs and explicit retry decisions are administrative."""
+    result = {key: value for key, value in request.items() if key not in {'invocation_id', 'output_dir'}}
+    config = result.get('config')
+    if not isinstance(config, dict):
+        raise ValueError('local command request has no scientific configuration')
+    result['config'] = {key: value for key, value in config.items()
+                        if key not in {'attempt', 'confirmation_token', 'confirmation_inputs_token'}}
+    return result
+
+
+def _command_files(argv: tuple[str, ...]) -> list[dict[str, str]]:
+    files = []
     for index, argument in enumerate(argv):
         resolved = shutil.which(argument) if index == 0 else argument
         if resolved is not None and Path(resolved).is_file():
             source = Path(resolved).resolve()
-            command_files.append({"path": str(source), "sha256": _file_hash(source)})
+            files.append({'path': str(source), 'sha256': _file_hash(source)})
+    return files
+
+
+def _recover_zero_exit_result(job: LocalCommandJob, request: dict[str, Any], argv: tuple[str, ...],
+                              required: tuple[str, ...], command_files: list[dict[str, str]],
+                              preflight: dict[str, Any], directory: Path) -> LocalCommandResult | None:
+    """Re-admit genuine completed output rejected by an older host contract.
+
+    Never edit the failed attempt or claim a new process ran. A same-input zero
+    exit attempt with altered or invalid evidence blocks automatic retraining.
+    """
+    from app.harness.tools.execution.command_preflight import preflight_state
+    if preflight.get('status') != 'passed' or not preflight.get('input_files'):
+        return None
+    root = job.run_root.resolve()
+    expected = _scientific_request(request)
+    for receipt_path in sorted(directory.glob('*/execution_receipt.json'),
+                               key=lambda path: path.stat().st_mtime, reverse=True):
+        if receipt_path.is_symlink() or receipt_path.parent.is_symlink():
+            raise ValueError('existing execution receipt cannot be symbolic; original output was not rerun')
+        if not receipt_path.resolve().is_relative_to(root) or receipt_path.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError('existing execution receipt is outside its bounded run; original output was not rerun')
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        if (receipt.get('schema') != 'local_command_receipt.v1' or receipt.get('status') != 'failed'
+                or receipt.get('returncode') != 0 or receipt.get('run_id') != job.run_id
+                or receipt.get('experiment_id') != job.experiment_id):
+            continue
+        old_request_path = receipt_path.with_name('job.json')
+        old_result_path = receipt_path.with_name('result.json')
+        for path in (old_request_path, old_result_path):
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError('zero-exit attempt request/result is unavailable; original output was not rerun')
+        old_request = json.loads(old_request_path.read_text(encoding='utf-8'))
+        for path, field in ((old_request_path, 'request_sha256'), (old_result_path, 'result_sha256')):
+            if _file_hash(path) != receipt.get(field):
+                raise ValueError('zero-exit attempt request/result changed; original output was not rerun')
+        if _scientific_request(old_request) != expected:
+            continue
+        if (receipt.get('invocation_id') != old_request.get('invocation_id')
+                or old_request.get('output_dir') != str(receipt_path.parent)
+                or receipt.get('argv') != list(argv) or receipt.get('command_files') != command_files):
+            raise ValueError('zero-exit attempt command binding changed; original output was not rerun')
+        raw_result = json.loads(old_result_path.read_text(encoding='utf-8'))
+        if raw_result.get('status') != 'completed':
+            raise ValueError('zero-exit attempt has no completed result; original output was not rerun')
+        old_token = old_request['config'].get('confirmation_token')
+        if not isinstance(old_token, str) or not old_token:
+            raise ValueError('zero-exit attempt has no approved validation binding; original output was not rerun')
+        previous_job = LocalCommandJob(run_id=job.run_id, experiment_id=job.experiment_id, project=job.project,
+            run_root=job.run_root, config=old_request['config'], seed=old_request.get('seed'),
+            steps=old_request['steps'], command_id=job.command_id)
+        old_preflight = preflight_state(previous_job, old_token)
+        current_inputs = {row['path']: (row['sha256'], row['bytes']) for row in preflight['input_files']}
+        previous_inputs = {row['path']: (row['sha256'], row['bytes']) for row in old_preflight.get('input_files', [])}
+        if old_preflight.get('status') != 'passed' or current_inputs != previous_inputs:
+            raise ValueError('zero-exit attempt validated inputs changed; original output was not rerun')
+        metrics, curve, evidence = _read_result(old_result_path, old_request, required)
+        source_evidence = [
+            {'kind': kind, 'path': str(path), 'sha256': _file_hash(path), 'bytes': path.stat().st_size}
+            for kind, path in (('original_execution_receipt', receipt_path),
+                               ('local_command_request', old_request_path), ('local_command_result', old_result_path))
+        ]
+        duration = float(receipt['duration_seconds'])
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError('zero-exit attempt duration is invalid; original output was not rerun')
+        recovered_dir = directory / uuid.uuid4().hex
+        recovered_dir.mkdir(parents=True, exist_ok=False)
+        recovered_path = recovered_dir / 'execution_receipt.json'
+        atomic_write_json(recovered_path, {**receipt, 'status': 'completed', 'error': '',
+            'evidence': [*evidence, *source_evidence], 'recovery': {
+                'schema': 'local_command_result_recovery.v1', 'training_rerun': False,
+                'source_receipt_path': str(receipt_path), 'source_receipt_sha256': _file_hash(receipt_path),
+                'source_request_path': str(old_request_path), 'source_result_path': str(old_result_path),
+                'original_validation_receipt_path': old_preflight['receipt_path'],
+                'original_validation_receipt_sha256': old_preflight['receipt_sha256'],
+                'current_validation_receipt_path': preflight['receipt_path'],
+                'current_validation_receipt_sha256': preflight['receipt_sha256'],
+            }})
+        return LocalCommandResult(status='completed', duration_seconds=duration, metrics=metrics, loss_curve=curve,
+            fingerprint_hash=_file_hash(recovered_path), artifacts=[
+                {'kind': 'local_command_receipt', 'path': str(recovered_path)}, *source_evidence, *evidence])
+    return None
+
+
+def _process_output_limits() -> tuple[int, int]:
+    config = load_execution_config()['execution']
+    log_bytes = config.get('command_log_max_bytes', 1048576)
+    tail_bytes = config.get('command_output_tail_bytes', 8192)
+    if (type(log_bytes) is not int or not 1024 <= log_bytes <= 16777216
+            or type(tail_bytes) is not int or not 0 < tail_bytes <= min(log_bytes, 65536)):
+        raise ValueError('command_log_max_bytes must be 1024-16777216 and command_output_tail_bytes '
+                         'must fit inside it (max 65536)')
+    return int(log_bytes), int(tail_bytes)
+
+
+def _safe_output_tail(stream: CapturedProcessStream) -> str:
+    from app.harness.tools.execution.command_preflight import bounded_error
+    tail = bytes(stream.tail)
+    if stream.observed_bytes > len(tail):
+        # A tail beginning inside a long credential has lost its key/header.
+        # Publish only complete trailing lines, which can be redacted reliably.
+        _, separator, tail = tail.partition(b'\n')
+        if not separator:
+            return '[output tail omitted: no complete line within configured limit]'
+    return bounded_error(tail)
+
+
+def _publish_process_log(stream: CapturedProcessStream, path: Path) -> None:
+    from app.harness.tools.execution.command_preflight import bounded_error
+    raw = b''
+    if stream.path.is_file():
+        with stream.path.open('rb') as source:
+            raw = source.read(stream.max_log_bytes)
+            if source.read(1):
+                stream.truncated = True
+    # The private spool is byte-capped. Redact the whole retained prefix before
+    # publishing it, then cap UTF-8 bytes even if decoding/redaction expands it.
+    safe = bounded_error(raw, max_chars=stream.max_log_bytes).encode('utf-8')
+    if len(safe) > stream.max_log_bytes:
+        stream.truncated = True
+        marker = b'\n[MARS: log truncated at configured byte limit; see execution_receipt.json]\n'
+        safe = safe[:stream.max_log_bytes - len(marker)].decode('utf-8', errors='ignore').encode('utf-8') + marker
+    atomic_write_text(path, safe.decode('utf-8'))
+    stream.written_bytes = len(safe)
+    stream.path = path
+
+
+async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution.simulation_runner") -> LocalCommandResult:
+    from app.harness.tools.execution.command_preflight import run_command_preflight, bounded_error, preflight_state, validation_configuration
+    approved: dict[str, Any] | None = None
+    token = job.config.get('confirmation_token')
+    if isinstance(token, str) and token and validation_configuration(_registered_command(job)) is not None:
+        approved = preflight_state(job, token)
+        if approved['status'] != 'passed':
+            raise ValueError('confirmed command validation is missing or stale; training was not started')
+    preflight = await asyncio.to_thread(run_command_preflight, job, 'execution-admission')
+    if approved is not None and preflight['status'] == 'passed':
+        expected = {row['path']: row['sha256'] for row in approved.get('input_files', [])}
+        actual = {row['path']: row['sha256'] for row in preflight.get('input_files', [])}
+        if expected != actual:
+            raise ValueError('validated input hashes changed after confirmation; training was not started')
+    if preflight['status'] == 'failed':
+        return LocalCommandResult(status='failed', duration_seconds=0, metrics={}, loss_curve=[],
+            fingerprint_hash=str(preflight['receipt_sha256']), error=str(preflight['error']),
+            artifacts=[{'kind': 'local_command_validation_receipt', 'path': preflight['receipt_path']}])
+    argv, required, timeout = _command(job, tool_name)
+    log_bytes, tail_bytes = _process_output_limits()
+    invocation_id = uuid.uuid4().hex
+    safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in job.experiment_id) or "experiment"
+    output_dir = job.run_root.resolve() / "execution/local_commands" / safe_name / invocation_id
+    request_path = output_dir / "job.json"
+    result_path = output_dir / "result.json"
+    request = command_request(job, invocation_id, output_dir)
+    command_files = _command_files(argv)
+    recovered = await asyncio.to_thread(_recover_zero_exit_result, job, request, argv, required,
+                                        command_files, preflight, output_dir.parent)
+    if recovered is not None:
+        return recovered
+    output_dir.mkdir(parents=True, exist_ok=False)
+    atomic_write_json(request_path, request)
+    request_sha256 = _file_hash(request_path)
     started = time.monotonic()
-    stdout, stderr = b"", b""
     code: int | None = None
     metrics: dict[str, float] = {}
     curve: list[float] = []
@@ -196,33 +534,36 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
     policy = tool_config(tool_name)
     interruption: BaseException | None = None
     process: asyncio.subprocess.Process | None = None
-    try:
-        process = await start_process(argv, cwd=output_dir, backend=policy.process_backend,
-            require_isolation=policy.require_isolation, env={
-                "MARS_RUN_ID": job.run_id, "MARS_EXPERIMENT_ID": job.experiment_id,
-                "MARS_PROJECT": job.project, "MARS_RUN_ROOT": str(job.run_root.resolve()),
-                "MARS_JOB_REQUEST": str(request_path), "MARS_RESULT_PATH": str(result_path),
-                "MARS_TENSORBOARD_ENABLED": "1",
-                "MARS_VISUALIZATIONS_DIR": str(output_dir / "visualizations"),
-                **code_environment,
-            })
-        stdout, stderr = await communicate_process(process, timeout=timeout)
-        code = process.returncode
-        if code != 0:
-            raise ValueError(f"local_command exited with status {code}")
-        if _file_hash(request_path) != request_sha256:
-            raise ValueError("command modified its host-owned job request")
-        metrics, curve, evidence = _read_result(result_path, request, required)
-        status = "completed"
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-    except BaseException as exc:
-        status, error, interruption = "cancelled", type(exc).__name__, exc
+    with tempfile.TemporaryDirectory(prefix='mars-command-log-') as private_logs:
+        capture = ProcessOutputCapture(
+            CapturedProcessStream(Path(private_logs) / 'stdout.raw', log_bytes, tail_bytes),
+            CapturedProcessStream(Path(private_logs) / 'stderr.raw', log_bytes, tail_bytes),
+        )
+        try:
+            process = await start_process(argv, cwd=output_dir, backend=policy.process_backend,
+                require_isolation=policy.require_isolation, env=command_environment(job, request_path, result_path, output_dir))
+            await stream_process_output(process, capture=capture, timeout=timeout)
+            code = process.returncode
+            if code != 0:
+                raise ValueError(f"local_command exited with status {code}: "
+                                 + (_safe_output_tail(capture.stderr) or _safe_output_tail(capture.stdout)))
+            if _file_hash(request_path) != request_sha256:
+                raise ValueError("command modified its host-owned job request")
+            metrics, curve, evidence = _read_result(result_path, request, required)
+            status = "completed"
+        except asyncio.TimeoutError:
+            error = bounded_error(f'TimeoutError: local_command exceeded {timeout:g} seconds: '
+                                  + (_safe_output_tail(capture.stderr) or _safe_output_tail(capture.stdout)))
+        except Exception as exc:
+            error = bounded_error(f"{type(exc).__name__}: {exc}")
+        except BaseException as exc:
+            status, error, interruption = "cancelled", type(exc).__name__, exc
+        finally:
+            _publish_process_log(capture.stdout, output_dir / 'stdout.log')
+            _publish_process_log(capture.stderr, output_dir / 'stderr.log')
     duration = time.monotonic() - started
     if process is not None:
         code = process.returncode
-    atomic_write_text(output_dir / "stdout.log", stdout.decode("utf-8", errors="replace"))
-    atomic_write_text(output_dir / "stderr.log", stderr.decode("utf-8", errors="replace"))
     receipt: dict[str, Any] = {
         "schema": "local_command_receipt.v1", "invocation_id": invocation_id,
         "run_id": job.run_id, "experiment_id": job.experiment_id,
@@ -231,7 +572,7 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
         "argv": list(argv), "command_files": command_files, "execution_backend": "local_process", "os_isolated": False,
         "request_sha256": request_sha256,
         "result_sha256": _file_hash(result_path) if result_path.is_file() and not result_path.is_symlink() else None,
-        "evidence": evidence, "error": error,
+        "evidence": evidence, "error": error, "log_capture": capture.metadata(),
     }
     receipt_path = output_dir / "execution_receipt.json"
     atomic_write_json(receipt_path, receipt)
@@ -240,4 +581,6 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
     return LocalCommandResult(status=status, duration_seconds=duration, metrics=metrics, loss_curve=curve,
         fingerprint_hash=_file_hash(receipt_path), error=error,
         artifacts=[{"kind": "local_command_receipt", "path": str(receipt_path)},
-                   {"kind": "local_command_request", "path": str(request_path)}, *evidence])
+                   {"kind": "local_command_request", "path": str(request_path)},
+                   {"kind": "execution_log", "path": str(output_dir / 'stdout.log')},
+                   {"kind": "execution_log", "path": str(output_dir / 'stderr.log')}, *evidence])

@@ -11,6 +11,7 @@ from typing import Literal
 import yaml
 
 from app.harness.runtime.run_graph import RunGraph
+from app.harness.runtime.state_machine import NodeState
 from app.settings import repo_root
 from app.bridge.node_key import parse_node_key
 
@@ -46,7 +47,14 @@ def ready_batch(graph: RunGraph, limit: int) -> list[str]:
         raise ValueError("parallel limit must be positive")
     selected: list[str] = []
     held: set[str] = set()
-    for key in graph.ready_nodes():
+    # Product approval is not completion: execution still has configuration
+    # review and actual jobs to run. Resume that continuation before consumers.
+    for key in graph.nodes:
+        if graph.state(key) not in {NodeState.PENDING, NodeState.APPROVED}:
+            continue
+        if any(graph.state(parent) not in {NodeState.DONE, NodeState.SKIPPED}
+               for parent in graph.predecessors(key)):
+            continue
         stage = parse_node_key(key).stage
         resources = {"artifact:" + stage}
         if stage in {"coding", "execution"}:

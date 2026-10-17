@@ -87,3 +87,43 @@ def test_live_activity_reads_recent_persisted_events_without_loading_model_conte
     assert view["timeline"][0]["payload"] == {"tool": "input-tool"}
     assert "private" not in json.dumps(view) and "visible" not in json.dumps(view)
     assert not build_research_activity(run, limit=0)["timeline"]
+
+
+def test_activity_large_payloads_are_projected_before_retention(tmp_path: Path) -> None:
+    import json
+    import tracemalloc
+    from app.bridge.research_activity import build_research_activity, _public_trace_rows
+    from app.storage.run_store import RunStore
+
+    run = RunStore(tmp_path / "runs").create(task="large-file-projection", project="presentation-input")
+    trace = run.root / "agent_traces/coding/authored-events"
+    trace.mkdir(parents=True)
+    path = trace / "events.jsonl"
+    # Large caller-authored parser inputs; no provider or service is simulated.
+    with path.open("w", encoding="utf-8") as stream:
+        for index in range(64):
+            stream.write(json.dumps({"event_seq": index + 1, "kind": "model_request",
+                "time": f"2026-10-12T00:00:{index:02d}Z", "model": "configured",
+                "visible": "x" * 262144}) + "\n")
+    _public_trace_rows.cache_clear()
+    tracemalloc.start()
+    try:
+        view = build_research_activity(run, limit=64)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert len(view["timeline"]) == 64
+    assert peak < 8 * 1024 * 1024
+    assert all(row["payload"] == {"model": "configured"} for row in view["timeline"])
+    before = _public_trace_rows.cache_info()
+    assert build_research_activity(run, limit=64) == view
+    assert _public_trace_rows.cache_info().hits == before.hits + 1
+    view["timeline"][0]["payload"]["model"] = "client mutation"
+    assert build_research_activity(run, limit=64)["timeline"][0]["payload"]["model"] == "configured"
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"event_seq": 65, "kind": "stopped", "status": "interrupted",
+                                "time": "2026-10-12T00:02:00Z"}) + "\n")
+    latest = build_research_activity(run, limit=64)["timeline"][0]
+    assert latest["kind"] == "stopped" and latest["payload"] == {"status": "interrupted"}
+    path.write_text('{"event_seq":1,"kind":"validation","valid":false}\n', encoding="utf-8")
+    assert build_research_activity(run, limit=64)["timeline"][0]["payload"] == {"valid": False}

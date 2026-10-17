@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { runDetailsUrl } from "@/lib/runConversation";
 import { downloadResultExport, getResults, type RunResults } from "@/lib/results";
 import { isUncertainRequestError } from "@/lib/clientPolicy";
 import { ExperimentComparison } from "./ExperimentComparison";
@@ -57,7 +58,7 @@ export function RunResultsPanel({ runId }: { runId: string }): JSX.Element {
   }
 
   return <>
-    <div className="flex flex-wrap items-center justify-between gap-3"><Link href={data ? `/projects/${encodeURIComponent(data.identity.project)}/research` : "/projects"} className="text-sm text-slate-400 hover:text-white">← 项目研究</Link><div className="flex gap-2"><Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>任务详情</Link><button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className={button}>刷新结果</button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link href={data ? `/projects/${encodeURIComponent(data.identity.project)}/research` : "/projects"} className="text-sm text-slate-400 hover:text-white">← 项目研究</Link><div className="flex gap-2"><Link href={runDetailsUrl(runId)} className={button}>任务详情</Link><button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className={button}>刷新结果</button></div></div>
     {loading ? <p role="status" className="py-12 text-center text-slate-400">正在核对任务状态与结果产物…</p> : null}
     {error ? <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-amber-100">{error}</div> : null}
     {data ? <>

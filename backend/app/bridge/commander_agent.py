@@ -187,7 +187,8 @@ class CommanderAgent:
                 next_attempt=observation.attempt,
             )
 
-        if observation.attempt >= observation.config.max_iterations:
+        from app.harness.llm.usage_policy import agent_quota_mode
+        if agent_quota_mode() == 'limited' and observation.attempt >= observation.config.max_iterations:
             return CommanderAttribution(
                 passed=False,
                 should_continue=False,

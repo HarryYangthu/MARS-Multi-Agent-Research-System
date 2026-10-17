@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from contextlib import suppress
 import json
 from pathlib import Path
@@ -12,8 +13,11 @@ from typing import Any
 from app.harness.agent_loop.executor import LoopInput, LoopResult, generation_fingerprint
 from app.harness.agent_loop.trace import LoopTrace, audit_trace, digest, canonical
 from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
-from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, wire_tools
+from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, run_root, wire_tools
+from app.harness.agent_loop.zcode.limits import invocation_limits
 from app.harness.agent_loop.zcode.protocol import ZCodeClient, ZCodeProtocolError
+from app.harness.llm.usage_policy import agent_quota_mode
+from app.harness.context.runtime_pack import store_material
 
 
 class ZCodeLoopExecutor:
@@ -29,20 +33,25 @@ class ZCodeLoopExecutor:
                 await request.review_provider.close()
 
     async def _run(self, request: LoopInput) -> LoopResult:
+        quota_mode = agent_quota_mode()
+        limited = quota_mode == 'limited'
+        request = replace(request, policy=request.policy.effective(quota_mode))
         if (request.policy.mode != "react" or request.external_review is not None
                 or request.stop_condition is not None or request.review_plan_factory is not None
                 or request.final_schema is None):
             raise ValueError("ZCode requires a structured ReAct task; configured reviews must not be bypassed")
         command = self.config.resolve_command()
-        fingerprint = digest({"backend": "zcode", "contract": 2,
+        fingerprint = digest({"backend": "zcode", "contract": 4, "agent_quota_mode": quota_mode,
             "generation": generation_fingerprint(request.config, request.provider),
             "messages": [m.to_wire() for m in request.messages], "tools": wire_tools(request),
             "final_schema": request.final_schema, "policy": request.policy.fingerprint_data(),
             "config": self.config.__dict__, "command": command, "runtime": runtime_identity(command),
             "correlation": request.correlation})
         state = self._state(request, fingerprint)
+        limits = invocation_limits(self.config, request.policy)
         trace = LoopTrace(request.trace_root, request.policy.trace, resume=request.resume, correlation=request.correlation)
-        gateway = ZCodeGateway(request, self.config, secrets.token_urlsafe(32), state, trace)
+        state['agent_quota_mode'] = quota_mode
+        gateway = ZCodeGateway(request, self.config, secrets.token_urlsafe(32), state, trace, quota_mode=quota_mode)
         runtime_root = request.trace_root / "zcode_runtime"
         workspace = runtime_root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -54,7 +63,8 @@ class ZCodeLoopExecutor:
             trace.emit("resumed" if request.resume else "started", {"backend": "zcode"})
             gateway.save()
             await gateway.progress("started")
-            if state.get("active_elapsed_seconds", 0) >= self.config.active_timeout_seconds:
+            remaining = limits.remaining_active_seconds(previous_elapsed)
+            if remaining is not None and remaining <= 0:
                 gateway.stop("budget_exhausted", "ZCode active-time budget exhausted")
                 return LoopResult(text=str(state.get("candidate", "")), status=state["status"],
                                   observations=state["history"], counts=state["counts"], trace_root=request.trace_root)
@@ -87,6 +97,10 @@ class ZCodeLoopExecutor:
             event_task = asyncio.create_task(self._events(client, gateway))
             prompt = ("Continue this exact MARS task using completed observations; verify current files before further edits. "
                       "Do not repeat a completed mutation.\n" if request.resume else self._prompt(request))
+            prompt += ("\nHost invocation budget: " + canonical(invocation_budget(self.config, request.policy, state["counts"], quota_mode=quota_mode))
+                + ". Null means unlimited; usage is still audited. Tool results report updated allowances. "
+                "Plan reads and edits within this budget and reserve calls for real tests and validated submission. "
+                "Do not repeat successful reads or writes without a concrete reason; do not skip checks or claim completion to fit the budget.")
             if request.resume and state.get("candidate"):
                 errors = await request.validate(state["candidate"], state["history"])
                 if not errors:
@@ -95,18 +109,16 @@ class ZCodeLoopExecutor:
                 else:
                     prompt += "\nMARS validation feedback: " + canonical(errors)
             if not gateway.done.is_set():
-                remaining = (self.config.active_timeout_seconds - previous_elapsed
-                             - (time.monotonic() - active_started))
-                if remaining <= 0:
+                remaining = limits.remaining_active_seconds(previous_elapsed, time.monotonic() - active_started)
+                if remaining is not None and remaining <= 0:
                     gateway.stop("budget_exhausted", "ZCode active-time budget exhausted")
                 else:
                     await client.call("session/send", {"sessionId": session_id, "content": prompt,
                         "modelSelection": {"providerId": "mars", "modelId": request.config.model,
                                            "options": {"reasoningLevel": "low"}}})
-                    remaining = max(0, self.config.active_timeout_seconds - previous_elapsed
-                                    - (time.monotonic() - active_started))
+                    remaining = limits.remaining_active_seconds(previous_elapsed, time.monotonic() - active_started)
                     try:
-                        await asyncio.wait_for(gateway.done.wait(), remaining)
+                        await asyncio.wait_for(gateway.done.wait(), remaining if limited else None)
                     except TimeoutError:
                         gateway.stop("budget_exhausted", "ZCode active-time budget exhausted")
         except asyncio.CancelledError:
@@ -143,6 +155,13 @@ class ZCodeLoopExecutor:
                 raise ValueError("ZCode checkpoint cannot be safely resumed; reconcile unknown tool outcomes before retry")
             state.update(status="running", pending=None)
             return state
+        # ZCode receives a joined prompt instead of passing through the native
+        # context packer. Persist its original messages before any model call,
+        # so revision recovery and context.read_material can resolve the same
+        # hash-addressed references recorded in context_metadata.
+        if request.context_metadata.get("materials"):
+            for message in request.messages:
+                store_material(run_root(request), message)
         return {"backend": "zcode", "fingerprint": fingerprint, "status": "running", "pending": None,
                 "counts": {key: 0 for key in ("model_requests", "model_responses", "tool_dispatches", "observations",
                     "sdk_attempts", "action_rounds", "protocol_repairs", "validation_repairs", "reflections")},

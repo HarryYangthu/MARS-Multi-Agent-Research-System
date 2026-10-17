@@ -32,6 +32,7 @@ class EvaluationRunner:
         expected_schema: str | None = None,
         target_schema: str | None = None,
         scope: EvaluationScope = "artifact",
+        required_report_chain: tuple[str, ...] | None = None,
     ) -> list[EvaluationReport]:
         target = EvaluationTarget(
             project=project,
@@ -40,5 +41,6 @@ class EvaluationRunner:
             text=text,
             expected_schema=expected_schema,
             target_schema=target_schema,
+            required_report_chain=required_report_chain,
         )
         return self.evaluate(target)

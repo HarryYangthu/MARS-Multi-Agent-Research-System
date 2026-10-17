@@ -153,6 +153,21 @@ def test_unknown_usage_is_not_reported_as_zero_and_legacy_ids_are_not_invented(t
     assert all(item["correlation"] == {} for item in trace["invocations"])
 
 
+def test_timeline_limit_does_not_limit_usage_or_integrity_checks(tmp_path: Path) -> None:
+    from app.bridge.run_observability import _loop_observability
+    run = RunStore(tmp_path).create(task="bounded-timeline", project="pimc")
+    for name in ("first", "second", "third"):
+        _parser_input(run, name, usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10})
+    summaries, events, streams = _loop_observability(run, limit=2)
+    assert len(events) == 2 and all(row["kind"] == "model_response" for row in events)
+    assert len(summaries) == len(streams) == 3
+    result = build_run_observability(run, limit=1)
+    assert len(result["timeline"]) == 1
+    assert result["trace"]["counts"]["model_responses"] == 3
+    assert result["trace"]["usage"]["total_tokens"] == 30
+    assert result["trace"]["integrity"]["consistent"] is True
+
+
 @pytest.mark.parametrize("damage,code", [
     ("broken_json", "invalid_jsonl"), ("sequence", "event_sequence_discontinuous"),
     ("missing_facts", "missing_facts"), ("counts", "count_mismatch"),

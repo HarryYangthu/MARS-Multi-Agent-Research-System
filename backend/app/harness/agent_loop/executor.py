@@ -27,6 +27,8 @@ from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_finge
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
+from app.harness.llm.usage_policy import agent_quota_mode
+from app.harness.agent_loop.failure_guard import repeated_failure, clear_failure
 from app.harness.tools.registry import ToolContext, ToolPolicy, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
@@ -197,7 +199,7 @@ def reflection_instruction(rubric: str, *, format_repair: bool = False) -> Messa
 
 
 def apply_review_decision(state: dict[str, Any], decision: dict[str, Any], *,
-                          format_repair: bool, max_reflections: int) -> str:
+                          format_repair: bool, max_reflections: int | None) -> str:
     """Apply an already strictly parsed review; formatting alone can never accept."""
     state["protocol_output"] = ""
     state["review_format_repair_pending"] = False
@@ -226,13 +228,13 @@ def apply_review_decision(state: dict[str, Any], decision: dict[str, Any], *,
                                     "Update all affected fields or provide a precise evidence-backed rebuttal in the revised candidate. "
                                     "Do not relax user constraints or merely remove warnings."})
     state["next_phase"] = "act"
-    if state["counts"]["reflections"] >= max_reflections:
+    if max_reflections is not None and state["counts"]["reflections"] >= max_reflections:
         state["status"] = "reflection_rejected"
     return "revision"
 
 
 def apply_planned_review_decision(state: dict[str, Any], result: UnitReviewResult, *, response_text: str,
-                                  response_visible: Any, max_reflections: int) -> tuple[dict[str, Any], str]:
+                                  response_visible: Any, max_reflections: int | None) -> tuple[dict[str, Any], str]:
     """Commit unit and candidate transitions together, before any notification await."""
     record = finish_review_unit(state, result, response_text=response_text, response_visible=response_visible)
     decision = completed_plan_decision(state["review_plan"])
@@ -282,7 +284,10 @@ def validate_native_thinking(config: LLMConfig, policy: AgentLoopPolicy) -> None
 
 class NativeAgentLoop:
     async def run(self, request: LoopInput) -> LoopResult:
+        quota_mode = agent_quota_mode()
+        request = replace(request, policy=request.policy.effective(quota_mode))
         p = request.policy
+        reflection_limit = None if quota_mode == 'statistics_only' else p.max_reflections
         if (request.review_provider is None) != (request.review_config is None):
             raise ValueError("review provider and configuration must be supplied together")
         validate_reflection_format_repair(request.review_config or request.config, p)
@@ -333,6 +338,8 @@ class NativeAgentLoop:
         if modern_context:
             fingerprint = digest({"base": fingerprint, "runtime_policy": runtime_policy,
                                   "materials": request.context_metadata.get("materials", {})})
+        if quota_mode == 'statistics_only':
+            fingerprint = digest({'base': fingerprint, 'agent_quota_mode': quota_mode})
         correlation = dict(request.correlation)
         correlation.setdefault("invocation_id", request.trace_root.name)
         correlation.setdefault("trace_id", request.tool_context.run_id)
@@ -349,6 +356,7 @@ class NativeAgentLoop:
             "next_phase": "act", "seen": {}, "reflection_accepted": False,
             "review_issues": [], "reviewed_candidate_sha": "",
             "correlation": correlation, "context_metadata": request.context_metadata,
+            "agent_quota_mode": quota_mode,
         }
         if request.review_plan_factory is not None:
             state["review_plan_contract_id"] = request.review_plan_contract_id
@@ -670,6 +678,7 @@ class NativeAgentLoop:
                             request.review_provider if reviewing and request.review_provider else request.provider,
                             messages, call_config,
                             run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)),
+                            active_model_time=True,
                             correlation=correlation),
                         timeout=llm_call_deadline_seconds(call_config))
                 except ResourceBudgetError as exc:
@@ -803,18 +812,20 @@ class NativeAgentLoop:
                             state["feedback"] += "\n" + revision_feedback(str(parse_error))
                     trace.emit("protocol_error", {"error": str(parse_error),
                                "repair_mode": "review_format" if state["review_format_repair_pending"] else None})
-                    if counts["protocol_repairs"] > p.max_protocol_repairs:
+                    failed_repeatedly = repeated_failure(state, 'protocol', str(parse_error), limit=p.max_protocol_repairs)
+                    if (failed_repeatedly if quota_mode == 'statistics_only' else counts["protocol_repairs"] > p.max_protocol_repairs):
                         state["status"] = "protocol_exhausted"
                         break
                     trace.snapshot(state)
                     continue
                 state["protocol_output"] = ""
+                clear_failure(state, 'protocol')
                 if reviewing:
                     finished_record: dict[str, Any] | None = None
                     if planned_review:
                         details = unit_result.details if unit_result is not None else {"review": decision}
                         finished_record, outcome = apply_planned_review_decision(state, UnitReviewResult(decision, details),
-                            response_text=completion.text, response_visible=response_visible, max_reflections=p.max_reflections)
+                            response_text=completion.text, response_visible=response_visible, max_reflections=reflection_limit)
                         trace.emit("review_unit", {"request": counts["model_requests"], "unit_id": finished_record["unit_id"],
                                                    "valid": True}, visible=finished_record)
                         if outcome == "next_unit":
@@ -829,7 +840,7 @@ class NativeAgentLoop:
                         decision = aggregate
                     else:
                         outcome = apply_review_decision(state, decision, format_repair=format_repair,
-                                                        max_reflections=p.max_reflections)
+                                                        max_reflections=reflection_limit)
                     if outcome == "independent_review":
                         trace.emit("review_format_repaired", {"accept": True, "effective_accept": False,
                                    "repair_mode": "review_format", "independent_review_required": True}, visible=decision)
@@ -850,7 +861,11 @@ class NativeAgentLoop:
                     await progress("review", accepted=decision["accept"], issues=decision["issues"], rationale=decision["rationale"])
                     if outcome == "accepted":
                         break
-                    if counts["reflections"] >= p.max_reflections:
+                    if quota_mode == 'statistics_only' and repeated_failure(state, 'review',
+                            {'candidate': state['candidate'], 'issues': decision['issues']}, limit=p.max_reflections):
+                        state['status'] = 'reflection_rejected'
+                        break
+                    if reflection_limit is not None and counts["reflections"] >= reflection_limit:
                         break
                 elif "final" in decision:
                     state["candidate"] = decision["final"]
@@ -880,7 +895,10 @@ class NativeAgentLoop:
                     if errors:
                         counts["validation_repairs"] += 1
                         state["feedback"] = canonical({"validation_errors": errors})
-                        if not p.completion_driven and counts["validation_repairs"] > p.max_validation_repairs:
+                        failed_repeatedly = repeated_failure(state, 'validation',
+                            {'candidate': state['candidate'], 'errors': errors}, limit=p.max_validation_repairs)
+                        if ((quota_mode == 'statistics_only' and failed_repeatedly)
+                                or (not p.completion_driven and counts["validation_repairs"] > p.max_validation_repairs)):
                             state["status"] = "validation_exhausted"
                             break
                     elif stop_at_boundary("after_validation"):

@@ -67,9 +67,10 @@ def load_failed_revision_seed(root: Path, *, project: str, agent: str,
             if state.get("status") == "model_error":
                 from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
                 rejected_quota = checkpoint_quota_rejection_receipt(path.parent, state, run_root=root)
+            truncated = _settled_truncation(path.parent, state, root)
             if ((state.get("status") not in {"protocol_exhausted", "validation_exhausted",
                     "reflection_rejected", "budget_exhausted", "evidence_unavailable"}
-                    and rejected_quota is None)
+                    and rejected_quota is None and not truncated)
                     or state.get("pending") and rejected_quota is None or state.get("pending_batch")):
                 continue
             if (state.get("correlation", {}).get("trace_id") != root.name
@@ -87,6 +88,35 @@ def load_failed_revision_seed(root: Path, *, project: str, agent: str,
         except (OSError, ValueError, TypeError, KeyError):
             continue
     return None
+
+
+def _settled_truncation(trace: Path, state: dict[str, Any], root: Path) -> bool:
+    """Accept only an observed completed rejection, never a timed-out pending call."""
+    reason = state.get('last_model_error')
+    counts = state.get('counts', {})
+    if (state.get('status') != 'model_error' or state.get('pending') or state.get('pending_batch')
+            or not isinstance(reason, dict) or reason.get('code') != 'output_truncated'
+            or reason.get('finish_reason') != 'length' or not isinstance(counts, dict)
+            or type(counts.get('model_requests')) is not int or counts['model_requests'] < 1
+            or counts.get('model_responses') != counts['model_requests']):
+        return False
+    path = trace / 'events.jsonl'
+    if not path.resolve().is_relative_to(root.resolve()) or path.stat().st_size > 32_000_000:
+        return False
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    requests = [i for i, event in enumerate(events) if event.get('kind') == 'model_request']
+    if not requests or events[requests[-1]].get('request') != counts['model_requests']:
+        return False
+    tail = events[requests[-1] + 1:]
+    terminal = [event for event in tail if event.get('kind') in {
+        'model_response', 'model_error', 'completion_recovery', 'sdk_attempt_started'}]
+    if ([event.get('kind') for event in terminal[-2:]] != ['model_response', 'model_error']
+            or terminal[-1].get('reason') != reason):
+        return False
+    response = terminal[-2]
+    return (response.get('rejected') is True and response.get('reason') == reason
+            and response.get('request') == counts['model_requests']
+            and events[-1].get('kind') == 'finished' and events[-1].get('status') == 'model_error')
 
 
 def _seed_from_state(root: Path, *, agent: str, source: Path, state: dict[str, Any],

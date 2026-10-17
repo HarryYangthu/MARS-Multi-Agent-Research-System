@@ -12,7 +12,7 @@ from app.harness.discovery.source_commit import archive_source_commit, source_co
 from app.harness.agent_loop.zcode.config import runtime_environment
 from app.harness.runtime.git_runtime import (
     GitRuntimeError, candidate_paths, git_child_environment, git_environment,
-    git_failure, resolve_git, run_git,
+    git_failure, git_helper_environment, resolve_git, run_git,
 )
 from app.harness.runtime.readiness import assert_ready_for_run, check_git_readiness
 from app.harness.tools.code import _git_apply
@@ -110,7 +110,9 @@ def test_real_branch_uses_configured_git_with_spaces_and_preserves_baseline(tmp_
         branch = prepare(root, run_root, "project", "run")
         branch.validate("project", "run")
     assert git(root, "rev-parse", "baseline") == base
-    assert git(root, "branch", "--show-current") == branch.branch
+    assert git(root, "branch", "--show-current") == "baseline"
+    assert branch.root != root and git(branch.root, "branch", "--show-current") == branch.branch
+    assert (branch.root / "main.py").read_text() == "VALUE = 1\n"
     assert not (run_root / "candidate").exists()
 
 
@@ -152,6 +154,32 @@ def test_real_source_history_and_child_git_share_runtime(tmp_path: Path) -> None
         paths=["main.py", "candidate.py"], environment=environment,
         parent_git_dir=archive, parent_commit=commit)
     assert run_git(["--git-dir", str(candidate_archive), "rev-parse", candidate + "^"]).stdout.strip() == commit
+
+
+def test_helper_path_comes_from_real_selected_installation_and_drops_repo_override(tmp_path: Path) -> None:
+    runtime = resolve_git()
+    baseline = git_helper_environment(runtime)
+    injected = tmp_path / 'untrusted repository helper directory'
+    injected.mkdir()
+    from app.harness.discovery.source_commit import _git_environment
+    for key in ('GIT_EXEC_PATH', 'git_exec_path'):
+        environment = {**{name: value for name, value in os.environ.items() if name.upper() != 'GIT_EXEC_PATH'},
+                       key: str(injected), 'GIT_DIR': str(tmp_path / 'wrong.git'),
+                       'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.hooksPath',
+                       'GIT_CONFIG_VALUE_0': str(injected)}
+        selected = git_helper_environment(runtime, environment)
+        assert selected.get('GIT_EXEC_PATH') == baseline.get('GIT_EXEC_PATH')
+        assert selected.get('GIT_EXEC_PATH') != str(injected)
+        assert not any(name in selected for name in ('GIT_DIR', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'git_exec_path'))
+        archive_env = _git_environment(environment)
+        assert archive_env.get('GIT_EXEC_PATH') == baseline.get('GIT_EXEC_PATH')
+        assert archive_env['GIT_CONFIG_GLOBAL'] == os.devnull and archive_env['GIT_CONFIG_NOSYSTEM'] == '1'
+    if baseline.get('GIT_EXEC_PATH'):
+        prefix = Path(runtime.executable).resolve().parent.parent
+        helpers = Path(baseline['GIT_EXEC_PATH'])
+        assert helpers.is_dir() and helpers.resolve().is_relative_to(prefix)
+        upload = helpers / ('git-upload-pack.exe' if sys.platform == 'win32' else 'git-upload-pack')
+        assert upload.is_file() and upload.resolve().is_relative_to(prefix)
 
 
 def test_zcode_environment_uses_verified_git_without_ambient_routing(

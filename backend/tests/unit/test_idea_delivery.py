@@ -105,6 +105,25 @@ def test_candidate_progress_never_claims_acceptance() -> None:
     assert message.startswith("候选方案，尚待验收：")
 
 
+@pytest.mark.asyncio
+async def test_finished_progress_renders_actual_truncation_receipt(tmp_path: Path) -> None:
+    configured = os.environ.get('MARS_TEST_TRUNCATION_TRACE')
+    if not configured:
+        pytest.skip('requires actual completed truncation evidence')
+    import shutil
+    source = Path(configured) / 'events.jsonl'
+    trace = tmp_path / 'agent_traces' / 'idea' / 'archived'
+    trace.mkdir(parents=True)
+    shutil.copyfile(source, trace / 'events.jsonl')
+    finished = json.loads(source.read_text().splitlines()[-1])
+    assert finished['kind'] == 'finished' and finished['status'] == 'model_error'
+    request = RunRequest(project='pimc', user_request='render archived failure', extra={'run_root': str(tmp_path)})
+    await progress_sink(request, 'archived')({**finished, 'phase': 'reflect'})
+    rows = (tmp_path / 'idea/progress.jsonl').read_text().splitlines()
+    message = json.loads(rows[-1])['message']
+    assert '独立评审' in message and '8192 token' in message and '被截断' in message
+
+
 def test_english_tool_explanations_have_a_chinese_factual_fallback() -> None:
     assert progress_message({"kind": "action", "tool": "search.arxiv_search", "reason": "Search more papers"}) == "正在检索相关论文。"
 

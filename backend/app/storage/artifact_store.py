@@ -129,6 +129,30 @@ class ArtifactStore:
 
     # ------------------------------------------------------------------ write
 
+    def review_candidate(self, *, agent_dir: str, stem: str) -> ArtifactRef | None:
+        """Newest draft unless that exact version has already been approved.
+
+        ``latest`` intentionally prefers published approvals for consumers. A
+        review must not use that policy: an older approval cannot approve a new
+        revision merely because both share a stem.
+        """
+        self._validate_stem(stem)
+        with path_lock(self.lock_path):
+            self._recover_approval(agent_dir=agent_dir, stem=stem)
+            versions = self.list_versions(agent_dir=agent_dir, stem=stem)
+            drafts = [ref for ref in versions if re.fullmatch(r'v[1-9]\d*', ref.version)]
+            approved = next((ref for ref in versions if ref.version == 'approved'), None)
+            if not drafts:
+                return approved
+            candidate = max(drafts, key=lambda ref: int(ref.version[1:]))
+            receipts = sorted(self._approval_dir(agent_dir, stem).glob('*.json'))
+            if approved is not None and receipts:
+                receipt = json.loads(receipts[-1].read_text(encoding='utf-8'))
+                if (receipt.get('source_version') == candidate.version
+                        and receipt.get('source_sha256') == hashlib.sha256(candidate.path.read_bytes()).hexdigest()):
+                    return approved
+            return candidate
+
     def _next_version(
         self, *, agent_dir: str, stem: str
     ) -> str:
@@ -240,7 +264,8 @@ class ArtifactStore:
                 from app.storage.artifact_handoff import execution_delivery_required, experiment_plan_required
                 if plan.is_file() or 'execution_jobs' in result.metadata or execution_delivery_required(self.run, 'coding'):
                     errors = coding_handoff_errors(plan.read_text() if plan.is_file() else '', result.metadata,
-                        project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'))
+                        project=self.run.project, plan_required=experiment_plan_required(self.run, 'coding'),
+                        run_id=self.run.run_id, run_root=self.run.root)
             elif result.schema_id == 'run_log.v1' and 'planned_experiments' in result.metadata:
                 plan = self.run.root / 'experiment/experiment_plan.approved.md'
                 coding = self.run.root / 'coding/code_spec.approved.md'
@@ -326,6 +351,7 @@ class ArtifactStore:
                 stem=ref.stem,
                 version=ref.version,
                 expected_schema=expected_schema,
+                required_report_chain=self._required_report_chain() if expected_schema == 'report.v1' else None,
             )
         except Exception as exc:  # pragma: no cover - eval must not block artifact writes
             logger.warning(
@@ -335,6 +361,28 @@ class ArtifactStore:
                 exc,
             )
             return []
+
+    def _required_report_chain(self) -> tuple[str, ...] | None:
+        from app.harness.runtime.state_journal import StateJournal
+        from app.harness.runtime.run_graph import RunGraph
+        from app.harness.runtime.state_machine import NodeState
+        authority = StateJournal.from_authority(self.run.root, run_id=self.run.run_id)
+        if authority is None:
+            return None  # Unknown/legacy state does not prove that any stage was skipped.
+        saved = authority.read()
+        if saved.get('project') != self.run.project or saved.get('run_id') != self.run.run_id:
+            raise ValueError('report evaluation graph belongs to another run/project')
+        graph = RunGraph.from_dict(saved['graph'])
+        stages = {'idea': 'proposal', 'experiment': 'plan', 'coding': 'code', 'execution': 'runs'}
+        required: list[str] = []
+        for stage, chain in stages.items():
+            nodes = [node for node in graph.nodes.values()
+                     if node.metadata.get('stage', node.key) == stage]
+            # Exclude only an explicit host SKIPPED; missing graph stages remain
+            # conservative requirements and cannot masquerade as skipped work.
+            if not nodes or any(node.state != NodeState.SKIPPED for node in nodes):
+                required.append(chain)
+        return tuple(required) or None
 
 
 def _version_sort_key(v: str) -> int:

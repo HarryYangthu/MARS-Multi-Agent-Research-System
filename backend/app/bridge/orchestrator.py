@@ -11,10 +11,11 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -200,19 +201,35 @@ class Orchestrator:
                         blocker = "缺少真实代码写入记录，主控未执行或批准旧补丁，请接管审核。"
             except (OSError, ValueError, RuntimeError) as error:
                 blocker = f"真实代码核对未通过：{error}"
-        upstream = {str(path.relative_to(session.run.root)): path.read_text(encoding="utf-8")
-                    for directory in ("idea", "experiment", "coding", "execution")
-                    for path in session.run.subdir(directory).glob("*.approved.md") if directory != ref.agent_dir}
+        from app.bridge.managed_review import artifact_review_materials
+        review_materials = artifact_review_materials(session.run, node_key)
+        upstream = review_materials['approved_upstream']
         artifact_ref = ref.path.relative_to(session.run.root).as_posix()
         folder_context = load_folder_context(session.run.project, session.run.root)
-        tool_log = session.run.root / "events/tool_calls.jsonl"
-        code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
-                       if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        code_evidence: dict[str, Any] = {}
+        if ref.agent_dir == "coding" and not blocker:
+            from app.bridge.coding_review_evidence import coding_review_evidence
+            try:
+                code_evidence = coding_review_evidence(session.run, node_key, text)
+            except (OSError, ValueError, RuntimeError) as error:
+                blocker = f"编码审核证据读取失败：{error}"
+        # run_log.approved.md is the plan frozen at approval time, not the
+        # measured outcome. Without the post-run receipts a writing review
+        # cannot verify reported numbers and flags them as unverified claims.
+        measurement_evidence: dict[str, str] = {}
+        if ref.agent_dir == "writing":
+            from app.bridge.agent_runner import _execution_result_handoffs
+
+            measurement_evidence = _execution_result_handoffs(session.run)
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
-                   "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
-                   "project_context": folder_context, "actual_code_checks": code_checks,
+                   "artifact_ref": artifact_ref, "candidate": text, **review_materials,
+                   "project_context": folder_context, **code_evidence,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
-                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+                   **measurement_evidence,
+                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *measurement_evidence.keys(),
+                                     *(["input/folder_context.v1.json"] if folder_context else []), *code_evidence.keys(),
+                                     *(['input/selected_data_source.json'] if review_materials['selected_data'] else []),
+                                     *(['revision_request'] if review_materials['revision_request'] else []), 'review_contract']}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
@@ -225,11 +242,11 @@ class Orchestrator:
                                       evidence_refs=["artifact_evaluation"])
             decision._identity = original_identity
         from app.storage.artifact_store import ArtifactStore
-        current_ref = ArtifactStore(session.run).latest(agent_dir=ref.agent_dir, stem=ref.stem)
+        current_ref = ArtifactStore(session.run).review_candidate(agent_dir=ref.agent_dir, stem=ref.stem)
         if current_ref is None or current_ref.path != ref.path or load_folder_context(session.run.project, session.run.root) != folder_context:
             await finish_review(session.run, session.bus, "needs_user", "审核期间当前方案版本或项目约束已变化，请重新核对。", identity=decision._identity)
             return
-        if ref.path.read_text(encoding="utf-8") != text or any((session.run.root / path).read_text(encoding="utf-8") != value for path, value in upstream.items()):
+        if ref.path.read_text(encoding="utf-8") != text or artifact_review_materials(session.run, node_key) != review_materials:
             await finish_review(session.run, session.bus, "needs_user", "审核期间方案或上游依据已变化，请重新核对。", identity=decision._identity)
             return
         if decision.decision == "approve":
@@ -243,12 +260,16 @@ class Orchestrator:
                 with research_branch_scope(session.run, node_key):
                     if not verify_written_code(session.run, text):
                         raise ValueError("真实代码写入记录未通过复核")
+                    if coding_review_evidence(session.run, node_key, text) != code_evidence:
+                        await finish_review(session.run, session.bus, "needs_user", "审核期间代码或测试记录已变化，请重新核对。", identity=decision._identity)
+                        return
                     await approve(session=review, bus=session.bus, actor="commander")
             else:
                 await approve(session=review, bus=session.bus, actor="commander")
             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
         elif decision.decision == "revise":
-            if revision_count(session.run, node_key) >= review_policy().max_revisions_per_node:
+            from app.harness.llm.usage_policy import agent_quota_mode
+            if agent_quota_mode() == 'limited' and revision_count(session.run, node_key) >= review_policy().max_revisions_per_node:
                 await finish_review(session.run, session.bus, "needs_user", "已达到主控返工次数上限，请接管审核。" + decision.reason, identity=decision._identity)
                 return
             await request_revision(session=review, bus=session.bus, actor="commander", reason=decision.reason)
@@ -289,6 +310,8 @@ class Orchestrator:
             assert_ready_for_run(project=request.project)
             from app.bridge.project_execution_config import require_project_execution
             require_project_execution(request.project)
+            from app.bridge.project_training import require_training_for_run
+            require_training_for_run(request.project, entrypoint=request.entrypoint, standalone=request.standalone)
         from app.harness.context.folder_context import load_folder_context
         from app.harness.agent_loop.trace import atomic_json
         # A contract-backed project is not an alias for mutable global project
@@ -328,6 +351,80 @@ class Orchestrator:
         self._persist_state(session, status="created")
         self._contract_execution_block(session)
         return session
+
+    def correct_initial_scope(self, run_id: str, *, project: str, entrypoint: str,
+                              user_request: str, reason: str, routing: dict[str, Any]) -> dict[str, Any]:
+        """Correct a user-rejected early route without allocating a new budget/run."""
+        session = self.session(run_id)
+        if session.run.project != project or session.read_only or CONTRACT_HASH_KEY in session.request.extra:
+            return {'ok': False, 'status': 'scope_correction_blocked', 'error': '任务归属、历史状态或冻结合同不允许原地改写。'}
+        if entrypoint not in {'experiment', 'coding'} or not user_request.strip() or not reason.strip():
+            return {'ok': False, 'error': '入口纠正必须指定 experiment/coding、用户纠正的目标与原因。'}
+        if routing.get('ok') is not True or not routing.get('evidence'):
+            return {'ok': False, 'error': '纠正代码相关任务前必须核对当前源文件。'}
+        if self.owned_tasks.active(run_id) is not None or self.owned_tasks.closing:
+            return {'ok': False, 'status': 'scope_correction_active', 'error': '任务仍在运行，请先停止并核对，再纠正入口。'}
+        if session.termination and session.termination.get('cleanup_complete') is not True:
+            return {'ok': False, 'error': '停止清理尚未完成，不能改写入口。'}
+        target_index = LINEAR_STAGES.index(entrypoint)
+        for key, state in session.graph.all_states().items():
+            index = LINEAR_STAGES.index(parse_node_key(key).stage)
+            allowed = {NodeState.PENDING, NodeState.SKIPPED}
+            if index < target_index:
+                allowed.add(NodeState.FAILED)
+            if state not in allowed:
+                return {'ok': False, 'error': '已有阶段产物待审核、已完成，或目标及后续阶段已开始；不能覆盖这些工作。'}
+        if any(list((session.run.root / stage).glob('*.approved.md')) for stage in LINEAR_STAGES):
+            return {'ok': False, 'error': '已有批准产物，不能用入口纠正丢弃原审批。'}
+        from app.harness.llm.accounting import RunModelBudget
+        ledger = session.run.root / 'resources/model_budget.v1.json'
+        if ledger.is_file():
+            budget = RunModelBudget(session.run.root).recovery_snapshot()
+            if any(row.get('status') in {'in_flight', 'reconciliation_required'}
+                   for row in budget.get('requests', {}).values()):
+                return {'ok': False, 'error': '存在结果未确认的模型调用，需先核对；入口纠正不会清空用量。'}
+        from app.harness.runtime.task_contract import TaskEnvelope
+        for path in (session.run.root / 'input/task_contracts').glob('*.json'):
+            task = TaskEnvelope.model_validate_json(path.read_text())
+            if task.run_id != run_id or task.project != project:
+                return {'ok': False, 'error': '原任务检查点归属无法核验。'}
+            checkpoint = session.run.root / 'agent_traces' / task.agent / task.invocation_id / 'checkpoint.json'
+            if not checkpoint.resolve().is_relative_to(session.run.root.resolve()):
+                return {'ok': False, 'error': '原任务检查点路径无法核验。'}
+            if checkpoint.is_file():
+                state = json.loads(checkpoint.read_text())
+                if state.get('pending') == 'tool' or state.get('pending_batch'):
+                    return {'ok': False, 'error': '存在结果未确认的工具操作，不能重排任务。'}
+        from app.harness.persistence import atomic_write_json, atomic_write_text
+        correction_id = uuid4().hex
+        record = {'schema_id': 'run.scope_correction.v1', 'id': correction_id,
+                  'run_id': run_id, 'project': project, 'reason': reason,
+                  'created_at': datetime.now(timezone.utc).isoformat(),
+                  'previous_revision': session.state_revision, 'previous_request': asdict(session.request),
+                  'previous_graph': session.graph.to_dict(), 'previous_termination': session.termination,
+                  'entrypoint': entrypoint, 'user_request': user_request, 'routing': routing}
+        record_path = session.run.root / 'input/scope_corrections' / (correction_id + '.json')
+        atomic_write_json(record_path, record)
+        # Creation identity remains immutable in the state journal. The graph
+        # and explicit active scope describe the corrected operational entry.
+        session.request = replace(session.request,
+            user_request=user_request, extra={**session.request.extra, 'routing': routing,
+                                             'scope_entrypoint': entrypoint,
+                                             'scope_correction_id': correction_id})
+        session.graph = (build_standalone(entrypoint) if session.request.standalone
+                         else build_pipeline(cast(EntryPoint, entrypoint)))
+        session.termination = None
+        self._persist_state(session, status='created')
+        session.run.meta.update(active_entrypoint=entrypoint, scope_correction_id=correction_id)
+        atomic_write_json(session.run.root / 'run_meta.json', session.run.meta)
+        atomic_write_text(session.run.root / 'input/user_request.md', user_request)
+        self._persist_request_extra(session.run, session.request.extra)
+        if self.langgraph_runtime.enabled():
+            self.langgraph_runtime.write_manifest(run=session.run, graph=session.graph)
+        return {'ok': True, 'run_id': run_id, 'entrypoint': entrypoint, 'status': 'scope_corrected',
+                'scope_correction_id': correction_id, 'history_preserved': True,
+                'cumulative_budget_preserved': True,
+                'states': {key: state.value for key, state in session.graph.all_states().items()}}
 
     def session(self, run_id: str) -> RunSession:
         if run_id not in self._sessions:
@@ -373,11 +470,15 @@ class Orchestrator:
                                "message": "research dispatch barrier could not be persisted"}
         if contract and termination is not None and termination.get("scope") == "research_contract":
             stopping = not bool(termination.get("cleanup_complete"))
+        elif termination is not None and termination.get("cleanup_complete") and state_error is None:
+            # Keep the internal cancellation barrier until explicit recovery,
+            # but do not present completed cleanup as an active stop operation.
+            stopping = False
         if stopping and session is None and not contract:
             state_error = {"type": "MissingRunSession", "phase": "request",
                            "message": "owned task has no in-memory persistence session"}
         return {"run_id": run_id, "owned_task_active": active, "stopping": stopping,
-            "owned_task_done": not active if active or stopping else None,
+            "owned_task_done": not active if active or stopping or termination is not None else None,
             "cleanup_complete": bool(termination.get("cleanup_complete")) if termination is not None else None,
             "state_persisted": False if state_error is not None else True if termination is not None else None,
             "state_persistence_error": state_error,
@@ -687,7 +788,10 @@ class Orchestrator:
                 for node_key in ready:
                     if self._stopping(session):
                         break
-                    group.create_task(self._advance(session, node_key), name=f"node:{run_id}:{node_key}")
+                    continuation = (self._complete_approved_node(session, node_key)
+                                    if graph.state(node_key) == NodeState.APPROVED
+                                    else self._advance(session, node_key))
+                    group.create_task(continuation, name=f"node:{run_id}:{node_key}")
             if session.waiting_for_feedback:
                 self._persist_state(session, status="waiting_feedback")
                 return
@@ -715,6 +819,39 @@ class Orchestrator:
                 else "run completion quality gate rejected the result" if quality_blocked else None
             ),
         })
+        self._notify_run_completion(run_id, terminal_status, failed_nodes, quality_blocked)
+
+    def _notify_run_completion(
+        self,
+        run_id: str,
+        terminal_status: str,
+        failed_nodes: list[str],
+        quality_blocked: bool,
+    ) -> None:
+        """Surface terminal run state in the linked chat conversation.
+
+        Runs started outside a chat turn (retry, resume, direct API) otherwise
+        finish silently and the user only finds out by reopening the page.
+        """
+        from app.bridge.commander_session import notify_linked_conversations
+
+        stage_names = {
+            "idea": "研究", "experiment": "实验设计", "coding": "编码",
+            "execution": "执行", "writing": "报告",
+        }
+        if terminal_status == "completed":
+            notice = (
+                f"【任务状态】研究任务 {run_id} 已完成：全部阶段（研究 → 实验设计 → 编码 → 执行 → 报告）"
+                "均已结束。可在任务详情查看报告与实验指标。"
+            )
+        else:
+            failed = "、".join(stage_names.get(node, node) for node in failed_nodes) or "质量门禁"
+            notice = (
+                f"【任务状态】研究任务 {run_id} 未完成：{failed} 阶段失败"
+                + ("（完成质量门禁拒绝）" if quality_blocked and not failed_nodes else "")
+                + "。可在任务详情查看失败证据；对话中的「任务恢复」支持仅重试失败阶段。"
+            )
+        notify_linked_conversations(run_id, notice)
 
     async def _write_evaluation_scorecard(self, session: RunSession) -> dict[str, Any]:
         try:
@@ -905,7 +1042,7 @@ class Orchestrator:
             await self._transition(session, node_key, NodeState.FAILED)
             return
 
-        latest = store.latest(agent_dir=agent_dir, stem=stem)
+        latest = store.review_candidate(agent_dir=agent_dir, stem=stem)
         if latest is None:
             # Agent didn't produce any artifact (real error). Halt the chain
             # — silently auto-approving here used to skip HITL entirely.
@@ -1007,7 +1144,7 @@ class Orchestrator:
                         node_key,
                         NodeState.WAITING_REVIEW,
                     )
-                latest = store.latest(agent_dir=agent_dir, stem=stem)
+                latest = store.review_candidate(agent_dir=agent_dir, stem=stem)
                 if latest is None:
                     await self._transition(session, node_key, NodeState.FAILED)
                     return
@@ -1127,6 +1264,11 @@ class Orchestrator:
         interval = float(confirmation_policy()['poll_interval_seconds'])
         announced = False
         while not self._stopping(session):
+            from app.bridge.preexecution_revision import pending_revision
+            if pending_revision(session.run) is not None:
+                if not await self._perform_preexecution_revision(session):
+                    return False
+            review_identity = ''
             try:
                 view = await asyncio.to_thread(execution_preview, session.run, node_key)
                 if not view['blockers']:
@@ -1142,30 +1284,41 @@ class Orchestrator:
                     def eligible() -> bool:
                         return (session.request.review_mode == "commander" and session.request.review_generation == generation
                                 and not self._stopping(session) and not session.read_only
+                                and pending_revision(session.run) is None
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
+                    review_payload = execution_review_payload(session.run, goal=session.request.user_request, configuration=view)
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
-                        payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
+                        payload=review_payload,
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
-                        current = execution_preview(session.run, node_key)
+                        review_identity = decision._identity
+                        current = await asyncio.to_thread(execution_preview, session.run, node_key)
                         if current['confirmed']:
                             return True
-                        if current['token'] != token or current['blockers']:
+                        from app.bridge.execution_recovery_evidence import execution_recovery_evidence
+                        recovery_changed = (execution_recovery_evidence(session.run, node_key)
+                                            != review_payload['execution_recovery'])
+                        if current['token'] != token or current['blockers'] or recovery_changed:
                             await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
-                            save_confirmation(session.run, node_key, str(token), actor="commander")
+                            await asyncio.to_thread(save_confirmation, session.run, node_key,
+                                                    str(token), actor="commander")
                             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
                             return True
                         else:
                             await finish_review(session.run, session.bus, "needs_user", decision.reason, identity=decision._identity)
-            except (OSError, ValueError, RuntimeError):
+            except (OSError, ValueError, RuntimeError) as error:
                 # A changed/unreadable input never becomes permission to launch.
-                view = {'blockers': ['仿真配置无法核验，请刷新配置核对窗口。']}
+                from app.harness.tools.execution.command_preflight import bounded_error
+                reason = '运行前核对未通过：' + bounded_error(str(error))
+                view = {'blockers': [reason]}
                 if session.request.review_mode == "commander":
                     from app.bridge.managed_review import record_state, review_state
                     state = review_state(session.run) or {}
-                    if state.get("node") != node_key or state.get("generation") != session.request.review_generation or state.get("status") != "needs_user":
+                    if review_identity:
+                        await finish_review(session.run, session.bus, 'needs_user', reason, identity=review_identity)
+                    elif state.get("node") != node_key or state.get("generation") != session.request.review_generation or state.get("status") != "needs_user" or state.get('reason') != reason:
                         await record_state(session.run, session.bus, {"node": node_key, "kind": "execution_configuration",
                             "generation": session.request.review_generation, "status": "needs_user", "reason": view['blockers'][0]})
             if not announced:
@@ -1332,7 +1485,7 @@ class Orchestrator:
         for _, (dir_name, stem) in SCHEMA_TO_AGENT.items():
             if dir_name != stage:
                 continue
-            latest = store.latest(agent_dir=dir_name, stem=stem)
+            latest = store.review_candidate(agent_dir=dir_name, stem=stem)
             if stage == "execution":
                 versions = [ref for ref in store.list_versions(agent_dir=dir_name, stem=stem) if ref.version != "approved"]
                 if versions:
@@ -1634,20 +1787,43 @@ class Orchestrator:
         agent: str,
         reason: str,
         restart_stopped: bool = False,
+        data_source: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         session = self.session(run_id)
         if session.read_only:
             return {"ok": False, "status": "read_only", "run_id": run_id}
         if self.owned_tasks.closing:
             return {"ok": False, "status": "stopped_run_requires_new_execution"}
+        coding_node = self._latest_node_for_stage(session, 'coding')
+        execution_node = self._latest_node_for_stage(session, 'execution')
+        if ((agent == 'coding' or (agent == 'experiment' and data_source is not None))
+                and coding_node is not None and execution_node is not None
+                and session.graph.state(coding_node) == NodeState.DONE
+                and session.graph.state(execution_node) == NodeState.APPROVED):
+            return self._request_preexecution_revision(session, coding_node, execution_node, reason,
+                                                       restart_stopped=restart_stopped, data_source=data_source)
+        if data_source is not None:
+            return {'ok': False, 'status': 'data_revision_blocked', 'error': '仅支持实验尚未启动时修订数据与方案'}
+        report_node = self._latest_node_for_stage(session, 'writing')
+        if agent == 'writing' and report_node is not None and session.graph.state(report_node) == NodeState.DONE:
+            return self._request_completed_report_revision(session, report_node, reason,
+                                                            restart_stopped=restart_stopped)
         if self._stopping(session) and not self._release_review_stop(session, agent=agent, operation="revision"):
             termination = session.termination or {}
             stopped_node = self._latest_node_for_stage(session, agent)
+            from app.bridge.stopped_draft_retry import stopped_draft_node
+            stopped_draft = stopped_draft_node(termination, {key: value.value for key, value in session.graph.all_states().items()})
+            stopped_execution_review = (agent == 'execution' and stopped_node is not None
+                and session.graph.state(stopped_node) == NodeState.APPROVED
+                and termination.get('interrupted_nodes') == []
+                and NodeState.RUNNING not in session.graph.all_states().values()
+                and (session.run.root / 'execution/run_log.approved.md').is_file())
             if (not restart_stopped or agent not in {"idea", "experiment", "coding", "execution", "writing"} or stopped_node is None
                     or termination.get("scope") != "owned_async_tasks" or not termination.get("cleanup_complete")
-                    or stopped_node not in termination.get("interrupted_nodes", [])
+                    or (stopped_node not in termination.get("interrupted_nodes", []) and stopped_node != stopped_draft
+                        and not stopped_execution_review)
                     or self.owned_tasks.active(run_id) is not None
-                    or session.graph.state(stopped_node) != NodeState.FAILED):
+                    or (session.graph.state(stopped_node) != NodeState.FAILED and not stopped_execution_review)):
                 return {"ok": False, "status": "stopped_run_requires_new_execution"}
             from app.bridge.research_branch import stopped_coding_retry_blocker
             from app.execution.job_journal import stopped_execution_retry_blocker
@@ -1721,18 +1897,32 @@ class Orchestrator:
         session: RunSession,
         node_key: str,
         reason: str,
+        continue_run: bool = True,
     ) -> None:
         try:
             if self._stopping(session):
                 return
-            retry_existing_execution = session.graph.state(node_key) == NodeState.FAILED
+            if parse_node_key(node_key).stage == 'writing':
+                # A historical report may have started before an APPROVED
+                # execution continuation was resumed. An explicit report retry
+                # must finish those prerequisites, never draft around them.
+                for parent in session.graph.topological_order():
+                    if parent not in session.graph.predecessors(node_key):
+                        continue
+                    if session.graph.state(parent) == NodeState.APPROVED:
+                        await self._complete_approved_node(session, parent)
+                    if (self._stopping(session) or session.waiting_for_feedback
+                            or session.graph.state(parent) not in {NodeState.DONE, NodeState.SKIPPED}):
+                        return
+            retry_existing_execution = (session.graph.state(node_key) == NodeState.FAILED or
+                (parse_node_key(node_key).stage == 'execution' and session.graph.state(node_key) == NodeState.APPROVED))
             if retry_existing_execution and parse_node_key(node_key).stage == 'execution':
                 from app.bridge.execution_confirmation import renew_execution_confirmation
                 renew_execution_confirmation(session.run, node_key)
             await self._transition(session, node_key, NodeState.RUNNING)
             if (retry_existing_execution and parse_node_key(node_key).stage == 'execution'
                     and (session.run.subdir('execution') / 'run_log.approved.md').is_file()
-                    and self._has_interrupted_execution_jobs(session)):
+                    and self._has_retryable_execution_jobs(session)):
                 # Execution retries run the already-approved deterministic intake.
                 # Keep completed measurement identities while requiring a fresh
                 # confirmation decision before recovering cleaned interrupted jobs.
@@ -1740,7 +1930,7 @@ class Orchestrator:
                 await self._transition(session, node_key, NodeState.APPROVED)
                 await self._publish_state(session, channel=f'run.{session.run.run_id}.execution', payload={
                     'event': 'execution.explicit_retry', 'node': node_key,
-                    'message': '沿用已批准执行清单；核验已完成作业，仅恢复已清理的中断作业。'})
+                    'message': '沿用已批准执行清单；重新审核失败或中断作业，核验并保留已完成作业。'})
                 await self._complete_approved_node(session, node_key, retry_interrupted_jobs=True)
                 await self.run(session.run.run_id)
                 return
@@ -1756,7 +1946,14 @@ class Orchestrator:
                 await self._await_hitl_or_auto(session, node_key)
             if not self._stopping(session):
                 await self._complete_approved_node(session, node_key)
-                await self.run(session.run.run_id)
+                if continue_run:
+                    from app.bridge.preexecution_revision import pending_revision
+                    pending = pending_revision(session.run)
+                    if pending and node_key in pending.get('nodes', [pending['node']]) and session.graph.state(node_key) == NodeState.DONE:
+                        if not await self._perform_preexecution_revision(session):
+                            return
+                        await self._complete_approved_node(session, pending['execution_node'])
+                    await self.run(session.run.run_id)
         except Exception as exc:  # pragma: no cover - background safety net
             logger.warning(
                 "artifact revision flow failed: run={} node={} error={}",
@@ -1764,6 +1961,114 @@ class Orchestrator:
                 node_key,
                 exc,
             )
+
+    def _request_completed_report_revision(self, session: RunSession, previous: str, reason: str,
+                                           *, restart_stopped: bool) -> dict[str, Any]:
+        from app.bridge.report_revision import append_report_revision
+        run_id = session.run.run_id
+        if self.owned_tasks.active(run_id) is not None:
+            return {'ok': True, 'status': 'already_running', 'node': previous}
+        if blocked := self._contract_execution_block(session):
+            return blocked
+        termination = session.termination
+        if self._stopping(session) and (not restart_stopped or termination is None
+                or termination.get('type') != 'cancelled' or termination.get('cleanup_complete') is not True
+                or termination.get('interrupted_nodes') != []):
+            return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
+        try:
+            revised, node = append_report_revision(session.graph, previous, reason)
+        except ValueError as exc:
+            return {'ok': False, 'status': 'report_revision_blocked', 'error': str(exc)}
+        previous_graph = session.graph
+        session.graph, session.termination = revised, None
+        try:
+            # Persist the pending attempt/reason before a model call; preserve
+            # completed nodes, documents, job receipts and approval history.
+            self._persist_state(session, status='queued')
+        except Exception:
+            session.graph, session.termination = previous_graph, termination
+            raise
+        session.run.write_event('run_lifecycle', {'event': 'run.report_revision_requested',
+            'node': node, 'previous_node': previous, 'reason': reason, 'previous_termination': termination})
+        self.owned_tasks.release_after_explicit_review(run_id)
+        async def revise_report() -> None:
+            await self._run_revision_flow(session=session, node_key=node, reason=reason)
+        started = self._spawn_owned(session, 'report_revision', revise_report)
+        return {'ok': started, 'status': 'revision_started' if started else 'not_startable', 'node': node}
+
+    def _request_preexecution_revision(self, session: RunSession, coding: str, execution: str,
+                                      reason: str, *, restart_stopped: bool,
+                                      data_source: dict[str, Any] | None = None) -> dict[str, Any]:
+        from app.bridge.preexecution_revision import enqueue_revision, record_revision_request
+        run_id = session.run.run_id
+        termination = session.termination
+        if self._stopping(session):
+            if (not restart_stopped or termination is None or termination.get('type') != 'cancelled'
+                    or termination.get('cleanup_complete') is not True or termination.get('interrupted_nodes') != []
+                    or self.owned_tasks.active(run_id) is not None):
+                return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
+        try:
+            row = enqueue_revision(session.run, session.graph, coding, execution, reason, data_source=data_source,
+                                   allow_failed_execution=data_source is None)
+        except (OSError, ValueError) as exc:
+            return {'ok': False, 'status': 'preexecution_revision_blocked', 'error': str(exc)}
+        record_revision_request(session.run, row, termination)
+        session.termination = None
+        self._persist_state(session, status='waiting_execution_confirmation')
+        if self.owned_tasks.active(run_id) is None:
+            self.owned_tasks.release_after_explicit_review(run_id)
+            async def repair_then_execute() -> None:
+                await self._complete_approved_node(session, execution)
+                if not self._stopping(session):
+                    await self.run(run_id)
+            if not self._spawn_owned(session, 'preexecution_revision', repair_then_execute):
+                return {'ok': False, 'status': 'not_startable', 'node': row['node']}
+        return {'ok': True, 'status': 'revision_requested', 'node': row['node']}
+
+    async def _perform_preexecution_revision(self, session: RunSession) -> bool:
+        from app.bridge.preexecution_revision import (
+            apply_revision_data, assert_revision_boundary, attach_revision, finish_revision, pending_revision,
+        )
+        row = pending_revision(session.run)
+        if row is None:
+            return True
+        assert_revision_boundary(session.run, row)
+        attach_revision(session.graph, row)
+        if source := apply_revision_data(session.run, row):
+            session.request.data_source = source
+            self._persist_state(session, status='running')
+        node, execution = row['node'], row['execution_node']
+        for revised_node in row.get('nodes', [node]):
+            if session.graph.state(revised_node) == NodeState.PENDING:
+                if session.request.review_mode == 'commander':
+                    from app.bridge.managed_review import record_state
+                    await record_state(session.run, session.bus, {'node': revised_node, 'kind': 'artifact',
+                        'generation': session.request.review_generation, 'status': 'revision_requested',
+                        'reason': '正在按明确反馈修订方案及编码；完成后正常审核，再核对执行配置。'})
+                await self._run_revision_flow(session=session, node_key=revised_node, reason=row['reason'], continue_run=False)
+            if self._stopping(session) or session.graph.state(revised_node) != NodeState.DONE:
+                return False
+        # Rebuild the deterministic execution intake from the newly reviewed code.
+        # Neither this method nor the API approves scientific content.
+        await self._transition(session, execution, NodeState.RUNNING)
+        if not await self._run_node_runner(session, execution, revision_reason=row['reason']):
+            return False
+        if session.graph.state(execution) == NodeState.RUNNING:
+            await self._transition(session, execution, NodeState.WAITING_REVIEW)
+        if session.graph.state(execution) == NodeState.WAITING_REVIEW:
+            await self._await_hitl_or_auto(session, execution)
+        if self._stopping(session) or session.graph.state(execution) != NodeState.APPROVED:
+            return False
+        if 'failed_execution_snapshot' in row:
+            # Repaired code requires a fresh configuration decision. Existing
+            # confirmations and failed/completed job records remain immutable.
+            from app.bridge.execution_confirmation import renew_execution_confirmation
+            assert_revision_boundary(session.run, row)
+            renew_execution_confirmation(session.run, execution)
+        finish_revision(session.run, row)
+        session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_reviewed',
+            'node': node, 'execution_node': execution, 'revision_id': row['id']})
+        return True
 
     def _latest_node_for_stage(self, session: RunSession, stage: str) -> str | None:
         candidates = [
@@ -1776,9 +2081,9 @@ class Orchestrator:
         return max(candidates, key=lambda key: parse_node_key(key).attempt)
 
     @staticmethod
-    def _has_interrupted_execution_jobs(session: RunSession) -> bool:
+    def _has_retryable_execution_jobs(session: RunSession) -> bool:
         from app.execution.job_journal import job_states
-        return any(row['status'] == 'interrupted' for row in job_states(session.run.root))
+        return any(row['status'] in {'failed', 'interrupted'} for row in job_states(session.run.root))
 
     def _recover_session(self, run_id: str) -> RunSession | None:
         run = self.run_store.get(run_id)

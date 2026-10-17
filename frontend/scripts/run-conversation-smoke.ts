@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { researchConversationUrl, researchRunConversationUrl } from "../src/lib/runConversation";
+import { researchConversationUrl, researchRunConversationUrl, runDetailsUrl } from "../src/lib/runConversation";
 
 const raw = researchConversationUrl("run/id + 中文", "project & 1", "experiment+a");
 const url = new URL(raw, "http://localhost");
@@ -10,3 +10,9 @@ assert.equal(url.searchParams.get("experiment"), "experiment+a");
 assert.equal(new URL(researchRunConversationUrl({run_id: "existing", project: "a"}), "http://localhost").searchParams.has("experiment"), false);
 assert.equal(new URL(researchRunConversationUrl({run_id: "existing", project: "a", experiment_id: "exp"}), "http://localhost").searchParams.get("experiment"), "exp");
 console.log("Research chat links retain exact run, project and experiment scope.");
+const details = new URL(runDetailsUrl("run/id + 中文", "coding_attempt_3"), "http://localhost");
+assert.equal(decodeURIComponent(details.pathname.slice("/runs/".length)), "run/id + 中文");
+assert.equal(details.searchParams.get("view"), "advanced");
+assert.equal(details.searchParams.get("agent"), "coding");
+assert.equal(new URL(runDetailsUrl("existing"), "http://localhost").searchParams.has("agent"), false);
+console.log("Task details open inspection for the failed stage instead of redirecting to chat.");

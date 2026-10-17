@@ -32,6 +32,33 @@ def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> 
         if metadata.get("schema") == "proposal.v1":
             candidates = [item.get("ref") for item in metadata.get("evidence_refs", [])
                           if isinstance(item, dict) and item.get("kind") == "code"]
+            # Focused proposals also record exact file identities separately
+            # from literature citations. These are source declarations, not
+            # proof of reads: resolve and hash the live files below. Never
+            # extract filenames or treat claimed hashes/findings as evidence.
+            method = metadata.get("method_spec")
+            checks = method.get("code_check") if isinstance(method, dict) else None
+            checked_files = checks.get("files") if isinstance(checks, dict) else None
+            if isinstance(checked_files, list):
+                handoff = metadata.get("handoff")
+                changes = handoff.get("changes", []) if isinstance(handoff, dict) else []
+                operations: dict[str, set[str]] = {}
+                for change in changes if isinstance(changes, list) else []:
+                    if isinstance(change, dict) and isinstance(change.get("target"), str):
+                        operations.setdefault(change["target"], set()).add(str(change.get("operation")))
+                additions = {target for target, kinds in operations.items() if kinds == {"add"}}
+                for item in checked_files:
+                    ref = item.get("path") if isinstance(item, dict) else None
+                    if isinstance(ref, str) and ref in additions:
+                        # code_check may describe the full implementation plan,
+                        # including files explicitly declared as new outputs.
+                        # They are not baseline evidence and need not exist yet.
+                        # Explicit evidence_refs above still require real files.
+                        if forbidden_source_path(ref):
+                            raise ValueError(f"Baseline handoff cannot reference a control or credential file: {ref}")
+                        resolve_allowed_path(repo, ref, require_text=True)
+                        continue
+                    candidates.append(ref)
         elif metadata.get("schema") == "experiment_plan.v1":
             # A proposal may omit optional evidence_refs. The approved plan
             # still names the exact source configuration for its experiments.
@@ -93,12 +120,18 @@ def repository_data_configuration(repo: ProjectRepo, ref: str) -> dict[str, Any]
             raise ValueError(f"{ref} 的 data_path 与 data.path 不一致，无法核对实际数据入口")
         fields["path"] = raw["data_path"]
     if not fields.get("path"):
-        return None
-    if not isinstance(fields["path"], str) or not fields["path"].strip():
+        if all(isinstance(raw.get(key), str) and raw[key].strip() for key in ("data_dir", "data_name")):
+            # Preserve exact flat loader declarations; do not guess an extension.
+            fields = {key: raw[key] for key in ("data_dir", "data_name")}
+        else:
+            return None
+    if "path" in fields and (not isinstance(fields["path"], str) or not fields["path"].strip()):
         raise ValueError(f"{ref} 的数据路径必须是非空字符串")
     parameters = raw.get("data_param", {})
     parameters = {key: parameters[key] for key in ("channels", "train_ratio", "xmax", "ymax")
                   if isinstance(parameters, dict) and key in parameters}
+    parameters.update({key: raw[key] for key in ("Ntx", "Nrx", "tra_offset", "tra_len", "val_len", "Fs_MHz")
+                       if key in raw})
     protocol = {key: raw[key] for key in ("scale", "fs", "band", "bound0", "bound1",
                 "train_fraction", "validation_fraction", "split_guard", "context") if key in raw}
     return {"config_path": ref, "config_sha256": hashlib.sha256(content).hexdigest(),

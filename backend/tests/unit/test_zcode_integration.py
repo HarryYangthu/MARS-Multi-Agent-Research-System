@@ -19,13 +19,14 @@ from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.trace import LoopTrace
 from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runtime_environment, runtime_identity
 from app.harness.agent_loop.zcode.executor import ZCodeLoopExecutor, session_identity
-from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, stream_envelope
+from app.harness.agent_loop.zcode.gateway import ZCodeGateway, invocation_budget, protocol_tool_name, stream_envelope
 from app.harness.agent_loop.zcode.protocol import ZCodeClient
 from app.harness.llm.openai_provider import LocalVllmProvider
 from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
 from app.harness.project_workspace import open_folder
 from app.harness.tools.git_branch import git
+from app.harness.tools.project_repo import load_project_repo
 from app.harness.tools.registry import ToolContext, get_registry
 from app.settings import reset_settings_cache
 from app.storage.run_store import RunHandle
@@ -63,6 +64,57 @@ def test_wire_parser_keeps_actual_tool_ids_finish_and_usage() -> None:
     assert session_identity({"id": "unrelated"}) == ""
 
 
+@pytest.mark.asyncio
+async def test_real_mcp_validator_io_failure_preserves_attempt_and_returns_error(tmp_path: Path) -> None:
+    async def validate(text: str, history: list[dict[str, Any]]) -> list[str]:
+        # Actual filesystem failure; no model or successful validator substitute.
+        (tmp_path / 'missing-host-input').read_bytes()
+        return []
+
+    trace_root = tmp_path / 'trace'
+    request = LoopInput(messages=[Message('user', 'Host failure boundary')],
+        provider=LocalVllmProvider(base_url='http://127.0.0.1:1'), config=LLMConfig('local_vllm', 'unavailable'),
+        registry=get_registry(), tool_context=ToolContext('boundary', 'local', 'coding'), tools=(),
+        policy=AgentLoopPolicy(), trace_root=trace_root, validate=validate,
+        final_schema={'type': 'object', 'properties': {'schema': {'type': 'string'}}})
+    config = ZCodeConfig.load()
+    state = ZCodeLoopExecutor(config)._state(request, 'boundary')
+    gateway = ZCodeGateway(request, config, 'host-failure-boundary', state, LoopTrace(trace_root, 'full'))
+    attempted = {'metadata': {'schema': 'code_spec.v1'}, 'body': 'Human-authored boundary input.'}
+    await gateway.start()
+    try:
+        async with httpx.AsyncClient(trust_env=False) as client:
+            response = await client.post(gateway.endpoint + '/mcp',
+                headers={'Authorization': 'Bearer host-failure-boundary'},
+                json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                      'params': {'name': 'mars_submit_document', 'arguments': attempted}})
+        assert response.status_code == 200
+        result = response.json()['result']
+        assert result['isError']
+        error = json.loads(result['content'][0]['text'])
+        assert error['accepted'] is False and error['error_code'] == 'host_validation_error'
+        assert 'FileNotFoundError' in error['error']
+        assert state['status'] == 'validation_failed' and gateway.done.is_set()
+        assert json.loads((trace_root / 'submission_attempt.json').read_text()) == attempted
+        assert not (trace_root / 'submission.json').exists()
+        assert state['counts']['model_requests'] == 0
+    finally:
+        await gateway.close()
+
+
+@pytest.mark.parametrize('completion_driven,models,tools,expected', [
+    (False, 2, 1, {'model_calls_remaining': 1, 'tool_calls_remaining': 1}),
+    (True, 2, 1, {'model_calls_remaining': None, 'tool_calls_remaining': None}),
+    (True, 6, 5, {'model_calls_remaining': None, 'tool_calls_remaining': None}),
+])
+def test_host_budget_reports_the_stricter_actual_local_limit(
+    completion_driven: bool, models: int, tools: int, expected: dict[str, int | None],
+) -> None:
+    config = replace(ZCodeConfig.load(), max_model_calls=5, max_tool_calls=4)
+    policy = AgentLoopPolicy(completion_driven=completion_driven, max_model_calls=3, max_tool_steps=2)
+    assert invocation_budget(config, policy, {'model_requests': models, 'tool_dispatches': tools}) == expected
+
+
 def test_private_config_contains_only_loopback_token_and_runtime_hash(tmp_path: Path) -> None:
     provider = model_config("glm-5.3", 8192, "http://127.0.0.1:10000", "private-local-token", context_window=128000)
     env = runtime_environment(tmp_path, provider=provider)
@@ -71,7 +123,9 @@ def test_private_config_contains_only_loopback_token_and_runtime_hash(tmp_path: 
     assert rule["access"]["apiKey"] == "private-local-token"
     assert rule["api"]["baseUrl"] == "http://127.0.0.1:10000/v1"
     assert not any("API_KEY" in key for key in env)
-    assert (tmp_path / "provider.json").stat().st_mode & 0o777 == 0o600
+    # Windows chmod exposes the read-only bit, not POSIX user/group ACLs.
+    if os.name != "nt":
+        assert (tmp_path / "provider.json").stat().st_mode & 0o777 == 0o600
     binary = tmp_path / "runtime"; binary.write_text("runtime source")
     first = runtime_identity((str(binary),))
     binary.write_text("updated runtime source")
@@ -154,9 +208,11 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
         state = ZCodeLoopExecutor(config)._state(request, "boundary")
         gateway = ZCodeGateway(request, config, "private-boundary-token", state, LoopTrace(request.trace_root, "full"))
         with research_branch_scope(run, "coding"):
+            candidate = load_project_repo(project.name).root
+            assert candidate != source
             await gateway.start()
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(trust_env=False) as client:
                     def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
                         return {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}
                     endpoint = gateway.endpoint + "/mcp"
@@ -169,7 +225,10 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
                     written = await client.post(endpoint, headers=auth,
                         json=call("mars_code__write_file", {"path": "main.py", "content": "VALUE = 2\n"}))
                     assert not written.json()["result"]["isError"]
-                    assert (source / "main.py").read_text() == "VALUE = 2\n"
+                    observation = json.loads(written.json()["result"]["content"][0]["text"])
+                    assert observation['invocation_budget'] == {'model_calls_remaining': 1, 'tool_calls_remaining': 1}
+                    assert (candidate / "main.py").read_text() == "VALUE = 2\n"
+                    assert (source / "main.py").read_text() == "VALUE = 1\n"
                     assert (source / "baseline/reference.py").read_text() == "VALUE = 1\n"
                     # Budget rejects before the unavailable model endpoint; it
                     # must neither call a model nor produce a success receipt.
@@ -179,7 +238,7 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
                     assert limited.status_code == 429 and state["counts"]["sdk_attempts"] == 0
                     stopped = await client.post(endpoint, headers=auth,
                         json=call("mars_code__write_file", {"path": "main.py", "content": "VALUE = 3\n"}))
-                    assert stopped.status_code == 409 and (source / "main.py").read_text() == "VALUE = 2\n"
+                    assert stopped.status_code == 409 and (candidate / "main.py").read_text() == "VALUE = 2\n"
             finally:
                 await gateway.close()
         assert git(source, "show", "baseline:main.py") == "VALUE = 1"
@@ -212,7 +271,7 @@ async def test_real_gateway_reports_shared_budget_block_without_sending_a_model_
     gateway = ZCodeGateway(request, zconfig, "private-budget-token", state, LoopTrace(request.trace_root, "full"))
     await gateway.start()
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             response = await client.post(gateway.endpoint + "/v1/chat/completions",
                 headers={"Authorization": "Bearer private-budget-token"},
                 json={"messages": [{"role": "user", "content": "Not admitted"}]})
@@ -227,3 +286,52 @@ async def test_real_gateway_reports_shared_budget_block_without_sending_a_model_
     finally:
         await gateway.close()
         await request.provider.close()
+
+
+@pytest.mark.asyncio
+async def test_statistics_mode_crosses_gateway_and_run_caps_but_reports_real_connection_failure(tmp_path: Path) -> None:
+    import socket
+
+    # A bound non-listening socket provides a genuine refused connection.
+    with socket.socket() as unavailable, environment({'MARS_AGENT_QUOTA_MODE': 'statistics_only'}):
+        unavailable.bind(('127.0.0.1', 0))
+        port = unavailable.getsockname()[1]
+        root = tmp_path / 'run'
+        resource_dir = root / 'resources'
+        resource_dir.mkdir(parents=True)
+        configuration = RunModelBudget(root).configuration
+        configuration['limits'].update(max_model_requests=1, max_elapsed_seconds=0.000001)
+        (resource_dir / 'model_budget.policy.yaml').write_text(yaml.safe_dump(configuration))
+        budget = RunModelBudget(root)
+        config = LLMConfig('local_vllm', 'unavailable', max_tokens=16, max_retries=0, request_timeout_seconds=0.2)
+        old = budget.reserve([Message('user', 'Historical reservation')], config, {})
+        budget.settle(old, usage=None, complete=False, outcome='failed')
+        old_row = budget.recovery_snapshot()['requests'][old.request_id]
+
+        async def validate(text: str, history: list[dict[str, Any]]) -> list[str]:
+            raise AssertionError('No candidate or successful model response is produced')
+
+        request = LoopInput(messages=[Message('user', 'Verify actual network admission')],
+            provider=LocalVllmProvider(base_url=f'http://127.0.0.1:{port}'), config=config,
+            registry=get_registry(), tool_context=ToolContext('quota-check', 'unbound', 'coding',
+                extra={'run_root': str(root)}), tools=(), policy=AgentLoopPolicy(max_model_calls=1),
+            trace_root=root / 'trace', validate=validate)
+        zconfig = replace(ZCodeConfig.load(), max_model_calls=1)
+        state = ZCodeLoopExecutor(zconfig)._state(request, 'quota-mode-boundary')
+        state['counts']['model_requests'] = 100
+        gateway = ZCodeGateway(request, zconfig, 'private-quota-token', state, LoopTrace(request.trace_root, 'full'))
+        await gateway.start()
+        try:
+            async with httpx.AsyncClient(trust_env=False) as client:
+                response = await client.post(gateway.endpoint + '/v1/chat/completions',
+                    headers={'Authorization': 'Bearer private-quota-token'},
+                    json={'messages': [{'role': 'user', 'content': 'Actual refused connection'}]})
+            assert response.status_code == 502
+            assert state['status'] == 'model_error'
+            assert state['counts']['sdk_attempts'] == 1
+            assert state['counts']['model_responses'] == 0
+            rows = budget.recovery_snapshot()['requests']
+            assert len(rows) == 2 and rows[old.request_id] == old_row
+        finally:
+            await gateway.close()
+            await request.provider.close()

@@ -425,7 +425,8 @@ class ResearchSession:
         except ValueError as exc:
             return ToolResult(ok=False, error=str(exc), output={"failure_type": "research_unit_argument_conflict",
                 **unit_fields(self.research_unit), "usable_as_final_evidence": False})
-        if self.attempted >= self.max_delegations:
+        from app.harness.llm.usage_policy import agent_quota_mode
+        if agent_quota_mode() == 'limited' and self.attempted >= self.max_delegations:
             return ToolResult(ok=False, error="research delegation budget exhausted; use existing evidence or report the gap",
                               output={"failure_type": "delegation_budget_exhausted", "remaining_delegations": 0,
                                       "previous_failures": self._recovery_context(), "usable_as_final_evidence": False})

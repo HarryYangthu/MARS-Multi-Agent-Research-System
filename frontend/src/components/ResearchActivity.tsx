@@ -16,11 +16,11 @@ export function useResearchActivity(runId: string | null | undefined, project: s
   useEffect(() => {
     setSnapshot(null); setError("");
     if (!runId) return;
-    let active = true, reading = false;
+    let active = true, reading = false, reread = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = async (): Promise<void> => {
       clearTimeout(timer);
-      if (reading) return;
+      if (reading) { reread = true; return; }
       reading = true;
       let complete = false;
       try {
@@ -29,7 +29,14 @@ export function useResearchActivity(runId: string | null | undefined, project: s
         complete = ["completed", "done", "failed", "stopped", "cancelled"].includes(run.status || "");
         if (active) { setSnapshot({ run, activities: runActivities(worklog, observation), updated: new Date().toISOString() }); setError(""); }
       } catch { if (active) setError("运行状态更新失败，正在重试；下方为最近记录。"); }
-      finally { reading = false; if (active && !complete) timer = setTimeout(() => void refresh(), CLIENT_POLICY.controlRefreshMs); }
+      finally {
+        reading = false;
+        if (active && (reread || !complete)) {
+          const delay = reread ? 0 : CLIENT_POLICY.controlRefreshMs;
+          reread = false;
+          timer = setTimeout(() => void refresh(), delay);
+        }
+      }
     };
     refreshRef.current = refresh;
     void refresh();

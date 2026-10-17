@@ -8,19 +8,20 @@ import zipfile
 from uuid import uuid4
 from xml.etree import ElementTree
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import yaml
 from loguru import logger
 
 from app.harness.schema.frontmatter_parser import parse
-from app.reporting.data_pack import collect_report_data_pack
+from app.reporting.data_pack import collect_report_data_pack, markdown_image_references
 from app.reporting.generators import (
     pretty_json,
     write_research_deck,
     write_research_docx,
+    write_research_html,
     write_results_workbook,
 )
 from app.settings import repo_root
@@ -40,8 +41,8 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     cfg = _reporting_config()
     if not cfg.get("enabled", True):
         raise ValueError("报告导出已在配置中关闭")
-    if any(kind not in {"excel", "word", "powerpoint"} for kind in formats):
-        raise ValueError("仅支持 Excel、Word、PPT 格式")
+    if any(kind not in {"html", "excel", "word", "powerpoint"} for kind in formats):
+        raise ValueError("仅支持 HTML、Excel、Word、PPT 格式")
     if any(not _format_config(cfg, kind).get("enabled", True) for kind in formats):
         raise ValueError("请求的报告格式已在配置中关闭")
     approved = safe_scope_path(run.root, "writing/research_report.approved.md", must_exist=True)
@@ -50,7 +51,11 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     validation = validate_document(approved.read_text(encoding="utf-8"), expected_schema="report.v1")
     if not validation.valid or validation.metadata.get("project") != run.project:
         raise ValueError("已审核报告格式或项目身份不正确，未生成导出文件")
-    deliverables_dir = safe_scope_path(run.root, str(Path(str(cfg.get("deliverables_dir", "writing/deliverables"))) / ".export_anchor")).parent / uuid4().hex
+    # relative_scope() rejects backslashes and str(Path(...)) emits them on
+    # Windows; build the anchor reference with PurePosixPath so exports work
+    # on Windows-native installs too.
+    configured_dir = str(cfg.get("deliverables_dir", "writing/deliverables")).replace("\\", "/")
+    deliverables_dir = safe_scope_path(run.root, str(PurePosixPath(configured_dir) / ".export_anchor")).parent / uuid4().hex
     deliverables_dir.mkdir(parents=True, exist_ok=True)
 
     previous = read_latest_report_bundle(run)
@@ -71,7 +76,10 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
                 f"{'!' if Path(item['path']).suffix.lower() != '.pdf' else ''}[已记录的实验图]({quote('images/' + Path(item['path']).name)})\n\n来源：`{item['source_path']}` · SHA-256：`{item['sha256']}`"
                 for item in images)
             text += "\n"
-        snapshot.write_text(text, encoding="utf-8")
+        # Keep exported markdown byte-identical across platforms: the default
+        # text-mode newline translation would turn \n into \r\n on Windows and
+        # diverge from both the approved source and the materials archive.
+        snapshot.write_text(text, encoding="utf-8", newline="\n")
         deliverables.append(_completed_deliverable(run, "markdown", snapshot))
     else:
         deliverables.append({"kind": "markdown", "path": "writing/research_report.approved.md", "status": "skipped", "error": "approved markdown report not found"})
@@ -84,7 +92,8 @@ def _generate_report_bundle(run: RunHandle, *, actor: str, formats: tuple[str, .
     materials_archive = _completed_deliverable(run, "markdown_archive", archive_path)
 
     reusable = _reusable_formats(run, previous, data_pack)
-    writers = [("excel", "results_workbook.xlsx", write_results_workbook),
+    writers = [("html", "research_report.html", write_research_html),
+               ("excel", "results_workbook.xlsx", write_results_workbook),
                ("word", "research_report.docx", write_research_docx),
                ("powerpoint", "research_deck.pptx", write_research_deck)]
     for kind, filename, writer in writers:
@@ -154,6 +163,8 @@ def _save_images(run: RunHandle, folder: Path, pack: dict[str, Any]) -> list[dic
         target.write_bytes(data)
         item = _completed_deliverable(run, "image", target)
         item["source_path"] = source_ref
+        if plot.get('report_references'):
+            item['report_references'] = plot['report_references']
         images.append(item)
         plot["source_path"], plot["path"] = source_ref, item["path"]
     return images
@@ -165,16 +176,38 @@ def portable_image_links(text: str, images: list[dict[str, Any]]) -> str:
     for item in images:
         source = str(item['source_path'])
         target = quote('images/' + Path(item['path']).name)
-        for ref in (source, './' + source, '../' + source):
+        for ref in (source, './' + source, '../' + source, *item.get('report_references', [])):
             links[ref] = target
+            links[unquote(ref)] = target
             links[quote(ref)] = target
-    pattern = re.compile(r'(!\[[^\]\n]*\]\()[ \t]*(<[^>\n]+>|[^\s)]+)([ \t]+(?:"[^"\n]*"|\x27[^\x27\n]*\x27))?[ \t]*\)')
+    pattern = re.compile(r'((?<!\\)!\[[^\]\n]*\]\()[ \t]*(<[^>\n]+>|[^\s)]+)([ \t]+(?:"[^"\n]*"|\x27[^\x27\n]*\x27))?[ \t]*\)')
+    labels = {' '.join(item['label'].split()).casefold() for item in markdown_image_references(text) if item['label']}
+    definition = re.compile(r'(^ {0,3}\[([^\]\n]+)\]:[ \t]*)(<[^>\n]+>|[^\s]+)')
 
     def relink(match: re.Match[str]) -> str:
         ref = match.group(2)
         ref = ref[1:-1] if ref.startswith('<') else ref
         target = links.get(ref)
         return match.group(1) + target + (match.group(3) or '') + ')' if target else match.group(0)
+
+    def relink_definition(match: re.Match[str]) -> str:
+        ref = match.group(3)
+        ref = ref[1:-1] if ref.startswith('<') else ref
+        target = links.get(ref)
+        if target and ' '.join(match.group(2).split()).casefold() in labels:
+            return match.group(1) + target
+        return match.group(0)
+
+    def rewrite_line(line: str) -> str:
+        # Inline code is preserved just like fenced code; it is not an image.
+        pieces: list[str] = []
+        cursor = 0
+        for code in re.finditer(r'(`+)(?!`)(.*?)(?<!`)\1(?!`)', line):
+            pieces.append(pattern.sub(relink, line[cursor:code.start()]))
+            pieces.append(code.group(0))
+            cursor = code.end()
+        pieces.append(pattern.sub(relink, line[cursor:]))
+        return definition.sub(relink_definition, ''.join(pieces))
 
     lines: list[str] = []
     fence = ''
@@ -187,7 +220,7 @@ def portable_image_links(text: str, images: list[dict[str, Any]]) -> str:
                 fence = ''
             lines.append(line)
         else:
-            lines.append(line if fence else pattern.sub(relink, line))
+            lines.append(line if fence else rewrite_line(line))
     return ''.join(lines)
 
 
@@ -243,7 +276,7 @@ def _run_writer(
     _event(run, "reporting.deliverable_started", {"kind": kind, "path": _relative(run, path)})
     try:
         writer(path, data_pack)
-        check = _zip_check(name=kind, path=path)
+        check = _deliverable_check(name=kind, path=path)
         if check["status"] != "passed":
             raise ValueError(check["detail"])
         item = _completed_deliverable(run, kind, path)
@@ -287,6 +320,15 @@ def _qa_status(
     else:
         status = "passed"
     return {"status": status, "checks": checks}
+
+
+def _deliverable_check(*, name: str, path: Path) -> dict[str, str]:
+    if path.suffix == ".html":
+        data = path.read_bytes()[:512]
+        if not data.lstrip().startswith(b"<!DOCTYPE html") or len(path.read_bytes()) < 1024:
+            return {"name": name, "status": "failed", "detail": "HTML document is empty or malformed"}
+        return {"name": name, "status": "passed", "detail": path.name}
+    return _zip_check(name=name, path=path)
 
 
 def _zip_check(*, name: str, path: Path) -> dict[str, str]:

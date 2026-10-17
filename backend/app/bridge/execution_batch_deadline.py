@@ -47,7 +47,8 @@ def prepare_interrupted_execution_retry(run: RunHandle, node_key: str) -> None:
     view = require_confirmation(run, node_key)
     prepared = prepare_execution(run, node_key)
     for spec in prepared.specs:
-        spec.config['confirmation_token'] = view['inputs_token']
+        spec.config['confirmation_token'] = view['token']
+        spec.config['confirmation_inputs_token'] = view['inputs_token']
     rearm_interrupted_jobs(prepared.specs, steps=prepared.batch_steps)
 
 
@@ -60,6 +61,9 @@ def execution_failure_hint(run: RunHandle, node_key: str) -> tuple[str, dict[str
     failure = FailureEnvelope.model_validate_json(path.read_text())
     if failure.task_id != f'{run.run_id}:{node_key}':
         raise ValueError('执行失败记录与当前任务不匹配。')
+    if failure.code in {'git_workspace_unreviewed_changes', 'git_workspace_code_unapproved', 'git_workspace_dirty'}:
+        return ('启动实验前核对未通过：' + failure.message + ' 核对代码后可在原任务中重试执行阶段。',
+                failure.model_dump())
     if failure.code not in {'execution_batch_failed', 'execution_dispatch_timeout'}:
         return '', failure.model_dump()
     return ('执行中断原因：' + failure.message + '。已有结果保留；核对配置后可在原任务中重试。',

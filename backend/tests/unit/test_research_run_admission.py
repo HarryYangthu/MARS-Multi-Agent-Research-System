@@ -212,7 +212,9 @@ def test_corrupted_saved_contract_recovers_readonly_and_never_falls_back_to_unbo
     before = files(run.root)
     owner = Orchestrator(run_store=store)
     if damage in {"symlink", "input_symlink", "run_symlink"}:
-        with pytest.raises(ResearchContractIntegrityError):
+        # The project path guard can reject a run symlink before the contract
+        # loader is reached. Both boundaries fail closed without side effects.
+        with pytest.raises(ValueError):
             owner.session(run.run_id)
         assert files(run.root) == before
         assert owner.owned_tasks.active(run.run_id) is None

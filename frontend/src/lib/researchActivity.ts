@@ -37,7 +37,9 @@ export function agentNodes(run: RunDetail): { key: string; state: string }[] {
 
 export type ConversationEntry = { kind: "message"; id: string; timestamp: string; message: StoredChatMessage } | { kind: "activity"; id: string; timestamp: string; activity: Activity };
 export function conversationEntries(messages: StoredChatMessage[], activities: Activity[]): ConversationEntry[] {
-  const entries: ConversationEntry[] = messages.filter(message => message.role !== "system").map((message,index) => ({ kind: "message", id: message.id || `message:${index}`, timestamp: message.timestamp, message }));
+  // System messages are host-side status notices (run completion, HITL pause);
+  // keep them so the user sees lifecycle updates without sending a message.
+  const entries: ConversationEntry[] = messages.map((message,index) => ({ kind: "message", id: message.id || `message:${index}`, timestamp: message.timestamp, message }));
   entries.push(...activities.map(activity => ({ kind: "activity" as const, id: activity.id, timestamp: activity.timestamp, activity })));
   // A regenerated earlier reply has a new timestamp but keeps its original
   // place in the dialogue. Its progress belongs to that turn, not the tail.

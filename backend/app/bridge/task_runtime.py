@@ -15,6 +15,8 @@ from app.harness.runtime.task_contract import (
 from app.harness.schema.validator import validate_document
 from app.storage.run_store import RunHandle
 
+RESUME_INPUT_CHANGED = "resume task or inputs changed; original invocation cannot be replayed"
+
 
 def task_contract_path(run: RunHandle, node_key: str) -> Path:
     parse_node_key(node_key)
@@ -33,7 +35,7 @@ def bind_task(run: RunHandle, node_key: str, *, goal: str, upstream: dict[str, s
         if (task.invocation_id != resume_invocation or task.run_id != run.run_id
                 or task.node_id != node_key or task.input_sha256 != inputs
                 or task.output_schema != output_schema):
-            raise ValueError("resume task or inputs changed; original invocation cannot be replayed")
+            raise ValueError(RESUME_INPUT_CHANGED)
         return task
     identity = parse_node_key(node_key)
     task = TaskEnvelope(run_id=run.run_id, task_id=f"{run.run_id}:{node_key}", parent_task_id=run.run_id,
@@ -66,7 +68,8 @@ def inspect_handoffs(run: RunHandle, node_key: str, *, supplied_context: dict[st
                 errors.append('/coding: 缺少批准的编码交付')
             else:
                 from app.execution.handoff_validation import coding_handoff_errors
-                errors.extend(coding_handoff_errors(plan_text, document_metadata(coding_path.read_text()), project=run.project))
+                errors.extend(coding_handoff_errors(plan_text, document_metadata(coding_path.read_text()),
+                    project=run.project, run_id=run.run_id, run_root=run.root))
         if errors:
             raise ValueError('上游交接未通过；请修正实验设计或编码交付：' + '；'.join(dict.fromkeys(errors)))
     handoffs: list[HandoffEnvelope] = []

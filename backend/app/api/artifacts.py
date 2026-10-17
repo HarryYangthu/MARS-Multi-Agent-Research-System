@@ -464,7 +464,7 @@ async def _apply_unwritten_patch(run_id: str, normalized: str) -> None:
 
 
 @router.get("/{run_id}/coding/patch/{version}", response_model=PatchView)
-async def get_patch(run_id: str, version: str) -> PatchView:
+def get_patch(run_id: str, version: str) -> PatchView:
     path = _patch_path(run_id, version)
     normalized = version if version.startswith("v") else f"v{version}"
     application = _patch_application_result(path, normalized)
@@ -543,7 +543,7 @@ async def reject_patch(
 
 
 @router.get("/{run_id}/{agent_dir}/{stem}/versions")
-async def list_versions(
+def list_versions(
     run_id: str, agent_dir: str, stem: str
 ) -> list[dict[str, str]]:
     store = get_run_store()
@@ -563,14 +563,14 @@ async def list_versions(
 
 
 @router.get("/{run_id}/{agent_dir}/{stem}/{version}", response_model=ArtifactView)
-async def get_artifact(
+def get_artifact(
     run_id: str, agent_dir: str, stem: str, version: str
 ) -> ArtifactView:
     return _read_view(run_id, agent_dir, stem, version)
 
 
 @router.get("/{run_id}/{agent_dir}/workspace-file", response_model=WorkspaceFileView)
-async def get_agent_workspace_file(
+def get_agent_workspace_file(
     run_id: str,
     agent_dir: str,
     path: str,
@@ -605,7 +605,7 @@ async def get_agent_workspace_file(
 
 
 @router.get("/{run_id}/{agent_dir}/research-source")
-async def get_research_source(run_id: str, agent_dir: str, source_id: str) -> FileResponse:
+def get_research_source(run_id: str, agent_dir: str, source_id: str) -> FileResponse:
     """Serve an actually archived source, never a caller-supplied filesystem path."""
     import hashlib
     if not re.fullmatch(r"source_[0-9a-f]{16}", source_id):
@@ -628,7 +628,7 @@ async def get_research_source(run_id: str, agent_dir: str, source_id: str) -> Fi
 
 
 @router.get("/{run_id}/{agent_dir}/workspace-tree", response_model=WorkspaceTreeView)
-async def get_agent_workspace_tree(
+def get_agent_workspace_tree(
     run_id: str,
     agent_dir: str,
 ) -> WorkspaceTreeView:
@@ -637,7 +637,7 @@ async def get_agent_workspace_tree(
 
 
 @router.get("/{run_id}/{agent_dir}/{stem}/diff")
-async def diff_versions(
+def diff_versions(
     run_id: str, agent_dir: str, stem: str, from_: str = "v1", to: str = "v2"
 ) -> dict[str, str]:
     left = _resolve(run_id, agent_dir, stem, from_).read_text(encoding="utf-8")
@@ -771,7 +771,7 @@ async def comment_artifact(
 
 
 @router.get("/{run_id}/audit")
-async def audit_log(run_id: str) -> list[dict[str, Any]]:
+def audit_log(run_id: str) -> list[dict[str, Any]]:
     store = get_run_store()
     run = store.get(run_id)
     if run is None:
@@ -818,7 +818,7 @@ async def pending_reviews(run_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/{run_id}/{agent_dir}/debate")
-async def get_debate_transcript(run_id: str, agent_dir: str) -> dict[str, Any]:
+def get_debate_transcript(run_id: str, agent_dir: str) -> dict[str, Any]:
     """Return the latest debate transcript for an agent (if any)."""
     store = get_run_store()
     run = store.get(run_id)
