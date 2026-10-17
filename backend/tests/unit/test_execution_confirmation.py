@@ -159,7 +159,8 @@ async def test_explicit_code_repair_after_real_failed_process_preserves_receipts
     execution: tuple[Orchestrator, RunSession, Path, Path],
 ) -> None:
     from app.bridge.failed_execution_repair import failed_execution_snapshot
-    from app.bridge.preexecution_revision import enqueue_revision, assert_revision_boundary
+    from app.bridge.preexecution_revision import enqueue_revision, assert_revision_boundary, record_revision_request
+    from app.bridge.execution_recovery_evidence import execution_recovery_evidence
     from app.bridge.tensorboard_service import shutdown_tensorboard
     from app.bridge.workflow_service import build_pipeline, ready_batch
 
@@ -179,6 +180,20 @@ async def test_explicit_code_repair_after_real_failed_process_preserves_receipts
         graph.restore_state('execution', NodeState.APPROVED)  # explicit config-review boundary
         row = enqueue_revision(session.run, graph, 'coding', 'execution', 'Repair failed adapter',
                                allow_failed_execution=True)
+        termination = {'type': 'cancelled', 'reason': 'server_shutdown', 'cleanup_complete': True,
+                       'interrupted_nodes': []}
+        session.run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': session.run.run_id,
+                                               'termination': termination})
+        record_revision_request(session.run, row, termination)
+        recovery = execution_recovery_evidence(session.run, 'execution')
+        assert recovery['retry_after_latest_stop'] is True
+        assert recovery['latest_explicit_retry']['event']['revision_id'] == row['id']
+        assert recovery['latest_explicit_retry']['event']['node'] == 'execution'
+        assert recovery['latest_explicit_retry']['event']['automatic_resume'] is False
+        assert all(job['record']['status'] == 'failed' for job in recovery['jobs'])
+        session.run.write_event('run_lifecycle', {'event': 'run.cancelled', 'run_id': session.run.run_id,
+                                               'termination': termination})
+        assert execution_recovery_evidence(session.run, 'execution')['retry_after_latest_stop'] is False
         assert row['failed_execution_snapshot'] == snapshot
         assert ready_batch(graph, 2) == [row['node']]
         assert_revision_boundary(session.run, row)

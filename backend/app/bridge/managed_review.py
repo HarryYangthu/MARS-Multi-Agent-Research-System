@@ -202,7 +202,10 @@ def artifact_review_materials(run: RunHandle, node: str) -> dict[str, Any]:
             'coding_review': 'Require actual changed code and checks against the currently approved design; no assumed future fixes. '
                 'With selected data, require no-training validation of each delivered configuration against that actual file. '
                 'Synthetic forward tests do not establish real-data compatibility. Verify approved parameters reach the computation, '
-                'rather than merely appearing in configuration metadata while hardcoded values remain active.',
+                'rather than merely appearing in configuration metadata while hardcoded values remain active. '
+                'For changed model/tensor scale, inspect actual target-device forward checks at the approved training batch '
+                'and full evaluation length, with device, shapes and peak memory recorded. A config-only or small-tensor '
+                'check is not evidence of memory feasibility; never waive this by reducing approved data/model/budget.',
             'execution_review': 'Require launchable approved inputs; never waive actual data/code/preflight blockers.'}}
 
 
@@ -264,6 +267,9 @@ async def review_once(
         "jobs 是实际已启动作业，启动前为空正常，待启动清单在 experiments。"
         "execution_recovery 保留原始失败、清理回执与显式恢复请求；较新的显式重试表示用户要求重新审核，"
         "不是仍要求暂停，也不等于已批准或故障已修复。核对失败原因、清理、重试理由和当前配置；"
+        "明确请求修复失败作业的代码也会登记为显式重试，须先完成编码和执行清单审核，再审核当前配置。"
+        "启动前检查与实际训练结果分开：审核应检查修复代码及真实无训练验证，批准后宿主仍须运行前验证；"
+        "不能要求尚未允许启动的新训练先提供成功回执。无训练检查不能冒充训练成功。"
         "没有新证据的相同连续失败仍需 needs_user。重试后更晚的停止优先，不能继续。"
         "configuration.budget 只计累计模型请求次数，与训练 epoch/step 预算独立；"
         "训练预算以批准方案及 experiments[].config.budget_unit/max_iters 为准。"

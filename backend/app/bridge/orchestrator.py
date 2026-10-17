@@ -1999,7 +1999,7 @@ class Orchestrator:
     def _request_preexecution_revision(self, session: RunSession, coding: str, execution: str,
                                       reason: str, *, restart_stopped: bool,
                                       data_source: dict[str, Any] | None = None) -> dict[str, Any]:
-        from app.bridge.preexecution_revision import enqueue_revision
+        from app.bridge.preexecution_revision import enqueue_revision, record_revision_request
         run_id = session.run.run_id
         termination = session.termination
         if self._stopping(session):
@@ -2012,9 +2012,7 @@ class Orchestrator:
                                    allow_failed_execution=data_source is None)
         except (OSError, ValueError) as exc:
             return {'ok': False, 'status': 'preexecution_revision_blocked', 'error': str(exc)}
-        session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_requested',
-            'node': row['node'], 'execution_node': execution, 'reason': reason,
-            'previous_termination': termination, 'revision_id': row['id']})
+        record_revision_request(session.run, row, termination)
         session.termination = None
         self._persist_state(session, status='waiting_execution_confirmation')
         if self.owned_tasks.active(run_id) is None:

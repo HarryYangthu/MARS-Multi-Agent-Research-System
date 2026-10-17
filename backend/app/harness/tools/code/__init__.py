@@ -24,6 +24,11 @@ from app.harness.tools.process_runtime import communicate_process, start_process
 from app.settings import repo_root
 
 _MAX_READ_BYTES = 20_000
+_PATCH_RECOVERY = (
+    'For patch syntax or hunk errors, do not guess new line counts: read the full current file, '
+    'then call code.patch_generator with path and complete content (omit diff), and apply its generated diff; '
+    'or use code.write_file with path and complete content. Scope/permission errors still require fixing the scope.'
+)
 _TEXT_SUFFIXES = {
     ".c",
     ".cfg",
@@ -99,7 +104,7 @@ async def patch_generator_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRe
     if diff:
         error = _bound_diff_error(ctx, diff)
         if error:
-            return ToolResult(ok=False, error=error)
+            return ToolResult(ok=False, error=error, output={'recovery_hint': _PATCH_RECOVERY})
         return ToolResult(
             ok=True,
             output={"diff": diff, "files": [{"path": p} for p in _extract_diff_paths(diff)]},
@@ -213,7 +218,7 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         return ToolResult(ok=False, error="diff or patch_path is required")
     error = _bound_diff_error(ctx, diff)
     if error:
-        return ToolResult(ok=False, error=error)
+        return ToolResult(ok=False, error=error, output={'recovery_hint': _PATCH_RECOVERY})
     root = _project_root(ctx)
     if root is None:
         return ToolResult(ok=False, error=f"project repo for '{ctx.project}' is not connected")
@@ -240,6 +245,8 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
             repo_root=root,
         )
         _write_patch_result(ctx, version, payload)
+        if isinstance(check.output, dict):
+            check.output['recovery_hint'] = _PATCH_RECOVERY
         return check
     applied = await _git_apply(root, diff, check_only=False, isolated=isolated)
     if not applied.ok:

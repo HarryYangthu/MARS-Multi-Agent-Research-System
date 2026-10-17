@@ -113,6 +113,22 @@ def assert_revision_boundary(run: RunHandle, row: dict[str, Any]) -> None:
         raise ValueError('返工期间执行记录发生变化，必须重新核对，不能自动继续')
 
 
+def record_revision_request(run: RunHandle, row: dict[str, Any], termination: dict[str, Any] | None) -> None:
+    """Expose the explicit repair request to subsequent configuration review.
+
+    Admission has already verified the terminated batch. This requests review,
+    never approves execution or claims that the repaired training succeeded.
+    """
+    event = {'run_id': run.run_id, 'node': row['node'], 'execution_node': row['execution_node'],
+             'reason': row['reason'], 'previous_termination': termination, 'revision_id': row['id'],
+             'timestamp': datetime.now(timezone.utc).isoformat()}
+    run.write_event('run_lifecycle', {**event, 'event': 'run.preexecution_revision_requested'})
+    if 'failed_execution_snapshot' in row:
+        run.write_event('run_lifecycle', {**event, 'event': 'run.explicit_execution_retry',
+            'node': row['execution_node'], 'coding_node': row['node'],
+            'source': 'explicit_failed_execution_code_repair', 'automatic_resume': False})
+
+
 def attach_revision(graph: RunGraph, row: dict[str, Any]) -> None:
     node, execution = row['node'], row['execution_node']
     if node not in graph.nodes:
