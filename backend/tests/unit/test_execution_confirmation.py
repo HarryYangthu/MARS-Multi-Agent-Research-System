@@ -154,6 +154,51 @@ async def test_failed_job_review_has_real_receipts_and_new_retry_keeps_history(
         await shutdown_tensorboard()
 
 
+@pytest.mark.asyncio
+async def test_explicit_code_repair_after_real_failed_process_preserves_receipts(
+    execution: tuple[Orchestrator, RunSession, Path, Path],
+) -> None:
+    from app.bridge.failed_execution_repair import failed_execution_snapshot
+    from app.bridge.preexecution_revision import enqueue_revision, assert_revision_boundary
+    from app.bridge.tensorboard_service import shutdown_tensorboard
+    from app.bridge.workflow_service import build_pipeline, ready_batch
+
+    orch, session, _, _ = execution
+    view = execution_preview(session.run, 'execution')
+    save_confirmation(session.run, 'execution', view['token'])
+    session.graph.restore_state('execution', NodeState.APPROVED)
+    try:
+        # Real child exits without required metrics. Never manufacture success.
+        await orch._complete_approved_node(session, 'execution')
+        assert session.graph.state('execution') == NodeState.FAILED
+        original = {path: path.read_bytes() for path in (session.run.root / 'execution').rglob('*.json')}
+        snapshot = failed_execution_snapshot(session.run, 'execution')
+        assert snapshot
+        graph = build_pipeline('coding')
+        graph.restore_state('coding', NodeState.DONE)
+        graph.restore_state('execution', NodeState.APPROVED)  # explicit config-review boundary
+        row = enqueue_revision(session.run, graph, 'coding', 'execution', 'Repair failed adapter',
+                               allow_failed_execution=True)
+        assert row['failed_execution_snapshot'] == snapshot
+        assert ready_batch(graph, 2) == [row['node']]
+        assert_revision_boundary(session.run, row)
+        assert all(path.read_bytes() == raw for path, raw in original.items())
+        # Reattach after a service restart, without replaying or approving jobs.
+        assert enqueue_revision(session.run, graph, 'coding', 'execution', 'Resume repair',
+                                allow_failed_execution=True)['id'] == row['id']
+        graph.restore_state(row['node'], NodeState.WAITING_REVIEW)
+        assert ready_batch(graph, 2) == []
+        # A newly started/unresolved invocation blocks repair even before a
+        # journal has been written. The receipt check fails closed.
+        orphan = session.run.root / 'execution/local_commands/orphan/invocation/job.json'
+        orphan.parent.mkdir(parents=True)
+        orphan.write_text(json.dumps({'run_id': session.run.run_id, 'experiment_id': 'orphan'}))
+        with pytest.raises(OSError):
+            assert_revision_boundary(session.run, row)
+    finally:
+        await shutdown_tensorboard()
+
+
 @pytest.fixture
 def execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Orchestrator, RunSession, Path, Path]]:
     configuration = tmp_path / 'execution.yaml'

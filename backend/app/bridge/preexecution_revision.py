@@ -1,8 +1,9 @@
-"""Explicit coding repair before any experiment has been confirmed or launched.
+"""Explicit coding repair at an execution configuration review boundary.
 
 Completed coding nodes and approved artifact versions remain historical facts.
 A new coding attempt must pass the ordinary review, followed by a fresh execution
-intake and configuration review. This is not permission to restart a running job.
+intake and configuration review. A failed batch additionally requires verified
+process-exit receipts; its original jobs and measurements remain untouched.
 """
 from __future__ import annotations
 
@@ -38,21 +39,32 @@ def assert_no_execution(run: RunHandle) -> None:
 
 
 def enqueue_revision(run: RunHandle, graph: RunGraph, coding: str, execution: str, reason: str,
-                     *, data_source: dict[str, Any] | None = None) -> dict[str, Any]:
+                     *, data_source: dict[str, Any] | None = None,
+                     allow_failed_execution: bool = False) -> dict[str, Any]:
     with path_lock(run.root / 'execution/.confirmation.lock'):
-        return _enqueue_revision(run, graph, coding, execution, reason, data_source=data_source)
+        return _enqueue_revision(run, graph, coding, execution, reason, data_source=data_source,
+                                 allow_failed_execution=allow_failed_execution)
 
 
 def _enqueue_revision(run: RunHandle, graph: RunGraph, coding: str, execution: str, reason: str,
-                      *, data_source: dict[str, Any] | None = None) -> dict[str, Any]:
+                      *, data_source: dict[str, Any] | None = None,
+                      allow_failed_execution: bool = False) -> dict[str, Any]:
     if not reason.strip():
         raise ValueError('执行前返工必须说明具体原因')
-    assert_no_execution(run)
     if pending := pending_revision(run):
+        assert_revision_boundary(run, pending)
         if data_source is not None and pending.get('data_source') != data_source:
             raise ValueError('已有未完成的修订，不能再次切换数据；请先处理当前修订')
         attach_revision(graph, pending)
         return pending
+    execution_snapshot = None
+    try:
+        assert_no_execution(run)
+    except ValueError:
+        if not allow_failed_execution or data_source is not None:
+            raise
+        from app.bridge.failed_execution_repair import failed_execution_snapshot
+        execution_snapshot = failed_execution_snapshot(run, execution)
     if graph.state(coding) != NodeState.DONE or graph.state(execution) != NodeState.APPROVED:
         raise ValueError('仅支持编码已完成、执行清单待确认的返工')
     if any(state in {NodeState.RUNNING, NodeState.WAITING_REVIEW, NodeState.FAILED}
@@ -67,6 +79,8 @@ def _enqueue_revision(run: RunHandle, graph: RunGraph, coding: str, execution: s
            'node': node, 'execution_node': execution, 'previous_coding_node': coding,
            'reason': reason.strip(), 'status': 'pending', 'created_at': datetime.now(timezone.utc).isoformat(),
            'previous_graph': graph.to_dict()}
+    if execution_snapshot is not None:
+        row['failed_execution_snapshot'] = execution_snapshot
     if data_source is not None:
         from pathlib import Path
         from app.storage.data_source_store import sha256_file
@@ -88,6 +102,15 @@ def _enqueue_revision(run: RunHandle, graph: RunGraph, coding: str, execution: s
     atomic_write_json(run.root / 'hitl/preexecution_revisions' / (row['id'] + '.json'), row)
     attach_revision(graph, row)
     return row
+
+
+def assert_revision_boundary(run: RunHandle, row: dict[str, Any]) -> None:
+    if 'failed_execution_snapshot' not in row:
+        assert_no_execution(run)
+        return
+    from app.bridge.failed_execution_repair import failed_execution_snapshot
+    if failed_execution_snapshot(run, row['execution_node']) != row['failed_execution_snapshot']:
+        raise ValueError('返工期间执行记录发生变化，必须重新核对，不能自动继续')
 
 
 def attach_revision(graph: RunGraph, row: dict[str, Any]) -> None:

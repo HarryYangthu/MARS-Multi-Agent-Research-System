@@ -2008,7 +2008,8 @@ class Orchestrator:
                     or self.owned_tasks.active(run_id) is not None):
                 return {'ok': False, 'status': 'stopped_run_requires_new_execution'}
         try:
-            row = enqueue_revision(session.run, session.graph, coding, execution, reason, data_source=data_source)
+            row = enqueue_revision(session.run, session.graph, coding, execution, reason, data_source=data_source,
+                                   allow_failed_execution=data_source is None)
         except (OSError, ValueError) as exc:
             return {'ok': False, 'status': 'preexecution_revision_blocked', 'error': str(exc)}
         session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_requested',
@@ -2028,12 +2029,12 @@ class Orchestrator:
 
     async def _perform_preexecution_revision(self, session: RunSession) -> bool:
         from app.bridge.preexecution_revision import (
-            apply_revision_data, assert_no_execution, attach_revision, finish_revision, pending_revision,
+            apply_revision_data, assert_revision_boundary, attach_revision, finish_revision, pending_revision,
         )
         row = pending_revision(session.run)
         if row is None:
             return True
-        assert_no_execution(session.run)
+        assert_revision_boundary(session.run, row)
         attach_revision(session.graph, row)
         if source := apply_revision_data(session.run, row):
             session.request.data_source = source
@@ -2060,6 +2061,12 @@ class Orchestrator:
             await self._await_hitl_or_auto(session, execution)
         if self._stopping(session) or session.graph.state(execution) != NodeState.APPROVED:
             return False
+        if 'failed_execution_snapshot' in row:
+            # Repaired code requires a fresh configuration decision. Existing
+            # confirmations and failed/completed job records remain immutable.
+            from app.bridge.execution_confirmation import renew_execution_confirmation
+            assert_revision_boundary(session.run, row)
+            renew_execution_confirmation(session.run, execution)
         finish_revision(session.run, row)
         session.run.write_event('run_lifecycle', {'event': 'run.preexecution_revision_reviewed',
             'node': node, 'execution_node': execution, 'revision_id': row['id']})
