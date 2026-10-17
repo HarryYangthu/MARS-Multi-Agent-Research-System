@@ -37,7 +37,9 @@ async def test_unconfigured_batch_cannot_fabricate_execution_artifacts(tmp_path:
     )
 
     assert result.ok is False
-    assert json.loads((run_root / "execution" / "metrics.json").read_text()) == []
+    assert result.error and "command_id" in result.error
+    assert not (run_root / "execution" / "metrics.json").exists()
+    assert not (run_root / "execution" / "local_commands").exists()
     assert not (run_root / "execution" / "curves").exists()
     assert (run_root / "events" / "tool_events.jsonl").is_file()
     reset_settings_cache()

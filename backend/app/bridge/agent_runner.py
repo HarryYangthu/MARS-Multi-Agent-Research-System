@@ -232,18 +232,27 @@ async def _execute_agent_node(
             "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
     failure_phase = "build_context"
     try:
-        context = await agent.build_context(request)
-
-        if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
-            failure_phase = "resource_revision"
-            RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
-
-        failure_phase = "draft"
-        run_loop = getattr(agent, "run_loop", None)
-        if callable(run_loop):
-            artifact = await run_loop(request, context)
+        reused = None
+        if (stage == 'coding' and attempt == 1 and research_stage is None
+                and not revision_reason and resume_invocation is None
+                and not (run.root / 'experiment/experiment_plan.approved.md').exists()):
+            from app.bridge.coding_reuse import prepare_reused_artifact
+            reused = await prepare_reused_artifact(run, request)
+        if reused is not None:
+            artifact = reused
         else:
-            artifact = await agent.draft(request, context)
+            context = await agent.build_context(request)
+
+            if revision_reason and resume_invocation is None and getattr(agent, "requires_model", True):
+                failure_phase = "resource_revision"
+                RunModelBudget(run.root).begin_revision(invocation_id=task.invocation_id, reason=revision_reason)
+
+            failure_phase = "draft"
+            run_loop = getattr(agent, "run_loop", None)
+            if callable(run_loop):
+                artifact = await run_loop(request, context)
+            else:
+                artifact = await agent.draft(request, context)
     except Exception as exc:
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
             code="agent_execution_failed", message=("Contract Agent execution failed; inspect its native receipts"
@@ -323,17 +332,22 @@ async def _execute_agent_node(
     # knowledge after execution and mislabel that reconstruction as consumed.
     try:
         from app.harness.context.compiler import write_compiled_manifest
-        compiled_manifest = context.metadata.get("last_compiled_manifest")
+        context_metadata = context.metadata if reused is None else {
+            "execution_reuse": artifact.metadata.get("execution_reuse", {}),
+            "model_calls": 0,
+        }
+        compiled_manifest = context_metadata.get("last_compiled_manifest")
         if isinstance(compiled_manifest, dict):
             write_compiled_manifest(run_root=run.root, manifest=compiled_manifest, agent_name=node_key)
         atomic_json(run.root / "context" / (task.invocation_id + ".source_receipt.json"), {
             "schema_id": "context.consumed_sources.v1", "invocation_id": task.invocation_id,
-            "task_id": task.task_id, "source": "actual_agent_context_metadata",
+            "task_id": task.task_id, "source": ("actual_agent_context_metadata" if reused is None
+                                                 else "host_verified_execution_reuse"),
             "compiled_manifest_available": isinstance(compiled_manifest, dict),
-            "required_upstream_refs": context.metadata.get("required_upstream_refs", []),
+            "required_upstream_refs": context_metadata.get("required_upstream_refs", []),
             "feedback_context": feedback_context,
-            "sources": {key: value for key, value in context.metadata.items()
-                        if "skill" in key or "memory" in key or key in {"project_knowledge", "folder_context"}},
+            "sources": {key: value for key, value in context_metadata.items()
+                        if "skill" in key or "memory" in key or key in {"project_knowledge", "folder_context", "execution_reuse", "model_calls"}},
         })
     except Exception as exc:
         logger.warning("actual context manifest persistence failed: {}", type(exc).__name__)
@@ -519,8 +533,7 @@ def load_agent_handoff_context(
                 from app.bridge.idea_revision_context import failed_idea_revision_context
                 upstream.update(failed_idea_revision_context(run.root, run.project))
         upstream["human_revision_request"] = (
-            "Human reviewer rejected the current draft and requested a revised "
-            f"version. Feedback: {revision_reason}"
+            f"Revision requested for the current draft. Feedback: {revision_reason}"
         )
     if stage in {"coding", "execution"}:
         from app.bridge.repository_handoff import attach_repository_handoff
@@ -582,8 +595,10 @@ def _execution_result_handoffs(run: RunHandle) -> dict[str, str]:
         out["execution.loss_curves_16.png"] = (
             "# Actual execution plot\n"
             f"source: {curves_path.relative_to(run.root).as_posix()}\n"
-            "This PNG is the generated loss curve panel from the completed "
-            "Execution Agent batch. Cite it as visual evidence when discussing convergence."
+            "This PNG overlays the adapter-returned measurement records for each actual experiment. "
+            "The historical filename does not mean 16 channels. Read the genuine job CSV/history and metric "
+            "definition for units and optimizer-step positions; record index is not automatically epoch or "
+            "optimizer step. The PNG alone does not prove convergence."
         )
     from app.bridge.execution_evidence_handoff import execution_job_evidence
     out["execution.job_files"] = execution_job_evidence(run.root, run.run_id, run.project)
@@ -731,7 +746,7 @@ async def _run_execution_batch(
     fail closed. Publishes per-experiment WS events via the
     orchestrator's bus when provided.
     """
-    from app.execution.batch_runner import BatchConfig, run_batch
+    from app.execution.batch_runner import BatchConfig, batch_failure_message, run_batch
     from app.execution.curve_parser import write_curve
     from app.execution.metrics_collector import (
         write_metrics_json,
@@ -760,7 +775,10 @@ async def _run_execution_batch(
     batch_steps = prepared.batch_steps
     specs = prepared.specs
     for spec in specs:
-        spec.config["confirmation_token"] = confirmed["inputs_token"]
+        # An explicit retry renews the decision even when scientific inputs stay
+        # unchanged. Admission must use the exact decision whose checker passed.
+        spec.config["confirmation_token"] = confirmed["token"]
+        spec.config["confirmation_inputs_token"] = confirmed["inputs_token"]
 
     async def check_inputs() -> None:
         import asyncio
@@ -833,7 +851,8 @@ async def _run_execution_batch(
         plot_loss_curves(
             batch_plot_curves,
             run.subdir("execution") / "loss_curves_16.png",
-            title=f"{len(batch_plot_curves)}-experiment measured loss",
+            title=f"{len(batch_plot_curves)}-experiment reported measurements",
+            value_scale="native",
         )
     write_metrics_json(run_root=run.root, results=outcome.results)
 
@@ -841,6 +860,8 @@ async def _run_execution_batch(
     summary = {
         "experiments": [r.experiment_id for r in outcome.results],
         "failures": outcome.failures,
+        "failure_evidence": {r.experiment_id: r.evidence_refs for r in outcome.results
+                             if r.status != "completed" and r.evidence_refs},
         "max_concurrency": max_concurrency,
         "configured_max_concurrency": configured_max_concurrency,
         "attempt": attempt,
@@ -861,7 +882,7 @@ async def _run_execution_batch(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
     if outcome.failures or len(outcome.results) != len(specs):
-        raise RuntimeError("actual execution batch failed; inspect execution/batch_summary.json")
+        raise RuntimeError(batch_failure_message(outcome, len(specs)))
 
 
 def _representative_execution_spec() -> tuple[str, dict[str, Any]]:

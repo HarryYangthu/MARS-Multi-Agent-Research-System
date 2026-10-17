@@ -10,6 +10,7 @@ from loguru import logger
 from app.execution.results import SimulationResult
 from app.execution.simulation_runner import JobSpec
 from app.execution.job_journal import run_managed_job
+from app.harness.tools.execution.command_preflight import bounded_error
 
 
 @dataclass
@@ -22,6 +23,14 @@ class BatchConfig:
 class BatchOutcome:
     results: list[SimulationResult] = field(default_factory=list)
     failures: list[tuple[str, str]] = field(default_factory=list)
+
+
+def batch_failure_message(outcome: BatchOutcome, expected_jobs: int) -> str:
+    """Preserve the first real cause; all failures remain in the batch record."""
+    reason = (f"{outcome.failures[0][0]}: {bounded_error(outcome.failures[0][1])}" if outcome.failures
+              else f"only {len(outcome.results)} of {expected_jobs} jobs produced results")
+    remaining = f"; {len(outcome.failures) - 1} additional failed jobs" if len(outcome.failures) > 1 else ""
+    return "actual execution batch failed: " + reason + remaining + "; inspect execution/batch_summary.json"
 
 
 async def run_batch(
@@ -45,10 +54,10 @@ async def run_batch(
                 res = await run_managed_job(s, bus_publish=bus_publish, steps=cfg.steps)
                 outcome.results.append(res)
                 if res.status != "completed":
-                    outcome.failures.append((s.experiment_id, f"execution status: {res.status}"))
+                    outcome.failures.append((s.experiment_id, bounded_error(res.error) or f"execution status: {res.status}"))
             except Exception as exc:
                 logger.exception("batch job {} failed", s.experiment_id)
-                outcome.failures.append((s.experiment_id, str(exc)))
+                outcome.failures.append((s.experiment_id, bounded_error(str(exc))))
 
     # TaskGroup waits for every child's process cleanup before acknowledging stop.
     async with asyncio.TaskGroup() as group:

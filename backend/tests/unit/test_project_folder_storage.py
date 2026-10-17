@@ -45,12 +45,14 @@ def test_project_run_files_reload_trash_restore_and_legacy(tmp_path: Path, regis
     assert target.read_text() == "4950"
     legacy = RunStore(store.runs_root).create(task="legacy", project=folder.name)
     reloaded = RunStore(store.runs_root, project_storage=True)
-    assert reloaded.get(run.run_id).root == run.root
+    retained = reloaded.get(run.run_id)
+    assert retained is not None and retained.root == run.root
     assert {row.run_id for row in reloaded.list()} == {run.run_id, legacy.run_id}
     trashed = reloaded.trash(run.run_id)
     assert trashed.root == folder.root / "runs/.trash" / run.run_id
     assert reloaded.get(run.run_id) is None
-    assert reloaded.get_trashed(run.run_id).root == trashed.root
+    retained_trash = reloaded.get_trashed(run.run_id)
+    assert retained_trash is not None and retained_trash.root == trashed.root
     restored = reloaded.restore(run.run_id)
     assert restored.root == run.root and (restored.root / "execution/result.txt").read_text() == "4950"
 
@@ -66,7 +68,8 @@ def test_two_project_runs_collisions_and_reopen_after_move(tmp_path: Path, regis
     moved = tmp_path / "A moved"
     a.root.rename(moved)
     assert open_folder(str(moved)).name == a.name
-    assert RunStore(store.runs_root, project_storage=True).get(ra.run_id).root == moved / "runs" / ra.run_id
+    relocated = RunStore(store.runs_root, project_storage=True).get(ra.run_id)
+    assert relocated is not None and relocated.root == moved / "runs" / ra.run_id
 
 
 def test_actual_dataset_and_default_survive_project_move(tmp_path: Path, registry: Path) -> None:
@@ -79,15 +82,18 @@ def test_actual_dataset_and_default_survive_project_move(tmp_path: Path, registr
     store.profile_uploaded_file(source_id=identifier, path=target, project=folder.name, original_name=target.name, fs_mhz=100.0)
     store.set_default(project=folder.name, source_id=identifier)
     assert target.is_relative_to(folder.root / "data")
-    assert store.load(identifier)["stored_path"] == str(target)
-    assert store.default_profile(folder.name)["id"] == identifier
+    loaded = store.load(identifier)
+    assert loaded is not None and loaded["stored_path"] == str(target)
+    default = store.default_profile(folder.name)
+    assert default is not None and default["id"] == identifier
     profile = json.loads(store.profile_path(identifier).read_text())
     assert profile["stored_path"] == "nested/" + target.name
     moved = tmp_path / "data moved"
     folder.root.rename(moved)
     open_folder(str(moved))
     reopened = DataSourceStore(store.base, project_storage=True)
-    assert Path(reopened.default_profile(folder.name)["stored_path"]).is_file()
+    reopened_default = reopened.default_profile(folder.name)
+    assert reopened_default is not None and Path(reopened_default["stored_path"]).is_file()
     assert len(reopened.list(project=folder.name)) == 1
 
 
@@ -103,8 +109,9 @@ def test_conversation_reload_trace_directory_and_legacy(tmp_path: Path, registry
     (directory / "trace.txt").write_text("real trace storage")
     legacy = CommanderSessionStore(tmp_path / "legacy").create(project=folder.name)
     fresh = CommanderSessionStore(tmp_path / "legacy", project_storage=True)
-    assert fresh.get(current.conv_id).messages[0].content == "research input"
-    assert fresh.session_directory(fresh.get(current.conv_id)) == directory
+    restored_conversation = fresh.get(current.conv_id)
+    assert restored_conversation is not None and restored_conversation.messages[0].content == "research input"
+    assert fresh.session_directory(restored_conversation) == directory
     assert {item.conv_id for item in fresh.list()} == {current.conv_id, legacy.conv_id}
     with pytest.raises(ValueError):
         fresh.get("../outside")
@@ -181,7 +188,8 @@ def test_history_import_is_idempotent_with_no_duplicate_entries(tmp_path: Path, 
     assert run.root.is_dir() and (runtime / "conversations" / session.conv_id).is_dir()
     assert (folder.root / "runs" / run.run_id / "execution/measured.txt").read_text() == "recorded data"
     routed = RunStore(legacy.runs_root, project_storage=True)
-    assert routed.get(run.run_id).root == folder.root / "runs" / run.run_id
+    routed_run = routed.get(run.run_id)
+    assert routed_run is not None and routed_run.root == folder.root / "runs" / run.run_id
     assert len(routed.list()) == 1
     routed.trash(run.run_id)
     assert routed.get(run.run_id) is None and not routed.list()

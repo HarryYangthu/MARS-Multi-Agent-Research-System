@@ -25,6 +25,9 @@ def revision_spec() -> dict[str, Any]:
             "end of the array addressed by path (e.g. /metadata/research_context/sources). Parents must exist; "
             "Use op=set on a whole array to insert/reorder. The replace alias is accepted only for an existing target. "
             "Use /metadata/field, not /field; a missing prefix is accepted only when the existing target is unambiguous. "
+            "Setting an object REPLACES that entire object; it does not merge children. For one field use its "
+            "nested pointer (e.g. /metadata/handoff/target_agent). To replace an object, include ALL required "
+            "and unaffected children, not only the changed fields. "
             "Update all related fields, including body if human_summary changes. "
             "Unchanged fields are preserved exactly as data; no content is supplied by the host."),
         "parameters": {"type": "object", "additionalProperties": False,

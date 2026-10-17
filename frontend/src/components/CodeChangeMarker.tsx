@@ -16,7 +16,8 @@ export function CodeChangeMarker({ record }: { record: CodeMarkerRecord }): JSX.
   const kind = codeMarkerKind(record.change);
   if (!kind) return null;
   const decoration = decorations[kind];
-  const state = ({ applied: "已写入", not_applied: "未写入", proposed: "待应用", recorded: "待核对" } as Record<string, string>)[record.status] ?? "待核对";
+  const state = record.status === "approved_history" && record.source === "approved_git_history" ? "已批准提交历史" :
+    ({ applied: "已写入", not_applied: "未写入", proposed: "待应用", recorded: "待核对" } as Record<string, string>)[record.status] ?? "待核对";
   const description = `${decoration.label} · ${state}`;
   return <span title={description} aria-label={description} data-change-kind={kind} className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border border-current font-mono text-xs leading-none ${decoration.color}`}><span aria-hidden="true">{decoration.symbol}</span></span>;
 }

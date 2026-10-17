@@ -338,7 +338,7 @@ class BaseAgent(ABC):
         if debate_role:
             config.extra["debate_role"] = debate_role
         try:
-            return await asyncio.wait_for(guarded_complete(provider, list(messages), config),
+            return await asyncio.wait_for(guarded_complete(provider, list(messages), config, active_model_time=True),
                                           timeout=llm_call_deadline_seconds(config))
         finally:
             await provider.close()

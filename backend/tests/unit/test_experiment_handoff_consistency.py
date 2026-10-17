@@ -236,6 +236,7 @@ def test_backend_precedence_is_shared_by_settings_and_tool_configuration(tmp_pat
         (runtime / path).mkdir(parents=True)
     (runtime / 'configs/agents.yaml').write_text((repo_root() / 'configs/agents.yaml').read_text())
     (runtime / 'configs/local_runtime.yaml').write_text((repo_root() / 'configs/local_runtime.yaml').read_text())
+    (runtime / 'configs/cli_research.yaml').write_text((repo_root() / 'configs/cli_research.yaml').read_text())
     (runtime / 'configs/execution.yaml').write_text(yaml.safe_dump({'execution': {'backend': 'paper_static'}}))
     environment = {key:value for key,value in os.environ.items() if key not in {'MARS_EXECUTION_BACKEND', 'MARS_EXECUTION_CONFIG_PATH'}}
     environment.update(MARS_RUNTIME_ROOT=str(runtime), PYTHONPATH=str(repo_root() / 'backend'))

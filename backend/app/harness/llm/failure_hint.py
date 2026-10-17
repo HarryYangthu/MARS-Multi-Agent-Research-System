@@ -6,6 +6,43 @@ from pathlib import Path
 from typing import Any
 
 
+def _terminal_provider(events: list[dict[str, Any]], request_index: int,
+                       terminal_index: int) -> str | None:
+    request = events[request_index]
+    declared = request.get('provider')
+    provider = declared if isinstance(declared, str) and declared else None
+    receipts = [event for event in events[request_index + 1:terminal_index]
+                if event.get('kind') == 'provider_request']
+    if not receipts:
+        return provider
+    terminal = events[terminal_index]
+    identity = terminal.get('request')
+    if type(identity) is not int or identity < 1:
+        return None
+    if 'request' in request and (type(request['request']) is not int
+                                 or request['request'] != identity):
+        return None
+    matched = [event for event in receipts
+               if type(event.get('request')) is int and event['request'] == identity]
+    if not matched:
+        return None
+    providers: set[str] = set()
+    for receipt in matched:
+        value = receipt.get('provider')
+        if not isinstance(value, str) or not value:
+            return None
+        providers.add(value)
+        correlation = receipt.get('correlation')
+        if isinstance(correlation, dict):
+            for related in (request, terminal):
+                other = related.get('correlation')
+                if isinstance(other, dict) and other != correlation:
+                    return None
+    if len(providers) != 1 or (provider is not None and provider not in providers):
+        return None
+    return next(iter(providers))
+
+
 def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
     if status == 'protocol_exhausted':
         errors = [event for event in events if event.get('kind') == 'protocol_error']
@@ -24,12 +61,24 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
     if not requests:
         return ''
     index = requests[-1]
-    provider = events[index].get('provider')
-    attempts = [event for event in events[index + 1:]
-                if event.get('kind') in {'sdk_attempt_failed', 'sdk_attempt_succeeded'}]
+    attempt_indices = [i for i in range(index + 1, len(events))
+                       if events[i].get('kind') in {'sdk_attempt_failed', 'sdk_attempt_succeeded'}]
+    attempts = [events[i] for i in attempt_indices]
     if not attempts or attempts[-1].get('kind') != 'sdk_attempt_failed':
         return ''
+    provider = _terminal_provider(events, index, attempt_indices[-1])
     details = attempts[-1].get('details', {})
+    if isinstance(details, dict) and details.get('exception_type') in {
+            'APIConnectionError', 'ConnectError', 'NetworkError'}:
+        label = 'GLM' if provider == 'zhipu' else '模型服务'
+        timed_out = any(isinstance(event.get('details'), dict)
+                        and event['details'].get('exception_type') in {
+                            'APITimeoutError', 'ReadTimeout', 'ConnectTimeout', 'TimeoutError'}
+                        for event in attempts[:-1])
+        sequence = '请求先超时，重试后连接失败' if timed_out else '请求连接失败'
+        return (f'{label} {sequence}（已尝试 {len(attempts)} 次），本次未取得模型回复。'
+                '已有工作与调用记录已保留；请检查网络、代理或模型服务后重试。'
+                '恢复时仍会核对原请求和工具状态；该错误不表示仿真代码失败。')
     if isinstance(details, dict) and details.get('exception_type') in {
             'APITimeoutError', 'ReadTimeout', 'ConnectTimeout', 'TimeoutError'}:
         label = 'GLM' if provider == 'zhipu' else '模型服务'
@@ -38,12 +87,34 @@ def provider_failure_hint(events: list[dict[str, Any]], *, status: str) -> str:
                 '恢复时仍会核对原请求和工具状态。')
     if (provider == 'zhipu' and isinstance(details, dict)
             and details.get('http_status') == 429 and str(details.get('api_error_code')) == '1113'):
-        return ('GLM 账户余额不足或无可用资源包（1113）。请补充额度或在设置中更换可用 API 后继续恢复；'
+        return ('GLM 账户余额不足或无可用资源包（1113）。请核对额度或在设置中更换可用 API 后，在原任务重试当前阶段；'
                 '进度和累计调用预算已保留，系统不会自动重复调用。')
     return ''
 
 
+def _model_call_limit_hint(root: Path) -> str:
+    path = root / 'checkpoint.json'
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            return ''
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return ''
+    if (not isinstance(state, dict) or state.get('status') != 'budget_exhausted'
+            or state.get('error') != 'ZCode model-call limit reached'):
+        return ''
+    counts = state.get('counts')
+    used = counts.get('model_requests') if isinstance(counts, dict) else None
+    if type(used) is not int or used <= 0:
+        return ''
+    return (f'本轮已到模型调用次数上限（{used} 次），交付内容尚未通过验收。'
+            '已有工作、检查结果和累计调用记录已保留；核对未通过项后可在原任务重试。'
+            '此状态不代表仿真已运行或仿真代码运行失败。')
+
+
 def checkpoint_failure_hint(root: Path, *, status: str) -> str:
+    if status == 'budget_exhausted':
+        return _model_call_limit_hint(root)
     if status not in {'model_error', 'protocol_exhausted'}:
         return ''
     path = root / 'events.jsonl'

@@ -87,8 +87,19 @@ async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None 
     path = _path(spec)
     path.parent.mkdir(parents=True, exist_ok=True)
     inputs = _inputs(spec, steps)
-    if path.exists():
-        saved = json.loads(path.read_text())
+    saved = json.loads(path.read_text()) if path.exists() else None
+    if saved is None and spec.config.get('confirmation_inputs_token'):
+        # A fresh user decision may reuse an intact completed measurement only
+        # when its host-bound code/data/config input identity is unchanged.
+        for history in sorted(path.parent.glob('*.json')):
+            previous = json.loads(history.read_text())
+            if (previous.get('run_id') == spec.run_id and previous.get('project') == spec.project
+                    and previous.get('experiment_id') == spec.experiment_id
+                    and previous.get('attempt') == spec.config.get('attempt', 1)
+                    and previous.get('inputs') == inputs and previous.get('status') == 'completed'):
+                saved = previous
+                break
+    if saved is not None:
         if saved.get('inputs') != inputs:
             raise ValueError('该作业的输入已变化；请核对后创建新的执行尝试')
         if saved.get('status') != 'completed':
@@ -146,7 +157,8 @@ async def run_managed_job(spec: JobSpec, *, steps: int, bus_publish: Any | None 
 
 def _inputs(spec: JobSpec, steps: int) -> str:
     return digest({'run_id': spec.run_id, 'project': spec.project, 'name': spec.experiment_id,
-                   'config': spec.config, 'seed': spec.seed, 'steps': steps,
+                   'config': {key: value for key, value in spec.config.items() if key != 'confirmation_token'},
+                   'seed': spec.seed, 'steps': steps,
                    'backend': get_settings().mars_execution_backend})
 
 

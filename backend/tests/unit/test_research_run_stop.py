@@ -18,7 +18,7 @@ from app.harness.runtime.research_budget_ledger import BudgetAmounts, BudgetRese
 from app.harness.runtime.state_machine import NodeState
 from tests.unit.test_research_job_service import _setup, _submit, _request, _wait, MEASURE
 from tests.unit.test_research_job_control import wait_running
-from tests.unit.test_research_stage_runtime import ready
+from tests.unit.test_research_stage_runtime import ready, configured_native_contract
 
 
 def policy() -> ResearchStopPolicy:

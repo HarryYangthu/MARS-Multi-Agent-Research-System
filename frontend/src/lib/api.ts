@@ -2085,8 +2085,12 @@ export class ChatMessageFailure extends Error {
 
 export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
 export type CodeChange = { id: string; path: string; additions: number | null; deletions: number | null; change: string; status: string; source: string; timestamp: string; truncated: boolean; warning?: string };
-export type CodeChanges = { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
-export type CodeChangeDetail = CodeChange & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
+export type ApprovedCodeHistory = {
+  source?: string; approved?: boolean; historical?: boolean; current_mismatch?: boolean; execution_eligible?: boolean;
+  workspace?: { head: string; head_matches: boolean; clean: boolean; tracked_changes: boolean; untracked_files: boolean };
+};
+export type CodeChanges = ApprovedCodeHistory & { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
+export type CodeChangeDetail = CodeChange & ApprovedCodeHistory & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
 export async function getCodeChanges(runId: string, project: string, signal?: AbortSignal): Promise<CodeChanges> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
 }

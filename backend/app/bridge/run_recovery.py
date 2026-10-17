@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 from app.bridge.node_key import parse_node_key
@@ -88,7 +87,7 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     elapsed_exhausted = False
     if ledger.exists():
         try:
-            model_budget = RunModelBudget(session.run.root)
+            model_budget = RunModelBudget(session.run.root, active_model_time=True)
             raw = model_budget.recovery_snapshot()
         except (ResourceBudgetError, OSError, ValueError):
             return finish('blocked', '资源记录或预算配置无法校验，请先核对记录和配置。')
@@ -121,8 +120,9 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
             exhausted = exhausted or sum(row['charged_cost'] or 0 for row in rows) >= limits['max_cost']
         if exhausted and model_agents:
             return finish('blocked', '累计调用预算已耗尽，请先调整并核对预算；恢复不会清空已有用量。')
-        elapsed_exhausted = (
-            time.time() - raw.get('revision_started_at', raw['started_at']) >= limits['max_elapsed_seconds'])
+        elapsed_exhausted = model_budget.remaining_seconds() <= 0
+        if elapsed_exhausted and model_agents:
+            return finish('blocked', '累计有效模型调用时间已耗尽，请核对时间预算；等待审批和暂停不计入，已有用量不会清空。')
     if legacy:
         for agent in agents:
             if getattr(agent, 'name', '') == 'coding':

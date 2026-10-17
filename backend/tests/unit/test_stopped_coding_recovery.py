@@ -16,6 +16,7 @@ from app.harness.project_workspace import open_folder
 from app.harness.runtime.event_bus import InProcessEventBus
 from app.harness.runtime.state_machine import NodeState
 from app.harness.tools.git_branch import git
+from app.harness.tools.project_repo import load_project_repo
 from app.settings import reset_settings_cache
 from app.storage.run_store import RunStore
 
@@ -39,7 +40,9 @@ def test_confirmed_coding_stop_offers_retry_but_unknown_write_blocks(
         session = orch.create_session(RunRequest(task='stopped-coding', project=project.name,
                                                 entrypoint='coding', standalone=True))
         with research_branch_scope(session.run, 'coding'):
-            assert git(root, 'branch', '--show-current').startswith('mars/')
+            candidate = load_project_repo(project.name).root
+            assert candidate != root and git(candidate, 'branch', '--show-current').startswith('mars/')
+            assert git(root, 'branch', '--show-current') == 'baseline'
         task = bind_task(session.run, 'coding', goal='Admission before operations', upstream={}, output_schema='code_spec.v1')
         trace = LoopTrace(session.run.root / 'agent_traces/coding' / task.invocation_id, 'full')
         trace.emit('authored_admission_fixture', {})

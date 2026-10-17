@@ -5,6 +5,7 @@ import asyncio
 import fnmatch
 import hashlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -70,7 +71,7 @@ def _directory_visible(ctx: ToolContext, relative: str, policy: InspectionPolicy
 
 
 def _scan(ctx: ToolContext, args: dict[str, Any], policy: InspectionPolicy,
-          *, default_depth: int) -> tuple[Path, list[tuple[str, Path, bool]], bool]:
+          *, default_depth: int, allow_file: bool = False) -> tuple[Path, list[tuple[str, Path, bool]], bool]:
     root = _project_root(ctx)
     if root is None or not root.is_dir():
         raise ValueError("project code repository is not connected")
@@ -85,6 +86,14 @@ def _scan(ctx: ToolContext, args: dict[str, Any], policy: InspectionPolicy,
         current /= part
         if current.is_symlink():
             raise ValueError("repository inspection cannot traverse symbolic links")
+    if allow_file and folder.is_file():
+        resolved = _resolve_project_file(ctx, path, must_exist=True)
+        if isinstance(resolved, ToolResult):
+            raise ValueError(resolved.error or "source file is unavailable")
+        actual_root, relative, target = resolved
+        if target.suffix.lower() not in TEXT_SUFFIXES:
+            raise ValueError("source file is unsupported")
+        return actual_root, [(relative, target, False)], False
     if not folder.is_dir() or not folder.resolve().is_relative_to(root):
         raise ValueError("repository directory is unavailable")
     relative = rel.as_posix()
@@ -154,11 +163,20 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         query = args.get("query")
         if not isinstance(query, str) or not query.strip() or len(query) > policy.snippet_chars:
             raise ValueError("query must be a short nonempty literal string")
-        root, files, scan_limited = _scan(ctx, args, policy, default_depth=policy.max_depth)
+        root, files, scan_limited = _scan(ctx, args, policy, default_depth=policy.max_depth, allow_file=True)
         offset = _integer(args, "offset", 0, 0, policy.max_scanned_entries)
         limit = _integer(args, "limit", policy.page_size, 1, policy.max_results)
         glob = str(args.get("glob", "*"))
         hits: list[dict[str, Any]] = []
+        original = str(ctx.extra.get('original_request', ''))[:policy.max_read_chars]
+        # Keep literal-query results intact. Candidate matches for identifiers
+        # in the actual task are separate, bounded and use the same file scope.
+        terms = list(dict.fromkeys(re.findall(r'[A-Za-z0-9_]+', original)))
+        terms = [term for term in terms if len(term) > 1 and not term.isdigit()
+                 and term.casefold() != query.casefold()]
+        terms.sort(key=lambda term: (not bool(re.search(r'[0-9_]|[a-z][A-Z]', term)), -len(term)))
+        terms = terms[:policy.page_size]
+        fallback_hits: list[dict[str, Any]] = []
         skipped_large = 0
         skipped_unreadable = 0
         matched = 0
@@ -185,6 +203,14 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 continue
             sha = hashlib.sha256(raw).hexdigest()
             for line, content in enumerate(text.splitlines(), 1):
+                folded = content.casefold()
+                for term in terms if len(fallback_hits) < limit else []:
+                    candidate = folded.find(term.casefold())
+                    if candidate >= 0:
+                        start = max(0, candidate - policy.snippet_chars // 4)
+                        fallback_hits.append({'path': name, 'line': line, 'sha256': sha,
+                            'matched_query': term, 'snippet': content[start:start + policy.snippet_chars]})
+                        break
                 position = content.casefold().find(query.casefold())
                 if position < 0:
                     continue
@@ -200,11 +226,15 @@ def _repo_search_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             if more:
                 break
         return ToolResult(ok=True, output={"repo_root": str(root), "query": query, "matches": hits,
+            "search_semantics": 'literal; no matches does not establish absence of a model or capability',
+            "fallback_queries": terms if not hits else [],
+            "fallback_matches": fallback_hits if not hits else [],
+            "next_step_if_empty": 'Search the original user term, browse matching filenames/configuration and inspect the model registration before a routing conclusion.',
             "truncated": more or scan_limited, "scan_limited": scan_limited,
             "skipped_large_files": skipped_large, "skipped_unreadable_files": skipped_unreadable,
             "next_offset": offset + len(hits) if more else None,
             "hint": "Read only the relevant matching line ranges; no match is not proof of absence if scanning was limited."},
-            evidence_refs=list(dict.fromkeys(str(hit["path"]) for hit in hits)))
+            evidence_refs=list(dict.fromkeys(str(hit["path"]) for hit in (hits or fallback_hits))))
     except (OSError, ValueError) as exc:
         return ToolResult(ok=False, error=str(exc))
 
@@ -232,9 +262,9 @@ def _read_code_fragment(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             raise ValueError("source file must be text")
         lines = raw.decode("utf-8").splitlines(keepends=True)
         start = _integer(args, "start_line", 1, 1, max(1, len(lines)))
-        end = _integer(args, "end_line", min(len(lines) or 1, start + policy.max_read_lines - 1),
-                       start, start + policy.max_read_lines - 1)
-        end = min(end, len(lines))
+        requested_end = _integer(args, "end_line", min(len(lines) or 1, start + policy.max_read_lines - 1),
+                                 start, policy.max_file_bytes)
+        end = min(requested_end, len(lines), start + policy.max_read_lines - 1)
         excerpt: list[str] = []
         chars = 0
         for line in lines[start - 1:end]:
@@ -248,6 +278,7 @@ def _read_code_fragment(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=True, output={"repo_root": str(root), "path": relative,
             "sha256": hashlib.sha256(raw).hexdigest(), "line_start": start, "line_end": last,
             "total_lines": len(lines), "content": "".join(excerpt), "truncated": last < len(lines),
+            "range_limited": last < min(requested_end, len(lines)),
             "next_line": last + 1 if last < len(lines) else None}, evidence_refs=[relative])
     except (OSError, ValueError, UnicodeError) as exc:
         return ToolResult(ok=False, error=str(exc))

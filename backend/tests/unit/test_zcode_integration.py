@@ -26,6 +26,7 @@ from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
 from app.harness.project_workspace import open_folder
 from app.harness.tools.git_branch import git
+from app.harness.tools.project_repo import load_project_repo
 from app.harness.tools.registry import ToolContext, get_registry
 from app.settings import reset_settings_cache
 from app.storage.run_store import RunHandle
@@ -154,6 +155,8 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
         state = ZCodeLoopExecutor(config)._state(request, "boundary")
         gateway = ZCodeGateway(request, config, "private-boundary-token", state, LoopTrace(request.trace_root, "full"))
         with research_branch_scope(run, "coding"):
+            candidate = load_project_repo(project.name).root
+            assert candidate != source
             await gateway.start()
             try:
                 async with httpx.AsyncClient() as client:
@@ -169,7 +172,8 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
                     written = await client.post(endpoint, headers=auth,
                         json=call("mars_code__write_file", {"path": "main.py", "content": "VALUE = 2\n"}))
                     assert not written.json()["result"]["isError"]
-                    assert (source / "main.py").read_text() == "VALUE = 2\n"
+                    assert (candidate / "main.py").read_text() == "VALUE = 2\n"
+                    assert (source / "main.py").read_text() == "VALUE = 1\n"
                     assert (source / "baseline/reference.py").read_text() == "VALUE = 1\n"
                     # Budget rejects before the unavailable model endpoint; it
                     # must neither call a model nor produce a success receipt.
@@ -179,7 +183,7 @@ async def test_real_mcp_auth_write_scope_stop_and_budget(tmp_path: Path) -> None
                     assert limited.status_code == 429 and state["counts"]["sdk_attempts"] == 0
                     stopped = await client.post(endpoint, headers=auth,
                         json=call("mars_code__write_file", {"path": "main.py", "content": "VALUE = 3\n"}))
-                    assert stopped.status_code == 409 and (source / "main.py").read_text() == "VALUE = 2\n"
+                    assert stopped.status_code == 409 and (candidate / "main.py").read_text() == "VALUE = 2\n"
             finally:
                 await gateway.close()
         assert git(source, "show", "baseline:main.py") == "VALUE = 1"

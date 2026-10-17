@@ -379,7 +379,7 @@ async def _complete_role_once(
 ) -> Completion:
     messages, _ = pack_context(messages, [], "", "", budget=input_budget, observation_chars=1)
     return await asyncio.wait_for(
-        guarded_complete(provider, messages, config, run_root=run_root),
+        guarded_complete(provider, messages, config, run_root=run_root, active_model_time=True),
         timeout=llm_call_deadline_seconds(
             config,
             minimum_seconds=get_settings().mars_llm_timeout_seconds,

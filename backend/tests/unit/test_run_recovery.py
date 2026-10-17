@@ -149,7 +149,7 @@ def test_token_usage_is_statistics_only_but_corrupt_ledger_blocks_recovery(tmp_p
     assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'
 
 
-def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> None:
+def test_approval_idle_time_does_not_expire_recoverable_model_checkpoint(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
     checkpoint(session)
     budget = RunModelBudget(session.run.root)
@@ -159,7 +159,29 @@ def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> 
     budget.path.write_text(json.dumps(state))
     before = budget.path.read_bytes()
     view = recovery_status(orch, session.run.run_id, project='pimc')
-    assert [action['action'] for action in view['actions']] == ['retry']
+    assert [action['action'] for action in view['actions']] == ['resume', 'retry']
+    assert budget.path.read_bytes() == before
+
+
+def test_consumed_model_activity_blocks_recovery_without_refunding_usage(tmp_path: Path) -> None:
+    import time
+    orch, session = session_at(tmp_path)
+    checkpoint(session)
+    initial = RunModelBudget(session.run.root)
+    policy = initial.configuration
+    policy['limits']['max_elapsed_seconds'] = 0.02
+    policy_path = session.run.root / 'resources/model_budget.policy.yaml'
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(yaml.safe_dump(policy))
+    budget = RunModelBudget(session.run.root, active_model_time=True)
+    reservation = budget.reserve([Message(role='user', content='Real budget reservation, no provider called.')],
+        LLMConfig(provider='custom', model='not-called', max_tokens=8, max_retries=0), {})
+    time.sleep(0.03)
+    budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'blocked' and not view['actions']
+    assert '有效模型调用时间' in view['message']
     assert budget.path.read_bytes() == before
 
 

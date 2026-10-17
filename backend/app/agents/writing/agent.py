@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +20,30 @@ class WritingAgent(BaseAgent):
         "你负责把完整研究链路汇总成研究报告。用 knowledge.run_archive 回顾执行结果、"
         "knowledge.methodology 对齐写作规范,串联 proposal/plan/code/runs 的 chain_refs,"
         "面向 phd_advisor 给出可复现、有据可依的中文报告。"
+        "先核对 admitted_report_sources 提供的实际路径；跳过的研究或实验设计阶段不能编造 proposal/plan。"
+        "上下文材料标签不是文件路径，不得猜测作业哈希；保留完整路径、目录与后缀。"
+        "执行证据的 source 是当前 run 的引用路径；按其 reader/material_ref 用 context.read_material 读取，"
+        "不能把 run 路径交给 code.repo_reader。代码仓读取失败不能据此声称执行证据不存在。"
     )
+
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        if request.extra.get('run_root'):
+            from app.harness.reporting.source_refs import report_source_catalogue
+            context.upstream['admitted_report_sources'] = json.dumps(
+                report_source_catalogue(Path(str(request.extra['run_root']))), ensure_ascii=False)
+            from app.harness.reporting.execution_evidence import execution_job_evidence
+            context.upstream['execution.job_files'] = execution_job_evidence(
+                Path(str(request.extra['run_root'])), str(request.extra.get('run_id') or Path(str(request.extra['run_root'])).name),
+                request.project, admit_materials=True)
+        return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
         errors = await super().validate_candidate(request, text, observations)
+        if not errors:
+            errors.extend(_review_metadata_errors(parse_frontmatter(text).metadata,
+                                                  debate_enabled=self._config.debate_enabled))
         if not errors and request.extra.get("run_root"):
             from app.harness.reporting.source_refs import report_source_errors
             errors.extend(report_source_errors(Path(str(request.extra["run_root"])), text))
@@ -58,6 +78,18 @@ class WritingAgent(BaseAgent):
             artifact.text = fm_dumps(artifact.metadata, artifact.body)
             return artifact
         return await self._draft_via_llm(request, context)
+
+
+def _review_metadata_errors(metadata: dict[str, Any], *, debate_enabled: bool) -> list[str]:
+    """Model-written review labels cannot create a debate that was disabled."""
+    if debate_enabled:
+        return []
+    summary = metadata.get('debate_summary', {})
+    claimed = isinstance(summary, dict) and (summary.get('rounds', 0) != 0 or bool(summary.get('reviewer_critiques')))
+    if claimed or metadata.get('debate_mode') or metadata.get('debate_transcript_ref'):
+        return ['debate_summary: this invocation has debate disabled; retries and revision feedback '
+                'cannot be presented as debate rounds or reviewer critiques']
+    return []
 
 
 def _turn_preview(text: str, *, limit: int = 240) -> str:
