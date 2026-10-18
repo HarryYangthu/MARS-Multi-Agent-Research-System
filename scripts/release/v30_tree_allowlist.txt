@@ -129,6 +129,7 @@ backend/app/bridge/commander_dispatch.py
 backend/app/bridge/commander_context.py
 backend/app/bridge/commander_code.py
 backend/app/bridge/commander_existing.py
+backend/app/bridge/commander_existing_sources.py
 backend/app/bridge/conversation_edit.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py

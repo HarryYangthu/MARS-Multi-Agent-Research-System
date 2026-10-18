@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import time
 import json
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -22,6 +21,7 @@ from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.discovery_types import DiscoveryRunSpec
 from app.bridge.commander_code import execute_code_inspection, routing_repository_check
+from app.bridge.commander_existing_sources import existing_retry, existing_user_sources
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
 from app.harness.tools.config import tool_config
@@ -234,31 +234,11 @@ async def _create_run_with_routing(
 
 
 def _existing_retry(text: str) -> bool:
-    return re.fullmatch(
-        r"\s*(?:好(?:的)?[，,\s]*)?(?:请)?(?:继续|重试|重新尝试|再试一次)(?:一下|吧)?[。.!！?？\s]*", text) is not None
+    return existing_retry(text)
 
 
 def _existing_user_sources(session: CommanderSession) -> list[dict[str, str]]:
-    messages = session.context_messages()
-    users = [m for m in messages if m.role == "user"]
-    if not users:
-        return []
-    selected = [users[-1]]
-    # An existing linked task belongs to recovery, never a new task carrying
-    # the previous user's budget. Otherwise only explicit short retries extend
-    # an immediately failed request; independent new requests stay independent.
-    for index in range(len(users) - 1, 0, -1):
-        current, previous = users[index], users[index - 1]
-        statuses = {m.tool_result.get("status") for m in messages
-                    if m.tool_name == "run.existing_model" and m.turn_id == previous.id and m.tool_result}
-        pending = bool(statuses & {"model_selection_required", "entrypoint_selection_required"})
-        retry = (not session.linked_run_id and bool(statuses & {
-            "model_not_resolved", "capability_unavailable", "execution_registration_required"})
-            and _existing_retry(current.content))
-        if session.linked_run_id or not (pending or retry):
-            break
-        selected.insert(0, previous)
-    return [{"id": m.id, "content": m.content} for m in selected]
+    return existing_user_sources(session)
 
 
 async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:

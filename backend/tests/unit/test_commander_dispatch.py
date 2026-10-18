@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 import hashlib
 import json
 import os
@@ -12,17 +13,18 @@ from typing import Any
 import pytest
 import yaml
 
-from app.bridge.commander import _parse_decision, _receipt_ends_action_batch
+from app.bridge.commander import Commander, _parse_decision, _receipt_ends_action_batch
 from app.bridge.commander_dispatch import (
     PREPARING_NOTICE, UNSTARTED_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard,
     has_run_dispatch, retained_dispatch_failure_reply, retained_dispatch_run_id,
-    run_dispatch_receipt, stale_executing_without_run,
+    pending_existing_admission, run_dispatch_receipt, stale_executing_without_run,
     truthful_unstarted_reply, unfulfilled_run_dispatch,
 )
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool
 from app.bridge.orchestrator import Orchestrator
 from app.harness.project_workspace import open_folder
+from app.harness.llm.model_registry import get_agent_config
 from app.harness.runtime.conversation_state import ConversationState
 from app.harness.runtime.event_bus import InProcessEventBus
 from app.settings import reset_settings_cache
@@ -269,3 +271,116 @@ async def test_actual_invalid_path_remains_invalid_and_reports_its_real_error(tm
         reply = truthful_unstarted_reply("先读取配置，再创建任务。", failure_reason=dispatch_failure_reason(ctx.session))
         assert result["error"] in reply and "先读取" not in reply
         assert ctx.session.linked_run_id is None and not ctx.run_store.list()
+
+
+def _continue(session: CommanderSession) -> ChatMessage:
+    user = ChatMessage(role="user", content="继续")
+    session.active_turn_id = user.id
+    return session.add(user)
+
+
+@pytest.mark.asyncio
+async def test_again_continue_uses_previous_actual_read_then_revalidates_and_creates_once(
+    tmp_path: Path,
+) -> None:
+    with _project(tmp_path) as (ctx, source):
+        config = source / "configs/unregistered.yaml"
+        config.write_text("model_name: MissingModel\nseed: 2026\n", encoding="utf-8")
+        original_user = next(message for message in ctx.session.messages if message.role == "user")
+        args = {"config_path": "configs/unregistered.yaml", "model_name": "MissingModel",
+                "max_iters": 1, "budget_unit": "epochs", "start": False}
+        failed = await execute_tool("run.existing_model", args, ctx)
+        assert failed["status"] == "execution_registration_required" and failed["ok"] is False
+        _observe(ctx.session, "run.existing_model", args, failed)
+        first_continue = _continue(ctx.session)
+        read = await execute_tool("code.repo_read_lines", {"path": args["config_path"]}, ctx)
+        assert read["ok"]
+        old_sha = read["output"]["sha256"]
+        _observe(ctx.session, "code.repo_read_lines", {"path": args["config_path"]}, read)
+        ctx.session.add(ChatMessage(role="assistant", content="配置已核实，现在按普通 Coding→Execution 路径创建任务。"))
+
+        # The retained incident also includes a generic creation tool denied
+        # before allocation because this turn has no source reads.
+        generic_continue = _continue(ctx.session)
+        generic_args = {"entrypoint": "coding", "user_request": "Run the existing configuration for 1 epoch.",
+                        "existing_execution_job": {"config_path": args["config_path"], "entrypoint": "train.py",
+                                                   "max_iters": 1, "budget_unit": "epochs"}}
+        generic_failure = await execute_tool("create_and_start_run", generic_args, ctx)
+        assert generic_failure["ok"] is False and generic_failure["status"] == "repository_inspection_required"
+        _observe(ctx.session, "create_and_start_run", generic_args, generic_failure)
+
+        # The next user's single continuation must not need another request.
+        # Registration and config really change here, rather than substituting
+        # a provider/tool result. Old reads identify the selected file only.
+        config.write_text("model_name: MissingModel\nseed: 2027\n", encoding="utf-8")
+        profile_path = tmp_path / "execution.yaml"
+        profile = yaml.safe_load(profile_path.read_text())
+        profile["execution"]["local_commands"][0]["config_paths"].append(args["config_path"])
+        profile_path.write_text(yaml.safe_dump(profile), encoding="utf-8")
+        action = pending_existing_admission(ctx.session)
+        assert action == {"tool": "run.existing_model", "args": args}
+        assert action is not None
+        assert "seed" not in action["args"]
+        # A real unavailable endpoint is not a provider substitute: any accidental
+        # model dispatch makes this fail through its actual network connection.
+        # The host restores the prior request before a model is needed.
+        config_provider = replace(get_agent_config("commander"), model_provider="local_vllm",
+            base_url="http://127.0.0.1:1/v1", base_url_env="", api_key_env="", raw={"loop": {"max_tool_steps": 1}})
+        commander = Commander(orchestrator=ctx.orchestrator, run_store=ctx.run_store, agent_config=config_provider)
+        try:
+            emitted = await commander.handle_user_message(ctx.session, "继续")
+        finally:
+            await commander._provider.close()
+        second_continue = next(message for message in reversed(ctx.session.messages) if message.role == "user")
+        created = next(message.tool_result for message in emitted if message.tool_name == "run.existing_model")
+        assert created is not None
+        assert created["ok"] and created["status"] == "created", created
+        assert not any(activity.kind == "model" for activity in ctx.session.activities)
+        assert sum(message.tool_name == "run.existing_model" for message in emitted) == 1
+        run = ctx.run_store.get(str(created["run_id"]))
+        assert run is not None and len(ctx.run_store.list()) == 1
+        record = json.loads((run.root / "context/existing_model_request.json").read_text())
+        assert record["requested"]["seed"] == 2027  # Current real file, not the old read.
+        assert record["requested"]["max_iters"] == 1 and record["requested"]["budget_unit"] == "epochs"
+        assert record["source_messages"] == [{"id": message.id, "content": message.content}
+                                             for message in (original_user, first_continue, generic_continue, second_continue)]
+        current_read = next(row for row in record["evidence"] if row["path"] == args["config_path"])
+        assert current_read["sha256"] == hashlib.sha256(config.read_bytes()).hexdigest() != old_sha
+        assert pending_existing_admission(ctx.session) is None
+        assert not list(run.subdir("execution").iterdir()) and created["states"]["coding"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_pending_continue_without_prior_read_revalidates_original_args_once(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, source):
+        config = source / "configs/unregistered.yaml"
+        config.write_text("model_name: MissingModel\nseed: 2026\n", encoding="utf-8")
+        args = {"config_path": "configs/unregistered.yaml", "model_name": "MissingModel",
+                "max_iters": 1, "budget_unit": "epochs", "start": False}
+        failed = await execute_tool("run.existing_model", args, ctx)
+        assert failed["status"] == "execution_registration_required"
+        _observe(ctx.session, "run.existing_model", args, failed)
+        _continue(ctx.session)
+        admission = pending_existing_admission(ctx.session)
+        assert admission == {"tool": "run.existing_model", "args": args}
+        assert admission is not None
+        # A second actual failure consumes the one re-admission allowance.
+        repeated = await execute_tool(admission["tool"], admission["args"], ctx)
+        assert repeated["ok"] is False
+        _observe(ctx.session, admission["tool"], admission["args"], repeated)
+        assert pending_existing_admission(ctx.session) is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+def test_first_turn_pending_admission_does_not_infer_missing_fields_or_a_new_goal() -> None:
+    session = CommanderSession(conv_id="policy", project="example", active_turn_id="original")
+    original = ChatMessage(role="user", content="Run the current model for one epoch", id="original")
+    session.add(original)
+    args = {"config_path": "configs/current.yaml", "budget_unit": "epochs"}
+    _observe(session, "run.existing_model", args, {"ok": False, "status": "capability_unavailable"})
+    _continue(session)
+    assert pending_existing_admission(session) is None  # No inferred count or seed.
+    new_goal = ChatMessage(role="user", content="运行另一个模型 2 epochs")
+    session.active_turn_id = new_goal.id
+    session.add(new_goal)
+    assert pending_existing_admission(session) is None

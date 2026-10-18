@@ -238,7 +238,7 @@ def test_only_explicit_retry_of_uncreated_request_retains_its_budget(status: str
     session.active_turn_id = first.id
     session.add(first)
     session.add(ChatMessage(role="tool", content=status, tool_name="run.existing_model",
-        tool_result={"ok": False, "status": status}))
+        tool_args=_args(), tool_result={"ok": False, "status": status}))
     second = ChatMessage(role="user", content=retry)
     session.active_turn_id = second.id
     session.add(second)

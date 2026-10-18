@@ -6,6 +6,7 @@ infer training parameters, or turn a source inspection into a success receipt.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from pathlib import PurePosixPath
 import re
 from typing import Any
@@ -132,6 +133,32 @@ def existing_model_fallback_action(session: CommanderSession) -> dict[str, Any] 
                 return {"tool": "code.repo_read_lines", "args": {"path": relative.as_posix()}}
         return {"tool": "code.repo_list", "args": {"path": ".", "depth": 1}}
     return None
+
+
+def pending_existing_admission(session: CommanderSession) -> dict[str, Any] | None:
+    """Restore one explicitly continued, never-created request before the model.
+
+    Exact args come from its actual failed admission. The real tool re-reads
+    current configuration and validates original user intent, registration,
+    budget and seed; this policy cannot grant an execution capability.
+    """
+    from app.bridge.commander_existing_sources import pending_existing_request
+
+    pending = pending_existing_request(session)
+    if pending is None or any(message.tool_name == "run.existing_model" for message in _turn_observations(session)):
+        return None
+    args = pending.get("args")
+    if not isinstance(args, dict):
+        return None
+    path = args.get("config_path")
+    if (not isinstance(path, str) or not path or ":" in path
+            or any(character in path for character in "*?[")
+            or PurePosixPath(path.replace("\\", "/")).is_absolute()
+            or ".." in PurePosixPath(path.replace("\\", "/")).parts
+            or type(args.get("max_iters")) is not int or args["max_iters"] < 1
+            or not isinstance(args.get("budget_unit"), str) or args["budget_unit"] not in {"steps", "epochs"}):
+        return None
+    return {"tool": "run.existing_model", "args": deepcopy(args)}
 
 
 def existing_run_recovery_guard(session: CommanderSession, actions: list[dict[str, Any]]) -> dict[str, Any] | None:

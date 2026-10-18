@@ -30,7 +30,7 @@ from app.bridge.commander_errors import CommanderDecisionError, conversation_fai
 from app.bridge.commander_dispatch import (
     PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
     retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
-    truthful_unstarted_reply, unfulfilled_run_dispatch,
+    pending_existing_admission, truthful_unstarted_reply, unfulfilled_run_dispatch,
 )
 from app.bridge.conversation_edit import MessageEditRequest, finish_user_turn_edit, replace_user_turn
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
@@ -122,22 +122,27 @@ class Commander:
 
             for _step in range(self.max_react_steps):
                 terminal_receipt = False
-                activity = session.begin_activity("model", "总控正在调用模型")
-                get_session_store().persist(session)
-                try:
-                    decision = await self._decide(session)
-                except asyncio.CancelledError:
-                    session.finish_activity(activity, "interrupted")
-                    raise
-                except Exception as exc:
-                    failure = conversation_failure(exc)
-                    if failure is not None:
-                        activity.title = failure[1]
-                    session.finish_activity(activity, "failed")
-                    raise
-                session.finish_activity(activity)
-                get_session_store().persist(session)
-
+                pending_action = pending_existing_admission(session) if _step == 0 else None
+                if pending_action is not None:
+                    # Restore the same explicit never-created request without
+                    # asking a model to choose a creation tool or wording again.
+                    decision = Decision(actions=[pending_action])
+                else:
+                    activity = session.begin_activity("model", "总控正在调用模型")
+                    get_session_store().persist(session)
+                    try:
+                        decision = await self._decide(session)
+                    except asyncio.CancelledError:
+                        session.finish_activity(activity, "interrupted")
+                        raise
+                    except Exception as exc:
+                        failure = conversation_failure(exc)
+                        if failure is not None:
+                            activity.title = failure[1]
+                        session.finish_activity(activity, "failed")
+                        raise
+                    session.finish_activity(activity)
+                    get_session_store().persist(session)
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
                     decision = Decision(actions=[recovery])
