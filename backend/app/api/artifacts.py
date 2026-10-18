@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_event_bus, get_orchestrator, get_run_store
 from app.api.idea_materials import IdeaMaterialsView, collect_idea_materials
-from app.harness.schema.frontmatter_parser import dumps as fm_dumps, parse as fm_parse
+from app.harness.schema.frontmatter_parser import FrontmatterError, dumps as fm_dumps, parse as fm_parse
 from app.harness.schema.validator import validate_metadata
 from app.harness.sedimentation.hooks import sediment_approved_artifact
 from app.hitl.approval import approve as do_approve, reject as do_reject
@@ -282,7 +282,14 @@ def _workspace_tree(run_id: str, agent_dir: str) -> WorkspaceTreeView:
 def _read_view(run_id: str, agent_dir: str, stem: str, version: str) -> ArtifactView:
     p = _resolve(run_id, agent_dir, stem, version)
     text = p.read_text(encoding="utf-8")
-    parsed = fm_parse(text)
+    try:
+        parsed = fm_parse(text)
+    except FrontmatterError as exc:
+        # Reading a draft must keep its original text editable. This does not
+        # approve an invalid handoff or relax actual configuration validation.
+        return ArtifactView(run_id=run_id, agent_dir=agent_dir, stem=stem, version=version,
+            path=str(p), text=text, metadata={}, schema_id=None, valid=False,
+            errors=[{'path': '/frontmatter', 'message': str(exc)}])
     metadata = parsed.metadata
     schema_id = str(metadata.get("schema") or "") or None
     result = validate_metadata(metadata, expected_schema=schema_id)

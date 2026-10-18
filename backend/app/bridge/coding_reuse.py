@@ -68,6 +68,12 @@ async def prepare_reused_artifact(run: RunHandle, request: RunRequest) -> Artifa
         return None
     row = jobs[0]
     config = dict(row['config'])
+    # Match the platform JobSpec built later by prepare_execution exactly.
+    # These are task bookkeeping fields, never scientific parameter overrides.
+    attempt = request.extra.get('attempt', 1)
+    if type(attempt) is not int or attempt < 1:
+        return None
+    config.update(label=str(row['name']), attempt=attempt)
     for source_key, target_key in (('stored_path', 'data_path'), ('id', 'data_source_id'),
                                    ('fs_mhz', 'fs_mhz'), ('channel_count', 'channel_count')):
         if selected.get(source_key) not in (None, ''):

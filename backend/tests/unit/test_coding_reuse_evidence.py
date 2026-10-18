@@ -402,7 +402,8 @@ async def test_first_existing_model_uses_current_registration_and_real_preflight
         assert validation.valid and validation.metadata['files_changed'] == []
         config = validation.metadata['execution_jobs'][0]['config']
         assert config == {**requested, 'command_id': 'ordinary_statistics', 'data_path': str(chosen),
-                          'data_source_id': 'new_values', 'fs_mhz': 100, 'channel_count': 1}
+                          'data_source_id': 'new_values', 'fs_mhz': 100, 'channel_count': 1,
+                          'attempt': 1, 'label': validation.metadata['execution_jobs'][0]['name']}
         reuse = json.loads((current.root / 'coding/reuse' / (invocation + '.json')).read_text())
         assert reuse['mode'] == 'host_validated_registered_execution'
         assert reuse['model_calls'] == 0 and reuse['training_started'] is False and reuse['approved'] is False

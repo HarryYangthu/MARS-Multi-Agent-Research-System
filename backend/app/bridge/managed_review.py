@@ -17,7 +17,8 @@ import yaml
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, digest
 from app.harness.llm.accounting import guarded_complete
 from app.harness.llm.model_registry import get_agent_config, select_provider
-from app.harness.llm.provider_base import Message
+from app.harness.llm.provider_base import Completion, Message
+from app.harness.llm.structured_output import parse_json_object
 from app.harness.runtime.event_bus import EventBus
 from app.settings import repo_root
 from app.storage.run_store import RunHandle
@@ -42,7 +43,8 @@ def review_policy() -> ReviewPolicy:
 
 
 class ReviewDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    # A model's optional commentary does not change the actual review fields.
+    model_config = ConfigDict(extra="ignore", strict=True)
     decision: Literal["approve", "revise", "needs_user"]
     reason: str = Field(min_length=1)
     evidence_refs: list[str] = Field(min_length=1)
@@ -58,10 +60,10 @@ def parse_decision(text: str, evidence_refs: list[str]) -> ReviewDecision:
             result[key] = value
         return result
 
-    value = text.strip()
-    if value.startswith("```json\n") and value.endswith("```"):
-        value = value[len("```json\n"):-3].strip()
-    decision = ReviewDecision.model_validate(json.loads(value, object_pairs_hook=unique))
+    value = parse_json_object(text, object_pairs_hook=unique)
+    if isinstance(value.get('decision'), str):
+        value['decision'] = value['decision'].strip().casefold()
+    decision = ReviewDecision.model_validate(value)
     if not decision.reason.strip() or any(ref not in evidence_refs for ref in decision.evidence_refs):
         raise ValueError("review must cite provided evidence")
     return decision
@@ -130,7 +132,7 @@ async def review_once(
     *, run: RunHandle, node: str, kind: str, payload: dict[str, Any], generation: int,
     eligible: Callable[[], bool], bus: EventBus, blocker: str = "",
 ) -> ReviewDecision | None:
-    """One real model review per immutable input and mode generation.
+    """One evidence-bound review, with one bounded response correction.
 
     Stop, manual review and disabling the switch cancel the pending call. A
     lost response never becomes permission, nor is it retried automatically.
@@ -192,21 +194,59 @@ async def review_once(
 
     config = replace(config, max_retries=0, max_tokens=min(config.max_tokens, policy.max_output_tokens), attempt_observer=observe)
     await record_state(run, bus, state)
-    trace.emit("model_request", {"model": config.model, "input_parts": list(payload)}, visible=[m.to_wire() for m in messages])
-    task = asyncio.create_task(guarded_complete(provider, messages, config, run_root=run.root, active_model_time=True,
-                              correlation={"trace_id": run.run_id, "node_id": node, "invocation_id": invocation}))
-    usage: dict[str, Any] | None = None
-    try:
-        async with asyncio.timeout(policy.timeout_seconds):
+    task: asyncio.Task[Completion] | None = None
+    usages: list[dict[str, Any] | None] = []
+    deadline = asyncio.get_running_loop().time() + policy.timeout_seconds
+
+    async def receive(current: list[Message], attempt: int) -> Completion | None:
+        nonlocal task
+        if not eligible():
+            return None
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError('review response time budget exhausted before dispatch')
+        if sum(len(message.content) for message in current) > policy.max_input_characters:
+            await record_state(run, bus, {**state, 'status': 'needs_user',
+                'reason': '审核材料超过当前上下文预算，尚未发送本次模型请求。'})
+            return None
+        trace.emit('model_request', {'model': config.model, 'input_parts': list(payload),
+            'response_attempt': attempt}, visible=[m.to_wire() for m in current])
+        task = asyncio.create_task(guarded_complete(provider, current, config, run_root=run.root,
+            active_model_time=True, correlation={'trace_id': run.run_id, 'node_id': node, 'invocation_id': invocation}))
+        async with asyncio.timeout(remaining):
             while not task.done():
                 if not eligible():
-                    await record_state(run, bus, {**state, "status": "cancelled", "reason": "主控审核已停止，未批准方案。"})
+                    await record_state(run, bus, {**state, 'status': 'cancelled', 'reason': '主控审核已停止，未批准方案。'})
                     return None
                 await asyncio.wait({task}, timeout=policy.poll_interval_seconds)
-            result = task.result()
-        trace.emit("model_response", {"model": config.model, "usage": result.raw.get("usage")}, visible=result.text)
-        usage = result.raw.get("usage")
-        decision = parse_decision(result.text, payload["evidence_refs"])
+            return task.result()
+
+    try:
+        for attempt in range(2):
+            result = await receive(messages, attempt)
+            if result is None:
+                return None
+            raw_usage = result.raw.get('usage')
+            usages.append(raw_usage if isinstance(raw_usage, dict) else None)
+            trace.emit('model_response', {'model': config.model, 'usage': raw_usage,
+                'response_attempt': attempt}, visible=result.text)
+            try:
+                decision = parse_decision(result.text, payload['evidence_refs'])
+                break
+            except ValueError as error:
+                # Correct a received response once, within this review's original
+                # time and resource budget. Transport failures are never replayed,
+                # and a correction is a new genuine review, not host approval.
+                if attempt or str(error) == 'review must cite provided evidence':
+                    raise
+                trace.emit('review_response_correction', {'response_sha256': digest(result.text),
+                    'error_type': type(error).__name__, 'approved': False})
+                messages = [*messages, Message(role='assistant', content=result.text), Message(role='user', content=(
+                    '上条回复没有形成可用的审核结论，尚未批准或执行任何操作。请依据同一份原始材料重新给出'
+                    '完整审核结论，保留真实判断、理由和材料中已有的evidence_refs；不要编造依据、放宽约束、'
+                    '执行工具或要求用户修正回复排版。返回decision、reason、evidence_refs。'))]
+        else:
+            raise RuntimeError('review response correction did not finish')
         decision._identity = identity
         if not eligible():
             return None
@@ -221,16 +261,23 @@ async def review_once(
         await record_state(run, bus, {**state, "status": "needs_user", "reason": f"主控审核未完成（{type(error).__name__}），请接管审核；详情见审核记录。"})
         return None
     finally:
-        if not task.done():
+        if task is not None and not task.done():
             task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
         await provider.close()
         rows = [json.loads(line) for line in trace.events.read_text().splitlines()]
         counts = {key: sum(row["kind"] == event for row in rows) for key, event in {
             "model_requests": "model_request", "model_responses": "model_response", "sdk_attempts": "sdk_attempt_started",
             "tool_dispatches": "tool_dispatch", "observations": "observation", "reflections": "reflection"}.items()}
         atomic_json(trace.root / "facts.json", {"event_seq": trace.seq, "trace_mode": "full", "counts": counts,
-            "usage": usage or {}, "usage_complete": usage is not None, "status": (review_state(run) or {}).get("status"),
+            "usage": ({key: sum(item[key] for item in usages if item is not None and type(item.get(key)) is int)
+                for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')} if len(usages) > 1 else
+                usages[0] if usages and usages[0] is not None else {}),
+            'usage_history': usages, "usage_complete": bool(usages) and len(usages) == counts['model_requests']
+                and all(item is not None and all(type(item.get(key)) is int
+                    for key in ('prompt_tokens', 'completion_tokens', 'total_tokens')) for item in usages),
+            "status": (review_state(run) or {}).get("status"),
             "resume_available": False, "correlation": trace.correlation, "context_metadata": {"type": "managed_review", "input_parts": list(payload)}})
 
 

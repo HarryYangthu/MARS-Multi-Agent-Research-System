@@ -90,7 +90,13 @@ def existing_execution_job_for_route(
     if raw is None:
         return None
     fields = {"config_path", "entrypoint", "max_iters", "budget_unit", "seed"}
-    if not isinstance(raw, dict) or set(raw) != fields:
+    # This optional shortcut must not turn a valid Coding request into a
+    # creation failure. In particular an unseeded source configuration cannot
+    # supply a seed merely to satisfy a model-output shape requirement. Let
+    # ordinary Coding inspect that entrypoint and preserve its actual defaults.
+    if not isinstance(raw, dict) or set(raw) < fields:
+        return None
+    if set(raw) != fields:
         raise ValueError("existing_execution_job 必须只包含 config_path、entrypoint、max_iters、budget_unit、seed。")
     normalized: dict[str, Any] = {}
     for key in ("config_path", "entrypoint"):

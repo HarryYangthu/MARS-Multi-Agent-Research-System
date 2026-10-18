@@ -347,6 +347,12 @@ configs/execution_review.yaml
 frontend/src/components/ExecutionConfigurationReview.tsx
 frontend/src/lib/executionReview.ts
 backend/app/bridge/git_code_delivery.py
+backend/app/bridge/research_branch.py
+backend/app/harness/tools/git_branch.py
+backend/app/harness/tools/git_source_snapshot.py
+backend/app/harness/tools/execution/preflight_reuse.py
+backend/app/harness/llm/structured_output.py
+backend/app/bridge/commander_errors.py
 backend/app/harness/reporting/execution_evidence.py
 backend/app/harness/tools/knowledge/__init__.py
 backend/app/harness/tools/mcp_adapters/__init__.py

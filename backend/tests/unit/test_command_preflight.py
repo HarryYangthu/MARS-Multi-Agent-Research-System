@@ -27,6 +27,10 @@ def genuine_checker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
     registry = tmp_path / 'registry.json'
     monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(registry))
     monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
+    # Keep parent and genuine archived-host subprocess environments identical;
+    # pytest otherwise initializes these terminal variables only in the child.
+    monkeypatch.setenv('COLUMNS', '80')
+    monkeypatch.setenv('LINES', '24')
     reset_settings_cache()
     from app.harness.project_workspace import open_folder
     project = open_folder(str(tmp_path / 'project'), create=True)
@@ -572,11 +576,11 @@ async def test_actual_admission_hash_check_catches_same_stat_content_change(
     stat = checkpoint.stat()
     checkpoint.write_text('[4,5,6]')
     os.utime(checkpoint, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    # Polling is intentionally stat-based. Execution independently hashes the
-    # real inputs and never approves a change hidden behind unchanged metadata.
-    assert execution_preview(run, 'execution')['confirmed']
+    # POSIX ctime detects an in-place edit even with restored mtime; Windows
+    # conservatively rehashes. The stale approval is rejected before admission.
+    assert not execution_preview(run, 'execution')['confirmed']
     config = prepare_execution(run, 'execution').specs[0].config
-    with pytest.raises(ValueError, match='input hashes changed after confirmation'):
+    with pytest.raises(ValueError, match='missing or stale'):
         await run_local_command(replace(job, config={**config, 'confirmation_token': view['token']}))
     assert not (data.parent / 'actual_execution.txt').exists()
 

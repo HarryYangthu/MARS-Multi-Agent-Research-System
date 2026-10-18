@@ -127,17 +127,5 @@ def verified_current_preflight(run: RunHandle, evidence: dict[str, Any], checked
 
 def current_preflight_inputs_unchanged(checked: dict[str, Any]) -> bool:
     """Check verified input signatures after preparation without hashing data twice."""
-    rows = checked.get('input_files')
-    if not isinstance(rows, list) or not rows:
-        return False
-    try:
-        for row in rows:
-            path = Path(row['path'])
-            stat = path.stat()
-            if path.is_symlink() or not path.is_file() or any(row.get(key) != value for key, value in (
-                    ('bytes', stat.st_size), ('mtime_ns', stat.st_mtime_ns),
-                    ('inode', stat.st_ino), ('device', stat.st_dev))):
-                return False
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-    return True
+    from app.harness.tools.execution.preflight_reuse import input_records_unchanged
+    return input_records_unchanged(checked.get('input_files'))

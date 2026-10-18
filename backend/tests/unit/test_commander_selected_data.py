@@ -38,7 +38,7 @@ def _runtime(root: Path) -> Iterator[tuple[DataSourceStore, ToolContext, ToolCon
             (code / "configs/existing.yaml").write_text("model_name: ExistingModel\nseed: 2026\n")
             (code / "train.py").write_text("def forward(value):\n    return value\n")
             (project.metadata_root / "repo_link.yaml").write_text(yaml.safe_dump({
-                "repo_path": str(code), "allowed_paths": ["configs/*.yaml", "train.py"], "read_only": True}))
+                "repo_path": str(code), "allowed_paths": ["configs/", "train.py"], "read_only": True}))
         (root / "execution.yaml").write_text(yaml.safe_dump({"execution": {"backend": "local_command",
             "local_commands": [{"id": "current_data_binding", "project_ids": [p.name for p in projects],
                 "entrypoints": ["train.py"], "config_paths": ["configs/existing.yaml"], "consumes_data_path": True}]}}))
@@ -132,3 +132,30 @@ async def test_invalid_default_is_reported_before_allocating_a_run(tmp_path: Pat
         result, run = await _create(first)
         assert not result["ok"] and result["status"] == "selected_data_source_invalid"
         assert run is None and not first.run_store.list()
+
+
+@pytest.mark.asyncio
+async def test_unseeded_optional_execution_hint_does_not_block_real_task_creation(tmp_path: Path) -> None:
+    with _runtime(tmp_path) as (_datasets, first, _other):
+        user = ChatMessage(role='user', content='运行已有基线 configs/existing.yaml，只跑1个epoch，其余沿用默认。')
+        first.session.active_turn_id = user.id
+        first.session.add(user)
+        read = await execute_tool('code.repo_read_lines', {
+            'path': 'configs/existing.yaml', 'start_line': 1, 'end_line': 10}, first)
+        assert read['ok'], read
+        first.session.add(ChatMessage(role='tool', content='Read current source configuration',
+            tool_name='code.repo_read_lines', tool_result=read))
+        result = await execute_tool('run.create', {'entrypoint': 'coding',
+            'task': 'baseline_single_epoch', 'user_request': user.content,
+            'routing_reason': 'Existing baseline configuration inspected for an execution request.',
+            'repository_scope': 'required', 'existing_execution_job': {
+                'config_path': 'configs/existing.yaml', 'entrypoint': 'train.py',
+                'max_iters': 1, 'budget_unit': 'epochs'}}, first)
+        assert result['ok'], result
+        actual = first.orchestrator.session(result['run_id'])
+        assert actual.request.entrypoint == 'coding'
+        assert actual.request.user_request == user.content
+        assert 'existing_execution_job' not in actual.request.extra
+        assert len(first.run_store.list()) == 1
+        assert not (actual.run.root / 'coding/code_spec.approved.md').exists()
+        assert not list((actual.run.root / 'execution').glob('**/job.json'))

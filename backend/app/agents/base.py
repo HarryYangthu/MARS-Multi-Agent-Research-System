@@ -19,6 +19,7 @@ from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import guarded_complete, run_resource_scope
+from app.harness.llm.structured_output import normalize_document_output
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 from app.harness.schema.validator import ValidationResult, validate_document
 from app.harness.runtime.project_scope import ProjectScope, current_project_scope
@@ -575,9 +576,9 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _unwrap_llm_text(text: str) -> str:
-        # Never add fields, close incomplete frontmatter, or discard a preamble to make
-        # an invalid model document appear valid.
-        return text.strip()
+        # Provider-text packaging only, before candidate validation/review.
+        # Never add fields, close frontmatter or alter YAML/Markdown body bytes.
+        return normalize_document_output(text)
 
 
 def _request_project_scope(request: RunRequest) -> ProjectScope | None:

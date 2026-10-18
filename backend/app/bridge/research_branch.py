@@ -102,7 +102,7 @@ def checkpoint_approved_code(run: RunHandle) -> None:
         return
     # Check the entire candidate against its baseline, including auto-saved
     # commits. A clean checkout alone does not imply human/Commander approval.
-    changed = changed_files(repo.root, repo.git_branch.baseline_commit)
+    changed = changed_files(repo.root, repo.git_branch.initial_commit or repo.git_branch.baseline_commit)
     approved = run.root / "coding" / "code_spec.approved.md"
     if not approved.is_file():
         if not changed:

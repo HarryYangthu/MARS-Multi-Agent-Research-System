@@ -41,9 +41,17 @@ def test_execution_intent_rejects_guessed_or_unsafe_fields(updates: dict[str, An
 
 
 @pytest.mark.parametrize("raw", ["configs/existing.yaml", [], {}, {"max_iters": 200}])
-def test_execution_intent_requires_complete_structured_fields(raw: Any) -> None:
-    with pytest.raises(ValueError, match="existing_execution_job"):
-        existing_execution_job_for_route({"entrypoint": "coding", "existing_execution_job": raw}, {})
+def test_incomplete_optional_shortcut_keeps_ordinary_coding(raw: Any) -> None:
+    assert existing_execution_job_for_route({"entrypoint": "coding", "existing_execution_job": raw}, {}) is None
+
+
+def test_unseeded_baseline_request_is_not_blocked_by_shortcut_shape() -> None:
+    raw = _intent()
+    del raw['seed']
+    raw.update(config_path='configs/static.yaml', max_iters=1, budget_unit='epochs')
+    assert existing_execution_job_for_route({'entrypoint': 'coding', 'existing_execution_job': raw},
+        {'ok': True, 'repository_scope': 'required', 'evidence': [{'path': 'configs/static.yaml'}]}) is None
+    assert 'seed' not in raw  # No seed or budget is invented for the shortcut.
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from app.harness.agent_loop.protocol import parse_review
 from app.harness.agent_loop.review_plan import ReviewPlan, ReviewUnit, UnitReviewResult, plan_payload, review_plan_errors
 from app.harness.agent_loop.trace import canonical, digest
 from app.harness.llm.provider_base import Message
+from app.harness.llm.structured_output import StructuredOutputError, parse_json_object
 from app.harness.schema.frontmatter_parser import parse
 
 LEGACY_REVIEW_PLAN_CONTRACT = "idea.research_per_insight_then_whole.v2"
@@ -72,7 +73,7 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError("duplicate insight review JSON key: " + key)
+            raise StructuredOutputError("duplicate insight review JSON key: " + key)
         result[key] = value
     return result
 
@@ -83,7 +84,7 @@ def _invalid_constant(value: str) -> Any:
 
 def parse_insight_review(text: str, *, fields: tuple[str, ...]) -> UnitReviewResult:
     """Validate all model-authored checks; never supply a missing scientific reason."""
-    value = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
+    value = parse_json_object(text, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
     errors = list(Draft202012Validator(insight_review_schema(fields)).iter_errors(value))
     if errors:
         raise ValueError("insight review contract: " + "; ".join(error.message for error in errors))

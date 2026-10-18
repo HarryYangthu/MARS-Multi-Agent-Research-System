@@ -13,8 +13,10 @@ Layer: bridge/ (product orchestration). It drives the conversation FSM
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -53,6 +55,7 @@ class Decision:
     reply: str = ""
     next_state: str | None = None
     actions: list[dict[str, Any]] = field(default_factory=list)
+    response_mode: str = "structured"
 
 
 class Commander:
@@ -128,7 +131,7 @@ class Commander:
                 session.finish_activity(activity)
                 get_session_store().persist(session)
 
-                if not decision.actions:
+                if not decision.actions and decision.response_mode != "clarification":
                     from app.bridge.commander_code import routing_conclusion_needs_source
                     if routing_conclusion_needs_source(session):
                         # Execute a real admission tool and let the model react;
@@ -225,7 +228,6 @@ class Commander:
                           correlation={"trace_id": session.conv_id, "node_id": "commander"})
         if manifest_path is not None:
             trace.emit("context_packed", json.loads(manifest_path.read_text()))
-        trace.emit("model_request", {"model": self._llm_config.model}, visible=[m.to_wire() for m in messages])
         previous_observer = self._llm_config.attempt_observer
 
         def observe(kind: str, data: dict[str, Any]) -> None:
@@ -235,21 +237,52 @@ class Commander:
                        visible=data.get("wire_payload"))
 
         try:
-            completion = await asyncio.wait_for(
-                guarded_complete(self._provider, messages, replace(self._llm_config, attempt_observer=observe),
-                    run_root=get_session_store().session_directory(session),
-                    active_model_time=True,
-                    correlation={"trace_id": session.conv_id, "node_id": "commander"}),
-                timeout=llm_call_deadline_seconds(
-                    self._llm_config,
-                    minimum_seconds=get_settings().mars_llm_timeout_seconds,
-                ),
-            )
-            if manifest_path is not None:
-                from app.harness.context.runtime_manifest import record_usage
-                record_usage(manifest_path, completion.raw.get("usage"))
-            trace.emit("model_response", {"model": self._llm_config.model, "usage": completion.raw.get("usage")}, visible=completion.text)
-            return _parse_decision(completion.text)
+            deadline = asyncio.get_running_loop().time() + llm_call_deadline_seconds(
+                self._llm_config, minimum_seconds=get_settings().mars_llm_timeout_seconds)
+            for response_attempt in range(2):
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError('Commander response time budget exhausted before dispatch')
+                trace.emit('model_request', {'model': self._llm_config.model,
+                    'response_attempt': response_attempt}, visible=[m.to_wire() for m in messages])
+                completion = await asyncio.wait_for(
+                    guarded_complete(self._provider, messages, replace(self._llm_config, attempt_observer=observe),
+                        run_root=root, active_model_time=True,
+                        correlation={'trace_id': session.conv_id, 'node_id': 'commander'}),
+                    timeout=remaining)
+                if manifest_path is not None:
+                    from app.harness.context.runtime_manifest import record_usage
+                    record_usage(manifest_path, completion.raw.get('usage'))
+                trace.emit('model_response', {'model': self._llm_config.model, 'usage': completion.raw.get('usage'),
+                    'response_attempt': response_attempt}, visible=completion.text)
+                decision = _decision_from_response(completion.text)
+                if decision.response_mode == 'clarification' and not response_attempt:
+                    trace.emit('decision_response_correction', {'response_sha256':
+                        hashlib.sha256(completion.text.encode()).hexdigest(), 'actions_executed': 0})
+                    messages = [*messages, Message(role='assistant', content=completion.text), Message(role='user', content=(
+                        '上条回复尚未派发任何操作。请依据原始用户请求和已有Observation继续，'
+                        '只给出尚未完成的操作，不要重放已经成功的工具。普通问答可以直接自然语言回复；'
+                        '需要操作时给出完整工具名和args，不猜缺失参数或宣称未执行的任务已完成。'))]
+                    if manifest_path is not None:
+                        # The correction is a genuine second request with its
+                        # own packed context/manifest and normal resource ledger.
+                        materials = commander_materials(messages)
+                        messages, manifest = pack_messages(messages, policy=policy,
+                            budget=input_budget(policy, int(policy['input_budget']),
+                                output_reserve=self._llm_config.max_tokens,
+                                model_window=self._llm_config.extra.get('context_window')),
+                            tools=self._llm_config.tools, materials=materials, root=root,
+                            previous=session.context_compaction, agent='commander')
+                        session.context_compaction = manifest['state']
+                        atomic_json(root / 'context/commander_state.json', session.context_compaction)
+                        manifest_path = record_manifest(root, agent='commander', node=session.conv_id,
+                            project=session.project, messages=messages, tools=self._llm_config.tools, manifest=manifest)
+                        trace.emit('context_packed', json.loads(manifest_path.read_text()))
+                    continue
+                if decision.response_mode != 'structured':
+                    trace.emit('decision_text_response', {'mode': decision.response_mode, 'actions': 0})
+                return decision
+            raise RuntimeError('Commander response correction did not finish')
         except Exception as error:
             trace.emit("model_error", {"error_type": type(error).__name__})
             raise
@@ -289,8 +322,8 @@ class Commander:
             Message(
                 role="user",
                 content=(
-                    "Respond now with ONLY the JSON decision object "
-                    "(reply / next_state / actions). No prose, no code fences."
+                    "Reply naturally for ordinary conversation. For system operations, provide "
+                    "the decision object (reply / next_state / actions) with actual tool names and args."
                 ),
             )
         )
@@ -372,6 +405,27 @@ def _parse_decision(text: str) -> Decision:
     )
 
 
+def _decision_from_response(text: str) -> Decision:
+    """Keep conversation usable without guessing an ambiguous tool operation."""
+    try:
+        return _parse_decision(text)
+    except CommanderDecisionError:
+        value = text.strip()
+        operation_claim = (re.search(r"已(?:经)?(?:启动|创建|完成|停止|暂停|取消|删除|批准|修改|保存|提交)", value) is not None
+            or any(marker in value for marker in ("现在创建", "将启动", "正在启动", "开始执行", "正在运行"))
+            or re.search(r"\b(?:started|created|launched|completed|starting|running|stopped|paused|cancelled|canceled|"
+                         r"deleted|approved|modified|saved|committed|will\s+(?:run|start|create))\b",
+                         value, re.IGNORECASE) is not None)
+        if (value and not operation_claim
+                and not any(marker in value for marker in ('"reply"', '"actions"', '"tool"', '"next_state"'))):
+            return Decision(reply=value, response_mode="plain_reply")
+        # Nothing from a malformed action is dispatched, including any valid
+        # earlier action in that same response. Prior completed tool observations
+        # remain in the session; this path never replays a decision or model call.
+        return Decision(reply="请求已保留，这条回复尚未执行新的操作。请补充要做的具体任务或必要参数；已有任务和结果已保留。",
+                        response_mode="clarification")
+
+
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     obj: dict[str, Any] = {}
     for key, value in pairs:
@@ -393,29 +447,12 @@ def _finite_json_float(value: str) -> float:
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
-    s = text.strip()
-    if s.startswith("```"):
-        nl = s.find("\n")
-        if nl < 0 or s[:nl].strip().lower() not in {"```", "```json"} or not s.endswith("```"):
-            return None
-        s = s[nl + 1 : -3].strip()
-    if not s.startswith("{"):
-        return None
+    from app.harness.llm.structured_output import StructuredOutputError, parse_json_object
     try:
-        decoder = json.JSONDecoder(object_pairs_hook=_unique_json_object, parse_constant=_reject_json_constant,
-                                   parse_float=_finite_json_float)
-        obj, end = decoder.raw_decode(s)
-    except json.JSONDecodeError:
+        return parse_json_object(text, object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant, parse_float=_finite_json_float)
+    except StructuredOutputError:
         return None
-    # A complete root object followed only by redundant closing delimiters is
-    # unambiguous. Never repair its contents or pick an object out of prose,
-    # multiple decisions, a wrapper array, or a truncated response.
-    suffix = s[end:]
-    if any(not char.isspace() and char not in "]}" for char in suffix):
-        return None
-    if suffix.strip():
-        logger.warning("Commander decision contained redundant closing delimiters; ignored {} characters", len(suffix.strip()))
-    return obj if isinstance(obj, dict) else None
 
 
 def _system_prompt(session: CommanderSession) -> str:
@@ -466,10 +503,10 @@ def _system_prompt(session: CommanderSession) -> str:
 ## 会话状态机(next_state 只能取这些)
 idle(待命) / clarifying(澄清需求) / planning(规划) / awaiting_confirm(等确认) / executing(执行中) / awaiting_review(等审核) / reporting(汇报)
 
-## 输出协议(严格)
-只输出一个 JSON 对象,不要任何额外文字或代码围栏:
+## 回复与操作交接
+普通聊天、解释或澄清可以直接用自然语言。需要系统执行操作时，给出完整操作对象，排版和围栏由系统兼容处理:
 {{"reply": "给用户看的中文回复", "next_state": "会话状态(可选)", "actions": [{{"tool": "工具名", "args": {{...}}}}]}}
-- 如果只是聊天/澄清/汇报,actions 留空 []。
+- 如果只是聊天/澄清/汇报,可以直接回复，或让 actions 留空 []。
 - 如果要调度,在 actions 里列工具。调完工具后你会收到 [observation ...],据此再决定下一步或给出最终 reply。
 - reply 必须是给用户的自然语言,不要把 JSON 或工具名直接念给用户。
 """

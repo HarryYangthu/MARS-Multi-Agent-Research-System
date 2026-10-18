@@ -72,7 +72,7 @@ def _changes(repo: ProjectRepo, baseline: str, commit: str, *, require_worktree_
 def _immutable_description(repo: ProjectRepo, baseline: str, commit: str, *, historical: bool = False) -> dict[str, Any]:
     branch = repo.git_branch
     assert branch is not None
-    if baseline != branch.baseline_commit:
+    if baseline != (branch.initial_commit or branch.baseline_commit):
         raise ValueError('Git 交付不得替换本任务记录的冻结基线')
     for value in (baseline, commit):
         git(repo.root, 'cat-file', '-e', value + '^{commit}')
@@ -98,7 +98,7 @@ def describe_committed_delivery(run: RunHandle) -> dict[str, Any]:
         if git(repo.root, 'status', '--porcelain=v1', '-z', '--untracked-files=all'):
             raise ValueError('Git 提交交付要求代码目录无未提交或未登记文件；未审核')
         head = git(repo.root, 'rev-parse', 'HEAD')
-        actual = _immutable_description(repo, branch.baseline_commit, head)
+        actual = _immutable_description(repo, branch.initial_commit or branch.baseline_commit, head)
         if git(repo.root, 'rev-parse', 'HEAD') != head or git(repo.root, 'status', '--porcelain=v1', '-z', '--untracked-files=all'):
             raise ValueError('核验期间代码发生变化，未审核')
         return actual

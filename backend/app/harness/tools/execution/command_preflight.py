@@ -113,7 +113,7 @@ def _identity(job: LocalCommandJob, inputs_token: str) -> str:
 def _input_signature(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {'path': str(path), 'bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
-            'inode': stat.st_ino, 'device': stat.st_dev}
+            'ctime_ns': stat.st_ctime_ns, 'inode': stat.st_ino, 'device': stat.st_dev}
 
 
 def _checked_roots(job: LocalCommandJob) -> tuple[Path, ...]:
@@ -160,6 +160,11 @@ def known_input_changes(job: LocalCommandJob, source_token: str) -> list[dict[st
         raise ValueError('validated input snapshot is invalid')
     roots = _checked_roots(job) if records else ()
     changed: list[dict[str, Any]] = []
+    if raw.get('host_fingerprint'):
+        from app.harness.tools.execution.preflight_reuse import preflight_fingerprint
+        current = preflight_fingerprint(job)
+        if current != raw['host_fingerprint']:
+            changed.append({'state': 'host_execution_identity_changed', 'fingerprint': current})
     for record in records:
         if not isinstance(record, dict) or not isinstance(record.get('path'), str):
             raise ValueError('validated input snapshot is invalid')
@@ -167,9 +172,9 @@ def known_input_changes(job: LocalCommandJob, source_token: str) -> list[dict[st
         if not target.is_file():
             changed.append({'path': str(target), 'state': 'missing'})
         else:
-            signature = _input_signature(target)
-            if signature != {key: record.get(key) for key in signature}:
-                changed.append(signature)
+            from app.harness.tools.execution.preflight_reuse import input_records_unchanged
+            if not input_records_unchanged([record]):
+                changed.append(_input_signature(target))
     return changed
 
 
@@ -225,10 +230,20 @@ def preflight_state(job: LocalCommandJob, inputs_token: str) -> dict[str, Any]:
     if _file_hash(receipt_path) != raw.get('receipt_sha256'):
         raise ValueError('command validation receipt changed')
     receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
-    if (not isinstance(receipt, dict) or receipt.get('status') != raw.get('status')
-            or receipt.get('run_id') != job.run_id or receipt.get('project') != job.project
-            or receipt.get('experiment_id') != job.experiment_id or receipt.get('inputs_token') != inputs_token):
+    if not isinstance(receipt, dict):
         raise ValueError('command validation receipt binding mismatch')
+    from app.harness.tools.execution.preflight_reuse import (
+        derived_source_token, input_records_unchanged, preflight_fingerprint,
+    )
+    fingerprint = preflight_fingerprint(job) if receipt.get('reuse_fingerprint') or 'derivation_path' in raw else None
+    source_token = derived_source_token(job, raw, receipt, receipt.get('reuse_fingerprint'))
+    if (receipt.get('status') != raw.get('status')
+            or receipt.get('run_id') != job.run_id or receipt.get('project') != job.project
+            or receipt.get('experiment_id') != job.experiment_id or receipt.get('inputs_token') != source_token):
+        raise ValueError('command validation receipt binding mismatch')
+    if receipt.get('reuse_fingerprint') and receipt['reuse_fingerprint'] != fingerprint:
+        return {'status': 'stale', 'configured': True, 'error': 'validated host execution identity changed',
+                'receipt_path': str(receipt_path), 'receipt_sha256': raw['receipt_sha256']}
     if receipt.get('status') == 'passed':
         for name, field in (('job.json', 'request_sha256'), ('result.json', 'result_sha256')):
             source = receipt_path.with_name(name)
@@ -237,11 +252,10 @@ def preflight_state(job: LocalCommandJob, inputs_token: str) -> dict[str, Any]:
         records = receipt.get('input_files', [])
         roots = _checked_roots(job) if records else ()
         for record in records:
-            target = _path_in_roots(record['path'], roots)
-            signature = _input_signature(target) if target.is_file() else None
-            if signature is None or signature != {key: record.get(key) for key in signature}:
-                return {'status': 'stale', 'configured': True, 'error': 'validated input files changed',
-                        'receipt_path': str(receipt_path), 'receipt_sha256': raw['receipt_sha256']}
+            _path_in_roots(record['path'], roots)
+        if records and not input_records_unchanged(records):
+            return {'status': 'stale', 'configured': True, 'error': 'validated input files changed',
+                    'receipt_path': str(receipt_path), 'receipt_sha256': raw['receipt_sha256']}
     return {'status': raw['status'], 'configured': True, 'error': raw.get('error', ''),
             'receipt_path': str(receipt_path), 'receipt_sha256': raw['receipt_sha256'],
             'checks': receipt.get('checks', []), 'input_files': receipt.get('input_files', [])}
@@ -278,6 +292,12 @@ def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_bu
     require_process_backend(tool.process_backend, require_isolation=tool.require_isolation)
     # Alternate validation argv still undergoes the same allowlist and checkout routing.
     argv, _, _ = _command(job, 'execution.simulation_runner', validation=True)
+    from app.harness.tools.execution.preflight_reuse import preflight_fingerprint, remember_preflight, reuse_preflight
+    fingerprint = preflight_fingerprint(job)
+    reused = reuse_preflight(job, inputs_token, fingerprint)
+    if reused is not None:
+        _save_input_snapshot(job, source_token or inputs_token, reused['input_files'], fingerprint)
+        return reused
     invocation = uuid.uuid4().hex
     root = job.run_root.resolve() / 'execution/preflight'
     directory = root / invocation
@@ -344,15 +364,23 @@ def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_bu
         'duration_seconds': time.monotonic() - started, 'request_sha256': request_hash,
         'result_sha256': _file_hash(result_path) if result_path.is_file() and not result_path.is_symlink() else None,
         'stdout_path': str(stdout_path), 'stderr_path': str(stderr_path), 'checks': result.get('checks', []),
-        'input_files': checked_inputs})
+        'input_files': checked_inputs,
+        **({'reuse_fingerprint': fingerprint} if fingerprint is not None else {})})
     record = {'schema': 'local_command_preflight.v1', 'run_id': job.run_id, 'project': job.project,
               'experiment_id': job.experiment_id, 'inputs_token': inputs_token, 'status': status,
               'error': error, 'receipt_path': str(receipt_path), 'receipt_sha256': _file_hash(receipt_path)}
     atomic_write_json(root / (_identity(job, inputs_token) + '.json'), record)
     if status == 'passed' and checked_inputs:
-        snapshot = root / (_identity(job, source_token or inputs_token) + '.inputs.json')
-        with path_lock(snapshot.with_suffix('.lock')):
-            if not snapshot.exists():
-                atomic_write_json(snapshot, {'schema': 'local_command_input_snapshot.v1',
-                    'run_id': job.run_id, 'project': job.project, 'input_files': checked_inputs})
+        _save_input_snapshot(job, source_token or inputs_token, checked_inputs, fingerprint)
+        remember_preflight(job, fingerprint, record)
     return {**record, 'configured': True, 'input_files': checked_inputs}
+
+
+def _save_input_snapshot(job: LocalCommandJob, source_token: str, inputs: list[dict[str, Any]],
+                         fingerprint: str | None) -> None:
+    snapshot = job.run_root / 'execution/preflight' / (_identity(job, source_token) + '.inputs.json')
+    with path_lock(snapshot.with_suffix('.lock')):
+        if not snapshot.exists():
+            atomic_write_json(snapshot, {'schema': 'local_command_input_snapshot.v1',
+                'run_id': job.run_id, 'project': job.project, 'input_files': inputs,
+                **({'host_fingerprint': fingerprint} if fingerprint is not None else {})})
