@@ -136,6 +136,30 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     return await _create_run_with_routing(args, ctx, routing)
 
 
+def _project_default_data_source(project: str) -> dict[str, Any] | None:
+    """Resolve the project's actual selection once, before allocating the run."""
+    from app.storage.data_source_store import DataSourceStore
+
+    store = DataSourceStore()
+    source_id = store.default_id(project)
+    if not source_id:
+        return None
+    profile = store.default_profile(project)
+    if profile is None:
+        raise ValueError("项目默认数据档案已丢失，请重新选择数据；不能悄悄改用配置中的另一份数据。")
+    if profile.get("id") != source_id or profile.get("project") != project:
+        raise ValueError("默认数据身份或项目归属不一致，不能使用其他项目的数据。")
+    stored_path = profile.get("stored_path")
+    if not isinstance(stored_path, str) or not stored_path or not Path(stored_path).is_absolute():
+        raise ValueError("默认数据缺少有效的绝对存储路径，请重新选择数据。")
+    path = Path(stored_path).resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("默认数据必须指向真实文件。")
+    with path.open("rb"):
+        pass  # Basic readability only; the real preflight binds content hashes.
+    return {**profile, "stored_path": str(path)}
+
+
 async def _create_run_with_routing(
     args: dict[str, Any], ctx: ToolContext, routing: dict[str, Any], *,
     additional_extra: dict[str, Any] | None = None,
@@ -154,6 +178,10 @@ async def _create_run_with_routing(
         existing_job = existing_execution_job_for_route(args, routing)
     except ValueError as exc:
         return {"ok": False, "status": "existing_execution_job_invalid", "error": str(exc)}
+    try:
+        data_source = _project_default_data_source(ctx.session.project)
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "status": "selected_data_source_invalid", "error": str(exc)}
     user_request = str(args.get("user_request", ""))
     seed_artifact = args.get("seed_artifact")
     task = str(args.get("task") or user_request[:60] or "commander_run")
@@ -164,6 +192,7 @@ async def _create_run_with_routing(
         entrypoint=entrypoint,  # type: ignore[arg-type]
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
+        data_source=data_source,
         review_mode="commander" if ctx.session.auto_mode else "manual",
         extra={"routing": routing,
                **({"existing_execution_job": existing_job} if existing_job is not None else {}),
