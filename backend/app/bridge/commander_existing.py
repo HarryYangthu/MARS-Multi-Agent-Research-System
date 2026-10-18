@@ -5,12 +5,14 @@ training, changes scientific settings, or treats an old result as a new result.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from collections import deque
 from fnmatch import fnmatchcase
 import hashlib
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import secrets
 from typing import Any
 
 import yaml
@@ -22,6 +24,7 @@ MAX_DIRECTORY_ENTRIES = 256
 MAX_SOURCE_BYTES = 131072
 MAX_CAPABILITIES = 64
 MAX_PATTERN_DEPTH = 6
+MAX_SEED_DEFAULTS = 8
 
 
 def _relative(value: Any) -> str:
@@ -58,7 +61,8 @@ def _profiles(project: str, registrations: Any) -> list[dict[str, Any]]:
             continue
         configs, entries = _patterns(row.get("config_paths")), _patterns(row.get("entrypoints"))
         if configs and entries:
-            result.append({"id": row["id"], "config_paths": configs, "entrypoints": entries})
+            result.append({"id": row["id"], "config_paths": configs, "entrypoints": entries,
+                           **{key: row[key] for key in ("seed_policy", "seed_defaults") if key in row}})
     return result
 
 
@@ -170,6 +174,68 @@ def _mentioned_configurations(texts: list[str], profiles: list[dict[str, Any]]) 
     return sorted(paths)
 
 
+def _seed_configuration(
+    repo: ProjectRepo, chosen: dict[str, Any], entry: str,
+) -> tuple[Any, dict[str, Any], list[dict[str, Any]]]:
+    """Follow only the host-declared loader order; never infer a base file."""
+    profiles = [row for row in chosen["profiles"] if any(fnmatchcase(entry, p) for p in row["entrypoints"])]
+    declarations: list[tuple[Any, list[str] | None]] = []
+    for row in profiles:
+        defaults = row.get("seed_defaults")
+        if "seed_defaults" in row:
+            if not isinstance(defaults, list) or len(defaults) > MAX_SEED_DEFAULTS:
+                raise ValueError("登记的seed_defaults必须是有界、按实际加载顺序排列的相对文件路径列表。")
+            defaults = [_relative(value) for value in defaults]
+            if any(any(char in value for char in "*?[") for value in defaults):
+                raise ValueError("seed_defaults必须声明实际文件，不能通过模式猜测默认配置。")
+        declarations.append((row.get("seed_policy"), defaults))
+    if any(value != declarations[0] for value in declarations[1:]):
+        # Entry/config registrations disagree about inheritance. Preserve the
+        # ordinary path rather than picking a policy or an inherited seed.
+        return chosen["configuration"].get("seed"), {
+            "policy": None, "defaults_declared": False, "reason": "seed_registration_ambiguous",
+            "merge_order": [chosen["config_path"]]}, []
+    policy, defaults = declarations[0]
+    seed: Any = None
+    evidence = []
+    values = []
+    for relative in defaults or []:
+        text, read = _read(repo, relative, "seed_defaults")
+        try:
+            configuration = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError("登记的默认配置无法解析，不能推断seed默认值。") from exc
+        if not isinstance(configuration, dict):
+            raise ValueError("登记的默认配置必须是实际可读取的配置对象。")
+        values.append({"path": relative, "has_seed": "seed" in configuration,
+                       **({"seed": configuration["seed"]} if "seed" in configuration else {})})
+        if "seed" in configuration:
+            seed = configuration["seed"]
+        evidence.append(read)
+    configuration = chosen["configuration"]
+    if "seed" in configuration:
+        seed = configuration["seed"]
+    values.append({"path": chosen["config_path"], "has_seed": "seed" in configuration,
+                   **({"seed": configuration["seed"]} if "seed" in configuration else {})})
+    return seed, {"policy": policy, "defaults_declared": defaults is not None,
+                  "merge_order": [*(defaults or []), chosen["config_path"]], "values": values}, evidence
+
+
+def materialize_existing_seed(resolved: dict[str, Any]) -> dict[str, Any]:
+    """Allocate only a new task's seed, after actual user intent is validated."""
+    result = deepcopy(resolved)
+    if result.get("seed_generation_required"):
+        if result.get("default_seed") is not None or result["requested"].get("seed") is not None:
+            raise ValueError("生成种子不能覆盖用户或实际配置中的种子。")
+        provenance = result.get("seed_provenance", {})
+        if provenance.get("policy") != "generate_if_unset" or provenance.get("defaults_declared") is not True:
+            raise ValueError("生成种子必须有明确登记的默认配置加载策略。")
+        result["requested"]["seed"] = secrets.randbits(32)
+        result["seed_source"] = "generated_for_run"
+        result["seed_generation_required"] = False
+    return result
+
+
 def resolve_existing_request(
     repo: ProjectRepo, registrations: Any, args: dict[str, Any], *, user_texts: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -203,6 +269,19 @@ def resolve_existing_request(
     if not explicit and not model:
         raise ValueError("请提供模型名称或准确配置路径。")
     profiles = _profiles(repo.project, registrations)
+    if explicit and not any(any(fnmatchcase(explicit, p) for p in row["config_paths"]) for row in profiles):
+        text, read = _read(repo, explicit, "configuration")
+        try:
+            configuration = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError("当前配置无法解析，请核对实际配置内容。") from exc
+        if not isinstance(configuration, dict):
+            raise ValueError("当前配置必须是实际可读取的配置对象。")
+        actual_model = configuration.get("model_name")
+        return {"ok": False, "status": "execution_registration_required", "config_path": explicit,
+                "model_name": actual_model if isinstance(actual_model, str) else None, "evidence": [read],
+                "training_started": False,
+                "error": "实际配置已读取，但当前项目尚未登记该配置的执行入口/范围；请补充执行登记，或由普通Coding准备交付。这不表示模型没有实现。"}
     if not profiles:
         return {"ok": False, "status": "capability_unavailable",
                 "error": "当前项目尚无明确登记的配置/入口范围；请从普通Coding核对并准备已有模型执行。"}
@@ -265,18 +344,70 @@ def resolve_existing_request(
         return {"ok": False, "status": "entrypoint_selection_required", "entrypoints": entries,
                 "error": "请确认当前登记的训练入口，不猜测运行命令。"}
     _, entry_evidence = _read(repo, entry, "entrypoint")
-    seed = args.get("seed", chosen["configuration"].get("seed"))
-    if type(seed) is not int or seed < 0:
-        raise ValueError("请明确seed；当前配置没有可直接确认的非负整数种子。")
+    default_seed, seed_provenance, seed_evidence = _seed_configuration(repo, chosen, entry)
+    explicit_seed = args.get("seed") is not None
+    seed = args["seed"] if explicit_seed else default_seed
+    if seed is not None and (type(seed) is not int or seed < 0):
+        raise ValueError("seed必须是实际用户指定或配置中的非负整数；不能以生成策略替换无效值。")
+    generate_seed = (seed is None and seed_provenance.get("policy") == "generate_if_unset"
+                     and seed_provenance["defaults_declared"])
+    missing_seed = seed is None and not generate_seed
+    ordinary_reason = seed_provenance.get("reason") or ("seed_default_unresolved" if missing_seed else None)
     requested = {"config_path": chosen["config_path"], "entrypoint": entry, "seed": seed,
                  "max_iters": args["max_iters"], "budget_unit": args["budget_unit"]}
     return {"ok": True, "status": "resolved", "requested": requested,
             "model_name": chosen["model_name"], "source_root": str(repo.root.resolve()),
-            "evidence": [chosen["evidence"], entry_evidence],
-            "default_seed": chosen["configuration"].get("seed"),
+            "evidence": [chosen["evidence"], *seed_evidence, entry_evidence],
+            "default_seed": default_seed, "seed_provenance": seed_provenance,
+            "seed_source": "user_request" if explicit_seed else "config_default" if seed is not None else
+                           "generated_for_run" if generate_seed else "not_configured",
+            "seed_generation_required": generate_seed,
+            "ordinary_coding_reason": ordinary_reason,
             "default_budget": {key: chosen["configuration"].get(key) for key in ("budget_unit", "max_iters")},
-            "ordinary_coding": bool(overrides), "parameter_overrides": overrides,
+            "ordinary_coding": bool(overrides) or bool(ordinary_reason), "parameter_overrides": overrides,
             "training_started": False, "preflight_passed": False}
+
+
+def _budget_count(raw: str) -> int | None:
+    """Parse explicit common Chinese integers, rejecting shorthand ambiguity."""
+    if raw.isdecimal():
+        return int(raw)
+    digits = {char: value for value, char in enumerate("零一二三四五六七八九")}
+    digits.update({"〇": 0, "两": 2})
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    if any(char not in digits and char not in units for char in raw):
+        return None
+    total = section = number = 0
+    previous_digit = False
+    last_unit = 100000
+    zero_after_unit = False
+    seen_wan = False
+    for index, char in enumerate(raw):
+        if char in digits:
+            value = digits[char]
+            if previous_digit and number != 0:
+                return None
+            number, previous_digit = value, True
+            if value == 0:
+                zero_after_unit = True
+            continue
+        unit = units[char]
+        if unit == 10000:
+            if seen_wan or section + number == 0:
+                return None
+            total, section, number = (section + number) * unit, 0, 0
+            seen_wan = True
+            last_unit = unit
+        else:
+            if unit >= last_unit or (number == 0 and not (index == 0 and unit == 10)):
+                return None
+            section += (number or 1) * unit
+            last_unit, number = unit, 0
+        previous_digit = False
+        zero_after_unit = False
+    if number and last_unit >= 100 and last_unit != 100000 and not zero_after_unit:
+        return None  # e.g. 一百二 / 一万一 can denote two different quantities.
+    return total + section + number
 
 
 def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str]) -> None:
@@ -287,16 +418,20 @@ def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str
     """
     budgets: set[tuple[str, int]] = set()
     seeds: set[int] = set()
+    number = r"(?<![\d.\-零〇一二两三四五六七八九十百千万负])([\d零〇一二两三四五六七八九十百千万]+)"
     for text in user_texts:
         current_budgets: set[tuple[str, int]] = set()
         for unit, patterns in (
-            ("steps", (r"(?<![\d.\-])(\d+)\s*(?:步|(?:次|个)?\s*(?:优化器\s*)?(?:更新|steps?(?![A-Za-z])|optimizer\s+updates?))",
+            ("steps", (number + r"\s*(?:步|(?:次|个)?\s*(?:优化器\s*)?(?:更新|steps?(?![A-Za-z])|optimizer\s+updates?))",
                        r"(?:max[_-]steps)\s*[:=：]\s*(\d+)(?![\d.])")),
-            ("epochs", (r"(?<![\d.\-])(\d+)\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|轮(?:训练)?)",
+            ("epochs", (number + r"\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|轮(?:训练)?)",
                         r"\bepochs?\s*[:=：]\s*(\d+)(?![\d.])")),
         ):
             for pattern in patterns:
-                current_budgets.update((unit, int(match.group(1))) for match in re.finditer(pattern, text, re.IGNORECASE))
+                for match in re.finditer(pattern, text, re.IGNORECASE):
+                    count = _budget_count(match.group(1))
+                    if count is not None:
+                        current_budgets.add((unit, count))
         if current_budgets:
             budgets = current_budgets
         current_seeds = {int(match.group(1)) for match in re.finditer(
@@ -315,6 +450,12 @@ def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str
     if seeds:
         if seeds != {requested["seed"]}:
             raise ValueError("提取的seed与当前用户消息不一致。")
+    elif resolved["default_seed"] is None and requested["seed"] is None:
+        if not resolved.get("seed_generation_required") and not resolved.get("ordinary_coding"):
+            raise ValueError("当前配置没有可确认种子，必须保留普通Coding或明确登记新任务种子策略。")
+    elif (resolved["default_seed"] is None and resolved.get("seed_source") == "generated_for_run"
+          and type(requested["seed"]) is int and 0 <= requested["seed"] <= 0xFFFFFFFF):
+        pass  # Generated only by the new-task boundary, never by model extraction.
     elif requested["seed"] != resolved["default_seed"] or type(resolved["default_seed"]) is not int:
         raise ValueError("当前用户消息没有指定该seed，不能覆盖实际配置中的种子。")
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import json
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -232,25 +233,37 @@ async def _create_run_with_routing(
     }
 
 
+def _existing_retry(text: str) -> bool:
+    return re.fullmatch(
+        r"\s*(?:好(?:的)?[，,\s]*)?(?:请)?(?:继续|重试|重新尝试|再试一次)(?:一下|吧)?[。.!！?？\s]*", text) is not None
+
+
 def _existing_user_sources(session: CommanderSession) -> list[dict[str, str]]:
-    users = [m for m in session.context_messages() if m.role == "user"]
+    messages = session.context_messages()
+    users = [m for m in messages if m.role == "user"]
     if not users:
         return []
     selected = [users[-1]]
-    if len(users) > 1:
-        previous = users[-2]
-        pending = any(m.tool_name == "run.existing_model" and m.turn_id == previous.id
-                      and m.tool_result and m.tool_result.get("status") in {
-                          "model_selection_required", "entrypoint_selection_required"}
-                      for m in session.context_messages())
-        if pending:
-            selected.insert(0, previous)
+    # An existing linked task belongs to recovery, never a new task carrying
+    # the previous user's budget. Otherwise only explicit short retries extend
+    # an immediately failed request; independent new requests stay independent.
+    for index in range(len(users) - 1, 0, -1):
+        current, previous = users[index], users[index - 1]
+        statuses = {m.tool_result.get("status") for m in messages
+                    if m.tool_name == "run.existing_model" and m.turn_id == previous.id and m.tool_result}
+        pending = bool(statuses & {"model_selection_required", "entrypoint_selection_required"})
+        retry = (not session.linked_run_id and bool(statuses & {
+            "model_not_resolved", "capability_unavailable", "execution_registration_required"})
+            and _existing_retry(current.content))
+        if session.linked_run_id or not (pending or retry):
+            break
+        selected.insert(0, previous)
     return [{"id": m.id, "content": m.content} for m in selected]
 
 
 async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     from app.bridge.commander_existing import (
-        existing_execution_stage_limit, resolve_existing_request,
+        existing_execution_stage_limit, materialize_existing_seed, resolve_existing_request,
         user_requests_additional_changes, validate_existing_user_intent,
     )
     from app.harness.persistence import atomic_write_json
@@ -258,6 +271,10 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
     from app.harness.tools.project_repo import load_project_repo
 
     source_messages = _existing_user_sources(ctx.session)
+    if (ctx.session.linked_run_id and source_messages
+            and _existing_retry(source_messages[-1]["content"])):
+        return {"ok": False, "status": "existing_run_recovery_required", "run_id": ctx.session.linked_run_id,
+                "error": "当前对话已有任务；继续或重试应核对并恢复原任务，不重复创建研究。"}
     try:
         resolved = resolve_existing_request(load_project_repo(ctx.session.project),
             load_execution_config()["execution"].get("local_commands", []), args,
@@ -266,7 +283,6 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         return {"ok": False, "status": "existing_model_request_invalid", "error": str(exc)}
     if not resolved["ok"]:
         return resolved
-    requested = resolved["requested"]
     try:
         if not source_messages:
             raise ValueError("已有模型运行必须绑定实际用户消息。")
@@ -276,10 +292,16 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc)}
     if user_requests_additional_changes([m["content"] for m in source_messages]):
         resolved["ordinary_coding"] = True
+    resolved = materialize_existing_seed(resolved)
+    requested = resolved["requested"]
     resolved["stop_after_execution"] = stop_after_execution
     original = "\n\n".join(f'[用户消息 {m["id"]}]\n{m["content"]}' for m in source_messages)
     original += "\n\n[MARS 核实的当前配置、预算和种子]\n" + json.dumps(requested, ensure_ascii=False)
-    if resolved["ordinary_coding"]:
+    if resolved["seed_source"] == "generated_for_run":
+        original += f'\n当前配置及登记默认文件未固定seed；MARS为本次新任务生成并冻结seed={requested["seed"]}。'
+    elif resolved["ordinary_coding_reason"]:
+        original += "\n当前配置的种子默认值尚不能完整确认；由普通Coding按真实入口核对，不借用历史种子。"
+    if resolved["parameter_overrides"]:
         original += "\n用户明确的参数调整（由普通Coding核对并实现，不改变其意义）：" + json.dumps(
             resolved["parameter_overrides"], ensure_ascii=False)
     routing = {"ok": True, "repository_scope": "required", "verification": "host_registered_current_source",
@@ -304,6 +326,7 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         "entrypoint": "coding", "configuration": requested["config_path"],
         "ordinary_coding": resolved["ordinary_coding"], "evidence": resolved["evidence"]})
     result = {**created, "status": "created", "requested": requested,
+              "seed_source": resolved["seed_source"],
               "ordinary_coding": resolved["ordinary_coding"], "training_started": False,
               "stop_after_execution": stop_after_execution,
               "inspection_ref": "context/existing_model_request.json"}
@@ -737,7 +760,7 @@ async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
 
 TOOLS: dict[str, ToolSpec] = {
     'run.existing_model': ToolSpec(name='run.existing_model',
-        description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Seed may come from the actual selected config. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
+        description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Omit seed unless the user explicitly supplied it: the host reads declared config defaults or generates and freezes a new seed only under an explicit host policy; never borrow a historical seed. An existing but unregistered config returns execution_registration_required, not missing-model evidence. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
         parameters={'model_name': 'optional existing model name, exact or an unambiguous abbreviation',
                     'config_path': 'optional exact connected-repository relative configuration path; preferred when known',
                     'entrypoint': 'optional registered relative entrypoint, needed only if more than one matches',

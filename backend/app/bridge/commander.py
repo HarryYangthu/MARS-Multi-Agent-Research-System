@@ -27,6 +27,11 @@ from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
+from app.bridge.commander_dispatch import (
+    PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
+    retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
+    truthful_unstarted_reply, unfulfilled_run_dispatch,
+)
 from app.bridge.conversation_edit import MessageEditRequest, finish_user_turn_edit, replace_user_turn
 from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
@@ -99,6 +104,8 @@ class Commander:
         """Process one user turn; returns the messages emitted this turn."""
         if session.processing:
             raise ValueError("conversation is already processing a message")
+        if stale_executing_without_run(session):
+            self._try_transition(session, "idle")
         retained = replace_user_turn(session, edit, text) if edit is not None else None
         session.processing = True
         try:
@@ -131,18 +138,34 @@ class Commander:
                 session.finish_activity(activity)
                 get_session_store().persist(session)
 
+                recovery = existing_run_recovery_guard(session, decision.actions)
+                if recovery is not None:
+                    decision = Decision(actions=[recovery])
                 if not decision.actions and decision.response_mode != "clarification":
-                    from app.bridge.commander_code import routing_conclusion_needs_source
-                    if routing_conclusion_needs_source(session):
-                        # Execute a real admission tool and let the model react;
-                        # never publish an unsupported absence/routing conclusion.
-                        decision = Decision(actions=[{'tool': 'routing.repository_check', 'args': {}}])
+                    fallback = existing_model_fallback_action(session)
+                    if fallback is not None:
+                        # A promise to inspect is not the inspection. Dispatch
+                        # one real bounded read, retaining the original request.
+                        decision = Decision(actions=[fallback])
+                    else:
+                        from app.bridge.commander_code import routing_conclusion_needs_source
+                        if routing_conclusion_needs_source(session):
+                            # Execute a real admission tool and let the model react;
+                            # never publish an unsupported absence/routing conclusion.
+                            decision = Decision(actions=[{'tool': 'routing.repository_check', 'args': {}}])
 
-                if decision.next_state:
+                dispatching_run = has_run_dispatch(decision.actions)
+                if decision.next_state and not (
+                    decision.next_state == "executing" and (dispatching_run or unfulfilled_run_dispatch(session))
+                ):
                     self._try_transition(session, decision.next_state)
 
-                if decision.reply:
-                    emitted.append(session.add(ChatMessage(role="assistant", content=decision.reply)))
+                reply = PREPARING_NOTICE if dispatching_run else decision.reply
+                if not decision.actions and unfulfilled_run_dispatch(session):
+                    reply = truthful_unstarted_reply(reply, retained_run_id=retained_dispatch_run_id(session),
+                                                     failure_reason=dispatch_failure_reason(session))
+                if reply:
+                    emitted.append(session.add(ChatMessage(role="assistant", content=reply)))
 
                 if not decision.actions:
                     break
@@ -175,17 +198,32 @@ class Commander:
                         )
                     )
                     get_session_store().persist(session)
-                    if len(decision.actions) == 1:
-                        from app.bridge.commander_existing import existing_model_turn_reply
-                        receipt_reply = existing_model_turn_reply(tool, result)
-                        if receipt_reply is not None:
-                            emitted.append(session.add(ChatMessage(role="assistant", content=receipt_reply)))
-                            get_session_store().persist(session)
-                            terminal_receipt = True
+                    receipt = run_dispatch_receipt(tool, result)
+                    retained_failure = retained_dispatch_failure_reply(tool, result)
+                    if receipt is not None:
+                        if receipt.executing:
+                            self._try_transition(session, "executing")
+                        emitted.append(session.add(ChatMessage(role="assistant", content=receipt.reply)))
+                        get_session_store().persist(session)
+                        terminal_receipt = True
+                        if _receipt_ends_action_batch(tool, len(decision.actions)):
                             break
+                    elif retained_failure is not None:
+                        # The task exists even though starting it failed. End
+                        # admission here so the next model cannot create it again.
+                        emitted.append(session.add(ChatMessage(role="assistant", content=retained_failure)))
+                        get_session_store().persist(session)
+                        terminal_receipt = True
+                        break
                 if terminal_receipt:
                     break
                 # loop again so the LLM can react to tool results
+            if (unfulfilled_run_dispatch(session) and emitted and emitted[-1].role == "tool"):
+                # The existing loop budget still applies. Do not silently end
+                # on a read receipt or imply a task was created when it was not.
+                emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
+                    "", retained_run_id=retained_dispatch_run_id(session),
+                    failure_reason=dispatch_failure_reason(session)))))
             return emitted
 
         finally:
@@ -403,6 +441,13 @@ def _parse_decision(text: str) -> Decision:
         next_state=next_state,
         actions=actions,
     )
+
+
+def _receipt_ends_action_batch(tool: str, action_count: int) -> bool:
+    # The specialized tool already creates AND optionally starts its task. A
+    # second authored action cannot turn that single request into another run.
+    # Keep the ordinary run.create -> run.start batch supported.
+    return tool == "run.existing_model" or action_count == 1
 
 
 def _decision_from_response(text: str) -> Decision:
