@@ -133,7 +133,7 @@ async def prepare_reused_artifact(run: RunHandle, request: RunRequest) -> Artifa
     body = ('# 复用已有模型的执行交付\n\n'
         f'本次使用已存在的入口 `{config["entrypoint"]}` 和配置 `{config["config_path"]}`，'
         f'预算为 {config["max_iters"]} {config["budget_unit"]}，种子 {config["seed"]}。'
-        '本次代码改动为零，执行清单由宿主按当前登记能力组装，未调用编码模型。\n\n'
+        '本次代码改动为零，执行清单由系统按当前登记能力组装，未调用编码模型。\n\n'
         + (f'历史复用来源：`{evidence["source_run_id"]}`。' if historical else '无需已有仿真结果作为启动前置。')
         + '当前独立代码目录、登记命令和本次输入绑定已核验。'
         '数据使用当前项目已选择并冻结的文件，不沿用历史输出目录。\n\n'

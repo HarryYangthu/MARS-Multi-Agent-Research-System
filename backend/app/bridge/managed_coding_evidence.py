@@ -53,7 +53,7 @@ def coding_preparation_review_evidence(run: RunHandle, metadata: dict[str, Any])
             or type(receipt.get('model_calls')) is not int or receipt['model_calls'] != 0
             or receipt.get('training_started') is not False or receipt.get('approved') is not False
             or receipt.get('files_changed') != []):
-        raise ValueError('执行准备收据不属于当前宿主交付。')
+        raise ValueError('执行准备收据不属于当前系统交付。')
     binding = receipt.get('current_preflight')
     if not isinstance(binding, dict) or binding.get('status') != 'passed':
         raise ValueError('执行准备缺少本次真实预检绑定。')
@@ -107,7 +107,7 @@ def coding_preparation_review_evidence(run: RunHandle, metadata: dict[str, Any])
             or request.get('project_workspace') != str(project_root.resolve())
             or source.get('current_code_commit') != request.get('code_commit')
             or source.get('registered_command_sha256') != registration_hash):
-        raise ValueError('宿主登记能力或当前独立代码绑定已变化。')
+        raise ValueError('系统登记能力或当前独立代码绑定已变化。')
     if receipt['mode'] == 'host_validated_registered_execution':
         argv, _, _ = _command(current, 'execution.simulation_runner')
         validation_argv, _, _ = _command(current, 'execution.simulation_runner', validation=True)
@@ -119,7 +119,7 @@ def coding_preparation_review_evidence(run: RunHandle, metadata: dict[str, Any])
                 or source.get('argv') != list(argv) or source.get('validation_argv') != list(validation_argv)
                 or validation.get('argv') != list(validation_argv)
                 or source.get('command_files') != _command_files(tuple(dict.fromkeys((*argv, *validation_argv))))):
-            raise ValueError('宿主入口、解释器或当前代码快照已变化。')
+            raise ValueError('系统入口、解释器或当前代码快照已变化。')
     details = [row.get('details', {}) for row in validation.get('checks', []) if isinstance(row, dict)]
     if (receipt['mode'] == 'host_validated_registered_execution'
             and not any(isinstance(item, dict) and item.get('training_started') is False

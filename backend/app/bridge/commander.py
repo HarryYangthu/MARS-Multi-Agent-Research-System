@@ -473,6 +473,9 @@ def _system_prompt(session: CommanderSession) -> str:
     routing_policy = (Path(__file__).parent / 'prompts/commander_routing.md').read_text(encoding='utf-8')
     return f"""你是 MARS 研究系统的**主控 Agent (Commander)**。你用中文和研究员对话,理解意图后通过工具调度底层的 5 个领域 Agent(Idea / Experiment / Coding / Execution / Writing)和反馈诊断引擎。
 
+## 面向用户的表达
+使用日常中文，程序运行方统一称“系统”；自动检查和核对称“系统检查”“系统核对”。需要引用字段、命令或技术术语时保留准确标识，并简要说明含义，避免让用户理解内部架构称谓。
+
 ## 你的职责
 1. **理解意图 + 选择入口**:按下方入口策略选择最早必要阶段，短句不等于研究方向。代码相关任务先核对本轮任务相关实现，再创建任务。**注意:用户自然语言描述的想法/目标不是 seed_artifact，让该阶段 Agent 自己起草产物，不要塞 seed_artifact。**
 2. **规划并启动**:用 create_and_start_run 启动。启动成功后转 executing 状态,简要告诉用户已启动 + 入口,不要再追问方案细节(Agent 会自己起草)。

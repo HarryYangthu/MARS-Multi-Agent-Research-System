@@ -11,7 +11,7 @@ class ExecutionAgent(BaseAgent):
     output_schema = "run_log.v1"
     requires_model = False
     native_structured_delivery = True
-    agent_brief = "接收批准方案和编码交付，保持实验配置；宿主核对配置后管理真实作业。"
+    agent_brief = "接收批准方案和编码交付，保持实验配置；系统核对配置后管理真实作业。"
 
     async def build_context(self, request: RunRequest) -> ContextPack:
         return ContextPack(system=self.agent_brief, project=request.project,

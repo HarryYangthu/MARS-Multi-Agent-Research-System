@@ -4,6 +4,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkUserFacingLanguage } from "@/lib/userFacingMarkdown";
 import { useRouter } from "next/navigation";
 import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
@@ -269,6 +270,6 @@ function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: 
     </button>
   </div>;
   return <div className="min-w-0 break-words text-sm leading-7 text-slate-200 [&_p]:my-3 [&_li]:ml-5 [&_ul]:list-disc [&_ol]:list-decimal [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-mars-panel [&_pre]:p-4 [&_a]:text-indigo-300 [&_h2]:my-4 [&_h2]:text-lg [&_h2]:font-medium [&_table]:block [&_table]:overflow-x-auto [&_td]:border [&_td]:border-mars-border [&_td]:p-2 [&_th]:border [&_th]:border-mars-border [&_th]:p-2">
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+    <ReactMarkdown remarkPlugins={[remarkGfm, ...(message.role === "assistant" ? [remarkUserFacingLanguage] : [])]}>{message.content}</ReactMarkdown>
   </div>;
 }

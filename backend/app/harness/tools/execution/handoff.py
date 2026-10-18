@@ -27,10 +27,10 @@ def execution_delivery_context() -> dict[str, Any]:
         'validation_protocol': validation_protocol() if backend == 'local_command' else {},
         'instruction': (
             '当前执行方式为 local_command：每项 execution_jobs.config 必须填写上述登记命令的 id '
-            '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由宿主执行，不得自行替换。'
+            '作为 command_id；只有 entrypoint/config_path 不足以启动。argv 由系统执行，不得自行替换。'
             '命令从 MARS_JOB_REQUEST 读取本项配置和预算，产出 MARS_RESULT_PATH 与真实证据。'
             '登记命令的项目、入口和配置能力必须与本项匹配；旧命令不能作为其他模型的通用入口。'
-            '声明 consumes_data_path 时必须消费宿主交付的数据；验证模式只检查，不训练。'
+            '声明 consumes_data_path 时必须消费系统交付的数据；验证模式只检查，不训练。'
             '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
             if backend == 'local_command' else
             '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'

@@ -488,6 +488,7 @@ frontend/src/components/ProjectContextFiles.tsx
 frontend/src/components/ProjectSwitcher.tsx
 frontend/src/components/ReportsPanel.tsx
 frontend/src/components/ResearchConversation.tsx
+frontend/src/lib/userFacingMarkdown.ts
 frontend/src/components/ResearchPdfPreview.tsx
 frontend/src/components/RuntimeOpsPanel.tsx
 frontend/src/components/SidebarToggleButton.tsx
