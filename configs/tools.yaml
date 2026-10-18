@@ -663,6 +663,12 @@ tools:
       required: [exists, manifest, metadata]
       additionalProperties: true
 
+  run.existing_model:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
   run.create:
     enabled: true
     bridge_only: true

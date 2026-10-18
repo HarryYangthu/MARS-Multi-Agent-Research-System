@@ -171,6 +171,7 @@ class Orchestrator:
         from app.harness.schema.validator import validate_document
         from app.storage.artifact_store import SCHEMA_TO_AGENT
         from app.harness.context.folder_context import load_folder_context
+        from app.bridge.managed_coding_evidence import coding_preparation_review_evidence
 
         generation = session.request.review_generation
         state = review_state(session.run) or {}
@@ -209,11 +210,18 @@ class Orchestrator:
         tool_log = session.run.root / "events/tool_calls.jsonl"
         code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
                        if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        preparation_evidence: dict[str, dict[str, Any]] = {}
+        if ref.agent_dir == "coding" and not blocker:
+            try:
+                preparation_evidence = coding_preparation_review_evidence(session.run, validation.metadata)
+            except (OSError, ValueError, KeyError, TypeError):
+                blocker = "本次执行准备或真实预检证据无法核验，请重新核对；主控未批准。"
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
                    "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
                    "project_context": folder_context, "actual_code_checks": code_checks,
+                   "execution_preparation_evidence": preparation_evidence,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
-                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *preparation_evidence.keys(), *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
@@ -233,6 +241,14 @@ class Orchestrator:
         if ref.path.read_text(encoding="utf-8") != text or any((session.run.root / path).read_text(encoding="utf-8") != value for path, value in upstream.items()):
             await finish_review(session.run, session.bus, "needs_user", "审核期间方案或上游依据已变化，请重新核对。", identity=decision._identity)
             return
+        if preparation_evidence:
+            try:
+                unchanged = coding_preparation_review_evidence(session.run, validation.metadata) == preparation_evidence
+            except (OSError, ValueError, KeyError, TypeError):
+                unchanged = False
+            if not unchanged:
+                await finish_review(session.run, session.bus, "needs_user", "审核期间执行准备或真实预检证据已变化，请重新核对。", identity=decision._identity)
+                return
         if decision.decision == "approve":
             # Repeat host checks at the write boundary. LLM judgement cannot
             # override a changed checkout, evaluation or immutable candidate.
@@ -1222,8 +1238,9 @@ class Orchestrator:
                         return (session.request.review_mode == "commander" and session.request.review_generation == generation
                                 and not self._stopping(session) and not session.read_only
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
+                    review_payload = execution_review_payload(session.run, goal=session.request.user_request, configuration=view)
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
-                        payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
+                        payload=review_payload,
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
@@ -1232,6 +1249,10 @@ class Orchestrator:
                             return True
                         if current['token'] != token or current['blockers']:
                             await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
+                        elif (review_payload.get('execution_preparation_evidence')
+                              and execution_review_payload(session.run, goal=session.request.user_request, configuration=current)
+                                  .get('execution_preparation_evidence') != review_payload['execution_preparation_evidence']):
+                            await finish_review(session.run, session.bus, "needs_user", "审核期间执行准备或真实预检证据已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
                             await asyncio.to_thread(save_confirmation, session.run, node_key,
                                                     str(token), actor="commander")

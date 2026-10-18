@@ -8,9 +8,10 @@ verbs the Commander LLM can pick from. Dependencies are injected via
 from __future__ import annotations
 
 import time
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -132,6 +133,19 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     routing = routing_repository_check(args, ctx.session)
     if not routing['ok']:
         return routing
+    return await _create_run_with_routing(args, ctx, routing)
+
+
+async def _create_run_with_routing(
+    args: dict[str, Any], ctx: ToolContext, routing: dict[str, Any], *,
+    additional_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Shared mutation after a real public reader or bounded host admission.
+
+    This private boundary accepts host-created evidence, never a model's claim
+    that inspection occurred. The ordinary creation tools still use the public
+    current-turn reader check above.
+    """
     entrypoint = str(args.get("entrypoint", "pipeline"))
     if entrypoint == 'execution':
         return {'ok': False, 'status': 'execution_delivery_required',
@@ -153,6 +167,7 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         review_mode="commander" if ctx.session.auto_mode else "manual",
         extra={"routing": routing,
                **({"existing_execution_job": existing_job} if existing_job is not None else {}),
+               **(additional_extra or {}),
                **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
     )
     rsession = ctx.orchestrator.create_session(request)
@@ -180,6 +195,89 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         "review_mode": request.review_mode,
         "states": {k: s.value for k, s in rsession.graph.all_states().items()},
     }
+
+
+def _existing_user_sources(session: CommanderSession) -> list[dict[str, str]]:
+    users = [m for m in session.context_messages() if m.role == "user"]
+    if not users:
+        return []
+    selected = [users[-1]]
+    if len(users) > 1:
+        previous = users[-2]
+        pending = any(m.tool_name == "run.existing_model" and m.turn_id == previous.id
+                      and m.tool_result and m.tool_result.get("status") in {
+                          "model_selection_required", "entrypoint_selection_required"}
+                      for m in session.context_messages())
+        if pending:
+            selected.insert(0, previous)
+    return [{"id": m.id, "content": m.content} for m in selected]
+
+
+async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.commander_existing import (
+        existing_execution_stage_limit, resolve_existing_request,
+        user_requests_additional_changes, validate_existing_user_intent,
+    )
+    from app.harness.persistence import atomic_write_json
+    from app.harness.tools.config import load_execution_config
+    from app.harness.tools.project_repo import load_project_repo
+
+    source_messages = _existing_user_sources(ctx.session)
+    try:
+        resolved = resolve_existing_request(load_project_repo(ctx.session.project),
+            load_execution_config()["execution"].get("local_commands", []), args,
+            user_texts=[m["content"] for m in source_messages])
+    except (OSError, UnicodeError, ValueError) as exc:
+        return {"ok": False, "status": "existing_model_request_invalid", "error": str(exc)}
+    if not resolved["ok"]:
+        return resolved
+    requested = resolved["requested"]
+    try:
+        if not source_messages:
+            raise ValueError("已有模型运行必须绑定实际用户消息。")
+        validate_existing_user_intent(resolved, [m["content"] for m in source_messages])
+        stop_after_execution = existing_execution_stage_limit(args, [m["content"] for m in source_messages])
+    except ValueError as exc:
+        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc)}
+    if user_requests_additional_changes([m["content"] for m in source_messages]):
+        resolved["ordinary_coding"] = True
+    resolved["stop_after_execution"] = stop_after_execution
+    original = "\n\n".join(f'[用户消息 {m["id"]}]\n{m["content"]}' for m in source_messages)
+    original += "\n\n[宿主核实的当前配置、预算和种子]\n" + json.dumps(requested, ensure_ascii=False)
+    if resolved["ordinary_coding"]:
+        original += "\n用户明确的参数调整（由普通Coding核对并实现，不改变其意义）：" + json.dumps(
+            resolved["parameter_overrides"], ensure_ascii=False)
+    routing = {"ok": True, "repository_scope": "required", "verification": "host_registered_current_source",
+               "reason": "已有登记模型的运行请求；宿主读取当前配置及入口，直接从Coding准备执行。",
+               "evidence": resolved["evidence"]}
+    create_args: dict[str, Any] = {"entrypoint": "coding", "user_request": original,
+                                  "task": f'existing_{Path(requested["config_path"]).stem}'}
+    if not resolved["ordinary_coding"]:
+        create_args["existing_execution_job"] = requested
+    record = {"schema": "commander.existing_model_request.v1", "conversation_id": ctx.session.conv_id,
+              "turn_id": ctx.session.active_turn_id, "source_messages": source_messages, **resolved}
+    created = await _create_run_with_routing(create_args, ctx, routing,
+        additional_extra={"existing_model_request": record,
+                          **({"stop_after": "execution"} if stop_after_execution else {})})
+    if not created.get("ok"):
+        return created
+    run = ctx.run_store.get(str(created["run_id"]))
+    if run is None:
+        raise ValueError("Created existing-model task is unavailable")
+    atomic_write_json(run.root / "context/existing_model_request.json", record)
+    run.write_event("agent_events", {"event": "commander.existing_model_admitted",
+        "entrypoint": "coding", "configuration": requested["config_path"],
+        "ordinary_coding": resolved["ordinary_coding"], "evidence": resolved["evidence"]})
+    result = {**created, "status": "created", "requested": requested,
+              "ordinary_coding": resolved["ordinary_coding"], "training_started": False,
+              "stop_after_execution": stop_after_execution,
+              "inspection_ref": "context/existing_model_request.json"}
+    if args.get("start", True):
+        started = await _start_run({"run_id": created["run_id"]}, ctx)
+        if not started.get("ok"):
+            return {**started, "run_id": created["run_id"], "entrypoint": "coding"}
+        result.update({"status": "preparation_started", "states": started.get("states", {})})
+    return result
 
 
 async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -603,6 +701,18 @@ async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
 
 
 TOOLS: dict[str, ToolSpec] = {
+    'run.existing_model': ToolSpec(name='run.existing_model',
+        description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Seed may come from the actual selected config. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
+        parameters={'model_name': 'optional existing model name, exact or an unambiguous abbreviation',
+                    'config_path': 'optional exact connected-repository relative configuration path; preferred when known',
+                    'entrypoint': 'optional registered relative entrypoint, needed only if more than one matches',
+                    'max_iters': 'required positive integer from current requested training budget',
+                    'budget_unit': 'required steps|epochs; do not interpret repetition count as optimizer steps',
+                    'seed': 'optional nonnegative integer; otherwise read actual config seed',
+                    'parameter_overrides': 'optional explicit config-key/value object; unsupported by host shortcut, so ordinary Coding only',
+                    'stop_after_execution': 'optional boolean, default false; true only when user explicitly requests stopping at results/no report; frozen before start',
+                    'start': 'optional boolean, default true; false only if user requests preparation without starting'},
+        handler=_run_existing_model),
     'routing.repository_check': ToolSpec(name='routing.repository_check',
         description='Verify current-turn source evidence before concluding that the existing run has the correct code-related route. Empty literal search is not evidence of absence. Read matching configuration/registration before concluding.',
         parameters={}, handler=_routing_check),

@@ -95,23 +95,35 @@ def revision_count(run: RunHandle, node: str) -> int:
 
 def execution_review_payload(run: RunHandle, *, goal: str, configuration: dict[str, Any]) -> dict[str, Any]:
     """Give the reviewer the actual upstream approvals and explicit decision semantics."""
+    from app.bridge.managed_coding_evidence import coding_preparation_review_evidence
+    from app.bridge.coding_reuse_evidence import _regular
+    from app.harness.schema.validator import validate_document
     artifacts = []
+    preparation_evidence: dict[str, dict[str, Any]] = {}
     for ref in ('experiment/experiment_plan.approved.md', 'coding/code_spec.approved.md'):
         path = run.root / ref
         if not path.resolve().is_relative_to(run.root.resolve()):
             raise ValueError('托管审核资料越出当前任务')
         if path.is_file():
             content = path.read_bytes()
+            if ref == 'coding/code_spec.approved.md':
+                validation = validate_document(content.decode('utf-8'), expected_schema='code_spec.v1')
+                if 'execution_reuse' in validation.metadata:
+                    _regular(path, run.root)
+                    if not validation.valid or validation.metadata.get('project') != run.project:
+                        raise ValueError('批准的执行准备产物格式或项目身份校验未通过。')
+                    preparation_evidence = coding_preparation_review_evidence(run, validation.metadata)
             artifacts.append({'ref': ref, 'sha256': hashlib.sha256(content).hexdigest(),
                               'content': content.decode('utf-8')})
     return {'goal': goal, 'configuration': configuration, 'approved_artifacts': artifacts,
+        'execution_preparation_evidence': preparation_evidence,
         'review_contract': {'schema_id': 'managed.execution_confirmation.v1',
             'decision_scope': 'confirm_approved_inputs_before_launch',
             'confirmed_false_means': 'awaiting_this_decision',
             'empty_jobs_means': 'no_simulations_launched',
             'model_budget_unit': 'model_requests',
             'training_budget_source': 'experiments[].config.budget_unit and max_iters'},
-        'evidence_refs': ['execution_configuration', *(item['ref'] for item in artifacts)]}
+        'evidence_refs': ['execution_configuration', *(item['ref'] for item in artifacts), *preparation_evidence]}
 
 
 async def review_once(

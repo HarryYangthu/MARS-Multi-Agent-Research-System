@@ -25,6 +25,7 @@ commander:
   - code.repo_list
   - code.repo_search
   - code.repo_read_lines
+  - run.existing_model
   - run.create
   - run.start
   - run.status

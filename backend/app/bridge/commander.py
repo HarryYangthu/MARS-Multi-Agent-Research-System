@@ -111,6 +111,7 @@ class Commander:
             emitted: list[ChatMessage] = []
 
             for _step in range(self.max_react_steps):
+                terminal_receipt = False
                 activity = session.begin_activity("model", "总控正在调用模型")
                 get_session_store().persist(session)
                 try:
@@ -171,6 +172,16 @@ class Commander:
                         )
                     )
                     get_session_store().persist(session)
+                    if len(decision.actions) == 1:
+                        from app.bridge.commander_existing import existing_model_turn_reply
+                        receipt_reply = existing_model_turn_reply(tool, result)
+                        if receipt_reply is not None:
+                            emitted.append(session.add(ChatMessage(role="assistant", content=receipt_reply)))
+                            get_session_store().persist(session)
+                            terminal_receipt = True
+                            break
+                if terminal_receipt:
+                    break
                 # loop again so the LLM can react to tool results
             return emitted
 

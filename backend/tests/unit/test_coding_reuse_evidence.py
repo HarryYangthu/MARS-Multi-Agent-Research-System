@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager, ExitStack
 import asyncio
 import hashlib
 import json
@@ -38,7 +39,8 @@ files = [code / 'existing_runner.py', code / 'configs/example.yaml', data]
 if os.environ.get('MARS_VALIDATE_ONLY') == '1':
     result = {'schema': 'local_command_validation.v1', 'status': 'ready',
         'checks': [{'name': 'actual_input_readiness', 'ready': True, 'details': {
-            'training_started': False, 'input_files': [{'path': str(p),
+            'training_started': False, 'budget_unit': request['config']['budget_unit'],
+            'budget_value': request['steps'], 'seed': request['seed'], 'input_files': [{'path': str(p),
             'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in files]}}]}
 else:
     values = [value * float(request['config'].get('scale', 1)) for value in json.loads(data.read_text())['values']]
@@ -62,11 +64,33 @@ def _request(**overrides: Any) -> dict[str, Any]:
             'seed': 2026, 'budget_unit': 'steps', 'max_iters': 20, **overrides}
 
 
+@contextmanager
+def _environment(values: dict[str, str]) -> Iterator[None]:
+    original = {key: os.environ.get(key) for key in values}
+    os.environ.update(values)
+    reset_settings_cache()
+    try:
+        yield
+    finally:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        reset_settings_cache()
+
+
 @pytest.fixture
-def real_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[RunStore, str, Path]]:
-    monkeypatch.setenv('MARS_GIT_EXECUTABLE', resolve_git().executable)
-    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
-    monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
+def real_project(tmp_path: Path) -> Iterator[tuple[RunStore, str, Path]]:
+    with ExitStack() as stack:
+        stack.enter_context(_environment({
+            'MARS_GIT_EXECUTABLE': resolve_git().executable,
+            'MARS_FOLDER_PROJECTS_REGISTRY': str(tmp_path / 'registry.json'),
+            'MARS_EXECUTION_BACKEND': 'local_command'}))
+        yield from _create_real_project(tmp_path, stack)
+
+
+def _create_real_project(tmp_path: Path, stack: ExitStack) -> Iterator[tuple[RunStore, str, Path]]:
     reset_settings_cache()
     project = open_folder(str(tmp_path / 'project'), create=True)
     source = project.root / 'code/ordinary_linear'; source.mkdir(parents=True)
@@ -96,14 +120,10 @@ def real_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tu
     tools.write_text(yaml.safe_dump({'tools': {'execution.simulation_runner': {
         'enabled': True, 'process_backend': 'local_process', 'require_isolation': False,
         'command_allowlist': [['python']]}}}))
-    monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(execution))
-    monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(tools))
-    monkeypatch.setenv('PATH', str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', ''))
-    reset_settings_cache()
-    try:
-        yield RunStore(tmp_path / 'run_registry', project_storage=True), project.name, data
-    finally:
-        reset_settings_cache()
+    stack.enter_context(_environment({'MARS_EXECUTION_CONFIG_PATH': str(execution),
+        'MARS_TOOLS_CONFIG_PATH': str(tools),
+        'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', '')}))
+    yield RunStore(tmp_path / 'run_registry', project_storage=True), project.name, data
 
 
 async def _completed_source(store: RunStore, project: str, data: Path,
@@ -351,6 +371,223 @@ async def test_cancelled_host_check_drains_the_real_worker_before_releasing_owne
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(pending, timeout=5)
     assert exited.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('unit,count', [('steps', 35), ('epochs', 3)])
+async def test_first_existing_model_uses_current_registration_and_real_preflight_without_history(
+        real_project: tuple[RunStore, str, Path], unit: str, count: int) -> None:
+    from app.agents.base import RunRequest
+    from app.bridge.coding_reuse import prepare_reused_artifact
+    from app.harness.schema.validator import validate_document
+
+    store, project, data = real_project
+    # A fresh project's explicitly selected data need not match a historical
+    # training run. No historical run or approved code_spec exists in this case.
+    chosen = data.with_name('new_selected_values.json')
+    chosen.write_text(json.dumps({'values': [2, 4, 8, 10]}))
+    current = store.create(task='first_existing_model', project=project, entrypoint='coding',
+        data_source={'id': 'new_values', 'stored_path': str(chosen), 'fs_mhz': 100, 'channel_count': 1})
+    assert [run.run_id for run in store.list()] == [current.run_id]
+    invocation = uuid.uuid4().hex
+    requested = _request(seed=2031, max_iters=count, budget_unit=unit)
+    request = RunRequest(project=project, user_request='Run the already existing configuration',
+        extra={'invocation_id': invocation, 'existing_execution_job': requested})
+    with research_branch_scope(current, 'coding'):
+        branch = json.loads(receipt_path(current.root).read_text())
+        before = git(Path(branch['repo_path']), 'rev-parse', 'HEAD')
+        artifact = await prepare_reused_artifact(current, request)
+        assert artifact is not None
+        validation = validate_document(artifact.text, expected_schema='code_spec.v1')
+        assert validation.valid and validation.metadata['files_changed'] == []
+        config = validation.metadata['execution_jobs'][0]['config']
+        assert config == {**requested, 'command_id': 'ordinary_statistics', 'data_path': str(chosen),
+                          'data_source_id': 'new_values', 'fs_mhz': 100, 'channel_count': 1}
+        reuse = json.loads((current.root / 'coding/reuse' / (invocation + '.json')).read_text())
+        assert reuse['mode'] == 'host_validated_registered_execution'
+        assert reuse['model_calls'] == 0 and reuse['training_started'] is False and reuse['approved'] is False
+        assert reuse['source']['schema'] == 'coding.registered_execution_evidence.v1'
+        assert 'source_run_id' not in reuse['source']
+        assert not any(key in reuse['source'] for key in ('metrics', 'source_receipt_path', 'source_code_spec_ref'))
+        receipt = json.loads((current.root / reuse['current_preflight']['ref']).read_text())
+        details = receipt['checks'][0]['details']
+        assert receipt['status'] == 'passed' and receipt['pid'] > 0
+        assert details['training_started'] is False and details['budget_unit'] == unit
+        assert details['budget_value'] == count and details['seed'] == 2031
+        assert any(row['path'] == str(chosen) for row in receipt['input_files'])
+        assert not any(row['path'] == str(data) for row in receipt['input_files'])
+        assert not list((current.root / 'execution').rglob('execution_receipt.json'))
+        assert not list((current.root / 'execution').rglob('observed_statistics.json'))
+        assert not (current.root / 'coding/code_spec.approved.md').exists()
+        assert git(Path(branch['repo_path']), 'rev-parse', 'HEAD') == before
+        assert git(Path(branch['repo_path']), 'status', '--porcelain') == ''
+        events = [json.loads(line) for line in (current.root / 'events/agent_events.jsonl').read_text().splitlines()]
+        assert not any(event.get('event') == 'coding.execution_reuse_unavailable' for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', [
+    'ambiguous', 'scope', 'validation', 'unit', 'extra_override', 'dirty', 'symlink',
+])
+async def test_untrusted_or_ambiguous_current_capability_falls_back_without_running(
+        real_project: tuple[RunStore, str, Path], change: str) -> None:
+    from app.agents.base import RunRequest
+    from app.bridge.coding_reuse import prepare_reused_artifact
+
+    store, project, data = real_project
+    requested = _request()
+    profile = Path(os.environ['MARS_EXECUTION_CONFIG_PATH'])
+    policy = yaml.safe_load(profile.read_text())
+    command = policy['execution']['local_commands'][0]
+    if change == 'ambiguous':
+        policy['execution']['local_commands'].append({**command, 'id': 'second_statistics'})
+    elif change == 'scope':
+        command.pop('config_paths')
+    elif change == 'validation':
+        command.pop('validation')
+    elif change == 'unit':
+        command['budget_units'] = ['epochs']
+    elif change == 'extra_override':
+        requested['learning_rate'] = 0.2
+    profile.write_text(yaml.safe_dump(policy))
+    current = store.create(task='decline_current_capability', project=project, entrypoint='coding',
+        data_source={'stored_path': str(data)})
+    request = RunRequest(project=project, user_request='Run existing model',
+        extra={'invocation_id': uuid.uuid4().hex, 'existing_execution_job': requested})
+    with research_branch_scope(current, 'coding'):
+        branch = json.loads(receipt_path(current.root).read_text())
+        config_path = Path(branch['repo_path']) / 'configs/example.yaml'
+        if change == 'dirty':
+            config_path.write_text('existing_model: changed\n')
+        elif change == 'symlink':
+            config_path.unlink()
+            config_path.symlink_to(data)
+            git(Path(branch['repo_path']), 'add', '.')
+            git(Path(branch['repo_path']), '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+                '-c', 'commit.gpgsign=false', 'commit', '-m', 'Actual symbolic config')
+        assert await prepare_reused_artifact(current, request) is None
+        assert not list((current.root / 'execution').rglob('validation_receipt.json'))
+        assert not list((current.root / 'coding/reuse').glob('*.json'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing', ['seed', 'budget_unit', 'training_started', 'budget_value'])
+async def test_actual_checker_must_explicitly_verify_requested_seed_budget_and_no_training(
+        real_project: tuple[RunStore, str, Path], missing: str) -> None:
+    from app.agents.base import RunRequest
+    from app.bridge.coding_reuse import prepare_reused_artifact
+    from app.harness.project_workspace import folder_project
+
+    store, project, data = real_project
+    folder = folder_project(project)
+    assert folder is not None
+    source = folder.root / 'code/ordinary_linear'
+    runner = source / 'existing_runner.py'
+    # An actual checker with incomplete consumption evidence still runs as a
+    # genuine subprocess, but it is not enough to skip ordinary Coding.
+    removal = {'seed': "'seed': request['seed'], ",
+               'budget_unit': "'budget_unit': request['config']['budget_unit'],\n            ",
+               'training_started': "'training_started': False, ",
+               'budget_value': "'budget_value': request['steps'], "}[missing]
+    assert removal in runner.read_text()
+    runner.write_text(runner.read_text().replace(removal, ''))
+    git(source, 'add', '.')
+    git(source, '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+        '-c', 'commit.gpgsign=false', 'commit', '-m', 'Actual incomplete validation contract')
+    current = store.create(task='incomplete_validation_contract', project=project, entrypoint='coding',
+        data_source={'stored_path': str(data)})
+    request = RunRequest(project=project, user_request='Run existing model',
+        extra={'invocation_id': uuid.uuid4().hex, 'existing_execution_job': _request()})
+    with research_branch_scope(current, 'coding'):
+        assert await prepare_reused_artifact(current, request) is None
+        receipts = list((current.root / 'execution/preflight').glob('*/validation_receipt.json'))
+        assert len(receipts) == 1
+        receipt = json.loads(receipts[0].read_text())
+        assert receipt['pid'] > 0 and receipt['returncode'] == 0
+        assert not list((current.root / 'execution').rglob('execution_receipt.json'))
+        assert not list((current.root / 'coding/reuse').glob('*.json'))
+
+
+@pytest.mark.asyncio
+async def test_first_prepared_jobs_execute_on_two_isolated_tasks_with_current_data_and_budget(
+        real_project: tuple[RunStore, str, Path]) -> None:
+    from app.agents.base import RunRequest
+    from app.bridge.coding_reuse import prepare_reused_artifact
+
+    store, project, data = real_project
+    workspaces: set[str] = set()
+    outputs: set[str] = set()
+    for index, (unit, count, seed) in enumerate((('steps', 7, 2027), ('epochs', 2, 2031))):
+        selected = data.with_name(f'selected_{index}.json')
+        values = [index + 1, index + 3, index + 6, index + 8]
+        selected.write_text(json.dumps({'values': values}))
+        run = store.create(task=f'current_measurement_{index}', project=project, entrypoint='coding',
+            data_source={'id': f'current_{index}', 'stored_path': str(selected)})
+        request = RunRequest(project=project, user_request='Execute existing configuration',
+            extra={'invocation_id': uuid.uuid4().hex,
+                   'existing_execution_job': _request(seed=seed, max_iters=count, budget_unit=unit)})
+        with research_branch_scope(run, 'coding'):
+            artifact = await prepare_reused_artifact(run, request)
+            assert artifact is not None
+            row = artifact.metadata['execution_jobs'][0]
+            ref = ArtifactStore(run).write(text=artifact.text)
+            ArtifactStore(run).approve(ref)
+            result = await run_local_command(LocalCommandJob(run.run_id, row['name'], project, run.root,
+                config=row['config'], seed=seed, steps=count, command_id=row['config']['command_id']))
+            assert result.status == 'completed'
+            assert result.metrics['mean'] == sum(values) / len(values)
+            path = next((run.root / 'execution/local_commands').glob('*/*/execution_receipt.json'))
+            receipt = json.loads(path.read_text())
+            job = json.loads(path.with_name('job.json').read_text())
+            assert receipt['status'] == 'completed' and receipt['returncode'] == 0
+            assert job['seed'] == seed and job['steps'] == count
+            assert job['config']['budget_unit'] == unit and job['config']['max_iters'] == count
+            assert job['config']['data_path'] == str(selected) and job['config']['data_source_id'] == f'current_{index}'
+            workspaces.add(job['code_workspace'])
+            outputs.add(job['output_dir'])
+    assert len(workspaces) == len(outputs) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['config', 'registration', 'unit_echo'])
+async def test_real_preflight_cannot_accept_changed_inputs_or_wrong_budget_echo(
+        real_project: tuple[RunStore, str, Path], change: str) -> None:
+    from app.agents.base import RunRequest
+    from app.bridge.coding_reuse import prepare_reused_artifact
+    from app.harness.project_workspace import folder_project
+
+    store, project, data = real_project
+    folder = folder_project(project)
+    assert folder is not None
+    source = folder.root / 'code/ordinary_linear'
+    runner = source / 'existing_runner.py'
+    text = runner.read_text()
+    if change == 'config':
+        text = text.replace("    result = {'schema': 'local_command_validation.v1'",
+            "    (code / 'configs/example.yaml').write_text('existing_model: changed_during_validation\\n')\n"
+            "    result = {'schema': 'local_command_validation.v1'")
+    elif change == 'registration':
+        text = text.replace("    result = {'schema': 'local_command_validation.v1'",
+            "    profile = Path(os.environ['MARS_EXECUTION_CONFIG_PATH'])\n"
+            "    profile.write_text(profile.read_text().replace('ordinary_statistics', 'changed_statistics'))\n"
+            "    result = {'schema': 'local_command_validation.v1'")
+    else:
+        text = text.replace("'budget_unit': request['config']['budget_unit']", "'budget_unit': 'epochs'")
+    runner.write_text(text)
+    git(source, 'add', '.')
+    git(source, '-c', 'user.name=Test', '-c', 'user.email=test@localhost',
+        '-c', 'commit.gpgsign=false', 'commit', '-m', 'Actual concurrent validation mutation')
+    run = store.create(task='reject_changed_preflight', project=project, entrypoint='coding',
+        data_source={'stored_path': str(data)})
+    request = RunRequest(project=project, user_request='Execute current model',
+        extra={'invocation_id': uuid.uuid4().hex, 'existing_execution_job': _request()})
+    with research_branch_scope(run, 'coding'):
+        assert await prepare_reused_artifact(run, request) is None
+        receipt_path_value = next((run.root / 'execution/preflight').glob('*/validation_receipt.json'))
+        receipt = json.loads(receipt_path_value.read_text())
+        assert receipt['status'] == 'passed' and receipt['pid'] > 0
+        assert not list((run.root / 'coding/reuse').glob('*.json'))
+        assert not list((run.root / 'execution/local_commands').rglob('execution_receipt.json'))
 
 
 def test_actual_archived_receipts_are_verified_and_changed_inputs_decline_reuse(
