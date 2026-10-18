@@ -437,7 +437,7 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
         _csv(directory / f"{name}.csv", evidence[name], fields)
     acceptance, usage, protocol, budget = evidence["acceptance"], evidence["resource_usage"], evidence["protocol"], evidence["budget"]
     body = [f"# MARS 真实运行与仿真报告\n\n状态：**{_display(evidence['status'])}**\n\n任务：{manifest.get('task', '')}",
-            "本文件由系统依据已归档证据生成；大模型最终解释见 " + (_link("writing/final.md") if (root / "writing/final.md").is_file() else "尚未生成的 writing/final.md") + "。",
+            "本文件由 MARS 依据已归档证据生成；大模型最终解释见 " + (_link("writing/final.md") if (root / "writing/final.md").is_file() else "尚未生成的 writing/final.md") + "。",
             "## 验收结论",
             f"工程端到端闭环：**{'完成' if acceptance['engineering_complete'] else '尚未具备完整证据'}**。包括调研、实验设计、候选 Git 收据、独立测试与最终报告。",
             f"当前预算内的科研目标：**{'达标' if acceptance['scientific_goal_met'] else '未达标' if acceptance['scientific_goal_met'] is False else '尚未判定'}**。",
@@ -488,7 +488,7 @@ def write_report(root: Path, manifest: dict[str, Any], state: dict[str, Any]) ->
     for row in evidence["trials"]:
         body.append("| " + " | ".join(_display(row.get(key)) for key in ("trial", "status", "real_parameters", "validation_RES_db", "test_RES_db", "optimizer_steps", "selected_optimizer_steps", "elapsed_seconds")) + " |")
     if evidence["final_comparison"]:
-        body.append("最终比较（仅依据系统测量）：\n```json\n" + json.dumps(evidence["final_comparison"], ensure_ascii=False, indent=2) + "\n```")
+        body.append("最终比较（仅依据 MARS 测量）：\n```json\n" + json.dumps(evidence["final_comparison"], ensure_ascii=False, indent=2) + "\n```")
     for chart in evidence["charts"]:
         body.append(f"![{Path(chart).stem}]({chart})")
     body += ["## 资源预算、模型与工具调用", "冻结计算预算：\n```json\n" + json.dumps(budget, ensure_ascii=False, indent=2) + "\n```",

@@ -33,10 +33,10 @@ class CodingAgent(BaseAgent):
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
         "测试只能核对纯函数、schema、真实文件和真实进程；禁止用替身训练器、Mock、monkeypatch "
         "或固定指标伪造模型/工具/执行成功。新增作业适配器时先读取 configured_execution_delivery "
-        "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆系统包装入口与训练入口。"
+        "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆 MARS 包装入口与训练入口。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
-        "配置文件 config_path 或系统 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
-        "按用户指定的 entrypoint 与 config_path 精确选择系统执行能力；没有匹配能力时明确报告缺失。"
+        "配置文件 config_path 或 MARS command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "按用户指定的 entrypoint 与 config_path 精确选择 MARS 执行能力；没有匹配能力时明确报告缺失。"
         "不能为迁就登记命令扩大用户指定的模型集合、替换配置、改变数据划分或指标口径。"
         "有批准实验方案时 experiment_plan_sha256 必须绑定该完整文档；没有方案时按用户任务交付运行清单，不得捏造方案哈希。"
         "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
@@ -44,14 +44,14 @@ class CodingAgent(BaseAgent):
         "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
         "同一数值的两种字段是预算别名，不能改写批准数值或改成 epochs。"
         "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
-        "系统为本任务固定一个 Git 分支，并在编码完成、停止或失败时自动提交真实写入改动。"
+        "MARS 为本任务固定一个 Git 分支，并在编码完成、停止或失败时自动提交真实写入改动。"
         "不要自行创建或切换分支，不要执行 stash/reset/pull，也不要重复提交；自动提交不代表方案已批准。"
         "files_changed 覆盖本任务整条成功写入链形成的净改动；前轮写入且保留的净改动仍须列出。"
         "相同内容重写是复用，不能声明新增；只有整条写入链没有净差异时 files_changed=[]。"
         "正文列出复用文件、指纹及真实检查；不要为了登记制造改动或重复应用补丁。"
         "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
         "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
-        "仿真入口默认启用 TensorBoard，消费系统 MARS_TENSORBOARD_ENABLED=1；"
+        "仿真入口默认启用 TensorBoard，消费 MARS MARS_TENSORBOARD_ENABLED=1；"
         "按真实更新记录损失、学习率、验证指标和参数快照，并将当前代码仓本次生成的"
         "频谱、通道对比、损失图、系数热图及非线性特性全部保存在当前作业目录。"
         "验证日志实际写出，只有最终结果单点不算完整过程；未采集内容明确说明，禁止补造。"
@@ -91,7 +91,7 @@ class CodingAgent(BaseAgent):
             kind: [{'command_id': cmd.id, 'argv': list(cmd.argv)} for cmd in check_commands(kind)]
             for kind in ('lint', 'test')})
         context.upstream['configured_code_checks_usage'] = (
-            'code.lint/code.test_runner 的 command_id 必须使用上述系统配置 ID，不能填写 shell 命令。'
+            'code.lint/code.test_runner 的 command_id 必须使用上述 MARS 配置 ID，不能填写 shell 命令。'
             '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
         from app.harness.tools.execution.handoff import execution_delivery_context
@@ -103,7 +103,7 @@ class CodingAgent(BaseAgent):
             if text.startswith('---\n') and document_metadata(text).get('schema') == 'experiment_plan.v1':
                 context.upstream['approved_experiment_identity'] = json.dumps({
                     'experiment_plan_sha256': document_hash(text),
-                    'instruction': '此哈希由系统计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
+                    'instruction': '此哈希由 MARS 计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
         return context
 
     async def validate_candidate(self, request: RunRequest, text: str,

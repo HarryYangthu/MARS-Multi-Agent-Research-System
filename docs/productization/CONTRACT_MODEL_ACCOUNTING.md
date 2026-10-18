@@ -1,6 +1,6 @@
 # 冻结合同的模型调用预算
 
-此增量在 `guarded_complete` 接入同一 `run_state.sqlite3` 预算扩展。冻结合同的调用必须由可信宿主绑定 run、task hash、stage 和 invocation；只有 coding stage 能使用 coding 输出额度。模型参数、工具参数及 correlation 不授予 stage 权限。同一合同没有 scope、scope 跨 run、冻结文件丢失或策略不符时拒绝，不回退全局 JSON 账本。
+此增量在 `guarded_complete` 接入同一 `run_state.sqlite3` 预算扩展。冻结合同的调用必须由MARS绑定 run、task hash、stage 和 invocation；只有 coding stage 能使用 coding 输出额度。模型参数、工具参数及 correlation 不授予 stage 权限。同一合同没有 scope、scope 跨 run、冻结文件丢失或策略不符时拒绝，不回退全局 JSON 账本。
 
 请求前冻结最大 SDK 尝试数、输入和计费输出额度。输入边界按完整 messages/tool schema 的 UTF-8 字节及消息开销保守计数，不宣称是供应商 tokenizer 的精确值；实际 usage 超出预留会保存真实超额并阻断后续操作。SDK 重试数取用户调用配置与合同 operation_retries 的较小值，0 禁止重试。当前只允许已经关闭 SDK 隐式重试、逐次发出 attempt 事件的 OpenAI-compatible provider 家族；其它 provider 明确拒绝。
 

@@ -12,7 +12,7 @@
 
 `TaskEnvelope.task_id` 沿用 `run_id:node_key`，`agent/attempt` 来自该 SQL 节点，`predecessor_task_ids` 来自该节点的真实入边。`input_sha256` 覆盖冻结 task hash、goal、schema、候选 SQL 封存 hash、节点/依赖身份、配置指纹和经验证的上下文引用。节点状态、revision 和预算用量不混入不可变输入；它们继续由原 StateJournal / ResearchBudgetLedger 维护。读取会验证账本，绝不初始化或结算账本，也不清除 unknown 预留。
 
-## 上游证据与有限宿主上下文
+## 上游证据与有限MARS上下文
 
 `ApprovedStageInput` 只接受 `predecessor_node / schema_id / stem / source_version / approval_sequence`。不接受上游正文、`success=true` 或任意路径。服务按 ArtifactStore 现有 `SCHEMA_TO_AGENT` 定位本 run 的数字版本文件及 `.approvals/<stem>/<sequence>.json`，核对审批历史前缀、run/stage/stem/sequence/source version、原文 SHA-256、frontmatter Schema 与 project；Schema 声明或正文包含 run_id 时，还核对该 run_id。符号链接、硬链接、越界路径、未批准版本或修改后的 source/receipt 都拒绝。
 
@@ -20,7 +20,7 @@
 
 旧 ArtifactStore 审批回执没有生产它的 node/attempt/invocation。因此这里的准确声明是“本 run 已批准、供该依赖使用的 Schema 产物”，不能声称已经证明某个父 invocation 生产了它，也不能替代后续输出提交时的生产者绑定。TaskEnvelope 中的 predecessor ID 只是 SQL 图关系。
 
-`host_context` 只允许三个枚举引用：`frozen_contract`、`project_rules`、`project_knowledge`。内容分别来自已验证冻结合同、已封存项目 AGENTS.md 和已封存 knowledge.md；未声明知识不能用字符串补充。宿主引用只记录来源和 hash，不将任意文本包装成上游研究结果。它们不能代替缺失的已批准依赖。
+`host_context` 只允许三个枚举引用：`frozen_contract`、`project_rules`、`project_knowledge`。内容分别来自已验证冻结合同、已封存项目 AGENTS.md 和已封存 knowledge.md；未声明知识不能用字符串补充。MARS引用只记录来源和 hash，不将任意文本包装成上游研究结果。它们不能代替缺失的已批准依赖。
 
 ## 配置漂移与权限边界
 

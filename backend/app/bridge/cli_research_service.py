@@ -386,7 +386,7 @@ class CliResearchService:
             return path.read_text(encoding="utf-8")
         attempts = state.setdefault("agent_attempts", {})
         stage_root = root / "stages" / path.parent.name / path.stem
-        task = manifest["task"] + "\n系统固定的验收目标和计算预算（不得修改）：" + json.dumps(manifest["budget"], ensure_ascii=False)
+        task = manifest["task"] + "\n MARS 固定的验收目标和计算预算（不得修改）：" + json.dumps(manifest["budget"], ensure_ascii=False)
         while int(attempts.get(relative, 0)) < 2:
             repair = failed_stage_context(stage_root) if attempts.get(relative) else {}
             attempts[relative] = int(attempts.get(relative, 0)) + 1

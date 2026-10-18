@@ -10,7 +10,7 @@ v2 仅额外启用主、子作者的 `author_empty_completion_repair_enabled`。
 
 v3 相对 v2 只把调研子 Agent 的 `research.review_mode` 改为 `per_insight_collect_then_whole`，使用显式逐项审查合同 v5；模型、工具和全部预算相同。它顺序收集同一候选各 insight 的有效审查意见，再把全部拒绝项一次交作者修订，合计一次 reflection。各单元仍只看到原始任务、自己的 insight 和完整匹配材料，不会收到先前单元的判定；即使最后一项通过，前面存在拒绝时整轮仍拒绝。只有所有 insight 均通过才执行整份审查。作者改稿后每项都重新审查，不沿用上一稿的通过结果。
 
-v4 相对 v3 仅为子研究配置显式增加 `search.cvf_search`，主工具、模型、审查模式及内部预算不变。子工具覆盖只允许已注册、已启用、允许该 Agent 的无审批只读工具，并保留 `search.fetch_sources`。ResearchSession 将经宿主校验的工具范围传给 ToolContext 独立字段；模型参数及 `extra` 不能声明该权限。默认路径与 v1/v2/v3 仍按原工具集合执行，跨 Agent、写操作及禁用工具不能借新范围获权。
+v4 相对 v3 仅为子研究配置显式增加 `search.cvf_search`，主工具、模型、审查模式及内部预算不变。子工具覆盖只允许已注册、已启用、允许该 Agent 的无审批只读工具，并保留 `search.fetch_sources`。ResearchSession 将经MARS校验的工具范围传给 ToolContext 独立字段；模型参数及 `extra` 不能声明该权限。默认路径与 v1/v2/v3 仍按原工具集合执行，跨 Agent、写操作及禁用工具不能借新范围获权。
 
 v5 相对 v4 仅将主 Agent 工具显式收窄为 `idea.research_delegate` 和 `knowledge.kb_query`。子工具、模型、审查合同和全部预算保持 v4 原值；不修改网络配置或调用者的来源数量要求。选择器为 `MARS_IDEA_RUNTIME_PROFILE=experimental_research_pro_per_insight_v5`。主 Agent 负责决定调研缺口、组合合格报告和提出方案，具体检索与 PDF 阅读交给子 Agent。此前 API v4 沿用完整产品工具集，CLI 调研场景则只给主 Agent 委派与记忆查询工具，二者并非相同的工具实验。第 21 次真实 API 运行在首次委派失败后由主 Agent 直接取文献，最终仅启动 1 次委派却耗尽 5 次工具预算，合格报告仍为零；现有验收正确停止了交付。v5 针对这条行动路径提供独立开关，尚无新的完整真实运行证明它改善了成功率。
 
@@ -20,7 +20,7 @@ v5 相对 v4 仅将主 Agent 工具显式收窄为 `idea.research_delegate` 和 
 
 CVF 工具要求部署允许 `openaccess.thecvf.com`，使用官方会议目录及论文页元数据，不需要通用搜索 API key；当前仅支持现代 `/content/{venue}{year}/` 布局。元数据和实际 PDF 阅读分别记账。公开验证场景为 `configs/evaluation/idea_research_publisher_real.yaml`；API 只采用其中的问题与要求，有效模型及工具来自显式服务 profile，不能把场景文件中的 CLI 模型配置误认为服务配置。
 
-v6 在 v5 基础上组合两项改动：子 Agent 的 `search.neurips_search` 官方元数据通道，以及主研究配置 `per_delegation_min_sources=1`。该组合不是单变量比较，v1—v5 保留原值。单篇策略要求父 Agent 拆分可由一篇相关论文支持的信息缺口；工具实际 Schema 明示 `min_sources=1`，其它值在创建子任务前拒绝，不静默改写。子作者和整报告审查都接收宿主的单篇交付范围，同时保留完整原任务及委派说明；若自由文本仍要求多篇，须明确处理范围冲突，不能借数值门槛忽略任务。研究员可继续比较多个来源，但每篇采用的材料仍需来源、正文、引用及科学审查。原任务的全局来源要求和父级方法链接门槛不变，失败材料不会自动成为接受报告。
+v6 在 v5 基础上组合两项改动：子 Agent 的 `search.neurips_search` 官方元数据通道，以及主研究配置 `per_delegation_min_sources=1`。该组合不是单变量比较，v1—v5 保留原值。单篇策略要求父 Agent 拆分可由一篇相关论文支持的信息缺口；工具实际 Schema 明示 `min_sources=1`，其它值在创建子任务前拒绝，不静默改写。子作者和整报告审查都接收MARS的单篇交付范围，同时保留完整原任务及委派说明；若自由文本仍要求多篇，须明确处理范围冲突，不能借数值门槛忽略任务。研究员可继续比较多个来源，但每篇采用的材料仍需来源、正文、引用及科学审查。原任务的全局来源要求和父级方法链接门槛不变，失败材料不会自动成为接受报告。
 
 NeurIPS 通道从官方年份目录匹配题名，核对真实论文页及 Paper 按钮，保存原始 HTML 和来源收据。引文元数据中的另一个 PDF 域名不自动变成已验证别名，会议版也不冒充 arXiv 版本。元数据不是正文，后续阅读仍由现有 `search.fetch_sources` 独立生成收据。部署需允许实际官方站点；对应公开场景为 `configs/evaluation/idea_research_single_publication_real.yaml`，显式增加 `papers.nips.cc` 和 `proceedings.neurips.cc`，保留原问题、至少两篇来源/PDF、256 参数上限和模型预算。NeurIPS 的真实注册工具组件已完成检索、下载和正文收据链验证；单篇策略与完整组合仍需新的实际 Agent 验证。独立组件使用指定题名，不能当成自主选文或研究报告通过。
 

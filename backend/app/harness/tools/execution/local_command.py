@@ -79,7 +79,7 @@ def local_command_protocol() -> dict[str, Any]:
                        'config', 'seed', 'steps', 'output_dir'],
             'config_location': 'execution_jobs.config 在 request["config"] 中，不在请求顶层。',
             'data_binding': '声明 consumes_data_path 的命令须消费 request.config.data_path 或 MARS_DATA_PATH；'
-                            '该值由系统解析并核验，不能忽略后沿用另一份数据。',
+                            '该值由 MARS 解析并核验，不能忽略后沿用另一份数据。',
         },
         'result_schema': deepcopy(_RESULT_SCHEMA),
         'result_delivery': (

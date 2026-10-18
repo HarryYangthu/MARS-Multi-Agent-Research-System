@@ -278,12 +278,12 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         resolved["ordinary_coding"] = True
     resolved["stop_after_execution"] = stop_after_execution
     original = "\n\n".join(f'[用户消息 {m["id"]}]\n{m["content"]}' for m in source_messages)
-    original += "\n\n[系统核实的当前配置、预算和种子]\n" + json.dumps(requested, ensure_ascii=False)
+    original += "\n\n[MARS 核实的当前配置、预算和种子]\n" + json.dumps(requested, ensure_ascii=False)
     if resolved["ordinary_coding"]:
         original += "\n用户明确的参数调整（由普通Coding核对并实现，不改变其意义）：" + json.dumps(
             resolved["parameter_overrides"], ensure_ascii=False)
     routing = {"ok": True, "repository_scope": "required", "verification": "host_registered_current_source",
-               "reason": "已有登记模型的运行请求；系统读取当前配置及入口，直接从Coding准备执行。",
+               "reason": "已有登记模型的运行请求；MARS 读取当前配置及入口，直接从Coding准备执行。",
                "evidence": resolved["evidence"]}
     create_args: dict[str, Any] = {"entrypoint": "coding", "user_request": original,
                                   "task": f'existing_{Path(requested["config_path"]).stem}'}
