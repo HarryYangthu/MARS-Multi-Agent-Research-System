@@ -1515,11 +1515,36 @@ class Orchestrator:
         if stop_after not in (None, "execution"):
             raise ValueError("目前支持在 execution 完成后停住")
         session = self.session(run_id)
-        if self.owned_tasks.active(run_id) is not None or session.read_only:
+        if session.read_only or (self.owned_tasks.active(run_id) is not None
+                                 and not self._waiting_execution_without_jobs(session)):
             raise ValueError("只能在启动前设置阶段边界")
         session.request.extra = {**session.request.extra, "stop_after": stop_after}
         self._persist_request_extra(session.run, session.request.extra)
         self._persist_state(session, status="waiting_execution_confirmation")
+
+    def _waiting_execution_without_jobs(self, session: RunSession) -> bool:
+        """An owned confirmation waiter has not admitted actual execution yet."""
+        if self._stopping(session) or self.owned_tasks.closing:
+            return False
+        key = self._latest_node_for_stage(session, 'execution')
+        if (key is None or session.graph.state(key) not in {NodeState.PENDING, NodeState.APPROVED}
+                or any(state == NodeState.RUNNING for state in session.graph.all_states().values())):
+            return False
+        try:
+            snapshot = RunStateStore(session.run).load()
+            if (snapshot is None or snapshot.status != 'waiting_execution_confirmation'
+                    or snapshot.revision != session.state_revision
+                    or snapshot.graph.all_states() != session.graph.all_states()):
+                return False
+            execution = session.run.subdir('execution')
+            # Managed jobs claim their durable journal before entering an
+            # adapter; retained attempts/results are never a prelaunch waiter.
+            if any((execution / name).exists() for name in ('batch_summary.json', 'metrics.json', 'results.json')):
+                return False
+            return not any(directory.exists() and any(directory.iterdir()) for directory in
+                (execution / name for name in ('jobs', 'local_commands', 'pim_cpu', 'paper_static')))
+        except (OSError, ValueError):
+            return False
 
     @staticmethod
     def _stage_limit_reached(session: RunSession) -> bool:

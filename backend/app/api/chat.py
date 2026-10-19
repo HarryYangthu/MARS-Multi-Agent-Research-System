@@ -83,6 +83,7 @@ class ConversationView(BaseModel):
     messages: list[MessageView]
     processing: bool = False
     active_turn_id: str | None = None
+    completion_state: dict[str, Any] = Field(default_factory=dict)
     activities: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -113,6 +114,7 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         messages=[_msg_view(m) for m in s.messages],
         processing=s.processing,
         active_turn_id=s.active_turn_id,
+        completion_state=dict(s.completion_state),
         activities=[asdict(item) for item in s.activities],
     )
 

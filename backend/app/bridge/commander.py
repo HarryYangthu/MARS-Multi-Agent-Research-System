@@ -1,9 +1,9 @@
 """Commander — the conversational master Agent.
 
 LLM-driven (DeepSeek) closed-loop controller. Each user turn runs a small
-ReAct loop: the LLM emits a strict-JSON decision {reply, next_state, actions},
-the Commander executes any tool actions against the EXISTING engine, feeds the
-results back, and lets the LLM react — until it has nothing left to do.
+ReAct loop: the LLM proposes decisions and the Commander executes real tools.
+A per-turn completion ledger distinguishes an answer from an unfinished action;
+only actual receipts can certify effects. Optional model metadata is advisory.
 
 Missing providers fail closed; all decisions require an actual model response.
 
@@ -19,6 +19,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -27,15 +28,17 @@ from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
+from app.bridge.commander_completion import (
+    CompletionVerdict, TurnGoal, admitted_existing_model_goal, assess_completion, goal_state, parse_turn_goal, proposed_action_goal, receipt_intervention,
+)
 from app.bridge.commander_dispatch import (
-    action_continuation, action_continuation_exhausted_reply,
     coding_handoff_clarification, ordinary_coding_handoff_actions, promised_source_read_action,
     PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
     retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
     pending_existing_admission, truthful_unstarted_reply, unfulfilled_run_dispatch,
 )
 from app.bridge.conversation_edit import MessageEditRequest, finish_user_turn_edit, replace_user_turn
-from app.bridge.commander_tools import ToolContext, execute_tool, tools_for_prompt
+from app.bridge.commander_tools import ToolContext, commander_tool_mutates, execute_tool, tools_for_prompt
 from app.bridge.orchestrator import Orchestrator
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.accounting import guarded_complete
@@ -63,6 +66,7 @@ class Decision:
     next_state: str | None = None
     actions: list[dict[str, Any]] = field(default_factory=list)
     response_mode: str = "structured"
+    goal: dict[str, Any] | None = None
 
 
 class Commander:
@@ -115,6 +119,7 @@ class Commander:
                 user_message = ChatMessage(role="user", content=text)
                 session.active_turn_id = user_message.id
                 session.add(user_message)
+            session.completion_state = _begin_turn_completion(session)
             ctx = ToolContext(
                 orchestrator=self.orchestrator,
                 session=session,
@@ -123,6 +128,9 @@ class Commander:
             emitted: list[ChatMessage] = []
             continuation_prompt: str | None = None
             continuation_evidence: set[str] = set()
+            goal: TurnGoal | None = None
+            completion_reviews: dict[str, Any] = {}
+            last_completion: CompletionVerdict | None = None
 
             for _step in range(self.max_react_steps):
                 terminal_receipt = False
@@ -130,6 +138,11 @@ class Commander:
                 if pending_action is not None:
                     # Restore the same explicit never-created request without
                     # asking a model to choose a creation tool or wording again.
+                    goal = admitted_existing_model_goal(session, pending_action)
+                    if goal is not None:
+                        _store_turn_completion(session, goal, CompletionVerdict(
+                            status="pending", reason="恢复已准入的原始请求，等待真实执行结果",
+                            missing=goal.required_effects))
                     decision = Decision(actions=[pending_action])
                 else:
                     activity = session.begin_activity("model", "总控正在调用模型")
@@ -148,6 +161,14 @@ class Commander:
                     session.finish_activity(activity)
                     get_session_store().persist(session)
                     continuation_prompt = None
+                if goal is None:
+                    goal = _decision_goal(session, decision)
+                    if goal is not None:
+                        _store_turn_completion(session, goal, CompletionVerdict(
+                            status="pending", reason="本轮目标已识别，等待真实执行结果",
+                            missing=goal.required_effects))
+                        get_session_store().persist(session)
+                decision = _prevent_duplicate_creation(session, decision)
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
                     decision = Decision(actions=[recovery])
@@ -192,8 +213,9 @@ class Commander:
                             decision = Decision(actions=[{'tool': 'routing.repository_check', 'args': {}}])
 
                 if not decision.actions:
-                    continuation = action_continuation(session, decision.reply, response_mode=decision.response_mode)
-                    if continuation is not None:
+                    goal, last_completion, question = await self._completion_gate(
+                        session, goal, decision.reply, completion_reviews)
+                    if last_completion.status in {"pending", "unknown"}:
                         handoff = ordinary_coding_handoff_actions(session, decision.reply,
                             response_mode=decision.response_mode)
                         question = coding_handoff_clarification(session, decision.reply,
@@ -204,22 +226,30 @@ class Commander:
                             decision = Decision(actions=handoff, response_mode="ordinary_coding_handoff")
                         elif question is not None:
                             decision = Decision(reply=question, response_mode="clarification")
+                            last_completion = CompletionVerdict(status="needs_user", reason=question,
+                                evidence_ids=last_completion.evidence_ids, missing=last_completion.missing)
                         elif source_read is not None:
                             decision = Decision(actions=[source_read])
-                        elif (continuation.fingerprint not in continuation_evidence
+                        elif (_completion_fingerprint(session, goal) not in continuation_evidence
                                 and _step + 1 < self.max_react_steps):
-                            continuation_evidence.add(continuation.fingerprint)
-                            continuation_prompt = continuation.prompt
+                            continuation_evidence.add(_completion_fingerprint(session, goal))
+                            continuation_prompt = _completion_prompt(session, goal, last_completion)
                             logger.info("Commander continues unfinished action turn={} step={} reason={}",
-                                        session.active_turn_id, _step, continuation.reason)
+                                        session.active_turn_id, _step, last_completion.reason)
                             continue
                         else:
-                            decision = Decision(reply=action_continuation_exhausted_reply(session))
+                            decision = Decision(reply=_completion_unfinished_reply(last_completion))
+                    elif last_completion.status == "needs_user" and question:
+                        decision = Decision(reply=question, response_mode="clarification")
+                    elif last_completion.status == "blocked":
+                        decision = Decision(reply=_completion_unfinished_reply(last_completion))
+                    elif last_completion.status == "delegated":
+                        decision = Decision(reply=_completion_unfinished_reply(last_completion))
 
                 dispatching_run = has_run_dispatch(decision.actions)
-                if decision.next_state and not (
-                    decision.next_state == "executing" and (dispatching_run or unfulfilled_run_dispatch(session))
-                ):
+                # Only a real dispatch receipt can enter executing. A model's
+                # suggested state cannot certify that an operation happened.
+                if decision.next_state and decision.next_state != "executing":
                     self._try_transition(session, decision.next_state)
 
                 reply = PREPARING_NOTICE if dispatching_run else decision.reply
@@ -234,6 +264,10 @@ class Commander:
 
                 handoff_run_id: str | None = None
                 for action in decision.actions:
+                    # Earlier actions in this same batch may already have
+                    # allocated a task or performed this exact mutation.
+                    if not _prevent_duplicate_creation(session, Decision(actions=[action])).actions:
+                        continue
                     tool = str(action.get("tool", ""))
                     args = action.get("args", {}) or {}
                     if not isinstance(args, dict):
@@ -280,6 +314,11 @@ class Commander:
                             "", retained_run_id=result.get("run_id"), failure_reason=str(result.get("error") or "")))))
                         terminal_receipt = True
                         break
+                    if receipt_intervention(result) is not None:
+                        # Real choices and review boundaries stop this batch;
+                        # a later authored action cannot select or approve them.
+                        terminal_receipt = True
+                        break
                     receipt = run_dispatch_receipt(tool, result)
                     retained_failure = retained_dispatch_failure_reply(tool, result)
                     if receipt is not None:
@@ -297,20 +336,49 @@ class Commander:
                         get_session_store().persist(session)
                         terminal_receipt = True
                         break
+                batch_completion = (assess_completion(session, goal, run_store=self.run_store)
+                    if not terminal_receipt and goal is not None and goal.intent == "action" else None)
+                if batch_completion is not None and batch_completion.status in {"fulfilled", "delegated"}:
+                    # Finished mutations must not require another model reply;
+                    # its optional format could otherwise obscure real success.
+                    terminal_receipt = True
+                    emitted.append(session.add(ChatMessage(role="assistant", content=(
+                        _completion_unfinished_reply(batch_completion) if batch_completion.status == "delegated"
+                        else "本轮操作已完成，实际结果已保留。"))))
                 if terminal_receipt:
+                    goal, last_completion, question = await self._completion_gate(
+                        session, goal, emitted[-1].content if emitted else "", completion_reviews)
+                    if last_completion.status in {"pending", "unknown"} and _step + 1 < self.max_react_steps:
+                        continuation_prompt = _completion_prompt(session, goal, last_completion)
+                        continue
+                    if last_completion.status in {"pending", "unknown", "blocked"}:
+                        emitted.append(session.add(ChatMessage(role="assistant",
+                            content=_completion_unfinished_reply(last_completion))))
+                    elif last_completion.status == "needs_user" and question:
+                        emitted.append(session.add(ChatMessage(role="assistant", content=question)))
+                    elif last_completion.status == "delegated":
+                        emitted.append(session.add(ChatMessage(role="assistant",
+                            content=_completion_unfinished_reply(last_completion))))
                     break
                 # loop again so the LLM can react to tool results
-            if (unfulfilled_run_dispatch(session) and emitted and emitted[-1].role == "tool"):
-                # The existing loop budget still applies. Do not silently end
-                # on a read receipt or imply a task was created when it was not.
-                emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
-                    "", retained_run_id=retained_dispatch_run_id(session),
-                    failure_reason=dispatch_failure_reason(session)))))
-            elif emitted and emitted[-1].role == "tool" and action_continuation(session, "") is not None:
-                # Tool calls alone cannot certify completion of an operation.
-                # This is a bounded exit, never a retry or automatic admission.
-                emitted.append(session.add(ChatMessage(role="assistant",
-                    content=coding_handoff_clarification(session, "") or action_continuation_exhausted_reply(session))))
+            if emitted and emitted[-1].role == "tool":
+                goal, last_completion, question = await self._completion_gate(
+                    session, goal, "", completion_reviews)
+                if last_completion.status not in {"fulfilled", "delegated"}:
+                    emitted.append(session.add(ChatMessage(role="assistant",
+                        content=question if last_completion.status == "needs_user" and question
+                        else _completion_unfinished_reply(last_completion))))
+                elif last_completion.status == "delegated":
+                    emitted.append(session.add(ChatMessage(role="assistant",
+                        content=_completion_unfinished_reply(last_completion))))
+                else:
+                    emitted.append(session.add(ChatMessage(role="assistant", content="本轮操作已完成，实际结果已保留。")))
+            if last_completion is not None:
+                _store_turn_completion(session, goal, last_completion)
+                if last_completion.status == "needs_user":
+                    self._try_transition(session, "clarifying")
+                elif last_completion.status in {"pending", "unknown"}:
+                    self._try_transition(session, "planning")
             return emitted
 
         finally:
@@ -320,10 +388,81 @@ class Commander:
                 finish_user_turn_edit(session, retained)
             get_session_store().persist(session)
 
+    async def _completion_gate(
+        self, session: CommanderSession, goal: TurnGoal | None, reply: str,
+        reviews: dict[str, Any],
+    ) -> tuple[TurnGoal | None, CompletionVerdict, str]:
+        """All exits use user intent and actual receipts, never a trigger word."""
+        verdict = (assess_completion(session, goal, reply=reply, run_store=self.run_store)
+                   if goal is not None else CompletionVerdict(
+                       status="unknown", reason="本轮目标尚未核对", evidence_ids=(), missing=()))
+        question = ""
+        # A real effect satisfies its declared obligation without another model
+        # call. Missing intent, conversational answers and proposed questions
+        # receive one semantic review per distinct evidence/reply state.
+        grounded_handoff = bool(goal is not None and goal.intent == "action"
+                                and verdict.status in {"fulfilled", "delegated"})
+        if verdict.status not in {"blocked", "needs_user"} and not grounded_handoff:
+            from app.bridge.commander_semantics import review_turn_completion
+            key = hashlib.sha256((_completion_fingerprint(session, goal) + reply).encode()).hexdigest()
+            review = reviews.get(key)
+            if review is None:
+                activity = session.begin_activity("model", "总控正在核对本轮请求是否完成")
+                get_session_store().persist(session)
+                try:
+                    review = await review_turn_completion(
+                        session, reply, provider=self._provider, llm_config=self._llm_config,
+                        run_root=get_session_store().session_directory(session),
+                        timeout_seconds=min(30.0, llm_call_deadline_seconds(self._llm_config,
+                            minimum_seconds=get_settings().mars_llm_timeout_seconds)))
+                except BaseException:
+                    session.finish_activity(activity, "failed")
+                    raise
+                session.finish_activity(activity)
+                reviews[key] = review
+            reviewed_goal = parse_turn_goal(review.goal_raw, session)
+            if goal is None or goal.intent in {"answer", "observe", "unknown"}:
+                goal = reviewed_goal or goal
+            elif reviewed_goal is not None and reviewed_goal.intent == "action":
+                # A later semantic check may find a previously omitted user
+                # requirement, but cannot downgrade an outstanding operation.
+                goal = replace(goal,
+                    required_effects=tuple(dict.fromkeys((*goal.required_effects, *reviewed_goal.required_effects))),
+                    expected_tools=tuple(dict.fromkeys((*goal.expected_tools, *reviewed_goal.expected_tools))))
+            question = review.question
+            semantic_status = review.status
+            if semantic_status == "needs_user" and not question.strip():
+                semantic_status = "unknown"
+            verdict = (assess_completion(session, goal, reply=question or reply,
+                        semantic_status=semantic_status, evidence_ids=review.evidence_ids,
+                        run_store=self.run_store) if goal is not None else CompletionVerdict(
+                            status="unknown", reason="尚未取得可核验的完成依据", evidence_ids=(), missing=()))
+        if verdict.status == "needs_user" and not question.strip():
+            question = _receipt_question(session, verdict)
+        _store_turn_completion(session, goal, verdict)
+        get_session_store().persist(session)
+        return goal, verdict, question
+
     # ----------------------------------------------------------- decision
 
     async def _decide(self, session: CommanderSession, *, continuation: str | None = None) -> Decision:
-        return await self._decide_llm(session, continuation=continuation)
+        goal = session.completion_state.get("goal")
+        action_pending = (isinstance(goal, dict) and goal.get("intent") == "action"
+                          and session.completion_state.get("status") == "pending")
+        # Conversation may use normal text; operations use the provider's native
+        # function channel. No text JSON or promise is dispatched as an action.
+        from app.bridge.commander_native import native_commander_decision
+        raw = await native_commander_decision(
+            session, self._build_messages(session, continuation=continuation),
+            self._provider, self._llm_config, get_session_store().session_directory(session),
+            min(60.0, llm_call_deadline_seconds(self._llm_config,
+                minimum_seconds=get_settings().mars_llm_timeout_seconds)),
+            accept_text_reply=not action_pending)
+        decision = _parse_decision(json.dumps({
+            "actions": raw.get("actions", []), "reply": raw.get("reply", "")}, ensure_ascii=False))
+        if raw.get("native_status") == "question":
+            decision.response_mode = "clarification"
+        return decision
 
     async def _decide_llm(self, session: CommanderSession, *, continuation: str | None = None) -> Decision:
         from app.harness.agent_loop.trace import LoopTrace
@@ -416,10 +555,29 @@ class Commander:
 
     def _build_messages(self, session: CommanderSession, *, continuation: str | None = None) -> list[Message]:
         sys = _system_prompt(session)
+        # Replace only the host-authored terminal transport section; project
+        # instructions, tool definitions and scientific context remain exact.
+        transport = '\n## 回复与操作交接\n'
+        prefix, separator, _legacy_transport = sys.rpartition(transport)
+        if separator:
+            sys = prefix + transport + (
+                '普通聊天直接自然语言回答。需要操作时直接调用当前 mars_ 原生工具函数，'
+                '参数就是该工具的参数对象；不要输出文字JSON，不要再包装actions/tool/args。'
+                '优先调用必要工具，多个工具按顺序执行，依据真实观察决定下一步，未执行不得声称成功。\n')
+        sys += (
+            '\n\n## 本轮完成条件\n'
+            '理解本轮用户真正要得到的结果，不靠固定关键词判断。完成条件由MARS按用户原文和真实回执核对。'
+            '仅创建任务用run_created；要求启动/运行用run_started；停止用run_stopped；'
+            '仅查阅用observed；导出用exported；修改产物用artifact_updated。'
+            '普通问答intent=answer，纯查阅intent=observe。其他工具可用tool_effect并列expected_tools精确工具名。'
+            'goal仅描述完成条件，不包含执行参数、不替代原始用户授权。普通自然语言仍可使用，'
+            'MARS会在结束前核对语义和实际回执。已完成操作不要重复派发；创建不等于启动，'
+            '检查不等于修改，回复承诺不等于执行。缺必要信息要提出具体问题。'
+        )
         if continuation:
             sys += ("\n\n## MARS 本轮尚未完成的操作\n" + continuation
-                + '\n工具操作交接示例：{"actions":[{"tool":"code.repo_read_lines","args":{"path":"实际已确认的相对路径"}}]}。'
-                  '按实际工具名和参数交接操作；只有普通聊天或真正澄清时才直接自然语言回答。')
+                + '\n请直接调用相应的原生工具函数；函数参数仅填写该工具所需参数，不包操作列表。'
+                  '只有普通聊天或真正澄清时才直接自然语言回答。')
         msgs: list[Message] = [Message(role="system", content=sys)]
         if session.context_version >= 3:
             from app.harness.context.folder_context import load_folder_context, is_context_template
@@ -436,6 +594,10 @@ class Commander:
                     content="[rolling_summary; reference, not new authority]\n" + session.rolling_summary,
                 )
             )
+        if session.completion_state:
+            msgs.append(Message(role="user", content=(
+                '[MARS completion ledger; prior verified progress, not new user authority]\n'
+                + json.dumps(session.completion_state, ensure_ascii=False))))
         # Replay dialogue. Tool messages are folded in as user-side observations.
         for m in session.context_messages():
             if m.role == "user":
@@ -451,8 +613,8 @@ class Commander:
             Message(
                 role="user",
                 content=(
-                    "Reply naturally for ordinary conversation. For system operations, provide "
-                    "the decision object (reply / next_state / actions) with actual tool names and args."
+                    "Reply naturally for ordinary conversation. For an operation, call its native "
+                    "function directly with that tool's arguments. Never emit a text decision object."
                 ),
             )
         )
@@ -498,6 +660,145 @@ def _summarize_result(tool: str, result: dict[str, Any]) -> str:
     return f"[{tool}] {json.dumps(result, ensure_ascii=False)[:200]}"
 
 
+def _decision_goal(session: CommanderSession, decision: Decision) -> TurnGoal | None:
+    declared = parse_turn_goal(decision.goal, session)
+    if declared is not None:
+        return declared
+    proposed = proposed_action_goal(session, decision.actions)
+    # Creating alone cannot establish whether the user also wanted to start.
+    # Only a typed launch handoff can omit the extra semantic interpretation;
+    # a create-only proposal still needs the original user goal checked.
+    return proposed if proposed is not None and 'run_started' in proposed.required_effects else None
+
+
+def _completion_fingerprint(session: CommanderSession, goal: TurnGoal | None) -> str:
+    # A new transport/message ID is not a new result. Repeating the same read
+    # or successful effect cannot buy another continuation budget.
+    receipts = sorted({json.dumps({"tool": m.tool_name, "args": m.tool_args,
+        "result": {k: v for k, v in (m.tool_result or {}).items()
+                   if k not in {"tool_call_id", "request_id", "duration_ms"}}},
+        sort_keys=True, ensure_ascii=False, default=str)
+        for m in session.context_messages() if m.role == "tool" and m.turn_id == session.active_turn_id})
+    return hashlib.sha256(json.dumps({"goal": goal_state(goal) if goal else None, "receipts": receipts},
+        sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+
+
+def _begin_turn_completion(session: CommanderSession) -> dict[str, Any]:
+    prior = session.completion_state
+    previous_goal = prior.get("goal")
+    if not isinstance(previous_goal, dict) or previous_goal.get("intent") == "unknown":
+        previous_goal = prior.get("previous_goal")
+        previous_status = prior.get("previous_status")
+    else:
+        previous_status = prior.get("status")
+    return {
+        "schema": "commander.turn_completion.v1", "turn_id": session.active_turn_id,
+        "goal": None, "status": "unknown", "reason": "本轮请求处理中",
+        "initial_linked_run_id": session.linked_run_id,
+        "previous_goal": previous_goal, "previous_status": previous_status,
+    }
+
+
+def _store_turn_completion(session: CommanderSession, goal: TurnGoal | None,
+                           verdict: CompletionVerdict) -> None:
+    previous = session.completion_state
+    session.completion_state = {
+        "schema": "commander.turn_completion.v1", "turn_id": session.active_turn_id,
+        "goal": goal_state(goal) if goal is not None else None,
+        "status": verdict.status, "reason": verdict.reason,
+        "evidence_ids": list(verdict.evidence_ids), "missing": list(verdict.missing),
+        "linked_run_id": session.linked_run_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if "initial_linked_run_id" in previous:
+        session.completion_state["initial_linked_run_id"] = previous["initial_linked_run_id"]
+    # Earlier intent remains reference data when this interpretation is absent
+    # or unknown; it never grants new execution permission.
+    session.completion_state.update({key: previous[key] for key in ("previous_goal", "previous_status")
+                                     if key in previous})
+
+
+def _completion_prompt(session: CommanderSession, goal: TurnGoal | None, verdict: CompletionVerdict) -> str:
+    return (
+        'MARS尚未取得本轮用户目标的完成证据。请继续原始用户真正要求的操作，'
+        '不要只给下一步说明；不要猜测科学参数、扩大修改范围或绕过审核。'
+        '实际完成的操作不得重放，已创建任务只处理同一个run。'
+        '若确实缺少必要信息，提出具体问题；真实审批或错误请如实说明。\n'
+        + json.dumps({"goal": goal_state(goal) if goal else None, "missing": list(verdict.missing),
+                      "reason": verdict.reason, "linked_run_id": session.linked_run_id}, ensure_ascii=False)
+    )
+
+
+def _receipt_question(session: CommanderSession, verdict: CompletionVerdict) -> str:
+    for message in reversed(session.context_messages()):
+        if message.id not in verdict.evidence_ids:
+            continue
+        result = message.tool_result or {}
+        rows = result.get('choices') or result.get('candidates') or result.get('options')
+        if isinstance(rows, list) and rows:
+            labels = []
+            for row in rows[:8]:
+                if isinstance(row, dict):
+                    label = row.get('config_path') or row.get('model_name') or row.get('name') or row.get('id')
+                else:
+                    label = row if isinstance(row, str) else None
+                if isinstance(label, str) and label.strip():
+                    labels.append(label)
+            if labels:
+                return '找到多个实际候选项，请确认使用哪一个：' + '；'.join(labels) + '。'
+    return '本轮操作需要你确认必要的候选项，实际查询结果已保留。请确认后继续。'
+
+
+def _completion_unfinished_reply(verdict: CompletionVerdict) -> str:
+    if verdict.status == "delegated":
+        return ('任务流程已创建并启动，文件修改已交给 Coding；'
+                '子流程产物、训练和结果尚未确认完成，请以该任务的实际进度和审核记录为准。')
+    if verdict.status == "needs_user":
+        return '本轮操作还需要确认候选项或补充必要信息；请求与已核对的结果已保留。'
+    if verdict.status == "blocked":
+        reason = {'real_tool_requires_intervention': '工具返回了需要审核或处理的事项'}.get(
+            verdict.reason, verdict.reason)
+        return '本轮操作尚未完成：' + reason + '。请求、已有任务和结果已保留。'
+    labels = {'run_created': '任务创建', 'run_started': '任务启动', 'run_stopped': '任务停止',
+        'artifact_updated': '文件修改结果', 'exported': '导出文件', 'observed': '实际查阅结果',
+        'tool_effect': '操作结果', 'semantic_answer': '完整答复', 'declared_effect': '实际操作结果'}
+    missing = '、'.join(labels.get(item, item) for item in verdict.missing)
+    return ('本轮操作尚未完成，已保留请求与实际进度。'
+            + ('尚未取得的完成依据：' + missing + '。' if missing else '本轮全部要求尚未核对完成。'))
+
+
+def _prevent_duplicate_creation(session: CommanderSession, decision: Decision) -> Decision:
+    """Do not replay an allocation or a successful exact mutation this turn."""
+    if not decision.actions:
+        return decision
+    allocated = next((m.tool_result.get('run_id') for m in reversed(session.context_messages())
+        if m.role == 'tool' and m.turn_id == session.active_turn_id and isinstance(m.tool_result, dict)
+        and m.tool_name in {'run.create', 'create_and_start_run', 'run.existing_model'}
+        and isinstance(m.tool_result.get('run_id'), str) and m.tool_result.get('run_id')
+        and m.tool_result.get('run_id') == session.linked_run_id), None)
+    prior = [m for m in session.context_messages() if m.role == 'tool'
+             and m.turn_id == session.active_turn_id and (m.tool_result or {}).get('ok') is True]
+    actions = []
+    queued_mutations: list[tuple[str, dict[str, Any]]] = []
+    for action in decision.actions:
+        name = str(action.get('tool', ''))
+        if allocated and name in {'run.create', 'create_and_start_run', 'run.existing_model'}:
+            continue
+        mutates = commander_tool_mutates(name)
+        raw_args = action.get('args')
+        action_args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+        repeated = (mutates
+                    and (any(m.tool_name == name and (m.tool_args or {}) == action_args for m in prior)
+                         or (name, action_args) in queued_mutations))
+        if not repeated:
+            actions.append(action)
+            if mutates:
+                queued_mutations.append((name, action_args))
+    if len(actions) != len(decision.actions):
+        return replace(decision, actions=actions, reply='')
+    return decision
+
+
 def _parse_decision(text: str) -> Decision:
     raw = _extract_json(text)
     if raw is None:
@@ -531,6 +832,7 @@ def _parse_decision(text: str) -> Decision:
         reply=reply.strip(),
         next_state=next_state,
         actions=actions,
+        goal=raw.get("goal") if isinstance(raw.get("goal"), dict) else None,
     )
 
 
@@ -538,7 +840,7 @@ def _receipt_ends_action_batch(tool: str, action_count: int) -> bool:
     # The specialized tool already creates AND optionally starts its task. A
     # second authored action cannot turn that single request into another run.
     # Keep the ordinary run.create -> run.start batch supported.
-    return tool == "run.existing_model" or action_count == 1
+    return tool in {"run.existing_model", "create_and_start_run"} or action_count == 1
 
 
 def _decision_from_response(text: str) -> Decision:
