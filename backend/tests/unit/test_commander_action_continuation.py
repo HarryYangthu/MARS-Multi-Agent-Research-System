@@ -21,7 +21,7 @@ import yaml
 from app.bridge.commander import _decision_from_response
 from app.bridge.commander_dispatch import (
     action_continuation, action_continuation_exhausted_reply,
-    ordinary_coding_handoff_actions, promised_source_read_action,
+    coding_handoff_clarification, ordinary_coding_handoff_actions, promised_source_read_action,
 )
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool
@@ -38,6 +38,7 @@ ORIGINAL_REQUEST = (
     "训练 2个 epoch，其余配置不变。 和改动前进行对比"
 )
 INCIDENT_PROMISE = "MARS 正在核对 7 层配置的具体字段（层数、抽头、学习率、seed），先读取两个 7 层配置文件。"
+REPEATED_INSPECTION_PROMISE = "正在继续定位模型注册文件，确认“7 层 StaticPIMC”与第二层抽头对应的配置字段。"
 
 
 @contextmanager
@@ -440,3 +441,326 @@ async def test_actual_candidate_selection_is_not_bypassed_by_deterministic_hando
         assert ordinary_coding_handoff_actions(ctx.session, question, response_mode="plain_reply") is None
         assert promised_source_read_action(ctx.session, question, response_mode="plain_reply") is None
         assert not ctx.run_store.list()
+
+
+async def _read_actual_configurations_then_fail_guessed_directories(ctx: ToolContext) -> None:
+    for path in ("configs/seven_a.yaml", "configs/seven_b.yaml"):
+        actual = await _inspect(ctx, "code.repo_read_lines", {"path": path})
+        model_name = yaml.safe_load(actual["output"]["content"])["model_name"]
+        assert isinstance(model_name, str) and model_name
+    for directory in ("src", "models"):
+        args = {"query": "7L", "path": directory}
+        failed = await execute_tool("code.repo_search", args, ctx)
+        assert failed["ok"] is False and not failed.get("run_id"), failed
+        _observe(ctx.session, "code.repo_search", args, failed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [REPEATED_INSPECTION_PROMISE, "配置已核对。", "我来创建改参对照任务。"])
+@pytest.mark.parametrize("response_mode", ["plain_reply", "clarification"])
+async def test_actual_named_model_without_user_path_can_handoff_after_unrelated_failed_searches(
+    tmp_path: Path, reply: str, response_mode: str,
+) -> None:
+    from app.bridge.commander_code import routing_source_evidence
+    from app.harness.tools.project_repo import load_project_repo
+
+    request = "将现有First7L第二层抽头增加2，学习率减半，seed=2026，训练2个epoch，与修改前对比。"
+    with _project(tmp_path, request) as (ctx, source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        evidence = routing_source_evidence(load_project_repo(ctx.session.project), ctx.session)
+        assert {row["path"] for row in evidence} == {"configs/seven_a.yaml", "configs/seven_b.yaml"}
+        decision = _decision_from_response(reply)
+        assert not decision.actions and decision.response_mode == "plain_reply"
+        # The mode label alone cannot turn a question-free progress sentence
+        # into a required user clarification. These are pure policy inputs.
+        plan = ordinary_coding_handoff_actions(ctx.session, decision.reply, response_mode=response_mode)
+        assert plan is not None and [action["tool"] for action in plan] == ["run.create", "run.start"]
+        args = plan[0]["args"]
+        assert args["entrypoint"] == "coding" and args["user_request"] == request
+        assert "configs/seven_a.yaml" in args["routing_reason"]
+        assert "configs/seven_b.yaml" not in args["routing_reason"]
+        assert coding_handoff_clarification(ctx.session, decision.reply, response_mode=response_mode) is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+        before = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
+        # Run only the real allocation operation. The planned start is never
+        # invoked; no model or trainer is substituted or declared successful.
+        created = await execute_tool(plan[0]["tool"], args, ctx)
+        assert created["ok"] and created["states"]["coding"] == "pending", created
+        _observe(ctx.session, plan[0]["tool"], args, created)
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        assert len(ctx.run_store.list()) == 1 and ctx.session.linked_run_id == created["run_id"]
+        run = ctx.run_store.get(created["run_id"])
+        assert run is not None and not list(run.subdir("execution").iterdir())
+        assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.asyncio
+async def test_failed_named_configuration_read_never_becomes_current_source_evidence(tmp_path: Path) -> None:
+    from app.bridge.commander_code import routing_source_evidence
+    from app.harness.tools.project_repo import load_project_repo
+
+    request = "修改现有First7L第二层抽头并运行2epochs，seed=2026，与原模型对比。"
+    with _project(tmp_path, request) as (ctx, source):
+        selected = source / "configs/seven_a.yaml"
+        original = selected.read_bytes()
+        selected.unlink()
+        args = {"path": "configs/seven_a.yaml"}
+        failed = await execute_tool("code.repo_read_lines", args, ctx)
+        assert not failed["ok"]
+        _observe(ctx.session, "code.repo_read_lines", args, failed)
+        selected.write_bytes(original)
+        await _inspect(ctx, "code.repo_read_lines", {"path": "configs/seven_b.yaml"})
+        evidence = routing_source_evidence(load_project_repo(ctx.session.project), ctx.session)
+        assert {row["path"] for row in evidence} == {"configs/seven_b.yaml"}
+        assert ordinary_coding_handoff_actions(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                                response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_text", ["当前7层模型的训练状态怎么样？", "First7L的训练结果是什么？", "只解释两个7层模型的区别，不修改也不运行。"])
+async def test_actual_two_model_reads_and_failed_search_do_not_launch_a_status_or_explanation_request(
+    tmp_path: Path, request_text: str,
+) -> None:
+    with _project(tmp_path, request_text) as (ctx, _source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        assert ordinary_coding_handoff_actions(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                                response_mode="plain_reply") is None
+        assert promised_source_read_action(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                           response_mode="plain_reply") is None
+        assert coding_handoff_clarification(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                             response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [REPEATED_INSPECTION_PROMISE, "配置已核对。", "MARS准备创建改参对照任务。"])
+@pytest.mark.parametrize("response_mode", ["plain_reply", "clarification"])
+async def test_unspecified_model_with_two_actual_configurations_finishes_with_one_concrete_question(
+    tmp_path: Path, reply: str, response_mode: str,
+) -> None:
+    with _project(tmp_path, ORIGINAL_REQUEST) as (ctx, source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        decision = _decision_from_response(reply)
+        assert decision.response_mode == "plain_reply" and not decision.actions
+        assert ordinary_coding_handoff_actions(ctx.session, decision.reply,
+                                                response_mode=response_mode) is None
+        before = json.dumps([message.to_dict() for message in ctx.session.messages], sort_keys=True)
+        question = coding_handoff_clarification(ctx.session, decision.reply,
+                                                response_mode=response_mode)
+        assert isinstance(question, str) and question
+        assert "First7L" in question and "configs/seven_a.yaml" in question
+        assert "Second7L" in question and "configs/seven_b.yaml" in question
+        assert re.search(r"选择|哪(?:个|种|份)|[？?]", question)
+        assert "src" not in question and "models/" not in question
+        assert json.dumps([message.to_dict() for message in ctx.session.messages], sort_keys=True) == before
+        assert action_continuation(ctx.session, question, response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, question, response_mode="plain_reply") is None
+        assert coding_handoff_clarification(ctx.session, question, response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+        assert yaml.safe_load((source / "configs/seven_a.yaml").read_text())["model"]["inner_kernel"] == 3
+        assert yaml.safe_load((source / "configs/seven_b.yaml").read_text())["model"]["inner_kernel"] == 31
+
+
+@pytest.mark.asyncio
+async def test_named_model_changed_after_successful_read_does_not_use_stale_selection(tmp_path: Path) -> None:
+    from app.bridge.commander_code import routing_source_evidence
+    from app.harness.tools.project_repo import load_project_repo
+
+    request_text = "修改现有First7L第二层抽头并训练2epochs，seed=2026，与原模型对比。"
+    with _project(tmp_path, request_text) as (ctx, source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        selected = source / "configs/seven_a.yaml"
+        changed = yaml.safe_load(selected.read_text())
+        changed["model"]["inner_kernel"] = 5
+        selected.write_text(yaml.safe_dump(changed))
+        evidence = routing_source_evidence(load_project_repo(ctx.session.project), ctx.session)
+        assert {row["path"] for row in evidence} == {"configs/seven_b.yaml"}
+        assert ordinary_coding_handoff_actions(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                                response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_source_followthrough_does_not_override_a_real_existing_task(tmp_path: Path) -> None:
+    with _project(tmp_path, ORIGINAL_REQUEST) as (ctx, _source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        args = {"entrypoint": "coding", "user_request": ORIGINAL_REQUEST}
+        created = await execute_tool("run.create", args, ctx)
+        assert created["ok"] and created["states"]["coding"] == "pending", created
+        _observe(ctx.session, "run.create", args, created)
+        assert ctx.session.linked_run_id == created["run_id"]
+        assert ordinary_coding_handoff_actions(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                                response_mode="plain_reply") is None
+        assert coding_handoff_clarification(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                             response_mode="plain_reply") is None
+        assert promised_source_read_action(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                           response_mode="plain_reply") is None
+        assert len(ctx.run_store.list()) == 1
+
+
+@pytest.mark.asyncio
+async def test_unique_actual_camelcase_model_alias_without_yaml_path_selects_only_that_model(tmp_path: Path) -> None:
+    request_text = "将现有ShortMix第二层抽头增加2，学习率减半，seed=2026，训练2个epoch，和改前对比。"
+    with _project(tmp_path, request_text) as (ctx, source):
+        for name, model_name in (("seven_a", "Example7LShortMix"), ("seven_b", "Example7LPointMix")):
+            path = source / f"configs/{name}.yaml"
+            configuration = yaml.safe_load(path.read_text())
+            configuration["model_name"] = model_name
+            path.write_text(yaml.safe_dump(configuration))
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        plan = ordinary_coding_handoff_actions(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                               response_mode="plain_reply")
+        assert plan is not None
+        assert plan[0]["args"]["entrypoint"] == "coding"
+        assert plan[0]["args"]["user_request"] == request_text
+        assert "configs/seven_a.yaml" in plan[0]["args"]["routing_reason"]
+        assert "configs/seven_b.yaml" not in plan[0]["args"]["routing_reason"]
+        assert coding_handoff_clarification(ctx.session, REPEATED_INSPECTION_PROMISE,
+                                             response_mode="plain_reply") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", [
+    "本次修改First7L还是Second7L？请选择一个模型。",
+    "要训练2个完整epoch，还是2次优化器更新？请确认预算单位。",
+])
+async def test_true_questions_remain_terminal_after_successful_and_failed_source_reads(
+    tmp_path: Path, question: str,
+) -> None:
+    request_text = "修改现有First7L第二层抽头并运行2epochs，seed=2026，与原模型对比。"
+    with _project(tmp_path, request_text) as (ctx, _source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        assert ordinary_coding_handoff_actions(ctx.session, question, response_mode="clarification") is None
+        assert coding_handoff_clarification(ctx.session, question, response_mode="clarification") is None
+        assert promised_source_read_action(ctx.session, question, response_mode="clarification") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [
+    "已核对相关证据，这是明确的改动加对照运行，直接创建Coding任务并启动。",
+    "配置已核对。",
+    "可以。",
+])
+@pytest.mark.parametrize("response_mode", ["plain_reply", "clarification"])
+async def test_unexecuted_explicit_operation_is_pending_without_a_promise_or_current_observations(
+    tmp_path: Path, reply: str, response_mode: str,
+) -> None:
+    request_text = "修改现有First7L第二层抽头并训练2epochs，seed=2026，与原模型对比。"
+    with _project(tmp_path, request_text) as (ctx, _source):
+        assert not any(message.role == "tool" for message in ctx.session.messages)
+        assert action_continuation(ctx.session, reply, response_mode=response_mode) is not None
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode=response_mode) is None
+        assert promised_source_read_action(ctx.session, reply, response_mode=response_mode) is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_selector", ["First7L", "ShortMix"])
+async def test_valid_historical_configuration_is_only_a_hint_until_one_actual_current_read(
+    tmp_path: Path, model_selector: str,
+) -> None:
+    from app.bridge.commander_code import routing_source_evidence
+    from app.harness.tools.project_repo import load_project_repo
+
+    with _project(tmp_path) as (ctx, source):
+        if model_selector == "ShortMix":
+            for filename, name in (("seven_a", "Example7LShortMix"), ("seven_b", "Example7LPointMix")):
+                path = source / f"configs/{filename}.yaml"
+                configuration = yaml.safe_load(path.read_text())
+                configuration["model_name"] = name
+                path.write_text(yaml.safe_dump(configuration))
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        old_turn = ctx.session.active_turn_id
+        old_messages = [message.to_dict() for message in ctx.session.messages]
+        request_text = (f"继续刚才任务，使用{model_selector}，只把第二层抽头增加2、学习率减半，"
+                        "seed=2026，原模型和候选各训练2个完整epoch，与改动前对比。")
+        _user(ctx.session, request_text)
+        reply = "已核对相关证据，直接创建Coding任务并启动。"
+        assert old_turn != ctx.session.active_turn_id
+        assert routing_source_evidence(load_project_repo(ctx.session.project), ctx.session) == []
+        assert action_continuation(ctx.session, reply, response_mode="plain_reply") is not None
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        action = promised_source_read_action(ctx.session, reply, response_mode="plain_reply")
+        assert action == {"tool": "code.repo_read_lines", "args": {"path": "configs/seven_a.yaml"}}
+        assert [message.to_dict() for message in ctx.session.messages[:-1]] == old_messages
+        assert not ctx.run_store.list()
+        actual = await _inspect(ctx, action["tool"], action["args"])
+        assert actual["output"]["sha256"] == hashlib.sha256((source / "configs/seven_a.yaml").read_bytes()).hexdigest()
+        evidence = routing_source_evidence(load_project_repo(ctx.session.project), ctx.session)
+        assert [row["path"] for row in evidence] == ["configs/seven_a.yaml"]
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        plan = ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply")
+        assert plan is not None and [item["tool"] for item in plan] == ["run.create", "run.start"]
+        assert plan[0]["args"]["user_request"] == request_text
+        assert "configs/seven_a.yaml" in plan[0]["args"]["routing_reason"]
+        assert "configs/seven_b.yaml" not in plan[0]["args"]["routing_reason"]
+        # The historical record did not allocate anything. Only this genuine
+        # creation call may allocate the pending task; start is not executed.
+        created = await execute_tool(plan[0]["tool"], plan[0]["args"], ctx)
+        assert created["ok"] and created["states"]["coding"] == "pending", created
+        _observe(ctx.session, plan[0]["tool"], plan[0]["args"], created)
+        assert len(ctx.run_store.list()) == 1
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_history", ["failed_read", "changed_bytes", "changed_repository"])
+async def test_historical_configuration_hint_rejects_failed_stale_or_rebound_source(
+    tmp_path: Path, invalid_history: str,
+) -> None:
+    import shutil
+
+    with _project(tmp_path) as (ctx, source):
+        selected = source / "configs/seven_a.yaml"
+        if invalid_history == "failed_read":
+            content = selected.read_bytes()
+            selected.unlink()
+            args = {"path": "configs/seven_a.yaml"}
+            failed = await execute_tool("code.repo_read_lines", args, ctx)
+            assert failed["ok"] is False
+            _observe(ctx.session, "code.repo_read_lines", args, failed)
+            selected.write_bytes(content)
+            await _inspect(ctx, "code.repo_read_lines", {"path": "configs/seven_b.yaml"})
+        else:
+            await _read_actual_configurations_then_fail_guessed_directories(ctx)
+            if invalid_history == "changed_bytes":
+                configuration = yaml.safe_load(selected.read_text())
+                configuration["model"]["inner_kernel"] = 5
+                selected.write_text(yaml.safe_dump(configuration))
+            else:
+                alternate = source.parent / "another-checkout"
+                shutil.copytree(source, alternate)
+                metadata = source.parent.parent / ".mars/repo_link.yaml"
+                binding = yaml.safe_load(metadata.read_text())
+                binding["repo_path"] = str(alternate)
+                metadata.write_text(yaml.safe_dump(binding))
+        _user(ctx.session, "继续刚才任务，修改First7L第二层抽头并训练2epochs，seed=2026，与原模型对比。")
+        reply = "已核对相关证据，直接创建Coding任务并启动。"
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_failed_current_reread_cannot_reuse_history_or_retry_the_same_file(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, source):
+        await _read_actual_configurations_then_fail_guessed_directories(ctx)
+        _user(ctx.session, "继续刚才任务，修改First7L第二层抽头并训练2epochs，seed=2026，与原模型对比。")
+        reply = "已核对相关证据，直接创建Coding任务并启动。"
+        action = promised_source_read_action(ctx.session, reply, response_mode="plain_reply")
+        assert action is not None and action["args"] == {"path": "configs/seven_a.yaml"}
+        selected = source / "configs/seven_a.yaml"
+        content = selected.read_bytes()
+        selected.unlink()
+        failed = await execute_tool(action["tool"], action["args"], ctx)
+        assert failed["ok"] is False
+        _observe(ctx.session, action["tool"], action["args"], failed)
+        selected.write_bytes(content)
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None

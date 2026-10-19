@@ -29,7 +29,7 @@ from app.bridge.commander_session import ChatMessage, CommanderSession, get_sess
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.bridge.commander_dispatch import (
     action_continuation, action_continuation_exhausted_reply,
-    ordinary_coding_handoff_actions, promised_source_read_action,
+    coding_handoff_clarification, ordinary_coding_handoff_actions, promised_source_read_action,
     PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
     retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
     pending_existing_admission, truthful_unstarted_reply, unfulfilled_run_dispatch,
@@ -151,6 +151,20 @@ class Commander:
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
                     decision = Decision(actions=[recovery])
+                if decision.actions and all(action.get("tool") in {
+                        "code.repo_list", "code.repo_search", "code.repo_read_lines"} for action in decision.actions):
+                    # Once a real configuration read identifies the requested
+                    # model, Coding owns further implementation inspection.
+                    # Ambiguous real models require a concrete choice instead
+                    # of another round of guessed repository directories.
+                    handoff = ordinary_coding_handoff_actions(session, decision.reply,
+                        response_mode=decision.response_mode)
+                    question = coding_handoff_clarification(session, decision.reply,
+                        response_mode=decision.response_mode) if handoff is None else None
+                    if handoff is not None:
+                        decision = Decision(actions=handoff, response_mode="ordinary_coding_handoff")
+                    elif question is not None:
+                        decision = Decision(reply=question, response_mode="clarification")
                 if not decision.actions and decision.response_mode != "clarification":
                     fallback = existing_model_fallback_action(session)
                     if fallback is not None:
@@ -169,10 +183,14 @@ class Commander:
                     if continuation is not None:
                         handoff = ordinary_coding_handoff_actions(session, decision.reply,
                             response_mode=decision.response_mode)
-                        source_read = promised_source_read_action(session, decision.reply,
+                        question = coding_handoff_clarification(session, decision.reply,
                             response_mode=decision.response_mode) if handoff is None else None
+                        source_read = promised_source_read_action(session, decision.reply,
+                            response_mode=decision.response_mode) if handoff is None and question is None else None
                         if handoff is not None:
                             decision = Decision(actions=handoff, response_mode="ordinary_coding_handoff")
+                        elif question is not None:
+                            decision = Decision(reply=question, response_mode="clarification")
                         elif source_read is not None:
                             decision = Decision(actions=[source_read])
                         elif (continuation.fingerprint not in continuation_evidence
@@ -279,7 +297,7 @@ class Commander:
                 # Tool calls alone cannot certify completion of an operation.
                 # This is a bounded exit, never a retry or automatic admission.
                 emitted.append(session.add(ChatMessage(role="assistant",
-                    content=action_continuation_exhausted_reply(session))))
+                    content=coding_handoff_clarification(session, "") or action_continuation_exhausted_reply(session))))
             return emitted
 
         finally:

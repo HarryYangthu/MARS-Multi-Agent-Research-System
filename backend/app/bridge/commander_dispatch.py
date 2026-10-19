@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from copy import deepcopy
 import hashlib
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+import tomllib
 from typing import Any
+
+import yaml
 
 from app.bridge.commander_existing import existing_model_turn_reply
 from app.bridge.commander_session import ChatMessage, CommanderSession
@@ -46,7 +49,7 @@ _READ_ONLY_TOOLS = _SOURCE_TOOLS | frozenset({
     "get_diagnosis", "query_kb", "list_runs", "discovery.status", "knowledge.research_memory_read",
 })
 _ACTION_VERBS = (
-    r"读取|查找|搜索|检查|核对|修改|调整|配置|创建|启动|运行|执行|训练|仿真|"
+    r"读取|查找|搜索|检查|核对|定位|修改|调整|配置|创建|启动|运行|执行|训练|仿真|"
     r"保存|提交|导出|生成|停止|恢复|重试|取消|删除|批准|"
     r"read|inspect|search|check|modify|configure|create|start|run|train|save|export|resume|retry"
 )
@@ -57,16 +60,16 @@ def _operation_promise(reply: str) -> bool:
     return bool(re.search(
         rf"(?:MARS|主控|我)(?:[^。！？\n]{{0,45}}?)(?:正在|将|会|先|接下来|下一步|现在)"
         rf"(?:[^。！？\n]{{0,25}}?)(?:{_ACTION_VERBS})|"
-        rf"^(?:接下来|下一步|现在|先)(?:[^。！？\n]{{0,15}}?)(?:{_ACTION_VERBS})|"
+        rf"^(?:正在|接下来|下一步|现在|先)(?:[^。！？\n]{{0,15}}?)(?:{_ACTION_VERBS})|"
         rf"\b(?:I|MARS)\s+(?:will|am\s+going\s+to|am\s+now)\b[^.!?\n]{{0,60}}(?:{_ACTION_VERBS})",
         reply.strip(), re.IGNORECASE))
 
 
 def _concrete_question(reply: str, response_mode: str) -> bool:
-    if response_mode == "clarification":
-        return True
+    # A provider's mode label alone is not a question. Plain progress text
+    # labelled clarification must not silently end a pending operation.
     return bool(re.search(r"请(?:你|您)?(?:选择|提供|补充|确认|告诉)|"
-                          r"(?:哪(?:个|种|些)|多少|还是|是否|需要.{0,20}(?:信息|参数|路径))[^。\n]*[？?]|"
+                          r"(?:哪(?:一?个|种|些|份)|多少|还是|是否|需要.{0,20}(?:信息|参数|路径))[^。\n]*[？?]|"
                           r"\b(?:which|what|please\s+(?:choose|provide|confirm))\b[^\n]*[?]",
                           reply, re.IGNORECASE))
 
@@ -142,11 +145,10 @@ def action_continuation(session: CommanderSession, reply: str, *,
         return None
     promise = _operation_promise(reply)
     requested = _operation_requested(session)
-    if not requested or not (promise or observations or not reply.strip()):
-        return None
-    # A clear failed read is a real blocking result, not idle success. The model
-    # may explain it or ask for the exact missing information without a retry.
-    if observations and (observations[-1].tool_result or {}).get("ok") is False and not promise:
+    # Completion is established by actual observations above, not by the
+    # wording of a model's answer. An explicit operation with no tools is
+    # still pending even if the answer contains no promise at all.
+    if not requested:
         return None
     return ActionContinuation(
         reason="operation_promise_without_action" if promise else "operation_pending_after_inspection",
@@ -206,22 +208,146 @@ def _mentioned_files(text: str, files: set[str]) -> list[str]:
 
 def promised_source_read_action(session: CommanderSession, reply: str, *,
                                 response_mode: str = "structured") -> dict[str, Any] | None:
-    """Fulfil one read of a complete path given by the actual current user.
+    """Fulfil one real read of a user path or a uniquely named known model.
 
     The ordinary reader must resolve it against the current project, verify
     existence, reject symlinks and enforce its read policy. A missing file is a
     real failed observation, never an invitation to invent a replacement path.
-    No path, source content, line range, or scientific parameter is invented.
+    An earlier real model configuration may supply the exact path only when
+    its current binding and SHA still match and the current user uniquely
+    names it. No source observation or scientific parameter is fabricated.
     """
     if (session.linked_run_id or _has_created_run(_turn_observations(session))
             or action_continuation(session, reply, response_mode=response_mode) is None):
         return None
     attempted = {(message.tool_args or {}).get("path") for message in _turn_observations(session)
                  if message.tool_name == "code.repo_read_lines"}
-    for path in _user_source_files(session):
+    paths = _user_source_files(session)
+    if not paths and _change_and_run_requested(session):
+        # An earlier real read can identify what to read again, but cannot
+        # satisfy this turn's source admission. Verify the current binding and
+        # bytes, then dispatch the ordinary reader for a new real receipt.
+        models = _configuration_reads(session, include_history=True)
+        matched = [path for path, name in models.items() if name and _model_named(_current_user_request(session), name)]
+        paths = matched if len(matched) == 1 else []
+    for path in paths:
         if path not in attempted:
             return {"tool": "code.repo_read_lines", "args": {"path": path}}
     return None
+
+
+def _change_and_run_requested(session: CommanderSession) -> bool:
+    request = _current_user_request(session)
+    return bool(
+        re.search(r"改(?:动|代码|参数)|修改|调整|增加|减半|\b(?:modify|change|adjust)\b", request, re.IGNORECASE)
+        and re.search(r"仿真|训练|运行|执行|\b(?:run|train|execute)\b", request, re.IGNORECASE)
+        and not re.search(r"(?:不要|不|先别)(?:启动|运行|训练|执行)|"
+                          r"\b(?:do\s+not|don't)\s+(?:run|start|execute)", request, re.IGNORECASE))
+
+
+def _configuration_reads(session: CommanderSession, *, include_history: bool = False) -> dict[str, str]:
+    """Return complete current configuration reads, checked against real bytes.
+
+    A later failed search does not invalidate another file's actual read. A
+    changed or partial file is never a basis for selecting a model, however.
+    The ordinary creation tool will independently recheck source admission.
+    """
+    observations = ([message for message in session.context_messages()
+                     if message.role == "tool" and message.tool_result]
+                    if include_history else _turn_observations(session))
+    outputs = []
+    for message in observations:
+        output = (message.tool_result or {}).get("output")
+        if (message.tool_name == "code.repo_read_lines" and (message.tool_result or {}).get("ok") is True
+                and isinstance(output, dict) and isinstance(output.get("content"), str)
+                and output.get("line_start") == 1 and output.get("line_end") == output.get("total_lines")
+                and not output.get("truncated") and not output.get("range_limited")):
+            path = _safe_source_path(output.get("path"))
+            if path and PurePosixPath(path).suffix.lower() in {".yaml", ".yml", ".json", ".toml"}:
+                outputs.append((path, output))
+    if not outputs:
+        return {}
+    if include_history:
+        from app.harness.tools.project_repo import load_project_repo, resolve_allowed_path
+        try:
+            repo = load_project_repo(session.project)
+        except (OSError, ValueError):
+            return {}
+        valid = set()
+        for path, output in outputs:
+            try:
+                if Path(str(output.get("repo_root", ""))).resolve() != repo.root.resolve():
+                    continue
+                actual = resolve_allowed_path(repo, path, require_exists=True, require_text=True)
+                current_path = repo.root
+                for part in PurePosixPath(path).parts:
+                    current_path /= part
+                    if current_path.is_symlink():
+                        raise ValueError("repository inspection cannot traverse symbolic links")
+                sha = hashlib.sha256(actual.read_bytes()).hexdigest()
+                if sha == output.get("sha256"):
+                    valid.add((path, sha))
+            except (OSError, ValueError):
+                continue
+    else:
+        from app.bridge.commander_code import routing_repository_check
+        current = routing_repository_check({}, session).get("evidence", [])
+        valid = {(str(item["path"]), str(item["sha256"])) for item in current if isinstance(item, dict)
+                 and isinstance(item.get("path"), str) and isinstance(item.get("sha256"), str)}
+    reads: dict[str, str] = {}
+    for path, output in outputs:
+        if (path, output.get("sha256")) not in valid:
+            continue
+        try:
+            content = output["content"]
+            parsed = tomllib.loads(content) if path.endswith(".toml") else yaml.safe_load(content)
+        except (ValueError, yaml.YAMLError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        name = parsed.get("model_name")
+        reads[path] = name.strip() if isinstance(name, str) and name.strip() else ""
+    return reads
+
+
+def _model_named(request: str, name: str) -> bool:
+    # Only literal complete names or CamelCase/separator suffixes are used.
+    # A shared family prefix (e.g. a generic model family) is not a selection
+    # of the first configuration happened upon during repository inspection.
+    starts = {0}
+    starts.update(match.end() for match in re.finditer(r"[_\-\s]+", name))
+    starts.update(match.start() for match in re.finditer(r"[A-Z][a-z]|[A-Z]+(?=[A-Z][a-z])|[0-9]", name))
+    selectors = [name[start:] for start in starts if len(name[start:]) >= 3]
+    return any(re.search(r"(?<![A-Za-z0-9_])" + re.escape(selector) + r"(?![A-Za-z0-9_])",
+                         request, re.IGNORECASE) for selector in selectors)
+
+
+def _coding_targets(session: CommanderSession) -> tuple[list[str], dict[str, str]]:
+    reads = _configuration_reads(session)
+    request = _current_user_request(session)
+    explicit = [path for path in _user_source_files(session)
+                if PurePosixPath(path).suffix.lower() in {".yaml", ".yml", ".json", ".toml"}]
+    if explicit:
+        # An unread or missing user file cannot be replaced by a different
+        # readable configuration, even when that other file names a model.
+        return (explicit if all(path in reads for path in explicit) else []), {}
+    models = {path: name for path, name in reads.items() if name}
+    matched = [path for path, name in models.items() if _model_named(request, name)]
+    return (matched if len(matched) == 1 else []), models
+
+
+def coding_handoff_clarification(session: CommanderSession, reply: str, *,
+                                 response_mode: str = "structured") -> str | None:
+    """Ask once about real ambiguous targets instead of inspecting forever."""
+    if (session.linked_run_id or _has_created_run(_turn_observations(session))
+            or not _change_and_run_requested(session)
+            or action_continuation(session, reply, response_mode=response_mode) is None):
+        return None
+    selected, models = _coding_targets(session)
+    if selected or len(models) < 2:
+        return None
+    choices = "；".join(f"{name}（{path}）" for path, name in models.items())
+    return f"已实际读取到不同的模型配置：{choices}。本次要修改并对比哪一个？尚未创建或启动任务。"
 
 
 def ordinary_coding_handoff_actions(session: CommanderSession, reply: str, *,
@@ -235,31 +361,16 @@ def ordinary_coding_handoff_actions(session: CommanderSession, reply: str, *,
     if (session.linked_run_id or _has_created_run(_turn_observations(session))
             or action_continuation(session, reply, response_mode=response_mode) is None):
         return None
-    request = _current_user_request(session)
-    if (not re.search(r"改(?:动|代码|参数)|修改|调整|增加|减半|\b(?:modify|change|adjust)\b", request, re.IGNORECASE)
-            or not re.search(r"仿真|训练|运行|执行|\b(?:run|train|execute)\b", request, re.IGNORECASE)
-            or re.search(r"(?:不要|不|先别)(?:启动|运行|训练|执行)|\b(?:do\s+not|don't)\s+(?:run|start|execute)",
-                         request, re.IGNORECASE)):
+    if not _change_and_run_requested(session):
         return None
-    reads = set()
-    for message in _turn_observations(session):
-        result = message.tool_result or {}
-        output = result.get("output")
-        if (message.tool_name == "code.repo_read_lines" and result.get("ok") is True
-                and isinstance(output, dict) and isinstance(output.get("sha256"), str)
-                and re.fullmatch(r"[0-9a-f]{64}", output["sha256"])):
-            path = _safe_source_path(output.get("path"))
-            if path is not None:
-                reads.add(path)
-    explicit = [path for path in _mentioned_files(request, reads)
-                if PurePosixPath(path).suffix.lower() in {".yaml", ".yml", ".json", ".toml"}]
-    if not explicit:
+    selected, _models = _coding_targets(session)
+    if not selected:
         return None
     return [
         {"tool": "run.create", "args": {"entrypoint": "coding", "repository_scope": "required",
-            "routing_reason": "本轮已实际读取用户明确的配置：" + "、".join(explicit)
+            "routing_reason": "本轮已实际读取并核验用户明确选择的模型配置：" + "、".join(selected)
                 + "；按原文要求修改现有实现并运行，由普通 Coding 校验和准备交付。",
-            "user_request": request}},
+            "user_request": _current_user_request(session)}},
         {"tool": "run.start", "args": {}},
     ]
 
