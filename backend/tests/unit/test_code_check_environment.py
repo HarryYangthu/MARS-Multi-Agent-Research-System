@@ -238,3 +238,26 @@ async def test_invalid_host_selected_data_is_rejected_before_child_launch(
         assert not outcome.ok and 'input binding failed' in str(outcome.error)
         assert outcome.output == {'executed': False}
         assert not (run.root / 'check_started').exists()
+
+
+@pytest.mark.asyncio
+async def test_real_tool_reuses_same_check_and_reruns_changed_selected_data(
+    bound_project: tuple[RunHandle, Path],
+) -> None:
+    run,data=bound_project
+    _select(run,data)
+    with research_branch_scope(run,'coding'):
+        first=await run_tests_tool({'command_id':'inputs'},_context(run))
+        assert first.ok,first.error or first.output
+        actual=first.output['results'][0]
+        assert actual['reused'] is False and actual['check_started'] is True
+        started=run.root/'check_started';assert started.is_file();started.unlink()
+        second=await run_tests_tool({'command_id':'inputs'},_context(run))
+        assert second.ok and second.output['results'][0]['reused'] is True
+        assert second.output['results'][0]['receipt_path']==actual['receipt_path']
+        assert not started.exists(), 'A cache hit must not launch the real child again'
+        data.write_text(json.dumps({'values':[13,17]}))
+        third=await run_tests_tool({'command_id':'inputs'},_context(run))
+        assert third.ok and third.output['results'][0]['reused'] is False
+        assert json.loads(third.output['results'][0]['stdout'])['sum']==30
+        assert started.read_text()=='real subprocess'

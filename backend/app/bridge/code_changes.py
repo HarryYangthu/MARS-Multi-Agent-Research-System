@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -137,6 +137,37 @@ def _before(run: RunHandle, record: dict[str, Any], path: str, limit: int) -> st
     return None
 
 
+def _copy_yaml_operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tuple[str, str | None, str]]:
+    """Read exact before/after copies from the archived write, never today's source."""
+    ref = record.get('rollback_ref')
+    if not isinstance(ref, str) or not ref:
+        raise ValueError('missing YAML copy snapshot')
+    path = Path(ref)
+    data = json.loads(_read(path if path.is_absolute() else run.root / path, run.root, limit))
+    if (data.get('schema') != 'tool_rollback.v1' or data.get('tool') != 'code.copy_yaml'
+            or data.get('run_id') != run.run_id or data.get('project') != run.project):
+        raise ValueError('YAML copy snapshot identity mismatch')
+    images: list[dict[str, str | None]] = []
+    for key in ('snapshots', 'after_snapshots'):
+        parsed: dict[str, str | None] = {}
+        for item in data[key]:
+            name, content, existed = item['path'], item['content'], item['existed']
+            if (not isinstance(name, str) or not name or PurePosixPath(name).is_absolute()
+                    or '..' in PurePosixPath(name).parts or name in parsed
+                    or not isinstance(content, str) or type(existed) is not bool):
+                raise ValueError('invalid YAML copy snapshot')
+            expected = 'sha256:' + hashlib.sha256(content.encode()).hexdigest() if existed else ''
+            if item['sha256'] != expected or (key == 'after_snapshots' and not existed):
+                raise ValueError('YAML copy snapshot hash mismatch')
+            parsed[name] = content if existed else None
+        images.append(parsed)
+    before, after = images
+    declared = [PurePosixPath(item['path']).as_posix() for item in record['args']['variants']]
+    if len(set(declared)) != len(declared) or set(declared) != before.keys() or before.keys() != after.keys():
+        raise ValueError('YAML copy snapshot paths differ from the write request')
+    return [(name, before[name], str(after[name])) for name in declared]
+
+
 def code_changes(run: RunHandle, *, project: str, change_id: str | None = None) -> dict[str, Any]:
     if run.project != project:
         raise ValueError('任务所属项目不匹配')
@@ -173,13 +204,24 @@ def code_changes(run: RunHandle, *, project: str, change_id: str | None = None) 
                         or record.get('agent') != 'coding'):
                     continue
                 tool = record.get('tool')
-                if tool not in {'code.write_file', 'code.delete_file', 'code.apply_patch', 'code.patch_generator'}:
+                if tool not in {'code.write_file', 'code.delete_file', 'code.apply_patch', 'code.patch_generator', 'code.copy_yaml'}:
                     continue
                 args = record['args']
                 label = str(tool)
                 timestamp = str(record.get('ended_at') or record.get('started_at') or '')
                 status = 'recorded' if record['status'] == 'success' else 'not_applied'
-                if tool in {'code.patch_generator', 'code.apply_patch'} and isinstance(args.get('diff'), str):
+                if tool == 'code.copy_yaml':
+                    if status != 'recorded':
+                        continue
+                    files = []
+                    for name, before, after in _copy_yaml_operations(run, record, limit):
+                        diff = ''.join(difflib.unified_diff((before or '').splitlines(keepends=True),
+                            after.splitlines(keepends=True), fromfile='/dev/null' if before is None else 'a/' + name,
+                            tofile='b/' + name, n=policy['context_lines']))
+                        files.extend(parse_diff(diff) if diff else [{'path': name, 'additions': 0,
+                            'deletions': 0, 'change': 'unchanged', 'lines': []}])
+                    status = 'applied'
+                elif tool in {'code.patch_generator', 'code.apply_patch'} and isinstance(args.get('diff'), str):
                     files = parse_diff(args['diff'])
                     if tool == 'code.patch_generator':
                         status = 'proposed'

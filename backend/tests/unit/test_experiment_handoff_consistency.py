@@ -45,6 +45,80 @@ def code(text: str, project: str = 'regression', **binding: Any) -> dict[str, An
 
 
 @pytest.mark.asyncio
+async def test_experiment_context_exposes_actual_registered_paths_before_design(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.harness.tools.execution.handoff import execution_delivery_context
+    from app.harness.tools.execution.local_command import LocalCommandJob, _registered_command
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
+    monkeypatch.setenv('MARS_EXECUTION_BACKEND', 'local_command')
+    reset_settings_cache()
+    project = open_folder(str(tmp_path / 'project'), create=True)
+    run_root = project.root / 'runs/design'
+    run_root.mkdir(parents=True)
+    registration = {'id': 'registered-model', 'argv': [sys.executable, '--version'],
+        'label': 'Host-owned command declaration, not a training receipt', 'project_ids': [project.name],
+        'entrypoints': ['train.py'], 'config_paths': ['configs/approved/*.yaml'],
+        'consumes_data_path': True, 'validation': {'environment': {'VALIDATE_ONLY': '1'}, 'timeout_seconds': 2}}
+    path = tmp_path / 'host-execution.yaml'
+    path.write_text(yaml.safe_dump({'execution': {'backend': 'local_command', 'local_commands': [registration]}}))
+    original = path.read_bytes()
+    monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(path))
+    reset_settings_cache()
+    try:
+        request = RunRequest(project=project.name, user_request='Design a small existing-model comparison',
+            extra={'run_id': 'design', 'run_root': str(run_root), 'context_sources': {
+                'project_rules': False, 'code_repositories': False, 'agent_resources': False,
+                'memory': False, 'project_references': False}})
+        context = await ExperimentAgent().build_context(request)
+        actual = json.loads(context.upstream['configured_execution_delivery'])
+        assert actual == execution_delivery_context()
+        assert actual['local_commands'] == [registration]
+        assert actual['validation_protocol']['result_schema']['properties']['schema']['const'] == 'local_command_validation.v1'
+        prospective = LocalCommandJob(run_id='design', experiment_id='future-candidate', project=project.name,
+            run_root=run_root, command_id='registered-model', config={'entrypoint': 'train.py',
+                'config_path': 'configs/approved/new.yaml'})
+        assert _registered_command(prospective) == registration
+        # Planning need not fabricate an already-existing generated config, but
+        # an arbitrary destination is not a capability of this host command.
+        assert not (project.root / 'configs/approved/new.yaml').exists()
+        with pytest.raises(ValueError, match='does not support this config_paths'):
+            _registered_command(LocalCommandJob(run_id='design', experiment_id='unsupported', project=project.name,
+                run_root=run_root, command_id='registered-model', config={'entrypoint': 'train.py',
+                    'config_path': 'configs/unregistered/new.yaml'}))
+        assert path.read_bytes() == original
+        assert not (run_root / 'execution').exists() and not list(run_root.rglob('*.approved.md'))
+    finally:
+        reset_settings_cache()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('backend', ['local_command', 'pim_cpu'])
+async def test_experiment_context_does_not_invent_a_missing_local_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str,
+) -> None:
+    monkeypatch.setenv('MARS_FOLDER_PROJECTS_REGISTRY', str(tmp_path / 'registry.json'))
+    monkeypatch.setenv('MARS_EXECUTION_BACKEND', backend)
+    path = tmp_path / 'host-execution.yaml'
+    path.write_text(yaml.safe_dump({'execution': {'backend': backend, 'local_commands': []}}))
+    monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(path))
+    reset_settings_cache()
+    try:
+        project = open_folder(str(tmp_path / 'project'), create=True)
+        root = project.root / 'runs/missing'
+        root.mkdir(parents=True)
+        context = await ExperimentAgent().build_context(RunRequest(project=project.name,
+            user_request='Design using available capabilities only', extra={'run_id': 'missing', 'run_root': str(root),
+                'context_sources': {'project_rules': False, 'code_repositories': False, 'agent_resources': False,
+                                   'memory': False, 'project_references': False}}))
+        actual = json.loads(context.upstream['configured_execution_delivery'])
+        assert actual['backend'] == backend and actual['local_commands'] == []
+        assert not (root / 'execution').exists() and not list(root.rglob('*.approved.md'))
+    finally:
+        reset_settings_cache()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('seed', ['同基线种子', None, True, -1])
 async def test_experiment_candidate_rejects_unresolved_seed_before_review(seed: Any) -> None:
     metadata = plan()

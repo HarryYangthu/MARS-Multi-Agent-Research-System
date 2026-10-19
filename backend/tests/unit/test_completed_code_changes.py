@@ -9,6 +9,7 @@ import pytest
 from app.bridge.code_changes import parse_diff
 from app.bridge.code_repository import BrowsePolicy, CodeRepository
 from app.bridge.completed_code_changes import _net_diff, _patched, completed_code_changes
+from app.bridge.code_changes import code_changes
 from app.harness.tools.project_repo import ProjectRepo
 from app.harness.tools.registry import ToolContext, get_registry
 from app.storage.run_store import RunHandle, RunStore
@@ -23,6 +24,40 @@ def setup(tmp_path: Path) -> tuple[RunHandle, Path, ToolContext, CodeRepository]
     browser = CodeRepository(ProjectRepo(run.project, root, "local_path", True, ("",), (), ()),
                              BrowsePolicy(200, 500, 8_388_608))
     return run, root, ctx, browser
+
+
+@pytest.mark.asyncio
+async def test_copied_yaml_keeps_reviewable_net_diff_and_archived_postimages(tmp_path: Path) -> None:
+    run, root, ctx, browser = setup(tmp_path)
+    source = root / 'base.yaml'
+    source.write_text('# keep comment\ntrain:\n  lr: 0.0004\n  epochs: 2\n')
+    (root / 'candidate.yaml').write_text('# previous\ntrain:\n  lr: 0.001\n  epochs: 2\n')
+    result = await get_registry().dispatch('code.copy_yaml', {
+        'source': 'base.yaml', 'variants': [
+            {'path': 'candidate.yaml', 'updates': {'train': {'lr': 0.0002}}},
+            {'path': 'control.yaml', 'updates': {}},
+        ]}, ctx)
+    assert result.ok, result.error
+    view = completed_code_changes(run, project=run.project, repository=browser)
+    assert not view['warnings'] and len(view['items']) == 2
+    assert {item['path']: item['change'] for item in view['items']} == {
+        'candidate.yaml': 'modified', 'control.yaml': 'added'}
+    # Editing the source later must not change the already archived write diff.
+    source.write_text('different: source\n')
+    archive = code_changes(run, project=run.project)
+    assert not archive['warnings'] and len(archive['items']) == 2
+    candidate = next(item for item in archive['items'] if item['path'] == 'candidate.yaml')
+    detail = code_changes(run, project=run.project, change_id=candidate['id'])
+    assert 'different: source' not in json.dumps(detail)
+    assert any('0.0002' in row['text'] for row in detail['lines'] if row['kind'] == 'add')
+    assert not completed_code_changes(run, project=run.project, repository=browser)['warnings']
+    # Tampering with one archived postimage cannot be counted as verified work.
+    rollback = Path(result.rollback_ref or '')
+    data = json.loads(rollback.read_text())
+    data['after_snapshots'][0]['content'] = 'forged: value\n'
+    rollback.write_text(json.dumps(data))
+    refused = completed_code_changes(run, project=run.project, repository=browser)
+    assert refused['items'] == [] and refused['warnings']
 
 
 @pytest.mark.asyncio

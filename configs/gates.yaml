@@ -20,4 +20,5 @@ gates:
     monitored_tools:
       - code.patch_generator
       - code.write_file
+      - code.copy_yaml
       - code.delete_file

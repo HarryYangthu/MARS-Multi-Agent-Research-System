@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from app.bridge.code_changes import _read, parse_diff
+from app.bridge.code_changes import _copy_yaml_operations, _read, parse_diff
 from app.bridge.code_repository import CodeRepository, run_code_repository
 from app.settings import repo_root
 from app.storage.run_store import RunHandle
@@ -108,6 +108,8 @@ def _patched(before: str | None, item: dict[str, Any]) -> str | None:
 
 
 def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tuple[str, str | None, str | None]]:
+    if record['tool'] == 'code.copy_yaml':
+        return [(path, before, after) for path, before, after in _copy_yaml_operations(run, record, limit)]
     snapshots = _snapshots(run, record, limit)
     args, tool = record["args"], record["tool"]
     if tool in {"code.write_file", "code.delete_file"}:
@@ -192,7 +194,7 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
             record = json.loads(_read(record_path, run.root, policy["max_record_bytes"]))
             if (record.get("run_id") == run.run_id and record.get("project") == project
                     and record.get("agent") == "coding" and record.get("status") == "success"
-                    and record.get("tool") in {"code.write_file", "code.delete_file", "code.apply_patch"}):
+                    and record.get("tool") in {"code.write_file", "code.delete_file", "code.apply_patch", "code.copy_yaml"}):
                 records.append(record)
         except (OSError, ValueError, AttributeError):
             warnings.append(f"{record_path.name} 无法安全核对。")
@@ -217,6 +219,9 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             args = record.get("args", {})
             affected = ([PurePosixPath(args["path"].strip()).as_posix()] if isinstance(args.get("path"), str)
+                        else [PurePosixPath(item['path']).as_posix() for item in args.get('variants', [])
+                              if isinstance(item, dict) and isinstance(item.get('path'), str)]
+                        if record.get('tool') == 'code.copy_yaml'
                         else [item["path"] for item in parse_diff(str(args.get("diff", "")))])
             if not affected:
                 raise ValueError("存在无法核对的成功写入记录，不能展示不完整的改动统计")

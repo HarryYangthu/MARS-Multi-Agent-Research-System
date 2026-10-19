@@ -31,6 +31,7 @@ MONITORED_TOOLS: tuple[str, ...] = (
     "code.patch_generator",
     "code.apply_patch",
     "code.write_file",
+    "code.copy_yaml",
     "code.delete_file",
 )
 
@@ -131,9 +132,10 @@ def static_check(
     if scope is not None:
         try:
             paths = [str(args["path"])] if "path" in args else []
-            if isinstance(args.get("files"), list):
+            files = args.get("variants") if tool_name == "code.copy_yaml" else args.get("files")
+            if isinstance(files, list):
                 paths.extend(str(item.get("path", "")) if isinstance(item, dict) else str(item)
-                             for item in args["files"])
+                             for item in files)
             if args.get("diff"):
                 paths.extend(validated_diff_paths(str(args["diff"])))
             if tool_name == "code.apply_patch" and args.get("patch_path"):
@@ -152,8 +154,9 @@ def static_check(
     target_paths: list[str] = []
     if "path" in args:
         target_paths.append(str(args["path"]))
-    if "files" in args and isinstance(args["files"], list):
-        target_paths.extend(str(f.get("path", "")) if isinstance(f, dict) else str(f) for f in args["files"])
+    files = args.get("variants") if tool_name == "code.copy_yaml" else args.get("files")
+    if isinstance(files, list):
+        target_paths.extend(str(f.get("path", "")) if isinstance(f, dict) else str(f) for f in files)
 
     diff = str(args.get("diff", "")) + "\n" + str(args.get("content", ""))
     for path in _extract_diff_paths(diff):

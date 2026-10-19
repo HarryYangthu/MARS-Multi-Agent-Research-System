@@ -31,6 +31,14 @@ class CodingAgent(BaseAgent):
         "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
         "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
+        "已有结构、入口和训练方式均不变的明确YAML参数任务，按配置修改交付：先读真实源配置与加载器继承，"
+        "优先 code.copy_yaml 单次批量复制，只改用户指定参数；不要为配置复制新增测试文件、重写训练脚本或运行全仓测试。"
+        "工具参数为 source、variants=[{path,updates}] 与可选 common_updates；updates使用嵌套mapping，叶值为JSON标量，不能写点路径。"
+        "公共预算/seed等放common_updates，各组差异放updates。确需新增已明确字段时才用allow_new_keys=true，不猜默认。"
+        "源配置依赖同目录base等文件时先核对加载器，另一次copy_yaml显式复制依赖，不能假设跨目录自动继承。"
+        "不要为清理旧配置而删除或迁移文件；保留已有写入，按真实运行清单引用需要的配置。"
+        "派生配置交由MARS逐组实际入口的不训练预检核验；它检查配置继承、必需字段和模型构建，不能用整仓单测替代。"
+        "确有源码/接口修改或真实预检失败时，只补受影响的已有检查与已定位问题，禁止为看起来完整而制造测试和重复检查。"
         "测试只能核对纯函数、schema、真实文件和真实进程；禁止用替身训练器、Mock、monkeypatch "
         "或固定指标伪造模型/工具/执行成功。新增作业适配器时先读取 configured_execution_delivery "
         "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆 MARS 包装入口与训练入口。"
@@ -101,7 +109,11 @@ class CodingAgent(BaseAgent):
             for kind in ('lint', 'test')})
         context.upstream['configured_code_checks_usage'] = (
             'code.lint/code.test_runner 的 command_id 必须使用上述 MARS 配置 ID，不能填写 shell 命令。'
-            '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
+            '省略 command_id 会执行该类全部检查；仅在任务确实需要全量回归时才省略。'
+            '纯YAML参数复制不新增测试文件、不重复全仓测试，保留各组真实入口的不训练预检。'
+            '需要检查时选择最相关command_id一次；同run相同Git可见内容快照、命令与实际环境的数据绑定，'
+            'MARS可返回reused=true和原成功receipt。引用它说明复用，不声称新进程执行；输入变化或失败必须实跑。'
+            '测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
         from app.harness.tools.execution.handoff import execution_delivery_context
         context.upstream['configured_execution_delivery'] = json.dumps(
@@ -127,7 +139,7 @@ class CodingAgent(BaseAgent):
         # genuine writes without issuing a redundant mutation in this invocation.
         # Standalone callers without that host verifier retain the local check.
         if request.candidate_validator is None and metadata.get("files_changed") and not any(
-            item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file"}
+            item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file", "code.copy_yaml"}
             for item in observations
         ):
             errors.append("/files_changed: implement the proposed changes through the real code tools before submitting")

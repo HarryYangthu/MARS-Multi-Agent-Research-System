@@ -483,6 +483,38 @@ tools:
       required: [path, sha256, bytes]
       additionalProperties: true
 
+  code.copy_yaml:
+    enabled: true
+    description: Copy one YAML configuration into bounded variants with nested scalar updates, preserving comments and unchanged text. Copy required sibling defaults explicitly. Complex YAML edits can use code.write_file.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 20
+    input_schema:
+      type: object
+      required: [source, variants]
+      additionalProperties: false
+      properties:
+        source: {type: string, minLength: 1}
+        common_updates: {type: object}
+        allow_new_keys: {type: boolean}
+        dry_run: {type: boolean}
+        _approval_id: {type: string}
+        variants:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            required: [path]
+            additionalProperties: false
+            properties:
+              path: {type: string, minLength: 1}
+              updates: {type: object}
+    output_schema:
+      type: object
+      required: [files]
+      additionalProperties: true
+
   code.delete_file:
     enabled: true
     description: Delete a project-repo file after human approval.

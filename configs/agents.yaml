@@ -214,6 +214,7 @@ coding:
   - code.patch_generator
   - code.apply_patch
   - code.write_file
+  - code.copy_yaml
   - code.delete_file
   - code.rollback_patch
   - code.test_runner

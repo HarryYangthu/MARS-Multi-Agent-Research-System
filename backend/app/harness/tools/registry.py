@@ -470,6 +470,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     from app.harness.tools.code_inspection import read_code_fragment, repo_list_tool, repo_search_tool
     from app.harness.tools.code import (
         apply_patch_tool,
+        copy_yaml_tool,
         delete_file_tool,
         lint_tool,
         patch_generator_tool,
@@ -530,6 +531,7 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     reg.register("code.patch_generator", patch_generator_tool)
     reg.register("code.apply_patch", apply_patch_tool)
     reg.register("code.write_file", write_file_tool)
+    reg.register("code.copy_yaml", copy_yaml_tool)
     reg.register("code.delete_file", delete_file_tool)
     reg.register("code.rollback_patch", rollback_patch_tool)
     reg.register("code.test_runner", test_runner_tool)
@@ -837,6 +839,10 @@ def _approval_required_reason(
         return ""
     if tool_name == "code.delete_file":
         return "delete_file requires human approval"
+    # Bounded scalar configuration variants are a parameter sweep, not a
+    # general source refactor. Explicit policy and Gate 5 still apply.
+    if tool_name == "code.copy_yaml":
+        return ""
     touched = _touched_files(args)
     threshold = _large_refactor_threshold()
     if len(touched) > threshold:
@@ -931,7 +937,7 @@ def _touched_files(args: dict[str, Any]) -> list[str]:
     out: list[str] = []
     if args.get("path"):
         out.append(str(args["path"]))
-    files = args.get("files")
+    files = args.get("files", args.get("variants"))
     if isinstance(files, list):
         for item in files:
             if isinstance(item, dict) and item.get("path"):
