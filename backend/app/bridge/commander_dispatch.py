@@ -19,6 +19,7 @@ import yaml
 from app.bridge.commander_existing import existing_model_turn_reply
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.harness.runtime.conversation_state import ConversationState
+from app.harness.tools.project_repo import ProjectRepo, load_project_repo, resolve_allowed_path
 
 
 RUN_DISPATCH_TOOLS = frozenset({"run.existing_model", "run.create", "run.start", "create_and_start_run"})
@@ -223,6 +224,12 @@ def promised_source_read_action(session: CommanderSession, reply: str, *,
     attempted = {(message.tool_args or {}).get("path") for message in _turn_observations(session)
                  if message.tool_name == "code.repo_read_lines"}
     paths = _user_source_files(session)
+    if not paths:
+        models = _current_search_configuration_hints(session)
+        matched = [path for path, name in models.items() if _model_named(_current_user_request(session), name)]
+        if len(matched) > 1:
+            return None  # Historical hints cannot select among current real candidates.
+        paths = matched if len(matched) == 1 else []
     if not paths and _change_and_run_requested(session):
         # An earlier real read can identify what to read again, but cannot
         # satisfy this turn's source admission. Verify the current binding and
@@ -239,10 +246,78 @@ def promised_source_read_action(session: CommanderSession, reply: str, *,
 def _change_and_run_requested(session: CommanderSession) -> bool:
     request = _current_user_request(session)
     return bool(
-        re.search(r"改(?:动|代码|参数)|修改|调整|增加|减半|\b(?:modify|change|adjust)\b", request, re.IGNORECASE)
+        not _research_or_design_requested(request)
+        and re.search(r"改(?:动|代码|参数|为|成)|修改|调整|增加|减少|减半|设(?:置)?为|"
+                      r"\b(?:modify|change|adjust|set)\b", request, re.IGNORECASE)
         and re.search(r"仿真|训练|运行|执行|\b(?:run|train|execute)\b", request, re.IGNORECASE)
         and not re.search(r"(?:不要|不|先别)(?:启动|运行|训练|执行)|"
                           r"\b(?:do\s+not|don't)\s+(?:run|start|execute)", request, re.IGNORECASE))
+
+
+def _research_or_design_requested(request: str) -> bool:
+    # Ignore explicit exclusions, then preserve actual user requests for new
+    # methods, literature or choosing the search dimensions. A model's own
+    # added design narrative cannot grant that scope.
+    excluded = r"(?:文献调研|调研|文献研究|研究|实验设计|设计)"
+    text = re.sub(r"(?:无需|不需要|不要|不用|不必|禁止|不)(?:再)?(?:进行|做|开展)?" + excluded
+                  + r"(?:[和与及、或]*(?:进行|做|开展)?" + excluded + r")*", "", request)
+    text = re.sub(r"(?:无需|不需要|不要|不用|不必|禁止)(?:再)?(?:从|进入|调用|交给)?\s*"
+                  r"(?:Experiment|Idea)(?:开始)?", "", text, flags=re.IGNORECASE)
+    return bool(re.search(
+        r"调研|实验设计|文献(?:研究|检索)|查阅.{0,12}文献|研究.{0,12}(?:新方法|新模型|新结构)|"
+        r"(?:从|交给|进入|先由)\s*(?:Experiment|Idea)(?![A-Za-z0-9_])|"
+        r"设计.{0,20}(?:方法|模型|结构|架构|实验|方案|比较|协议|变量|矩阵|策略|范围|预算)|"
+        r"(?:实验|比较|评估)(?:协议|矩阵).{0,10}(?:设计|规划)|"
+        r"(?:选择|挑选|决定|规划|搜索|探索).{0,18}(?:变量|维度|范围|矩阵|超参|参数组合|搜索空间)|"
+        r"\b(?:research|literature|design\s+(?:a\s+)?(?:new|experiment|protocol|search))\b",
+        text, re.IGNORECASE))
+
+
+def _source_hint_is_current(repo: ProjectRepo, path: str, reported_root: Any, sha: Any) -> bool:
+    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{64}", sha) is None:
+        return False
+    try:
+        if Path(str(reported_root or "")).resolve() != repo.root.resolve():
+            return False
+        actual = resolve_allowed_path(repo, path, require_exists=True, require_text=True)
+        current = repo.root
+        for part in PurePosixPath(path).parts:
+            current /= part
+            if current.is_symlink():
+                return False
+        return hashlib.sha256(actual.read_bytes()).hexdigest() == sha
+    except (OSError, ValueError):
+        return False
+
+
+def _current_search_configuration_hints(session: CommanderSession) -> dict[str, str]:
+    """Find exact current paths in actual search snippets, never read receipts."""
+    if _research_or_design_requested(_current_user_request(session)):
+        return {}
+    try:
+        repo = load_project_repo(session.project)
+    except (OSError, ValueError):
+        return {}
+    names: dict[str, set[str]] = {}
+    for message in _turn_observations(session):
+        output = (message.tool_result or {}).get("output")
+        if (message.tool_name != "code.repo_search" or (message.tool_result or {}).get("ok") is not True
+                or not isinstance(output, dict) or not isinstance(output.get("matches"), list)):
+            continue
+        for hit in output["matches"]:
+            if not isinstance(hit, dict) or not isinstance(hit.get("snippet"), str):
+                continue
+            path = _safe_source_path(hit.get("path"))
+            if (not path or PurePosixPath(path).suffix.lower() not in {".yaml", ".yml", ".json", ".toml"}
+                    or not _source_hint_is_current(repo, path, output.get("repo_root"), hit.get("sha256"))):
+                continue
+            # Names must be literal fields from the real configuration hit,
+            # not a class name invented from a filename or assistant wording.
+            match = re.search(r"(?:^|[\n{,])\s*[\"']?model_name[\"']?\s*[:=]\s*"
+                              r"[\"']?([A-Za-z0-9_.-]+)[\"']?(?=\s*(?:[,}\n#]|$))", hit["snippet"])
+            if match:
+                names.setdefault(path, set()).add(match.group(1))
+    return {path: next(iter(values)) for path, values in names.items() if len(values) == 1}
 
 
 def _configuration_reads(session: CommanderSession, *, include_history: bool = False) -> dict[str, str]:
@@ -268,27 +343,14 @@ def _configuration_reads(session: CommanderSession, *, include_history: bool = F
     if not outputs:
         return {}
     if include_history:
-        from app.harness.tools.project_repo import load_project_repo, resolve_allowed_path
         try:
             repo = load_project_repo(session.project)
         except (OSError, ValueError):
             return {}
         valid = set()
         for path, output in outputs:
-            try:
-                if Path(str(output.get("repo_root", ""))).resolve() != repo.root.resolve():
-                    continue
-                actual = resolve_allowed_path(repo, path, require_exists=True, require_text=True)
-                current_path = repo.root
-                for part in PurePosixPath(path).parts:
-                    current_path /= part
-                    if current_path.is_symlink():
-                        raise ValueError("repository inspection cannot traverse symbolic links")
-                sha = hashlib.sha256(actual.read_bytes()).hexdigest()
-                if sha == output.get("sha256"):
-                    valid.add((path, sha))
-            except (OSError, ValueError):
-                continue
+            if _source_hint_is_current(repo, path, output.get("repo_root"), output.get("sha256")):
+                valid.add((path, str(output["sha256"])))
     else:
         from app.bridge.commander_code import routing_repository_check
         current = routing_repository_check({}, session).get("evidence", [])

@@ -764,3 +764,207 @@ async def test_failed_current_reread_cannot_reuse_history_or_retry_the_same_file
         assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
         assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
         assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+POINTMIX_RATE_COMPARISON = (
+    "用已有 PointMix（1–31–1）七层模型做学习率对照。原模型保留当前学习率，"
+    "候选学习率减半，结构和其他配置不变；两组都用 seed=2027，各训练 1 个完整 epoch。"
+    "对比 RES 和训练曲线，输出报告。"
+)
+BATCH_SIZE_COMPARISON = (
+    "帮我做一次 ShortMix 七层模型的 batch_size 对照：原模型用 512，候选改为 256，"
+    "学习率等其他配置不变。两组都固定 seed=2026，各训练 1 个完整 epoch，"
+    "对比 RES、参数量和训练曲线，给我报告。"
+)
+
+
+def _name_comparison_configurations(source: Path) -> None:
+    for filename, name in (("seven_a", "Example7LShortMix"), ("seven_b", "Example7LPointMix")):
+        path = source / f"configs/{filename}.yaml"
+        configuration = yaml.safe_load(path.read_text())
+        configuration["model_name"] = name
+        configuration["output_dir"] = f"results/{name}"
+        configuration["train_param"] = {"batch_size": 512}
+        path.write_text(yaml.safe_dump(configuration))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", ["配置已找到。", "正在核对模型配置。"])
+async def test_real_search_model_field_supplies_only_one_fresh_read_before_pointmix_coding(
+    tmp_path: Path, reply: str,
+) -> None:
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        found = await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        matches = found["output"]["matches"]
+        assert len(matches) == 2 and {row["path"] for row in matches} == {"configs/seven_b.yaml"}
+        assert any(row["snippet"].startswith("model_name:") for row in matches)
+        await _inspect(ctx, "code.repo_list", {"path": "configs", "depth": 1})
+        before_messages = [message.to_dict() for message in ctx.session.messages]
+        before_files = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+        assert action_continuation(ctx.session, reply, response_mode="plain_reply") is not None
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        read_action = promised_source_read_action(ctx.session, reply, response_mode="plain_reply")
+        assert read_action == {"tool": "code.repo_read_lines", "args": {"path": "configs/seven_b.yaml"}}
+        assert [message.to_dict() for message in ctx.session.messages] == before_messages
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+        read = await _inspect(ctx, read_action["tool"], read_action["args"])
+        assert read["output"]["sha256"] == hashlib.sha256((source / "configs/seven_b.yaml").read_bytes()).hexdigest()
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+
+        plan = ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply")
+        assert plan is not None and [action["tool"] for action in plan] == ["run.create", "run.start"]
+        assert plan[0]["args"]["entrypoint"] == "coding"
+        assert plan[0]["args"]["user_request"] == POINTMIX_RATE_COMPARISON
+        assert "configs/seven_b.yaml" in plan[0]["args"]["routing_reason"]
+        assert "configs/seven_a.yaml" not in plan[0]["args"]["routing_reason"]
+        # Allocate only a real pending workflow; never execute its model/start.
+        created = await execute_tool(plan[0]["tool"], plan[0]["args"], ctx)
+        assert created["ok"] and created["states"]["coding"] == "pending", created
+        assert created["states"]["idea"] == created["states"]["experiment"] == "skipped"
+        _observe(ctx.session, plan[0]["tool"], plan[0]["args"], created)
+        run = ctx.run_store.get(created["run_id"])
+        assert run is not None and not list(run.subdir("execution").iterdir())
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        assert promised_source_read_action(ctx.session, reply, response_mode="plain_reply") is None
+        assert len(ctx.run_store.list()) == 1
+        assert {path: path.read_bytes() for path in before_files} == before_files
+
+
+@pytest.mark.asyncio
+async def test_candidate_changed_to_exact_batch_size_is_coding_after_a_real_model_read(tmp_path: Path) -> None:
+    with _project(tmp_path, BATCH_SIZE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        await _inspect(ctx, "code.repo_search", {"query": "ShortMix"})
+        action = promised_source_read_action(ctx.session, "已找到模型。", response_mode="plain_reply")
+        assert action == {"tool": "code.repo_read_lines", "args": {"path": "configs/seven_a.yaml"}}
+        assert ordinary_coding_handoff_actions(ctx.session, "正在核对配置。", response_mode="plain_reply") is None
+        await _inspect(ctx, action["tool"], action["args"])
+        plan = ordinary_coding_handoff_actions(ctx.session, "配置已核对。", response_mode="plain_reply")
+        assert plan is not None and [item["tool"] for item in plan] == ["run.create", "run.start"]
+        assert plan[0]["args"]["entrypoint"] == "coding"
+        assert plan[0]["args"]["user_request"] == BATCH_SIZE_COMPARISON
+        assert "existing_execution_job" not in plan[0]["args"]
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_hint", ["changed_bytes", "changed_repository", "symlink", "disallowed"])
+async def test_search_hint_rejects_changed_or_unbound_configuration_before_a_fresh_read(
+    tmp_path: Path, invalid_hint: str,
+) -> None:
+    import shutil
+
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        selected = source / "configs/seven_b.yaml"
+        if invalid_hint == "changed_bytes":
+            selected.write_text(selected.read_text() + "threads: 2\n")
+        elif invalid_hint == "changed_repository":
+            alternate = source.parent / "other-source"
+            shutil.copytree(source, alternate)
+            metadata = source.parent.parent / ".mars/repo_link.yaml"
+            binding = yaml.safe_load(metadata.read_text())
+            binding["repo_path"] = str(alternate)
+            metadata.write_text(yaml.safe_dump(binding))
+        elif invalid_hint == "symlink":
+            outside = tmp_path / "outside.yaml"
+            outside.write_bytes(selected.read_bytes())
+            selected.unlink()
+            selected.symlink_to(outside)
+        else:
+            metadata = source.parent.parent / ".mars/repo_link.yaml"
+            binding = yaml.safe_load(metadata.read_text())
+            binding["allowed_paths"] = ["configs/seven_a.yaml"]
+            metadata.write_text(yaml.safe_dump(binding))
+        assert promised_source_read_action(ctx.session, "配置已找到。", response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, "配置已核对。", response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None
+
+
+@pytest.mark.asyncio
+async def test_two_real_search_configurations_matching_the_same_model_do_not_choose_the_first(tmp_path: Path) -> None:
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        duplicate = source / "configs/pointmix_variant.yaml"
+        duplicate.write_bytes((source / "configs/seven_b.yaml").read_bytes())
+        found = await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        assert {row["path"] for row in found["output"]["matches"]} == {
+            "configs/seven_b.yaml", "configs/pointmix_variant.yaml"}
+        assert promised_source_read_action(ctx.session, "模型已找到。", response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, "配置已核对。", response_mode="plain_reply") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+async def test_current_ambiguous_search_cannot_be_overridden_by_one_historical_configuration_read(tmp_path: Path) -> None:
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        await _inspect(ctx, "code.repo_read_lines", {"path": "configs/seven_b.yaml"})
+        _user(ctx.session, POINTMIX_RATE_COMPARISON)
+        (source / "configs/pointmix_variant.yaml").write_bytes((source / "configs/seven_b.yaml").read_bytes())
+        found = await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        assert len({row["path"] for row in found["output"]["matches"]}) == 2
+        assert promised_source_read_action(ctx.session, "配置已找到。", response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, "配置已核对。", response_mode="plain_reply") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+async def test_search_output_directory_text_is_not_a_model_configuration_field(tmp_path: Path) -> None:
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        selected = source / "configs/seven_b.yaml"
+        configuration = yaml.safe_load(selected.read_text())
+        configuration["model_name"] = "DifferentModel"
+        selected.write_text(yaml.safe_dump(configuration))
+        found = await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        assert len(found["output"]["matches"]) == 1
+        assert found["output"]["matches"][0]["snippet"].startswith("output_dir:")
+        assert promised_source_read_action(ctx.session, "PointMix配置已找到。", response_mode="plain_reply") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+async def test_old_search_and_actual_failed_current_read_are_not_fresh_model_evidence(tmp_path: Path) -> None:
+    with _project(tmp_path, POINTMIX_RATE_COMPARISON) as (ctx, source):
+        _name_comparison_configurations(source)
+        await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        _user(ctx.session, POINTMIX_RATE_COMPARISON)
+        assert promised_source_read_action(ctx.session, "配置已找到。", response_mode="plain_reply") is None
+        await _inspect(ctx, "code.repo_search", {"query": "PointMix"})
+        action = promised_source_read_action(ctx.session, "配置已找到。", response_mode="plain_reply")
+        assert action is not None
+        selected = source / "configs/seven_b.yaml"
+        content = selected.read_bytes()
+        selected.unlink()
+        failed = await execute_tool(action["tool"], action["args"], ctx)
+        assert failed["ok"] is False
+        _observe(ctx.session, action["tool"], action["args"], failed)
+        selected.write_bytes(content)
+        assert promised_source_read_action(ctx.session, "再次核对配置。", response_mode="plain_reply") is None
+        assert ordinary_coding_handoff_actions(ctx.session, "创建任务。", response_mode="plain_reply") is None
+        assert not ctx.run_store.list()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_text", [
+    "先调研PointMix模型压缩的文献，设计一种新方法，再修改模型并训练对比。",
+    "请为PointMix选择要改的超参数和搜索范围，设计实验后修改配置并训练。",
+    "先为ShortMix设计一套新的训练方法，再修改模型并运行对比实验。",
+    "PointMix学习率减半后训练1epoch，请先做实验设计，再交给编码实现和执行。",
+    "请从Experiment开始，将PointMix学习率减半，再训练1epoch和原配置比较。",
+])
+async def test_genuine_research_or_unspecified_search_design_never_becomes_a_fixed_parameter_handoff(
+    tmp_path: Path, request_text: str,
+) -> None:
+    with _project(tmp_path, request_text) as (ctx, source):
+        _name_comparison_configurations(source)
+        for path in ("configs/seven_a.yaml", "configs/seven_b.yaml"):
+            await _inspect(ctx, "code.repo_read_lines", {"path": path})
+        reply = "已有模型配置已核对，接下来准备任务。"
+        assert ordinary_coding_handoff_actions(ctx.session, reply, response_mode="plain_reply") is None
+        assert coding_handoff_clarification(ctx.session, reply, response_mode="plain_reply") is None
+        assert not ctx.run_store.list() and ctx.session.linked_run_id is None

@@ -151,6 +151,19 @@ class Commander:
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
                     decision = Decision(actions=[recovery])
+                if (len(decision.actions) == 1 and decision.actions[0].get("tool") in {
+                        "run.create", "create_and_start_run"}
+                        and isinstance(decision.actions[0].get("args"), dict)
+                        and decision.actions[0]["args"].get("entrypoint") == "experiment"):
+                    # The model cannot turn the user's fixed parameter change
+                    # into permission to design a comparison protocol. This
+                    # existing handoff still requires a named current model,
+                    # a real source read, and no user request for research or
+                    # choosing search dimensions; all ordinary reviews remain.
+                    handoff = ordinary_coding_handoff_actions(session, decision.reply,
+                        response_mode=decision.response_mode)
+                    if handoff is not None:
+                        decision = Decision(actions=handoff, response_mode="ordinary_coding_handoff")
                 if decision.actions and all(action.get("tool") in {
                         "code.repo_list", "code.repo_search", "code.repo_read_lines"} for action in decision.actions):
                     # Once a real configuration read identifies the requested
