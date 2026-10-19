@@ -67,6 +67,7 @@ from app.bridge.extension_runtime import get_extension_runtime
 from app.bridge.idea_selection import IdeaSelectionCoordinator
 from app.harness.tools.registry import get_registry as get_tool_registry
 from app.harness.runtime.readiness import check_git_readiness
+from app.harness.runtime.plot_environment import initialize_plot_environment
 from app.settings import get_settings
 
 
@@ -92,6 +93,7 @@ def register_default_agents() -> None:
 
 @asynccontextmanager
 async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    initialize_plot_environment()
     git_check = await asyncio.to_thread(check_git_readiness)
     _app.state.git_readiness = git_check
     if not git_check.ready:
