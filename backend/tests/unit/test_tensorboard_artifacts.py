@@ -1,11 +1,13 @@
 """Real temporary observation files and event decoding; no substituted execution."""
 import json
+import hashlib
 from pathlib import Path
 
 from PIL import Image
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 from app.execution.tensorboard_artifacts import sync_run_visualizations
+from app.execution.tensorboard_writer import ScalarWriter
 
 
 def test_saved_observations_figures_and_provenance_are_idempotent(tmp_path: Path) -> None:
@@ -62,3 +64,110 @@ def test_missing_curves_and_external_images_are_reported(tmp_path: Path) -> None
     report = sync_run_visualizations(run)
     assert report['images'] == 0
     assert len(report['warnings']) == 2
+
+
+def _native_method(run: Path, name: str, role: str) -> Path:
+    """Actual temporary files/events describe observations, not a fake training run."""
+    attempt = run / 'execution/local_commands' / name / ('invocation-' + name)
+    method = attempt / 'measurement/model'
+    method.mkdir(parents=True)
+    (attempt / 'job.json').write_text(json.dumps({
+        'schema': 'local_command_request.v1', 'run_id': run.name, 'project': 'real-files',
+        'experiment_id': name, 'invocation_id': attempt.name,
+        'config': {'role': role, 'budget_unit': 'epochs', 'max_iters': 2, 'seed': 2026}}))
+    (method / 'config.yaml').write_text('model_name: ExistingModel\nmodel:\n  kernel: 3\n')
+    rows = [{'optimizer_step': index, 'training_loss': loss, 'lr': .001}
+            for index, loss in ((1, .25), (2, .125))]
+    (method / 'steps.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    (method / 'epochs.jsonl').write_text(json.dumps({'epoch': 1, 'optimizer_steps': 2, 'RES': 8.}) + '\n')
+    with ScalarWriter(method / 'tensorboard') as writer:
+        for row in rows:
+            writer.scalar('train/loss', row['training_loss'], int(row['optimizer_step']))
+            writer.scalar('train/learning_rate', row['lr'], int(row['optimizer_step']))
+        writer.scalar('heldout/RES_db', 8., 1)
+    return method
+
+
+def _native_files(methods: list[Path]) -> dict[Path, str]:
+    return {path: hashlib.sha256(path.read_bytes()).hexdigest()
+            for method in methods for path in method.rglob('*') if path.is_file()}
+
+
+def test_native_epochs_are_indexed_without_history_or_summary_and_events_remain_unchanged(tmp_path: Path) -> None:
+    run = tmp_path / 'native-run'
+    baseline = _native_method(run, 'control', 'baseline')
+    candidate = _native_method(run, 'variant', 'candidate')
+    # A model name is not its scientific role; only the actual job declares that.
+    (candidate / 'config.yaml').write_text('model_name: ExistingModel\nmodel: baseline\n')
+    for method in (baseline, candidate):
+        figure = method / 'figs/spectrum.png'
+        figure.parent.mkdir()
+        Image.new('RGB', (12, 10), 'blue').save(figure)
+    original = _native_files([baseline, candidate])
+    report = sync_run_visualizations(run)
+    models = report['models']
+    assert len(models) == 2 and report['warnings'] == []
+    assert report['images'] == 2
+    assert [model['is_baseline'] for model in models] == [True, False]
+    assert all(model['native'] and model['training_steps'] == 2
+               and model['validation_points'] == 1 for model in models)
+    assert all(model['label'].startswith('ExistingModel · ') for model in models)
+    assert all(model['image_tags'] == ['figures/measurement/model/figs/spectrum.png'] for model in models)
+    assert len({model['image_run'] for model in models}) == 2
+    assert {model['scalar_run'] for model in models} == {
+        (method / 'tensorboard').relative_to(run).as_posix() for method in (baseline, candidate)}
+    assert sync_run_visualizations(run) == report
+    assert _native_files([baseline, candidate]) == original
+    for model in models:
+        events = EventAccumulator(str(run / model['scalar_run'])).Reload()
+        assert [event.value for event in events.Scalars('train/loss')] == [.25, .125]
+        assert [event.step for event in events.Scalars('heldout/RES_db')] == [1]
+
+
+def test_running_native_observations_ignore_partial_lines_and_refresh_real_counts(tmp_path: Path) -> None:
+    run = tmp_path / 'running-native'
+    method = _native_method(run, 'control', 'baseline')
+    with (method / 'steps.jsonl').open('a') as handle:
+        handle.write('{"optimizer_step": 3')
+    with (method / 'epochs.jsonl').open('a') as handle:
+        handle.write('{"epoch": 2')
+    first = sync_run_visualizations(run)['models'][0]
+    assert first['training_steps'] == 2 and first['validation_points'] == 1
+    with (method / 'steps.jsonl').open('a') as handle:
+        handle.write(', "training_loss": 0.0625}\n')
+    with (method / 'epochs.jsonl').open('a') as handle:
+        handle.write(', "optimizer_steps": 3, "RES": 7.0}\n')
+    with ScalarWriter(method / 'tensorboard') as writer:
+        writer.scalar('train/loss', .0625, 3)
+        writer.scalar('heldout/RES_db', 7., 2)
+    original = _native_files([method])
+    second = sync_run_visualizations(run)['models'][0]
+    assert second['id'] == first['id']
+    assert second['training_steps'] == 3 and second['validation_points'] == 2
+    assert _native_files([method]) == original
+
+
+def test_native_epoch_discovery_rejects_external_files_and_mismatched_request_identity(tmp_path: Path) -> None:
+    run = tmp_path / 'scoped-native'
+    linked = _native_method(run, 'linked', 'baseline')
+    external = tmp_path / 'external-steps.jsonl'
+    (linked / 'steps.jsonl').replace(external)
+    (linked / 'steps.jsonl').symlink_to(external)
+    wrong = _native_method(run, 'wrong', 'candidate')
+    request_path = wrong.parent.parent / 'job.json'
+    request = json.loads(request_path.read_text())
+    request['invocation_id'] = 'a-different-invocation'
+    request_path.write_text(json.dumps(request))
+    assert sync_run_visualizations(run)['models'] == []
+    assert len(EventAccumulator(str(linked / 'tensorboard')).Reload().Scalars('train/loss')) == 2
+
+
+def test_native_history_is_not_registered_twice_and_real_job_role_has_priority(tmp_path: Path) -> None:
+    run = tmp_path / 'mixed-native'
+    method = _native_method(run, 'candidate', 'candidate')
+    (method / 'history.json').write_text(json.dumps([{'optimizer_steps': 2, 'validation_RES_db': 8., 'epoch': 1}]))
+    (method / 'config.json').write_text('{"model":"baseline"}')
+    original_events = {path: path.read_bytes() for path in (method / 'tensorboard').iterdir() if path.is_file()}
+    models = sync_run_visualizations(run)['models']
+    assert len(models) == 1 and models[0]['native'] and not models[0]['is_baseline']
+    assert {path: path.read_bytes() for path in (method / 'tensorboard').iterdir() if path.is_file()} == original_events

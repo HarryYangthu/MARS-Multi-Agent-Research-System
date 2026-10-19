@@ -21,7 +21,7 @@ export const exactRunFilter = (values: string[]): string => `^(?:${Array.from(ne
 export function comparisonUrl(base: string, dashboard: TensorBoardDashboard, sources: ComparisonSource[], overlay: boolean): string {
   const runNames = sources.map((source) => dashboard === "histograms" ? source.histogram_run : dashboard === "images" ? source.image_run : source.scalar_run);
   const values = new URLSearchParams({ regexInput: exactRunFilter(runNames), _smoothingWeight: "0" });
-  if (dashboard === "scalars") values.set("tagFilter", "^(train/loss|train/learning_rate|validation/RES_db|test/RES_db)$");
+  if (dashboard === "scalars") values.set("tagFilter", "^(train/loss|train/learning_rate|validation/RES_db|test/RES_db|heldout/(PIM|RES|APE|PIM_MAX|RES_MAX)_db)$");
   if (dashboard === "images") {
     const tags = overlay && sources.length > 1 ? sources[0].comparison_tags : sources.flatMap((source) => source.image_tags);
     // An impossible filter keeps unavailable images visibly empty rather than
