@@ -28,6 +28,8 @@ from loguru import logger
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.bridge.commander_dispatch import (
+    action_continuation, action_continuation_exhausted_reply,
+    ordinary_coding_handoff_actions, promised_source_read_action,
     PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
     retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
     pending_existing_admission, truthful_unstarted_reply, unfulfilled_run_dispatch,
@@ -119,6 +121,8 @@ class Commander:
                 run_store=self.run_store,
             )
             emitted: list[ChatMessage] = []
+            continuation_prompt: str | None = None
+            continuation_evidence: set[str] = set()
 
             for _step in range(self.max_react_steps):
                 terminal_receipt = False
@@ -131,7 +135,7 @@ class Commander:
                     activity = session.begin_activity("model", "总控正在调用模型")
                     get_session_store().persist(session)
                     try:
-                        decision = await self._decide(session)
+                        decision = await self._decide(session, continuation=continuation_prompt)
                     except asyncio.CancelledError:
                         session.finish_activity(activity, "interrupted")
                         raise
@@ -143,6 +147,7 @@ class Commander:
                         raise
                     session.finish_activity(activity)
                     get_session_store().persist(session)
+                    continuation_prompt = None
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
                     decision = Decision(actions=[recovery])
@@ -158,6 +163,27 @@ class Commander:
                             # Execute a real admission tool and let the model react;
                             # never publish an unsupported absence/routing conclusion.
                             decision = Decision(actions=[{'tool': 'routing.repository_check', 'args': {}}])
+
+                if not decision.actions:
+                    continuation = action_continuation(session, decision.reply, response_mode=decision.response_mode)
+                    if continuation is not None:
+                        handoff = ordinary_coding_handoff_actions(session, decision.reply,
+                            response_mode=decision.response_mode)
+                        source_read = promised_source_read_action(session, decision.reply,
+                            response_mode=decision.response_mode) if handoff is None else None
+                        if handoff is not None:
+                            decision = Decision(actions=handoff, response_mode="ordinary_coding_handoff")
+                        elif source_read is not None:
+                            decision = Decision(actions=[source_read])
+                        elif (continuation.fingerprint not in continuation_evidence
+                                and _step + 1 < self.max_react_steps):
+                            continuation_evidence.add(continuation.fingerprint)
+                            continuation_prompt = continuation.prompt
+                            logger.info("Commander continues unfinished action turn={} step={} reason={}",
+                                        session.active_turn_id, _step, continuation.reason)
+                            continue
+                        else:
+                            decision = Decision(reply=action_continuation_exhausted_reply(session))
 
                 dispatching_run = has_run_dispatch(decision.actions)
                 if decision.next_state and not (
@@ -175,11 +201,18 @@ class Commander:
                 if not decision.actions:
                     break
 
+                handoff_run_id: str | None = None
                 for action in decision.actions:
                     tool = str(action.get("tool", ""))
                     args = action.get("args", {}) or {}
                     if not isinstance(args, dict):
                         args = {}
+                    if (decision.response_mode == "ordinary_coding_handoff" and tool == "run.start"
+                            and (handoff_run_id is None or session.linked_run_id != handoff_run_id)):
+                        emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
+                            "", failure_reason="未取得与当前会话一致的新任务创建回执，未派发启动。"))))
+                        terminal_receipt = True
+                        break
                     activity = session.begin_activity("tool", f"总控正在执行工具 · {tool}")
                     get_session_store().persist(session)
                     try:
@@ -203,6 +236,19 @@ class Commander:
                         )
                     )
                     get_session_store().persist(session)
+                    if decision.response_mode == "ordinary_coding_handoff" and tool == "run.create":
+                        created_id = result.get("run_id")
+                        if (result.get("ok") is True and isinstance(created_id, str) and created_id
+                                and session.linked_run_id == created_id):
+                            handoff_run_id = created_id
+                    if (decision.response_mode == "ordinary_coding_handoff"
+                            and (result.get("ok") is not True or tool == "run.create" and handoff_run_id is None)):
+                        # Creation and start are dependent operations. A failed
+                        # allocation must never start another or an old task.
+                        emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
+                            "", retained_run_id=result.get("run_id"), failure_reason=str(result.get("error") or "")))))
+                        terminal_receipt = True
+                        break
                     receipt = run_dispatch_receipt(tool, result)
                     retained_failure = retained_dispatch_failure_reply(tool, result)
                     if receipt is not None:
@@ -229,6 +275,11 @@ class Commander:
                 emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
                     "", retained_run_id=retained_dispatch_run_id(session),
                     failure_reason=dispatch_failure_reason(session)))))
+            elif emitted and emitted[-1].role == "tool" and action_continuation(session, "") is not None:
+                # Tool calls alone cannot certify completion of an operation.
+                # This is a bounded exit, never a retry or automatic admission.
+                emitted.append(session.add(ChatMessage(role="assistant",
+                    content=action_continuation_exhausted_reply(session))))
             return emitted
 
         finally:
@@ -240,13 +291,13 @@ class Commander:
 
     # ----------------------------------------------------------- decision
 
-    async def _decide(self, session: CommanderSession) -> Decision:
-        return await self._decide_llm(session)
+    async def _decide(self, session: CommanderSession, *, continuation: str | None = None) -> Decision:
+        return await self._decide_llm(session, continuation=continuation)
 
-    async def _decide_llm(self, session: CommanderSession) -> Decision:
+    async def _decide_llm(self, session: CommanderSession, *, continuation: str | None = None) -> Decision:
         from app.harness.agent_loop.trace import LoopTrace
         root = get_session_store().session_directory(session)
-        messages = self._build_messages(session)
+        messages = self._build_messages(session, continuation=continuation)
         manifest_path = None
         if session.context_version >= 3:
             from app.harness.context.runtime_pack import pack_messages
@@ -332,8 +383,12 @@ class Commander:
         finally:
             await self._provider.close()
 
-    def _build_messages(self, session: CommanderSession) -> list[Message]:
+    def _build_messages(self, session: CommanderSession, *, continuation: str | None = None) -> list[Message]:
         sys = _system_prompt(session)
+        if continuation:
+            sys += ("\n\n## MARS 本轮尚未完成的操作\n" + continuation
+                + '\n工具操作交接示例：{"actions":[{"tool":"code.repo_read_lines","args":{"path":"实际已确认的相对路径"}}]}。'
+                  '按实际工具名和参数交接操作；只有普通聊天或真正澄清时才直接自然语言回答。')
         msgs: list[Message] = [Message(role="system", content=sys)]
         if session.context_version >= 3:
             from app.harness.context.folder_context import load_folder_context, is_context_template
