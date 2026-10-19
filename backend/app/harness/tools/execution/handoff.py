@@ -1,7 +1,11 @@
 """Validate execution delivery semantics against actual bound host inputs."""
 from __future__ import annotations
+import asyncio
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 import yaml
 from app.harness.schema.experiment_contract import budget, delivery_experiments
 from app.harness.tools.config import load_execution_config
@@ -104,4 +108,107 @@ def coding_handoff_errors(plan_text: str, coding: dict[str, Any], *, project: st
                     command_id=command_id, config=config), 'execution.simulation_runner')
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(prefix + ': ' + str(exc))
+    return errors
+
+
+async def coding_handoff_preflight_errors(plan_text: str, coding: dict[str, Any], *, project: str,
+                                         run_id: str, run_root: Path, attempt: int = 1,
+                                         plan_required: bool = False) -> list[str]:
+    """Feed real registered no-training checks back before Coding is delivered.
+
+    This is not artifact approval, execution confirmation or a training
+    receipt. No source configuration or scientific default is rewritten.
+    """
+    errors = coding_handoff_errors(plan_text, coding, project=project, plan_required=plan_required)
+    if errors or get_settings().mars_execution_backend != 'local_command':
+        return errors
+    from app.harness.persistence import atomic_write_json
+    from app.harness.runtime.project_scope import current_project_scope
+    from app.harness.tools.execution.command_preflight import bounded_error, run_command_preflight, validation_configuration
+    from app.harness.tools.execution.local_command import LocalCommandJob, _registered_command
+    from app.harness.tools.git_branch import current_git_branch
+    try:
+        jobs = delivery_experiments(plan_text, coding, project=project, plan_required=plan_required)
+        configured = [validation_configuration(_registered_command(LocalCommandJob(
+            run_id=run_id or 'handoff-check', experiment_id=row['name'], project=project,
+            run_root=run_root, config=row['config'], command_id=str(row['config']['command_id'])))) is not None
+            for row in jobs]
+        if (not run_id or not run_root.is_absolute() or run_root.is_symlink()
+                or not run_root.is_dir() or type(attempt) is not int or attempt < 1):
+            if not any(configured):
+                # Legacy commands without a checker retain static admission;
+                # lack of task context must not manufacture a passed check.
+                return []
+            raise ValueError('编码交付预检需要当前任务的真实 run_id、run_root 和 attempt')
+        root = run_root.resolve(strict=True)
+        current_git_branch(project, run_id)  # Existing capability validates the bound checkout identity.
+        scope = current_project_scope(project, run_id)
+        if scope is not None and scope.run_root != root:
+            raise ValueError('编码交付预检目录与当前任务能力不一致')
+        selected_path = root / 'input/selected_data_source.json'
+        selected = json.loads(selected_path.read_text()) if any(configured) and selected_path.is_file() else {}
+        if not isinstance(selected, dict) or selected.get('project', project) != project:
+            raise ValueError('本任务冻结的数据选择不属于当前项目')
+    except (OSError, ValueError, RuntimeError) as exc:
+        return ['/execution_jobs: ' + bounded_error(str(exc))]
+    identity = {'project': project, 'run_id': run_id, 'attempt': attempt, 'coding': coding}
+    token = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    records: list[dict[str, Any]] = []
+    for index, row in enumerate(jobs):
+        prefix = f'/execution_jobs/{index}/config'
+        record: dict[str, Any] = {'name': row['name'], 'status': 'unverified', 'configured': False}
+        records.append(record)
+        try:
+            if not configured[index]:
+                record['reason'] = '未登记无训练 checker；仅完成静态交接核对，不能称为运行预检通过。'
+                continue
+            config = {**row['config'], 'label': row['name'], 'attempt': attempt}
+            # Same frozen host bindings as execution preparation; these never
+            # replace model, optimizer, training-unit or seed declarations.
+            for source, target in (('stored_path', 'data_path'), ('id', 'data_source_id'),
+                                   ('fs_mhz', 'fs_mhz'), ('channel_count', 'channel_count')):
+                if selected.get(source) not in (None, ''):
+                    config[target] = selected[source]
+            _unit, count = budget(config)
+            seed = config.get('seed')
+            if type(seed) is not int:
+                raise ValueError('交付预检需要已声明的整数 seed；不能补写默认种子')
+            job = LocalCommandJob(run_id=run_id, experiment_id=row['name'], project=project,
+                run_root=root, config=config, seed=seed, steps=count, command_id=str(config['command_id']))
+            record['configured'] = True
+            worker = asyncio.create_task(asyncio.to_thread(run_command_preflight, job, token))
+            try:
+                checked = await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                # The checker owns a bounded process. Keep its checkout grant
+                # until it exits, including on a repeated stop request.
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if worker.done() and not worker.cancelled():
+                    worker.exception()
+                raise
+            record.update(status=checked.get('status', 'unverified'), reused=bool(checked.get('reused')))
+            receipt = Path(str(checked.get('receipt_path', '')))
+            if not receipt.is_absolute() or not receipt.is_file() or not receipt.resolve().is_relative_to(root):
+                raise ValueError('登记 checker 未返回当前任务内的真实验证收据')
+            ref = receipt.relative_to(root).as_posix()
+            record.update(receipt_ref=ref, receipt_sha256=checked.get('receipt_sha256'))
+            if checked.get('status') != 'passed':
+                detail = bounded_error(str(checked.get('error') or '登记的无训练预检未通过'))
+                record['error'] = detail
+                errors.append(prefix + ': 真实无训练交付预检失败：' + detail + f'；证据：{ref}')
+        except (OSError, ValueError, RuntimeError) as exc:
+            detail = bounded_error(str(exc))
+            record.update(status='failed', error=detail)
+            errors.append(prefix + ': ' + detail)
+    status = 'failed' if errors else 'passed' if all(r['status'] == 'passed' for r in records) else 'unverified'
+    atomic_write_json(root / 'coding/delivery_preflight' / (uuid4().hex + '.json'), {
+        'schema': 'coding.delivery_preflight.v1', 'project': project, 'run_id': run_id, 'attempt': attempt,
+        'candidate_sha256': token, 'status': status, 'training_started': False, 'approved': False,
+        'jobs': records, 'errors': errors})
     return errors

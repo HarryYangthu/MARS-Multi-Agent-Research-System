@@ -55,6 +55,19 @@ def _is_baseline(request: dict[str, Any], configuration: dict[str, Any]) -> bool
     role = job.get("role") if isinstance(job, dict) else None
     if isinstance(role, str) and role in {"baseline", "candidate", "ablation"}:
         return role == "baseline"
+    # Interpret only an individual job's explicit name when its role is absent.
+    # This is display metadata; immutable requests and scientific values remain
+    # unchanged. A comparison task's name cannot select either side for it.
+    identity = request.get("experiment_id")
+    if (isinstance(job, dict) and "role" not in job and isinstance(identity, str)
+            and identity.isascii() and all(char.isalnum() or char in "_.-" for char in identity)):
+        name = identity.casefold()
+        tokens = set(name.replace("-", "_").replace(".", "_").split("_"))
+        if "vs" not in tokens:
+            if name.startswith("baseline_") and "candidate" not in tokens:
+                return True
+            if name.startswith("candidate_") and "baseline" not in tokens:
+                return False
     return bool(configuration.get("model") == "baseline")
 
 

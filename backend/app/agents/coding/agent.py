@@ -51,6 +51,10 @@ class CodingAgent(BaseAgent):
         "正文列出复用文件、指纹及真实检查；不要为了登记制造改动或重复应用补丁。"
         "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
         "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
+        "已有模型的有限改参任务，优先复用 configured_execution_delivery 中登记命令 label 明确声明的"
+        "现有适配器观测能力；训练脚本未直接写 TensorBoard 不代表执行器缺少观测。"
+        "适配器已负责观测时，保留其回调和日志文件约定，不重复注入 Observer 或再次写入同一步骤日志。"
+        "没有能力声明或真实证据时不得声称已支持；以真实预检与运行日志核对缺口，不能把声明当作运行成功。"
         "仿真入口默认启用 TensorBoard，消费 MARS MARS_TENSORBOARD_ENABLED=1；"
         "按真实更新记录损失、学习率、验证指标和参数快照，并将当前代码仓本次生成的"
         "频谱、通道对比、损失图、系数热图及非线性特性全部保存在当前作业目录。"
@@ -130,11 +134,14 @@ class CodingAgent(BaseAgent):
                 if upstream.get("schema") == "experiment_plan.v1":
                     plans.append(text)
         if plans or metadata.get('execution_jobs') or request.extra.get('execution_delivery_required'):
-            from app.harness.tools.execution.handoff import coding_handoff_errors
+            from app.harness.tools.execution.handoff import coding_handoff_preflight_errors
             if len(plans) > 1:
                 errors.append('/upstream: 必须有唯一的批准实验方案')
             else:
-                errors.extend(coding_handoff_errors(plans[0] if plans else '', metadata, project=request.project,
+                errors.extend(await coding_handoff_preflight_errors(plans[0] if plans else '', metadata,
+                    project=request.project, run_id=str(request.extra.get('run_id') or ''),
+                    run_root=Path(str(request.extra.get('run_root') or '')),
+                    attempt=request.extra.get('attempt', 1),
                     plan_required=bool(request.extra.get('experiment_plan_required'))))
         return errors
 
