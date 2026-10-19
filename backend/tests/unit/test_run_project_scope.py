@@ -245,6 +245,38 @@ def test_contextvar_isolates_concurrent_same_name_projects_and_rejects_identity_
             pass
 
 
+def test_metadata_index_thread_and_agent_context_keep_each_actual_run_scope(tmp_path: Path) -> None:
+    from app.harness.context.repo_index import repository_index
+
+    run_a, code_a = create_bound_run(tmp_path / "a", "A")
+    run_b, code_b = create_bound_run(tmp_path / "b", "B")
+    (code_a / "src/only_a.py").write_text("ONLY_A = True\n")
+    (code_b / "src/only_b.py").write_text("ONLY_B = True\n")
+    a, b = prepare(run_a), prepare(run_b)
+
+    async def exercise(scope: ProjectScope, own: str, other: str) -> None:
+        with bind_project_scope(scope):
+            result = await asyncio.to_thread(repository_index, scope.project, 120)
+            assert own in result["files"] and other not in result["files"]
+            assert {"baseline.py", "dependency.py", "src/protected/interface.py"} <= set(result["files"])
+            assert not any(name.startswith((".env", ".git", "private_data/")) for name in result["files"])
+            with pytest.raises(ValueError, match="different run or project"):
+                await asyncio.to_thread(repository_index, "unrelated_project", 120)
+            request = RunRequest(project=scope.project, user_request="Read metadata only",
+                extra={"run_root": str(scope.run_root), "run_id": scope.run_id,
+                    "context_sources": {"agent_resources": False, "memory": False}})
+            context_pack = await ExperimentAgent().build_context(request)
+            actual_index = context_pack.metadata["repository_index"]
+            assert own in actual_index["files"] and other not in actual_index["files"]
+            assert actual_index["contents_loaded"] is False
+            assert current_project_scope(scope.project, scope.run_id) == scope
+
+    async def both() -> None:
+        await asyncio.gather(exercise(a, "src/only_a.py", "src/only_b.py"),
+                             exercise(b, "src/only_b.py", "src/only_a.py"))
+    asyncio.run(both())
+
+
 def test_real_patch_write_delete_and_rollback_touch_only_candidate(tmp_path: Path) -> None:
     run, code = create_bound_run(tmp_path)
     scope = prepare(run)

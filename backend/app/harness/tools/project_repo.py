@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,29 @@ def resolve_allowed_path(
     if repo.scope is not None:
         if current_project_scope(repo.project) != repo.scope:
             raise ValueError("Project repository capability is not bound to this execution")
+    return _resolve_repo_path_rules(repo, rel_path, require_exists=require_exists,
+                                    require_text=require_text, for_write=for_write)
+
+
+def _metadata_index_repo(project: str) -> tuple[ProjectRepo, Callable[[str], Path]]:
+    """One validated binding for one synchronous, filename-only index operation.
+
+    This does not accept a caller-supplied repository or a validation bypass.
+    Actual content tools continue to use resolve_allowed_path on every call.
+    """
+    repo = load_project_repo(project)
+
+    def metadata_path(name: str) -> Path:
+        return _resolve_repo_path_rules(repo, name, require_exists=True, require_text=True)
+
+    return repo, metadata_path
+
+
+def _resolve_repo_path_rules(
+    repo: ProjectRepo, rel_path: str, *, require_exists: bool = False,
+    require_text: bool = False, for_write: bool = False,
+) -> Path:
+    if repo.scope is not None:
         target = repo.scope.resolve_file(rel_path, write=for_write, must_exist=require_exists)
         if require_text and target.suffix.lower() not in TEXT_SUFFIXES:
             raise ValueError(f"unsupported text file type '{target.suffix}'")

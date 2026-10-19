@@ -4,11 +4,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from app.harness.tools.project_repo import load_project_repo, resolve_allowed_path, TEXT_SUFFIXES
+from app.harness.tools.project_repo import _metadata_index_repo, TEXT_SUFFIXES
 
 
 def repository_index(project: str, limit: int) -> dict[str, Any]:
-    repo = load_project_repo(project)
+    repo, metadata_path = _metadata_index_repo(project)
     files: list[str] = []
     if repo.scope is not None:
         candidates = iter(repo.scope.readable_files)
@@ -26,7 +26,7 @@ def repository_index(project: str, limit: int) -> dict[str, Any]:
         candidates = walk()
     for name in candidates:
         try:
-            path = resolve_allowed_path(repo, name, require_exists=True, require_text=True)
+            path = metadata_path(name)
             if path.is_file() and path.suffix in TEXT_SUFFIXES:
                 files.append(name)
         except ValueError:
