@@ -721,3 +721,4 @@ backend/app/harness/runtime/plot_environment.py
 frontend/src/lib/metricFormat.ts
 backend/app/harness/tools/code/yaml_copy.py
 backend/app/harness/tools/code/check_receipts.py
+backend/app/bridge/coding_write_context.py

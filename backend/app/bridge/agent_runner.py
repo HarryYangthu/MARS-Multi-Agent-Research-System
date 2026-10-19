@@ -546,6 +546,11 @@ def load_agent_handoff_context(
             description = baseline_data_description(load_run_project_repo(run.project, run.root, run.run_id), upstream)
             if description:
                 upstream["data_description"] = description
+    if stage == 'coding':
+        from app.bridge.coding_write_context import coding_write_context
+        manifest = coding_write_context(run)
+        if manifest is not None:
+            upstream['current_written_code_manifest'] = manifest
     return upstream, feedback_context
 
 
