@@ -717,3 +717,5 @@ configs/project_storage.yaml
 backend/app/harness/project_storage.py
 backend/app/harness/tools/code/check_environment.py
 backend/app/harness/agent_loop/zcode/limits.py
+backend/app/harness/runtime/plot_environment.py
+frontend/src/lib/metricFormat.ts

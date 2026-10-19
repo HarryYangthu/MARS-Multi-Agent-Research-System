@@ -7,6 +7,7 @@ import { executionExperimentFields } from "@/lib/executionReviewPresentation";
 import type { RunDetail } from "@/lib/api";
 import { managedReviewPending, managedReviewReason } from "@/lib/managedReview";
 import { latestStages } from "@/lib/runReview";
+import { formatMetric } from "@/lib/metricFormat";
 
 const labels: Record<string, string> = {
   device: "运行位置", runtime_backend: "实际执行方式", configured_backend: "配置中的执行方式",
@@ -160,7 +161,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
     void confirm(token);
   }
   if (!view?.visible) return visibleNotice ? <p role="status" className="text-xs text-amber-300">{visibleNotice}</p> : null;
-  if (view.state === "done") return <details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">仿真已完成<span className="ml-3 text-xs text-slate-400">{view.jobs.length} 条真实作业记录 · 展开结果</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? "已完成" : job.status === "interrupted" ? "已中断" : "失败"}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{Number.isInteger(value) ? value : value.toFixed(2)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details>;
+  if (view.state === "done") return <details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">仿真已完成<span className="ml-3 text-xs text-slate-400">{view.jobs.length} 条真实作业记录 · 展开结果</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? "已完成" : job.status === "interrupted" ? "已中断" : "失败"}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{formatMetric(value)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details>;
   const id = `execution-config-${runId}`;
   return <>
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-400/25 bg-indigo-400/5 px-4 py-3">
