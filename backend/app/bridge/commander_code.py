@@ -95,7 +95,7 @@ def creation_source_preparation(session: CommanderSession, action: dict[str, Any
         return None
     args = action.get('args')
     if (not isinstance(args, dict) or args.get('repository_scope', 'required') != 'required'
-            or args.get('entrypoint') == 'writing' or session.linked_run_id):
+            or args.get('entrypoint') == 'writing'):
         return None
     try:
         repo = load_project_repo(session.project)

@@ -100,14 +100,16 @@ async def test_discovered_explicit_source_is_really_read_before_route_is_reconsi
         assert repository_admission_state(ctx.session)['status'] == 'source_read_required'
 
 
-def test_noncode_writing_and_existing_run_are_not_replanned(tmp_path: Path) -> None:
+def test_noncode_and_recovery_are_unchanged_but_new_tasks_in_old_chats_need_source(tmp_path: Path) -> None:
     with _project(tmp_path) as (ctx, _):
         for args in ({'repository_scope': 'not_applicable', 'routing_reason': '纯文字报告'},
                      {'entrypoint': 'writing'}, {'repository_scope': 'invalid'}):
             assert creation_source_preparation(ctx.session, {'tool': 'run.create', 'args': args}) is None
         ctx.session.linked_run_id = 'retained-real-identity'
-        assert creation_source_preparation(ctx.session, {'tool': 'run.create', 'args': {}}) is None
         assert creation_source_preparation(ctx.session, {'tool': 'run.recover', 'args': {}}) is None
+        assert creation_source_preparation(ctx.session, {'tool': 'run.create', 'args': {}}) == {
+            'tool': 'code.repo_list', 'args': {'path': '.'}}
+        assert ctx.session.linked_run_id == 'retained-real-identity' and not ctx.run_store.list()
 
 
 def test_missing_repository_remains_an_actual_blocker(tmp_path: Path) -> None:
