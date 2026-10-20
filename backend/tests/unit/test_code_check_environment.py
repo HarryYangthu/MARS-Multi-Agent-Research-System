@@ -47,7 +47,7 @@ print(json.dumps({'sum': sum(values), 'python': sys.executable, 'code_root': str
 @pytest.fixture
 def check_python(tmp_path: Path) -> Path:
     prefix = tmp_path / 'registered-check-venv'
-    venv.EnvBuilder(with_pip=False).create(prefix)
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != 'nt').create(prefix)
     return prefix / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 
 
@@ -78,17 +78,18 @@ def bound_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     execution = tmp_path / 'execution.yaml'
     execution.write_text(yaml.safe_dump({
         'execution': {'backend': 'local_command', 'command_timeout_seconds': 10},
-        'code_checks': {kind: {'commands': [{'id': 'inputs', 'argv': ['python', 'check_inputs.py']}]}
+        'code_checks': {kind: {'commands': [{'id': 'inputs', 'argv': [str(check_python), 'check_inputs.py']}]}
                         for kind in ('test', 'lint')},
     }))
     tools = tmp_path / 'tools.yaml'
     tools.write_text(yaml.safe_dump({'tools': {name: {
         'enabled': True, 'process_backend': 'local_process',
-        'command_allowlist': [['python', 'check_inputs.py']],
+        'command_allowlist': [[str(check_python), 'check_inputs.py']],
     } for name in ('code.test_runner', 'code.lint')}}))
     monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(execution))
     monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(tools))
-    # Resolve the registered isolated interpreter before Git narrows child PATH.
+    # The host registers this isolated interpreter explicitly; a generic Python
+    # placeholder follows MARS's running environment, independently of PATH.
     monkeypatch.setenv('PATH', str(check_python.parent) + os.pathsep + os.environ.get('PATH', ''))
     reset_settings_cache()
     try:

@@ -38,10 +38,37 @@ jobs:
           uv lock --check
           uv sync --frozen --extra dev --python 3.11
           uv pip install --python .venv/bin/python --no-deps --editable projects/synthetic_regression
+      - name: Real check subprocess interpreter and Git
+        env:
+          PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
+        run: .venv/bin/python -m pytest -q backend/tests/unit/test_check_interpreter.py backend/tests/unit/test_coding_approval.py::test_real_code_checks_use_the_selected_git_in_child_commands
       - name: Pytest
         env:
           PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
-        run: .venv/bin/python -m pytest backend/tests projects/synthetic_regression/tests -q
+        run: .venv/bin/python -m pytest backend/tests projects/synthetic_regression/tests -q --junitxml="${{ runner.temp }}/mars-core-pytest.xml"
+      - name: Pytest totals
+        if: always()
+        env:
+          MARS_PYTEST_JUNIT: ${{ runner.temp }}/mars-core-pytest.xml
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          path = Path(os.environ["MARS_PYTEST_JUNIT"])
+          if not path.is_file():
+              print(f"Pytest totals: missing XML report at {path}")
+              raise SystemExit(1)
+          root = ET.parse(path).getroot()
+          suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+          if not suites:
+              raise ValueError("Pytest XML contains no testsuite")
+          totals = {key: sum(int(suite.get(key, "0")) for suite in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          print("Pytest totals: " + json.dumps(totals, sort_keys=True))
+          PY
       - name: Research failure and recovery regressions
         env:
           PYTHONPATH: .:backend:posttrain/src:projects/synthetic_regression/src
