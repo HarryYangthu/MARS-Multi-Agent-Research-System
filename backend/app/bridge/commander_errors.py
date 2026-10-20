@@ -28,7 +28,9 @@ def conversation_failure(exc: Exception) -> tuple[str, str] | None:
     if ((isinstance(exc, ValueError) and 'provider requires API key' in str(exc))
             or (isinstance(exc, RuntimeError) and str(exc).startswith('provider ') and 'is not configured for' in str(exc))):
         return ('model_credentials_missing', '尚未配置模型 API 密钥。历史对话可以直接查看；新研究请先在设置中配置并测试模型连接。')
-    if isinstance(exc, ValueError) and ('native tool streaming' in str(exc) or 'upstream completion envelope' in str(exc)):
+    if isinstance(exc, ValueError) and any(marker in str(exc).lower() for marker in (
+            'upstream completion', 'upstream sse', 'upstream tool call', 'upstream streamed tool call',
+            'unsolicited tool calls')):
         return ('model_protocol_incompatible', '当前模型接口未提供兼容的回复或工具调用。请在设置中测试连接，核对接口地址与模型名称。历史任务和结果已保留。')
     status = getattr(exc, 'status_code', None)
     if status in {401, 403}:

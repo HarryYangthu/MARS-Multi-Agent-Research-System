@@ -18,7 +18,7 @@ def requires_glm_thinking(provider: str, model: str) -> bool:
 def supports_glm_observation_tools(provider: str, model: str) -> bool:
     """GLM 5.x gateways may select thinking; public observation history is valid."""
     return provider in {"zhipu", "custom", "custom_endpoint", "local_vllm", "openai"} and bool(
-        re.match(r"^glm[-_]?5(?:[.\-_]|$)", model.strip(), re.IGNORECASE))
+        re.match(r"^glm[-_]?v?5(?:[.\-_]|$)", model.strip(), re.IGNORECASE))
 
 
 def setup_reasoning(provider: str, model: str) -> tuple[bool, ReasoningEffort | None]:

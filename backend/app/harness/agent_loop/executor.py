@@ -25,7 +25,7 @@ from app.harness.agent_loop.review_plan import (
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
-from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking, supports_glm_observation_tools
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.structured_output import normalize_document_output
@@ -278,7 +278,8 @@ def validate_native_thinking(config: LLMConfig, policy: AgentLoopPolicy) -> None
             raise ModelCompatibilityError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
         return
     if (not policy.native_observation_history
-            or not (glm_thinking or config.provider == "deepseek" and config.thinking_enabled is True)):
+            or not (supports_glm_observation_tools(config.provider, config.model)
+                    or config.provider == "deepseek" and config.thinking_enabled is True)):
         raise ModelCompatibilityError("native thinking tools require supported observation-only history")
 
 
