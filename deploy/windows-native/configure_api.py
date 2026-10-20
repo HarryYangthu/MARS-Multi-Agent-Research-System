@@ -171,10 +171,13 @@ def main(root: Path = ROOT) -> None:
             "MARS_ENABLE_NETWORK_TOOLS": "true",
             "MARS_WEB_SEARCH_ALLOWLIST": "arxiv.org,export.arxiv.org,openaccess.thecvf.com,papers.nips.cc,papers.neurips.cc,proceedings.neurips.cc,api.openalex.org,openreview.net,proceedings.mlr.press",
         })
-    code = input("PIMC 源码目录（可留空，之后在项目页接入）：").strip().strip('"')
-    if code:
-        data = input("PIMC 数据文件绝对路径（可留空，之后在前端选择）：").strip().strip('"')
-        configure_pimc(root, Path(code), Path(data) if data else None)
+    if (root / "projects/pimc/repo_link.yaml").is_file():
+        code = input("PIMC 源码目录（可留空，之后在项目页接入）：").strip().strip('"')
+        if code:
+            data = input("PIMC 数据文件绝对路径（可留空，之后在前端选择）：").strip().strip('"')
+            configure_pimc(root, Path(code), Path(data) if data else None)
+    else:
+        logger.info("产品版不预置研究项目。启动后请在项目页新建项目或打开已有文件夹，再配置代码、数据与执行环境。")
     receipt = root / "local/windows/api-configured.json"
     receipt.parent.mkdir(parents=True, exist_ok=True)
     receipt.write_text(json.dumps({"provider": provider, "endpoint": endpoint,

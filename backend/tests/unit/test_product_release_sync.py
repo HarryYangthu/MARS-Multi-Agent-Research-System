@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -173,3 +174,63 @@ def test_bad_prepared_cache_is_not_recertified(tmp_path: Path, kind: str) -> Non
         assert result.returncode != 0
         assert not (output / 'MARS-Product/WINDOWS-OFFLINE.json').exists()
         assert not (output / 'MARS-Product-Windows-Offline.zip').exists()
+
+
+@pytest.mark.parametrize('legacy_metadata', [False, True])
+def test_actual_api_configuration_completes_without_packaged_project_or_keeps_legacy_intake(
+    tmp_path: Path, legacy_metadata: bool,
+) -> None:
+    root = tmp_path / 'configuration'
+    (root / 'configs').mkdir(parents=True)
+    configs = {
+        'models.yaml': {'providers': {'local_vllm': {
+            'api_key_env': 'MARS_CONFIGURATION_TEST_KEY', 'base_url': 'http://127.0.0.1:8000/v1'}}},
+        'windows_native.yaml': {'api_local_endpoint': 'http://127.0.0.1:8000/v1'},
+        'agents.yaml': {'commander': {'model': {'model': 'previous-model'}, 'loop': {}}},
+        'idea_focused.yaml': {'author': {}},
+        'cli_research.yaml': {'generation': {}},
+        'execution.yaml': {'execution': {'paper_static': {'enabled': False, 'data_path': 'old-data'}}},
+    }
+    for name, body in configs.items():
+        (root / 'configs' / name).write_text(yaml.safe_dump(body), encoding='utf-8')
+    answers = ['4', '', 'local-config-only', 'LOCAL-CONFIG-ONLY', 'n']
+    code = tmp_path / 'scientific-source'
+    code.mkdir()
+    (code / 'train_static.py').write_text('# Actual intake fixture; never executed.\n', encoding='utf-8')
+    link = root / 'projects/pimc/repo_link.yaml'
+    if legacy_metadata:
+        link.parent.mkdir(parents=True)
+        link.write_text('repo_path: previous-source\n', encoding='utf-8')
+        answers.extend([str(code), ''])
+    launcher = (
+        'import runpy, sys; from pathlib import Path; '
+        'module = runpy.run_path(sys.argv[1]); module["main"](Path(sys.argv[2]))'
+    )
+    env = os.environ.copy()
+    env['PYTHONPATH'] = str(ROOT / 'backend') + os.pathsep + env.get('PYTHONPATH', '')
+    env['PYTHONIOENCODING'] = 'utf-8'
+    result = subprocess.run(
+        [sys.executable, '-c', launcher, str(ROOT / 'deploy/windows-native/configure_api.py'), str(root)],
+        input='\n'.join(answers) + '\n', capture_output=True, text=True, encoding='utf-8',
+        env=env, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads((root / 'local/windows/api-configured.json').read_text(encoding='utf-8'))
+    assert receipt['provider'] == 'local_vllm'
+    assert receipt['endpoint'] == 'http://127.0.0.1:8000/v1'
+    agents = yaml.safe_load((root / 'configs/agents.yaml').read_text(encoding='utf-8'))
+    assert agents['commander']['model']['model'] == 'local-config-only'
+    assert 'LOCAL-CONFIG-ONLY' not in result.stdout + result.stderr
+    assert 'MARS_CONFIGURATION_TEST_KEY="LOCAL-CONFIG-ONLY"' in (root / '.env.local').read_text(encoding='utf-8')
+    if legacy_metadata:
+        assert 'PIMC 源码目录' in result.stdout
+        assert yaml.safe_load(link.read_text(encoding='utf-8'))['repo_path'] == code.resolve().as_posix()
+        settings = yaml.safe_load((root / 'configs/execution.yaml').read_text(encoding='utf-8'))
+        assert settings['execution']['paper_static']['repo_path'] == code.resolve().as_posix()
+        assert settings['execution']['paper_static']['data_path'] == ''
+        assert settings['execution']['paper_static']['enabled'] is False
+    else:
+        assert 'PIMC 源码目录' not in result.stdout
+        assert '产品版不预置研究项目' in result.stderr
+        assert not link.exists()
+        assert yaml.safe_load((root / 'configs/execution.yaml').read_text(encoding='utf-8')) == configs['execution.yaml']
