@@ -248,7 +248,7 @@ class Commander:
                         decision = Decision(reply=_completion_unfinished_reply(last_completion))
 
                 if decision.actions:
-                    from app.bridge.commander_code import creation_source_preparation
+                    from app.bridge.commander_code import creation_needs_source, creation_source_preparation
                     preparation = creation_source_preparation(session, decision.actions[0])
                     if preparation is not None:
                         # Dispatch the prerequisite, not a creation that is
@@ -256,6 +256,13 @@ class Commander:
                         # real read/list result and chooses its route again.
                         decision = Decision(actions=[preparation], response_mode='repository_preparation',
                             reply='MARS 先核对当前代码；读取结果后再创建任务。')
+                    elif creation_needs_source(session, decision.actions[0]):
+                        # Do not call a mutation whose prerequisite is known
+                        # missing. No observation or creation receipt is forged.
+                        continuation_prompt = ('创建尚未执行：本轮还没有读取任务相关源码。'
+                            '请从已浏览/搜索到的真实路径选择相关文件，调用 code.repo_read_lines；'
+                            '读取后重新判断入口。此前对话的读取不能替代本轮实际读取。')
+                        continue
                 dispatching_run = has_run_dispatch(decision.actions)
                 # Only a real dispatch receipt can enter executing. A model's
                 # suggested state cannot certify that an operation happened.
@@ -283,10 +290,14 @@ class Commander:
                     # Native batches may search and then try to create without
                     # reading. Recheck after preceding real observations too;
                     # dependent start calls must wait for the next decision.
-                    from app.bridge.commander_code import creation_source_preparation
+                    from app.bridge.commander_code import creation_needs_source, creation_source_preparation
                     prepared_action = creation_source_preparation(session, action)
                     if prepared_action is not None:
                         action = prepared_action
+                    elif creation_needs_source(session, action):
+                        continuation_prompt = ('本批后续创建和启动尚未执行：需要本轮实际源码读取。'
+                            '请根据真实浏览和搜索结果调用 code.repo_read_lines，随后重新判断入口。')
+                        break
                     tool = str(action.get("tool", ""))
                     args = action.get("args", {}) or {}
                     if not isinstance(args, dict):

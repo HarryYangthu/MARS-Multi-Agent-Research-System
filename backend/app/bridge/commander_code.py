@@ -34,6 +34,8 @@ def routing_repository_check(args: dict[str, Any], session: CommanderSession) ->
         return {'ok': True, 'repository_scope': 'not_applicable', 'reason': 'Summarize existing artifacts.', 'evidence': []}
     try:
         repo = load_project_repo(session.project)
+        if not repo.root.is_dir():
+            raise ValueError('connected repository directory is unavailable')
     except ValueError as exc:
         return {'ok': False, 'status': 'repository_unavailable',
                 'error': f'代码仓绑定无法核验：{exc}。纯非代码任务可明确声明 repository_scope=not_applicable 并说明理由。'}
@@ -83,6 +85,15 @@ def repository_admission_state(session: CommanderSession) -> dict[str, Any]:
                 '代码任务此时不能创建；纯非代码任务可明确说明 repository_scope=not_applicable。')}
 
 
+def creation_needs_source(session: CommanderSession, action: dict[str, Any]) -> bool:
+    if action.get('tool') not in {'run.create', 'create_and_start_run'} or not isinstance(action.get('args'), dict):
+        return False
+    try:
+        return routing_repository_check(action['args'], session).get('status') == 'repository_inspection_required'
+    except (OSError, ValueError):
+        return False  # The actual tool must report a real binding/read failure.
+
+
 def creation_source_preparation(session: CommanderSession, action: dict[str, Any]) -> dict[str, Any] | None:
     """Schedule a real bounded read before a premature creation, never create it.
 
@@ -105,7 +116,29 @@ def creation_source_preparation(session: CommanderSession, action: dict[str, Any
         return None  # A broken binding is an actual blocker, not a search miss.
     observations = [m for m in session.messages if m.role == 'tool' and m.turn_id == session.active_turn_id]
     candidates: set[str] = set()
+    source_ranges: dict[str, dict[str, int]] = {}
     described = str(args.get('user_request', ''))
+    # Prior verified reads are exact path hints, never current-turn admission.
+    # Re-read that file through the public tool when the new action names it.
+    for message in session.context_messages():
+        output = (message.tool_result or {}).get('output')
+        if (message.role != 'tool' or message.tool_name != 'code.repo_read_lines'
+                or (message.tool_result or {}).get('ok') is not True or not isinstance(output, dict)
+                or not output.get('content') or Path(str(output.get('repo_root', ''))).resolve() != repo.root.resolve()):
+            continue
+        path = output.get('path')
+        if not isinstance(path, str) or not path or not re.search(
+                r'(?<![A-Za-z0-9_./])' + re.escape(path) + r'(?![A-Za-z0-9_./])', described):
+            continue
+        try:
+            actual = resolve_allowed_path(repo, path, require_exists=True, require_text=True)
+            if hashlib.sha256(actual.read_bytes()).hexdigest() == output.get('sha256'):
+                candidates.add(path)
+                start, end = output.get('line_start'), output.get('line_end')
+                if type(start) is int and type(end) is int and 1 < start <= end:
+                    source_ranges[path] = {'start_line': start, 'end_line': end}
+        except (OSError, ValueError):
+            continue
     for message in observations:
         output = (message.tool_result or {}).get('output')
         if ((message.tool_result or {}).get('ok') is not True or not isinstance(output, dict)
@@ -133,7 +166,7 @@ def creation_source_preparation(session: CommanderSession, action: dict[str, Any
         except (OSError, ValueError):
             return None
         if path not in attempted:
-            return {'tool': 'code.repo_read_lines', 'args': {'path': path}}
+            return {'tool': 'code.repo_read_lines', 'args': {'path': path, **source_ranges.get(path, {})}}
     if not any(m.tool_name == 'code.repo_list' and (m.tool_args or {}).get('path', '.') == '.'
                and (m.tool_result or {}).get('ok') is True for m in observations):
         return {'tool': 'code.repo_list', 'args': {'path': '.'}}

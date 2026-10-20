@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
-from app.bridge.commander_code import creation_source_preparation, repository_admission_state
+from app.bridge.commander_code import creation_needs_source, creation_source_preparation, repository_admission_state
 from app.bridge.commander_session import ChatMessage, CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool
 from app.bridge.orchestrator import Orchestrator
@@ -70,6 +70,7 @@ async def test_premature_create_prepares_real_repository_then_requires_real_read
         assert listed['ok'] and listed['output']['repo_root'] == str(source)
         assert listed['output']['entries'] == [{'path': 'configs', 'type': 'directory'}]
         assert creation_source_preparation(ctx.session, action) is None  # No repeated listing.
+        assert creation_needs_source(ctx.session, action)  # Replan instead of attempting creation.
         assert repository_admission_state(ctx.session)['creation_ready'] is False
         rejected = await execute_tool(action['tool'], action['args'], ctx)
         assert not rejected['ok'] and rejected['status'] == 'repository_inspection_required'
@@ -89,6 +90,7 @@ async def test_discovered_explicit_source_is_really_read_before_route_is_reconsi
         assert read['ok'] and read['output']['content'] == (source / 'configs/model.yaml').read_text()
         assert repository_admission_state(ctx.session)['status'] == 'ready'
         assert creation_source_preparation(ctx.session, action) is None
+        assert not creation_needs_source(ctx.session, action)
         assert not ctx.run_store.list()
         # Only the later real creation allocates a run, preserving the route.
         created = await execute_tool(action['tool'], action['args'], ctx)
@@ -119,3 +121,40 @@ def test_missing_repository_remains_an_actual_blocker(tmp_path: Path) -> None:
         source.rmdir()
         assert repository_admission_state(ctx.session)['status'] == 'unavailable'
         assert creation_source_preparation(ctx.session, {'tool': 'run.create', 'args': {}}) is None
+        assert not creation_needs_source(ctx.session, {'tool': 'run.create', 'args': {}})
+
+
+@pytest.mark.asyncio
+async def test_old_conversation_named_source_is_really_refreshed_before_creation(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, source):
+        read = await _observe(ctx, {'tool': 'code.repo_read_lines', 'args': {'path': 'configs/model.yaml'}})
+        assert read['ok']
+        user = ctx.session.add(ChatMessage(role='user', content='基于刚才模型做学习率寻优'))
+        user.turn_id = ctx.session.active_turn_id = user.id
+        action = {'tool': 'run.create', 'args': {'entrypoint': 'experiment',
+                  'user_request': '基于 configs/model.yaml 设计学习率寻优'}}
+        assert creation_needs_source(ctx.session, action)
+        prepare = creation_source_preparation(ctx.session, action)
+        assert prepare == {'tool': 'code.repo_read_lines', 'args': {'path': 'configs/model.yaml'}}
+        assert not ctx.run_store.list()
+        refreshed = await _observe(ctx, prepare)
+        assert refreshed['ok'] and refreshed['output']['content'] == (source / 'configs/model.yaml').read_text()
+        assert not creation_needs_source(ctx.session, action)
+        assert len([m for m in ctx.session.messages if m.tool_name == 'code.repo_read_lines']) == 2
+
+
+@pytest.mark.asyncio
+async def test_historical_excerpt_refresh_keeps_the_actual_relevant_line_range(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, source):
+        (source / 'configs/model.yaml').write_text('# comment\n# other\nmodel_name: Existing\nlearning_rate: 0.0004\n')
+        read = await _observe(ctx, {'tool': 'code.repo_read_lines',
+                             'args': {'path': 'configs/model.yaml', 'start_line': 3, 'end_line': 4}})
+        assert read['ok']
+        user = ctx.session.add(ChatMessage(role='user', content='基于已读模型做对照'))
+        user.turn_id = ctx.session.active_turn_id = user.id
+        prepare = creation_source_preparation(ctx.session, {'tool': 'run.create', 'args': {
+            'entrypoint': 'experiment', 'user_request': '基于 configs/model.yaml 设计对照'}})
+        assert prepare == {'tool': 'code.repo_read_lines',
+                           'args': {'path': 'configs/model.yaml', 'start_line': 3, 'end_line': 4}}
+        refreshed = await _observe(ctx, prepare)
+        assert refreshed['ok'] and refreshed['output']['content'] == 'model_name: Existing\nlearning_rate: 0.0004\n'
