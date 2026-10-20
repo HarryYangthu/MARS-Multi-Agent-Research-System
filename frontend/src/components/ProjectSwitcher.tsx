@@ -1,20 +1,23 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { useProject } from "@/lib/project";
 const FolderProjectDialog = dynamic(() => import("./FolderProjectDialog").then((m) => m.FolderProjectDialog), { ssr: false });
 
 export function ProjectSwitcher({ compact = false }: { compact?: boolean }): JSX.Element {
+  const { ui } = useI18n();
   const { selectedProject, projects, loading, setSelectedProject, refreshProjects } = useProject();
   const [mode, setMode] = useState<"create" | "open" | "context" | null>(null);
   const current = projects.find((project) => project.name === selectedProject);
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded border border-mars-border bg-mars-panel2 px-2 py-1">
-      <span className="text-[10px] text-slate-500">项目</span>
+      <span className="text-[10px] text-slate-500">{ui("项目")}</span>
       {projects.length > 0 ? (
         <select
-          aria-label="当前项目"
+          aria-label={ui("当前项目")}
           value={selectedProject}
           onChange={(event) => setSelectedProject(event.target.value)}
           className="max-w-40 rounded bg-transparent py-1 text-xs text-slate-200"
@@ -28,7 +31,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }): JSX
         </select>
       ) : (
         <span className="font-mono text-xs text-slate-300">
-          {loading ? "加载中" : selectedProject || "尚未选择"}
+          {loading ? ui("加载中") : selectedProject || ui("尚未选择")}
         </span>
       )}
       {current ? (
@@ -36,13 +39,13 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }): JSX
           className={`h-1.5 w-1.5 rounded-full ${
             current.repo_exists ? "bg-emerald-400" : "bg-amber-400"
           }`}
-          title={current.repo_exists ? current.repo_path : "代码仓链接缺失"}
+          title={current.repo_exists ? current.repo_path : ui("代码仓链接缺失")}
         />
       ) : null}
       {!compact ? <>
-        <button type="button" className="px-1 text-xs text-cyan-200 hover:underline" onClick={() => setMode("create")}>新建项目</button>
-        <button type="button" className="px-1 text-xs text-slate-300 hover:underline" onClick={() => setMode("open")}>打开文件夹</button>
-        {current ? <button type="button" className="px-1 text-xs text-slate-300 hover:underline" onClick={() => setMode("context")}>项目资料</button> : null}
+        <button type="button" className="px-1 text-xs text-cyan-200 hover:underline" onClick={() => setMode("create")}>{ui("新建项目")}</button>
+        <button type="button" className="px-1 text-xs text-slate-300 hover:underline" onClick={() => setMode("open")}>{ui("打开文件夹")}</button>
+        {current ? <button type="button" className="px-1 text-xs text-slate-300 hover:underline" onClick={() => setMode("context")}>{ui("项目资料")}</button> : null}
       </> : null}
       {mode ? <FolderProjectDialog mode={mode} current={current} onClose={() => setMode(null)} onOpened={async (project) => {
         await refreshProjects();

@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getRun, type RunDetail } from "@/lib/api";
@@ -32,6 +34,7 @@ type OwnerControl = {
 };
 
 export function RunControlBar({ runId, run, onChange, showSimpleLink = true, compact = false }: { runId: string; run: RunDetail | null; onChange: (run: RunDetail) => void; showSimpleLink?: boolean; compact?: boolean }): JSX.Element | null {
+  const { ui } = useI18n();
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
@@ -100,21 +103,21 @@ export function RunControlBar({ runId, run, onChange, showSimpleLink = true, com
   }
   const button = "rounded border border-mars-border px-3 py-1.5 text-xs hover:bg-mars-panel2 disabled:opacity-50";
   if (compact && !stoppedReview && !controlError && !message && !control?.available_actions.includes("stop") && !control?.stopping) return null;
-  return <section aria-label="任务控制" className="rounded-lg border border-mars-border bg-mars-panel px-4 py-3">
-    <div className="flex flex-wrap items-center justify-between gap-3">{!compact ? <div className="flex flex-wrap items-center gap-3 text-sm"><Link href={run ? `/projects/${encodeURIComponent(run.project)}/research` : "/projects"} className="text-slate-400 hover:text-white">← 项目研究</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div> : null}<div className="flex flex-wrap gap-2">
-      {showSimpleLink ? <Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>简洁视图</Link> : null}
-      {run && !compact ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>结果与导出</Link> : null}
-      {run && !run.read_only && run.status === "created" ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("start")}>启动任务</button> : null}
-      {control?.available_actions.includes("stop") ? <button type="button" className={`${button} border-rose-400/50 text-rose-200`} disabled={!!busy} onClick={() => void act("stop")}>{busy === "stop" ? "正在请求停止…" : control.stopping ? "核对停止状态" : "停止任务"}</button> : null}
-      {run && !compact && !run.read_only && ["failed", "stopped"].includes(run.status || "") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("resume")}>检查并恢复</button> : null}
-      {run?.available_actions?.includes("migrate_state") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("migrate-state")}>{busy ? "正在校验…" : "校验并迁移历史记录"}</button> : null}
+  return <section aria-label={ui("任务控制")} className="rounded-lg border border-mars-border bg-mars-panel px-4 py-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">{!compact ? <div className="flex flex-wrap items-center gap-3 text-sm"><Link href={run ? `/projects/${encodeURIComponent(run.project)}/research` : "/projects"} className="text-slate-400 hover:text-white">{ui("← 项目研究")}</Link><span role="status">{run ? (run.read_only ? `只读记录 · ${statusLabel}` : statusLabel) : "正在读取任务…"}</span></div> : null}<div className="flex flex-wrap gap-2">
+      {showSimpleLink ? <Link href={`/runs/${encodeURIComponent(runId)}`} className={button}>{ui("简洁视图")}</Link> : null}
+      {run && !compact ? <Link href={`/results/${encodeURIComponent(run.run_id)}`} className={button}>{ui("结果与导出")}</Link> : null}
+      {run && !run.read_only && run.status === "created" ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("start")}>{ui("启动任务")}</button> : null}
+      {control?.available_actions.includes("stop") ? <button type="button" className={`${button} border-rose-400/50 text-rose-200`} disabled={!!busy} onClick={() => void act("stop")}>{busy === "stop" ? ui("正在请求停止…") : control.stopping ? ui("核对停止状态") : ui("停止任务")}</button> : null}
+      {run && !compact && !run.read_only && ["failed", "stopped"].includes(run.status || "") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("resume")}>{ui("检查并恢复")}</button> : null}
+      {run?.available_actions?.includes("migrate_state") ? <button type="button" className={button} disabled={!!busy} onClick={() => void act("migrate-state")}>{busy ? ui("正在校验…") : ui("校验并迁移历史记录")}</button> : null}
     </div></div>
     {run?.read_only ? <p className="mt-2 text-xs leading-5 text-amber-200">{READ_ONLY[run.read_only_reason || ""] || "此记录没有可供当前服务使用的可信执行状态。已保存产物仍可查看。"}</p> : null}
     {controlError ? <p role="status" className="mt-2 text-xs text-amber-200">暂时无法核对工作进程状态，正在重新连接。</p> : null}
     {stoppedReview ? <p role="status" className="mt-2 text-xs text-amber-200">任务推进已停止，待审核产物已保留。审核并批准后可以继续。</p> : null}
     {control?.research_stop?.run_stop_confirmed ? <p role="status" className="mt-2 text-xs text-emerald-200">停止核对完成，已保存的产物和预算记录保留。</p> : control?.research_stop?.status === "stop_incomplete" ? <p role="status" className="mt-2 text-xs text-amber-200">仍有工作进程、作业或活动记录未能确认停止。新动作已阻止，请核对停止状态。</p> : null}
     {control?.state_persisted === false ? <p role="alert" className="mt-2 text-xs text-amber-200">停止状态保存失败。{control.owned_task_done ? "本服务的工作进程已经结束。" : "仍需核对工作进程是否完成清理。"}恢复前需修复执行记录。</p> : null}
-    {run?.execution_admission?.blockers.length ? <details className="mt-2 text-xs text-slate-400"><summary className="cursor-pointer">查看启动受阻原因</summary><ul className="mt-2 list-inside list-disc space-y-1">{run.execution_admission.blockers.map((blocker) => <li key={blocker.code}>{blocker.message}</li>)}</ul></details> : null}
+    {run?.execution_admission?.blockers.length ? <details className="mt-2 text-xs text-slate-400"><summary className="cursor-pointer">{ui("查看启动受阻原因")}</summary><ul className="mt-2 list-inside list-disc space-y-1">{run.execution_admission.blockers.map((blocker) => <li key={blocker.code}>{blocker.message}</li>)}</ul></details> : null}
     {message ? <p role={error ? "alert" : "status"} className={`mt-2 text-xs leading-5 ${error ? "text-amber-200" : "text-emerald-200"}`}>{message}</p> : null}
   </section>;
 }

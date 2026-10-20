@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { confirmExecutionConfiguration, ExecutionReviewError, getExecutionPreparation, prepareExecutionConfiguration, type ExecutionConfiguration, type ExecutionPreparation } from "@/lib/executionReview";
@@ -31,6 +33,7 @@ function display(value: unknown): string {
 export function ExecutionConfigurationReview({ runId, project, stale, onChanged, run = null }: {
   runId: string; project: string; stale: boolean; onChanged: () => Promise<void>; run?: RunDetail | null;
 }): JSX.Element | null {
+  const { ui } = useI18n();
   const [view, setView] = useState<ExecutionConfiguration | null>(null);
   const [preparation, setPreparation] = useState<ExecutionPreparation | null>(null);
   const [error, setError] = useState("");
@@ -205,7 +208,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
   const boundaryControl = <ExecutionBoundaryControl runId={runId} project={project} />;
   if (!view?.visible && !preparation?.operation_id && preparation?.launch_state !== "approved" && runExecutionState !== "approved" && !error) return boundaryControl;
   if (!view?.visible) return <>{boundaryControl}<div className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3">{progress}</div>{visibleNotice ? <p role="status" className="text-xs text-amber-300">{visibleNotice}</p> : null}</>;
-  if (view.state === "done") return <>{boundaryControl}<details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">仿真已完成<span className="ml-3 text-xs text-slate-400">{view.jobs.length} 条真实作业记录 · 展开结果</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? "已完成" : job.status === "interrupted" ? "已中断" : "失败"}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{formatMetric(value)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details></>;
+  if (view.state === "done") return <>{boundaryControl}<details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">{ui("仿真已完成")}<span className="ml-3 text-xs text-slate-400">{view.jobs.length}  {ui("条真实作业记录 · 展开结果")}</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? ui("已完成") : job.status === "interrupted" ? ui("已中断") : ui("失败")}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{formatMetric(value)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details></>;
   const id = `execution-config-${runId}`;
   return <>
     {boundaryControl}
@@ -229,7 +232,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
           </article>)}</div></section>
           {view.source_configs.length ? <section><h3 className="text-sm font-medium">已编码的配置文件</h3><p className="mt-1 text-xs text-slate-500">每组实验绑定自己的配置文件；实际值在实验清单中展示。</p><ul className="mt-2 space-y-2 text-xs">{view.source_configs.map(item => <li key={item.path} className="break-all text-slate-300">{item.path}<span className="ml-3 text-slate-500">种子 {display(item.seed)}{view.defaults.budget_unit !== "steps" ? ` · 训练轮数 ${display(item.epochs)}` : ""}</span></li>)}</ul></section> : null}
           {progress}
-          {view.jobs?.length ? <section><h3 className="text-sm font-medium">真实作业记录</h3><ul className="mt-2 space-y-2 text-xs">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.attempt}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3"><p>{job.experiment_id} · 第 {job.attempt} 次 · {({ running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" } as Record<string, string>)[job.status] || job.status}</p>{job.error ? <p className="mt-1 text-amber-200">{job.error}</p> : null}</li>)}</ul></section> : null}
+          {view.jobs?.length ? <section><h3 className="text-sm font-medium">真实作业记录</h3><ul className="mt-2 space-y-2 text-xs">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.attempt}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3"><p>{job.experiment_id} · 第 {job.attempt} 次 · {({ running: "运行中", completed: ui("已完成"), failed: ui("失败"), interrupted: ui("已中断") } as Record<string, string>)[job.status] || job.status}</p>{job.error ? <p className="mt-1 text-amber-200">{job.error}</p> : null}</li>)}</ul></section> : null}
           <p className="text-xs text-slate-500">累计计入预算的模型请求 {view.budget.used} / {view.budget.limit ?? "不限"} 次。执行管理器无需模型生成计划；以上历史用量不阻断确定的作业执行。</p>
           {view.warnings.map(item => <p key={item} className="text-xs leading-6 text-amber-200">{item}</p>)}
         </div>

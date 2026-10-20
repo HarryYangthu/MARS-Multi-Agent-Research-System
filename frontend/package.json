@@ -8,7 +8,8 @@
     "start": "node scripts/serve.cjs start",
     "lint": "next lint",
     "typecheck": "node scripts/clean-next-types.cjs && tsc --noEmit",
-    "test:context": "tsc --outDir .tmp/context-workbench --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/context-workbench-smoke.ts src/lib/contextWorkbench.ts && node .tmp/context-workbench/scripts/context-workbench-smoke.js"
+    "test:context": "tsc --outDir .tmp/context-workbench --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --noEmit false scripts/context-workbench-smoke.ts src/lib/contextWorkbench.ts && node .tmp/context-workbench/scripts/context-workbench-smoke.js",
+    "test:language": "tsc --outDir .tmp/language --rootDir . --module commonjs --target ES2023 --moduleResolution node --esModuleInterop --skipLibCheck --noEmit false scripts/language-smoke.ts && node .tmp/language/scripts/language-smoke.js"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

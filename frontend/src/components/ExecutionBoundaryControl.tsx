@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { BoundaryRequestOrder, type ExecutionBoundary } from "@/lib/executionBoundaryState";
@@ -10,6 +12,7 @@ function selectionMessage(stop: boolean): string {
 }
 
 export function ExecutionBoundaryControl({ runId, project }: { runId: string; project: string }): JSX.Element {
+  const { ui } = useI18n();
   const [boundary, setBoundary] = useState<ExecutionBoundary | null>(null);
   const [saving, setSaving] = useState(false);
   const [readError, setReadError] = useState("");
@@ -99,16 +102,17 @@ export function ExecutionBoundaryControl({ runId, project }: { runId: string; pr
     <div className="flex flex-wrap items-center justify-between gap-3">
       <label className="flex items-center gap-2 text-sm text-slate-200">
         <input type="checkbox" aria-describedby={description} checked={boundary?.stop_after_execution === true} disabled={saving || !boundary?.can_update} onChange={event => { void save(event.target.checked); }} />
-        仿真完成后暂停，暂不生成报告
+
+        {ui("仿真完成后暂停，暂不生成报告")}
       </label>
-      <button type="button" disabled={saving} onClick={() => { void refresh(); }} className="text-xs text-indigo-300 disabled:opacity-40">刷新暂停设置</button>
+      <button type="button" disabled={saving} onClick={() => { void refresh(); }} className="text-xs text-indigo-300 disabled:opacity-40">{ui("刷新暂停设置")}</button>
     </div>
-    <p id={description} className="text-xs leading-5 text-slate-500">只设置本轮仿真完成后的推进方式，不中断当前仿真，也不改变训练配置。</p>
+    <p id={description} className="text-xs leading-5 text-slate-500">{ui("只设置本轮仿真完成后的推进方式，不中断当前仿真，也不改变训练配置。")}</p>
     {saving ? <p role="status" className="text-xs text-indigo-200">正在保存暂停设置…</p> : null}
     {!boundary && !readError ? <p role="status" className="text-xs text-slate-400">正在读取当前暂停设置…</p> : null}
     {boundary && !boundary.can_update ? <p role="status" className="text-xs text-amber-200">{boundary.reason || "当前任务已进入后续阶段，暂停设置不可再修改。"}</p> : null}
     {notice ? <p role="status" className="text-xs text-emerald-300">{notice}</p> : null}
     {readError ? <p role="alert" className="text-xs text-amber-200">{readError}</p> : null}
-    {saveError ? <div className="flex flex-wrap items-center gap-3"><p role="alert" className="text-xs text-amber-200">{saveError}</p>{retryValue !== null ? <button type="button" disabled={saving || !boundary?.can_update} onClick={() => { if (retryValue !== null) void save(retryValue); }} className="text-xs text-indigo-300 disabled:opacity-40">重试保存</button> : null}</div> : null}
+    {saveError ? <div className="flex flex-wrap items-center gap-3"><p role="alert" className="text-xs text-amber-200">{saveError}</p>{retryValue !== null ? <button type="button" disabled={saving || !boundary?.can_update} onClick={() => { if (retryValue !== null) void save(retryValue); }} className="text-xs text-indigo-300 disabled:opacity-40">{ui("重试保存")}</button> : null}</div> : null}
   </section>;
 }

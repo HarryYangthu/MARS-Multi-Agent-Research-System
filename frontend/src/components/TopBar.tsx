@@ -54,9 +54,15 @@ export function TopBar(): JSX.Element {
               <Link href="/runs/new?mode=contract">{zh ? "研究合同表单" : "Research contract form"}</Link>
             </div>
             <RuntimeOpsPanel project={selectedProject} />
-            <button type="button" onClick={toggle} className="rounded border border-mars-border px-3 py-2 text-xs hover:bg-mars-subtle">{zh ? "Switch to English" : "切换到中文"}</button>
           </div>
         </details>
+        <button type="button" onClick={toggle}
+          aria-label={zh ? "Switch to English" : "切换到中文"}
+          title={zh ? "切换到英文" : "Switch to Chinese"}
+          className="inline-flex shrink-0 items-center gap-2 rounded-md border border-mars-border px-3 py-2 text-sm text-slate-200 hover:border-indigo-400/60 hover:bg-mars-panel2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z" /></svg>
+          <span lang={zh ? "en" : "zh-CN"}>{zh ? "English" : "中文"}</span>
+        </button>
       </div>
     </header>
   );
