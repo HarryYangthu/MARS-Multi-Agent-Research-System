@@ -59,7 +59,9 @@ def commander_tool_input_schema(name: str, configured: dict[str, ToolConfig]) ->
     run_id = {'type': 'string', 'description': 'Optional; defaults to the actual linked run.'}
     if name in {'run.create', 'create_and_start_run'}:
         return {'type': 'object', 'additionalProperties': False, 'properties': {
-            'entrypoint': {'type': 'string', 'enum': list(get_args(EntryPoint)), 'default': 'pipeline'},
+            'entrypoint': {'type': 'string',
+                'enum': [stage for stage in get_args(EntryPoint) if stage != 'execution'],
+                'default': 'pipeline'},
             'repository_scope': {'type': 'string', 'enum': ['required', 'not_applicable'], 'default': 'required'},
             'routing_reason': string, 'user_request': string, 'task': string, 'seed_artifact': string,
             'standalone': {'type': 'boolean', 'default': False},

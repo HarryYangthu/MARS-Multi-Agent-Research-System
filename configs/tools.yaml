@@ -393,7 +393,7 @@ tools:
 
   code.repo_search:
     enabled: true
-    description: Search literal task-related text in selected source files; returns bounded snippets with path, line and hash.
+    description: Search literal task-related text in a relative directory or exact text file. A permitted missing path broadens the search to the connected repository root with an explicit warning; invalid, excluded, symbolic or unreadable paths remain errors. Returns bounded snippets with path, line and hash.
     mutation_level: read
     repeatable_read: true
     allowed_agents: [commander]
@@ -404,14 +404,18 @@ tools:
       additionalProperties: false
       properties:
         query: {type: string, minLength: 1, maxLength: 300}
-        path: {type: string, default: .}
+        path: {type: string, default: ., description: Relative directory or exact text file; an absent permitted path searches the repository root and is reported in requested_path/effective_path/warning.}
         glob: {type: string, maxLength: 300}
         depth: {type: integer, minimum: 1, maximum: 16}
         offset: {type: integer, minimum: 0, maximum: 20000}
         limit: {type: integer, minimum: 1, maximum: 100}
     output_schema:
       type: object
-      required: [repo_root, query, matches, truncated, scan_limited]
+      required: [repo_root, query, matches, truncated, scan_limited, requested_path, effective_path]
+      properties:
+        requested_path: {type: string}
+        effective_path: {type: string}
+        warning: {type: [string, 'null']}
       additionalProperties: true
 
   code.patch_generator:

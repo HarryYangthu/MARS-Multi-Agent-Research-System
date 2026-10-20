@@ -246,6 +246,15 @@ class Commander:
                     elif last_completion.status == "delegated":
                         decision = Decision(reply=_completion_unfinished_reply(last_completion))
 
+                if decision.actions:
+                    from app.bridge.commander_code import creation_source_preparation
+                    preparation = creation_source_preparation(session, decision.actions[0])
+                    if preparation is not None:
+                        # Dispatch the prerequisite, not a creation that is
+                        # known to fail. The next native decision consumes the
+                        # real read/list result and chooses its route again.
+                        decision = Decision(actions=[preparation], response_mode='repository_preparation',
+                            reply='MARS 先核对当前代码；读取结果后再创建任务。')
                 dispatching_run = has_run_dispatch(decision.actions)
                 # Only a real dispatch receipt can enter executing. A model's
                 # suggested state cannot certify that an operation happened.
@@ -268,6 +277,13 @@ class Commander:
                     # allocated a task or performed this exact mutation.
                     if not _prevent_duplicate_creation(session, Decision(actions=[action])).actions:
                         continue
+                    # Native batches may search and then try to create without
+                    # reading. Recheck after preceding real observations too;
+                    # dependent start calls must wait for the next decision.
+                    from app.bridge.commander_code import creation_source_preparation
+                    prepared_action = creation_source_preparation(session, action)
+                    if prepared_action is not None:
+                        action = prepared_action
                     tool = str(action.get("tool", ""))
                     args = action.get("args", {}) or {}
                     if not isinstance(args, dict):
@@ -301,6 +317,8 @@ class Commander:
                         )
                     )
                     get_session_store().persist(session)
+                    if prepared_action is not None:
+                        break
                     if decision.response_mode == "ordinary_coding_handoff" and tool == "run.create":
                         created_id = result.get("run_id")
                         if (result.get("ok") is True and isinstance(created_id, str) and created_id
@@ -894,7 +912,7 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _system_prompt(session: CommanderSession) -> str:
-    from app.bridge.commander_code import repository_summary
+    from app.bridge.commander_code import repository_admission_state, repository_summary
     from app.harness.context.folder_context import load_folder_context, render_folder_context
 
     folder_context = load_folder_context(session.project)
@@ -931,6 +949,7 @@ def _system_prompt(session: CommanderSession) -> str:
 ## 当前上下文
 - 当前项目: {session.project}
 - {repository_summary(session.project)}
+- 本轮代码任务创建条件（MARS 实际核验）: {json.dumps(repository_admission_state(session), ensure_ascii=False)}
 - 会话状态(FSM): {session.state.value}
 - 关联 run: {session.linked_run_id or "(无)"}
 - 介入模式: {"主控托管(主控代替人工审批，异常交回用户)" if session.auto_mode else "人工审批"}

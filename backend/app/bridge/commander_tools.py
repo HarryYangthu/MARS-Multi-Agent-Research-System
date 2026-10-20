@@ -807,8 +807,8 @@ TOOLS: dict[str, ToolSpec] = {
         parameters={"path": "relative directory, default .", "glob": "optional filename glob", "depth": "1 by default, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
         handler=_repo_list, mutation_level="read"),
     "code.repo_search": ToolSpec(name="code.repo_search",
-        description="Search literal text (case-insensitive) in selected source files. Returns path, line, snippet and SHA256, not whole files. Use task-related names, config keys or functions. Never scan unrelated code unnecessarily.",
-        parameters={"query": "literal text, not regex", "path": "relative directory, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        description="Search literal text in a relative directory or exact text file (default '.'). If a permitted relative path is absent, MARS searches the connected repository root and reports requested_path/effective_path/warning; invalid, excluded, symbolic or unreadable paths remain errors. Returns bounded snippets with source SHA256.",
+        parameters={"query": "literal text, not regex", "path": "relative directory or exact text file, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
         handler=_repo_search, mutation_level="read"),
     "code.repo_read_lines": ToolSpec(name="code.repo_read_lines",
         description="Read only a relevant source/config line range from the connected repository. Returns exact source, line numbers and SHA256. Maximum 160 lines/12000 characters per call. Use search results to pick ranges; no execution or modification.",
@@ -822,7 +822,7 @@ TOOLS: dict[str, ToolSpec] = {
         name="run.create",
         description="Create without starting. Inspect task-relevant connected source in this turn before choosing entrypoint. For an explicit unchanged existing model/configuration with a supported entrypoint and resolved budget/seed, always pass coding plus existing_execution_job after reading the exact configuration. No history lookup is required: the host checks actual approved delivery and execution receipts plus fresh validation. Old memory summaries, failed short checks or reuse_allowed=false cannot reject this reuse request; they cannot certify it either. The host may generate a fresh validated delivery without Coding model calls; unavailable evidence falls back to ordinary Coding. This does not approve artifacts or start simulation. Do not use it for code changes or new methods. For unrelated tasks explain repository_scope=not_applicable in routing_reason.",
         parameters={
-            "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
+            "entrypoint": "one of pipeline|idea|experiment|coding|writing; new execution-only runs require coding delivery first",
             "repository_scope": "required (default) or not_applicable for tasks unrelated to code",
             "routing_reason": "why this is the earliest necessary stage, based on inspected code or non-code scope",
             "user_request": "natural-language task",
@@ -916,7 +916,7 @@ TOOLS: dict[str, ToolSpec] = {
             "Running an existing model must not be expanded into designing a new one. "
             "`entrypoint` to SKIP agents the user doesn't need: 'pipeline' runs "
             "the full Idea→Experiment→Coding→Execution→Writing chain; or pick a "
-            "single stage ('idea'|'experiment'|'coding'|'execution'|'writing') to "
+            "single stage ('idea'|'experiment'|'coding'|'writing') to "
             "enter mid-chain (upstream stages are skipped). The entered stage's "
             "Agent drafts its artifact from `user_request` automatically. DO NOT "
             "pass seed_artifact unless the user gave a COMPLETE structured doc "
@@ -924,7 +924,7 @@ TOOLS: dict[str, ToolSpec] = {
             "seed_artifact; in that case just set entrypoint + user_request."
         ),
         parameters={
-            "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
+            "entrypoint": "one of pipeline|idea|experiment|coding|writing; new execution-only runs require coding delivery first",
             "user_request": "the research question / task description (natural language)",
             "task": "optional short slug for the run",
             "repository_scope": "required (default); not_applicable only for tasks unrelated to the connected code",

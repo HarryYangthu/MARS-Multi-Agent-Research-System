@@ -298,6 +298,31 @@ def test_all_actual_commander_tools_have_typed_input_metadata_and_aliases_agree(
     assert 'seed' not in existing.get('required', []) and 'default' not in existing['properties']['seed']
 
 
+@pytest.mark.parametrize('name', ['run.create', 'create_and_start_run'])
+def test_new_run_schema_exposes_only_entrypoints_accepted_by_creation_handler(name: str) -> None:
+    from typing import get_args
+    from app.bridge.workflow_service import EntryPoint, build_pipeline
+    supported = [stage for stage in get_args(EntryPoint) if stage != 'execution']
+    assert supported == ['pipeline', 'idea', 'experiment', 'coding', 'writing']
+    schema = commander_tool_input_schema(name, load_tool_configs())
+    assert schema['properties']['entrypoint']['enum'] == supported
+    assert schema['properties']['entrypoint']['default'] == 'pipeline'
+    exported = {tool['function']['name']: tool['function'] for tool in commander_native_tools()}
+    native_name = next(key for key, original in native_tool_names().items() if original == name)
+    assert exported[native_name]['parameters'] == schema
+    for stage in get_args(EntryPoint):
+        # Real graph/schema construction only: no tool, provider or job call.
+        assert build_pipeline(stage).nodes
+        if stage == 'execution':
+            with pytest.raises(ValidationError):
+                Draft202012Validator(schema).validate({'entrypoint': stage})
+        else:
+            Draft202012Validator(schema).validate({'entrypoint': stage})
+    assert 'execution' in get_args(EntryPoint)  # Existing workflow/recovery types remain intact.
+    assert 'coding|execution|writing' not in TOOLS[name].parameters['entrypoint']
+    assert "'coding'|'execution'|'writing'" not in TOOLS[name].description
+
+
 def test_discovery_spec_metadata_preserves_pydantic_definitions_and_open_payload_boundaries() -> None:
     from app.bridge.discovery_types import DiscoveryRunSpec
     schema = commander_tool_input_schema('discovery.create', load_tool_configs())
