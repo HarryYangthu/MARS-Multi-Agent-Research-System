@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { openTensorBoard, type TensorBoardSession } from "@/lib/tensorboard";
 import { ExperimentComparison } from "./ExperimentComparison";
-import { canOverlayImages, comparisonUrl, type TensorBoardDashboard } from "@/lib/tensorboardComparison";
+import { canOverlayImages, comparisonUrl, exactRunFilter, type TensorBoardDashboard } from "@/lib/tensorboardComparison";
 
 export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   project: string; runId?: string; fullHeight?: boolean;
@@ -30,7 +30,10 @@ export function TensorBoardPanel({ project, runId, fullHeight = false }: {
   const pair = baseline && selectedCandidate ? [baseline, selectedCandidate] : [];
   const comparing = compareBaseline && pair.length === 2;
   const split = comparing && (!overlay || (dashboard === "images" && !canOverlayImages(pair, sources)));
-  const frameUrl = session ? comparing ? comparisonUrl(session.url, dashboard, pair, true) : session.url + "#" + dashboard : "";
+  const galleryRuns = sources.map((source) => source.gallery_run).filter(Boolean);
+  const frameUrl = session ? comparing ? comparisonUrl(session.url, dashboard, pair, true)
+    : dashboard === "images" && galleryRuns.length ? session.url + "#images&regexInput=" + encodeURIComponent(exactRunFilter(galleryRuns))
+    : session.url + "#" + dashboard : "";
   useEffect(() => {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(preferenceKey) || "{}");

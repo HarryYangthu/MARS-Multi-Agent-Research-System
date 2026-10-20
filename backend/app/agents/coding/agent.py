@@ -31,21 +31,44 @@ class CodingAgent(BaseAgent):
         "实际落地，或通过 code.write_file 完成允许的改动；所有写入仍必须经过工具权限与 Gate 5。"
         "完成前核对工具执行成功，正文保留实际 diff；只提出补丁而未写入不算实现完成。"
         "无真实测试结果时如实标注 skipped，不声称测试通过。"
+        "已有结构、入口和训练方式均不变的明确YAML参数任务，按配置修改交付：先读真实源配置与加载器继承，"
+        "优先 code.copy_yaml 单次批量复制，只改用户指定参数；不要为配置复制新增测试文件、重写训练脚本或运行全仓测试。"
+        "工具参数为 source、variants=[{path,updates}] 与可选 common_updates；updates使用嵌套mapping，叶值为JSON标量，不能写点路径。"
+        "公共预算/seed等放common_updates，各组差异放updates。确需新增已明确字段时才用allow_new_keys=true，不猜默认。"
+        "源配置依赖同目录base等文件时先核对加载器，另一次copy_yaml显式复制依赖，不能假设跨目录自动继承。"
+        "不要为清理旧配置而删除或迁移文件；保留已有写入，按真实运行清单引用需要的配置。"
+        "派生配置交由MARS逐组实际入口的不训练预检核验；它检查配置继承、必需字段和模型构建，不能用整仓单测替代。"
+        "确有源码/接口修改或真实预检失败时，只补受影响的已有检查与已定位问题，禁止为看起来完整而制造测试和重复检查。"
+        "测试只能核对纯函数、schema、真实文件和真实进程；禁止用替身训练器、Mock、monkeypatch "
+        "或固定指标伪造模型/工具/执行成功。新增作业适配器时先读取 configured_execution_delivery "
+        "中的真实请求/结果协议，按相同执行配置检查解析和结果格式；不要混淆 MARS 包装入口与训练入口。"
         "交付 execution_jobs：名称逐项对应已批准实验，每项 config 绑定实际启动入口 entrypoint、"
-        "配置文件 config_path 或宿主 command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "配置文件 config_path 或 MARS command_id；明确 seed、预算数值和单位，不能替换批准参数。"
+        "明确的基线与候选对照，请在各项 config.role 保留或填写已确认的 baseline/candidate 身份标签，"
+        "供结果展示对齐；保留批准清单的既有 role，未确认的分组不猜测，不借标签改变科学配置、数据、种子或预算。"
+        "按用户指定的 entrypoint 与 config_path 精确选择 MARS 执行能力；没有匹配能力时明确报告缺失。"
+        "不能为迁就登记命令扩大用户指定的模型集合、替换配置、改变数据划分或指标口径。"
         "有批准实验方案时 experiment_plan_sha256 必须绑定该完整文档；没有方案时按用户任务交付运行清单，不得捏造方案哈希。"
         "交付前逐组核对实际配置文件的种子与训练单位。当前入口不能满足批准预算时实现正确入口，"
         "不能把 steps 解释成 epochs；未落实交接约束不能提交成功。"
         "步骤预算在交付中使用 budget_steps，或 budget_unit=steps + max_iters；"
         "同一数值的两种字段是预算别名，不能改写批准数值或改成 epochs。"
         "重试时先检查当前分支已有改动，保留正确实现，只修复已定位问题。"
-        "宿主为本任务固定一个 Git 分支，并在编码完成、停止或失败时自动提交真实写入改动。"
+        "MARS 为本任务固定一个 Git 分支，并在编码完成、停止或失败时自动提交真实写入改动。"
         "不要自行创建或切换分支，不要执行 stash/reset/pull，也不要重复提交；自动提交不代表方案已批准。"
-        "files_changed 只列本任务成功写入记录形成的净改动；相同内容重写是复用，不能声明新增。"
-        "全部复用时 files_changed=[]，正文列出复用文件、指纹及真实检查；不要为了登记制造改动。"
+        "files_changed 覆盖本任务整条成功写入链形成的净改动；前轮写入且保留的净改动仍须列出。"
+        "相同内容重写是复用，不能声明新增；只有整条写入链没有净差异时 files_changed=[]。"
+        "正文列出复用文件、指纹及真实检查；不要为了登记制造改动或重复应用补丁。"
+        "同范围检查已有成功真实收据，且相关源码、配置、检查命令及执行环境输入均未变时，引用并复用收据，"
+        "不要重复运行整套检查；输入变化、先前失败或证据无法确认时，按受影响范围重新实际检查。"
+        "不得伪造检查通过，也不能以复用为由省略变化后的必要检查或本次必须的运行预检。"
         "正文中的示意 diff 不会作为补丁执行；完整补丁须有文件头与正确行号，禁止省略号。"
         "不要为了消除交付字段冲突删除基线配置中无关的 Epoch/Etotal/epoch 控制字段。"
-        "仿真入口默认启用 TensorBoard，消费宿主 MARS_TENSORBOARD_ENABLED=1；"
+        "已有模型的有限改参任务，优先复用 configured_execution_delivery 中登记命令 label 明确声明的"
+        "现有适配器观测能力；训练脚本未直接写 TensorBoard 不代表执行器缺少观测。"
+        "适配器已负责观测时，保留其回调和日志文件约定，不重复注入 Observer 或再次写入同一步骤日志。"
+        "没有能力声明或真实证据时不得声称已支持；以真实预检与运行日志核对缺口，不能把声明当作运行成功。"
+        "仿真入口默认启用 TensorBoard，消费 MARS MARS_TENSORBOARD_ENABLED=1；"
         "按真实更新记录损失、学习率、验证指标和参数快照，并将当前代码仓本次生成的"
         "频谱、通道对比、损失图、系数热图及非线性特性全部保存在当前作业目录。"
         "验证日志实际写出，只有最终结果单点不算完整过程；未采集内容明确说明，禁止补造。"
@@ -85,16 +108,23 @@ class CodingAgent(BaseAgent):
             kind: [{'command_id': cmd.id, 'argv': list(cmd.argv)} for cmd in check_commands(kind)]
             for kind in ('lint', 'test')})
         context.upstream['configured_code_checks_usage'] = (
-            'code.lint/code.test_runner 的 command_id 必须使用上述宿主配置 ID，不能填写 shell 命令。'
-            '省略 command_id 会执行该类全部已配置检查。测试中切换全局配置时先清空旧配置，'
+            'code.lint/code.test_runner 的 command_id 必须使用上述 MARS 配置 ID，不能填写 shell 命令。'
+            '省略 command_id 会执行该类全部检查；仅在任务确实需要全量回归时才省略。'
+            '纯YAML参数复制不新增测试文件、不重复全仓测试，保留各组真实入口的不训练预检。'
+            '需要检查时选择最相关command_id一次；同run相同Git可见内容快照、命令与实际环境的数据绑定，'
+            'MARS可返回reused=true和原成功receipt。引用它说明复用，不声称新进程执行；输入变化或失败必须实跑。'
+            '测试中切换全局配置时先清空旧配置，'
             '避免上一组残留的 scheduler 等字段污染下一组。')
+        from app.harness.tools.execution.handoff import execution_delivery_context
+        context.upstream['configured_execution_delivery'] = json.dumps(
+            execution_delivery_context(), ensure_ascii=False)
         from app.harness.schema.experiment_contract import document_hash, document_metadata
         for supplied in request.upstream_artifacts.values():
             text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied
             if text.startswith('---\n') and document_metadata(text).get('schema') == 'experiment_plan.v1':
                 context.upstream['approved_experiment_identity'] = json.dumps({
                     'experiment_plan_sha256': document_hash(text),
-                    'instruction': '此哈希由宿主计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
+                    'instruction': '此哈希由 MARS 计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
         return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
@@ -104,8 +134,12 @@ class CodingAgent(BaseAgent):
             return errors
         from app.harness.schema.frontmatter_parser import parse
         metadata = parse(text).metadata
-        if metadata.get("files_changed") and not any(
-            item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file"}
+        # The host validator has already checked the run's durable write ledger,
+        # bound branch and current file hashes above. A retry may reuse those
+        # genuine writes without issuing a redundant mutation in this invocation.
+        # Standalone callers without that host verifier retain the local check.
+        if request.candidate_validator is None and metadata.get("files_changed") and not any(
+            item.get("ok") and item.get("tool") in {"code.apply_patch", "code.write_file", "code.delete_file", "code.copy_yaml"}
             for item in observations
         ):
             errors.append("/files_changed: implement the proposed changes through the real code tools before submitting")
@@ -117,11 +151,14 @@ class CodingAgent(BaseAgent):
                 if upstream.get("schema") == "experiment_plan.v1":
                     plans.append(text)
         if plans or metadata.get('execution_jobs') or request.extra.get('execution_delivery_required'):
-            from app.harness.tools.execution.handoff import coding_handoff_errors
+            from app.harness.tools.execution.handoff import coding_handoff_preflight_errors
             if len(plans) > 1:
                 errors.append('/upstream: 必须有唯一的批准实验方案')
             else:
-                errors.extend(coding_handoff_errors(plans[0] if plans else '', metadata, project=request.project,
+                errors.extend(await coding_handoff_preflight_errors(plans[0] if plans else '', metadata,
+                    project=request.project, run_id=str(request.extra.get('run_id') or ''),
+                    run_root=Path(str(request.extra.get('run_root') or '')),
+                    attempt=request.extra.get('attempt', 1),
                     plan_required=bool(request.extra.get('experiment_plan_required'))))
         return errors
 

@@ -24,9 +24,11 @@ def resume_revision_reason(run: RunHandle, node: str, invocation: str) -> str:
         raise ValueError("resume revision requires its exact original human feedback material")
     source = read_material(run.root, references[0], 0, 2_000_000)
     content = source["content"]
-    prefix = ("[untrusted upstream:human_revision_request]\n"
-              "Human reviewer rejected the current draft and requested a revised version. Feedback: ")
-    if source["truncated"] or not isinstance(content, str) or not content.startswith(prefix):
+    prefixes = ("[untrusted upstream:human_revision_request]\nRevision requested for the current draft. Feedback: ",
+                "[untrusted upstream:human_revision_request]\n"
+                "Human reviewer rejected the current draft and requested a revised version. Feedback: ")
+    prefix = next((value for value in prefixes if isinstance(content, str) and content.startswith(value)), None)
+    if source["truncated"] or not isinstance(content, str) or prefix is None:
         raise ValueError("resume revision feedback format differs from its original input")
     reason = content[len(prefix):]
     if not reason.strip():

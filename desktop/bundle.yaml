@@ -20,7 +20,7 @@ runtime_source_prefixes:
   - backend/app/
   - configs/
   - templates/
-  - projects/synthetic_regression/
+  - projects/.gitkeep
   - scripts/evaluators/
 frontend_build_exclusions:
   - cache

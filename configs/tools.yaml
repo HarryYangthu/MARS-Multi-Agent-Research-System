@@ -393,7 +393,7 @@ tools:
 
   code.repo_search:
     enabled: true
-    description: Search literal task-related text in selected source files; returns bounded snippets with path, line and hash.
+    description: Search literal task-related text in a relative directory or exact text file. A permitted missing path broadens the search to the connected repository root with an explicit warning; invalid, excluded, symbolic or unreadable paths remain errors. Returns bounded snippets with path, line and hash.
     mutation_level: read
     repeatable_read: true
     allowed_agents: [commander]
@@ -404,14 +404,18 @@ tools:
       additionalProperties: false
       properties:
         query: {type: string, minLength: 1, maxLength: 300}
-        path: {type: string, default: .}
+        path: {type: string, default: ., description: Relative directory or exact text file; an absent permitted path searches the repository root and is reported in requested_path/effective_path/warning.}
         glob: {type: string, maxLength: 300}
         depth: {type: integer, minimum: 1, maximum: 16}
         offset: {type: integer, minimum: 0, maximum: 20000}
         limit: {type: integer, minimum: 1, maximum: 100}
     output_schema:
       type: object
-      required: [repo_root, query, matches, truncated, scan_limited]
+      required: [repo_root, query, matches, truncated, scan_limited, requested_path, effective_path]
+      properties:
+        requested_path: {type: string}
+        effective_path: {type: string}
+        warning: {type: [string, 'null']}
       additionalProperties: true
 
   code.patch_generator:
@@ -481,6 +485,38 @@ tools:
     output_schema:
       type: object
       required: [path, sha256, bytes]
+      additionalProperties: true
+
+  code.copy_yaml:
+    enabled: true
+    description: Copy one YAML configuration into bounded variants with nested scalar updates, preserving comments and unchanged text. Copy required sibling defaults explicitly. Complex YAML edits can use code.write_file.
+    mutation_level: write
+    allowed_agents: [coding, system, bridge]
+    timeout_seconds: 20
+    input_schema:
+      type: object
+      required: [source, variants]
+      additionalProperties: false
+      properties:
+        source: {type: string, minLength: 1}
+        common_updates: {type: object}
+        allow_new_keys: {type: boolean}
+        dry_run: {type: boolean}
+        _approval_id: {type: string}
+        variants:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            type: object
+            required: [path]
+            additionalProperties: false
+            properties:
+              path: {type: string, minLength: 1}
+              updates: {type: object}
+    output_schema:
+      type: object
+      required: [files]
       additionalProperties: true
 
   code.delete_file:
@@ -663,6 +699,12 @@ tools:
       required: [exists, manifest, metadata]
       additionalProperties: true
 
+  run.existing_model:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+
   run.create:
     enabled: true
     bridge_only: true
@@ -788,3 +830,64 @@ tools:
       type: object
       required: [ref, content, char_start, char_end, total_chars]
       additionalProperties: true
+
+  knowledge.research_memory:
+    enabled: true
+    description: Search task-related baseline capability and experiment history. Reuse
+      requires exact complete measurement protocol and intact evidence.
+    mutation_level: read
+    allowed_agents:
+    - commander
+    - idea
+    - idea_research
+    - experiment
+    - coding
+    - execution
+    - writing
+    timeout_seconds: 30
+    input_schema:
+      type: object
+      required:
+      - query
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        protocol:
+          type: object
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10
+    output_schema:
+      type: object
+  knowledge.research_memory_read:
+    enabled: true
+    description: Read a preserved baseline or experiment record with configuration,
+      recipe, metrics and paginated evidence.
+    mutation_level: read
+    allowed_agents:
+    - commander
+    - idea
+    - idea_research
+    - experiment
+    - coding
+    - execution
+    - writing
+    timeout_seconds: 30
+    input_schema:
+      type: object
+      required:
+      - record_id
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          pattern: ^mem_[0-9a-f]{32}$
+        evidence_offset:
+          type: integer
+          minimum: 0
+    output_schema:
+      type: object

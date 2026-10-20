@@ -35,7 +35,7 @@ python -m scripts.desktop.smoke_macos \
 - `Contents/Resources/licenses/`：MARS、Electron/Chromium 许可证和冻结 Python requirements。Python 原生许可证、Python wheel 的 dist-info/许可证、Node 包许可证保留在对应包目录。此材料保留不等于法律合规审查完成。
 - `Contents/Resources/local-test.json`：源码 revision、每个选中文件 SHA256、锁文件哈希、真实前端 build ID 和显式固定文件来源。
 
-`bundle-manifest.json` 位于 `.app` 外，逐项记录普通文件 hash/尺寸/权限、目录权限与链接目标，拒绝逃逸或断裂 symlink、`.env*`、editable `.pth`、`pyvenv.cfg`。原生依赖检查列出真实 Mach-O 加载项与 LC_RPATH，拒绝包外绝对搜索路径和逃逸相对路径；按应用主程序、Python 或独立原生程序的宿主上下文解析 `@rpath`、`@loader_path` 与 `@executable_path`，要求非系统加载项能在包内递归解析。构建副本中上游 wheel 残留的外部绝对 LC_RPATH 会在签名前移除，随后仍须完整通过解析。`LC_ID_DYLIB` 自身标识不误判为加载路径。该静态检查不覆盖尚未实际执行的任意字符串动态 `dlopen`。签名前逐个对所有原生文件执行 ad-hoc 签名，再封装整个 `.app`；验证时同时核验每个原生文件与外层应用。仅 `codesign --deep` 对根应用通过不足以证明 Resources 下 wheel dylib 的签名有效。清单用于本地内容复核，未由外部发布者签名，不构成供应链真实性证明。
+`bundle-manifest.json` 位于 `.app` 外，逐项记录普通文件 hash/尺寸/权限、目录权限与链接目标，拒绝逃逸或断裂 symlink、`.env*`、editable `.pth`、`pyvenv.cfg`。原生依赖检查列出真实 Mach-O 加载项与 LC_RPATH，拒绝包外绝对搜索路径和逃逸相对路径；按应用主程序、Python 或独立原生程序的加载上下文解析 `@rpath`、`@loader_path` 与 `@executable_path`，要求非系统加载项能在包内递归解析。构建副本中上游 wheel 残留的外部绝对 LC_RPATH 会在签名前移除，随后仍须完整通过解析。`LC_ID_DYLIB` 自身标识不误判为加载路径。该静态检查不覆盖尚未实际执行的任意字符串动态 `dlopen`。签名前逐个对所有原生文件执行 ad-hoc 签名，再封装整个 `.app`；验证时同时核验每个原生文件与外层应用。仅 `codesign --deep` 对根应用通过不足以证明 Resources 下 wheel dylib 的签名有效。清单用于本地内容复核，未由外部发布者签名，不构成供应链真实性证明。
 
 Next 的 custom server 需要完整 production dependencies；不能仅复制 `.next/standalone`，后者不追踪 custom server 所需的所有文件。`next.config.mjs` 读取的 `configs/frontend.yaml` 一并打包。前端缓存、standalone 重复副本和构建类型产物排除。
 

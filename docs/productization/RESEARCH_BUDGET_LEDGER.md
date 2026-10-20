@@ -1,6 +1,6 @@
 # 冻结研究预算的 SQLite 持久核心
 
-此增量提供 `harness/runtime/research_budget_ledger.py`，只处理可信宿主提交的预算记录与原子准入。模型、工具和本地 CPU 作业适配器分别验证；Reader、Orchestrator 的完整调度仍需接入，合同研究依然阻断，不能把本模块测试当成全部预算已约束真实研究。
+此增量提供 `harness/runtime/research_budget_ledger.py`，只处理MARS提交的预算记录与原子准入。模型、工具和本地 CPU 作业适配器分别验证；Reader、Orchestrator 的完整调度仍需接入，合同研究依然阻断，不能把本模块测试当成全部预算已约束真实研究。
 
 ## 权威与显式升级
 
@@ -22,7 +22,7 @@ StateJournal 新增 `transaction()` 与 `commit_in_transaction()`。budget 的 `
 
 预留、结算和持久读取都校验数量类型：模型请求、token 与非零模型金额只可记入 model，训练/GPU 时间只可记入 job。model/tool 的预留与明确结算至少包含一次对应请求/执行；未开始或结果未知不能用空的成功结算退款。普通业务计数可复合记账，例如一次搜索工具同时预留 tool_executions 与 search_candidates。明确实际用量可少于预留，不能因此把最大候选数或训练时长当成已消耗量。
 
-进程崩溃不会退款：已提交 reserved 继续占用，未提交事务由 SQLite 回滚。持久核心不靠 PID 猜测 owner 死亡，宿主取得真实失联证据后显式 `mark_unknown(reason, observed_lower_bound=None)`。可选 BudgetAmounts 下界单独持久保存并带哈希，不改原预留；每项占用为 max(原预留, 已知下界)，重复观察只能提高下界。已知下界超额同样设置 reservation_overrun，不能因总用量未知而丢弃已知超额。unknown 保留活动区间和 Reader/Job 槽位。明确确认工作已停止后可 `reconcile_stopped(actor, evidence_refs)`，关闭活动并释放槽位，但仍保留上述保守用量、unknown 标记且禁止自动重放原操作。
+进程崩溃不会退款：已提交 reserved 继续占用，未提交事务由 SQLite 回滚。持久核心不靠 PID 猜测 owner 死亡，MARS取得真实失联证据后显式 `mark_unknown(reason, observed_lower_bound=None)`。可选 BudgetAmounts 下界单独持久保存并带哈希，不改原预留；每项占用为 max(原预留, 已知下界)，重复观察只能提高下界。已知下界超额同样设置 reservation_overrun，不能因总用量未知而丢弃已知超额。unknown 保留活动区间和 Reader/Job 槽位。明确确认工作已停止后可 `reconcile_stopped(actor, evidence_refs)`，关闭活动并释放槽位，但仍保留上述保守用量、unknown 标记且禁止自动重放原操作。
 
 ## 计时、金额与 23 项字段
 

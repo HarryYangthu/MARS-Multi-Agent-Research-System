@@ -44,6 +44,7 @@ from app.api import results as results_api
 from app.api import runtime as runtime_api
 from app.api import runs as runs_api
 from app.api import research_contracts as research_contracts_api
+from app.api import research_memory as research_memory_api
 from app.api import research_templates as research_templates_api
 from app.api import stats as stats_api
 from app.api import system as system_api
@@ -67,6 +68,7 @@ from app.bridge.extension_runtime import get_extension_runtime
 from app.bridge.idea_selection import IdeaSelectionCoordinator
 from app.harness.tools.registry import get_registry as get_tool_registry
 from app.harness.runtime.readiness import check_git_readiness
+from app.harness.runtime.plot_environment import initialize_plot_environment
 from app.settings import get_settings
 
 
@@ -92,6 +94,7 @@ def register_default_agents() -> None:
 
 @asynccontextmanager
 async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    initialize_plot_environment()
     git_check = await asyncio.to_thread(check_git_readiness)
     _app.state.git_readiness = git_check
     if not git_check.ready:
@@ -167,6 +170,7 @@ def create_app() -> FastAPI:
 
     app.include_router(runs_api.router)
     app.include_router(research_contracts_api.router)
+    app.include_router(research_memory_api.router)
     app.include_router(research_templates_api.router)
     app.include_router(capabilities_api.router)
     app.include_router(context_api.router)

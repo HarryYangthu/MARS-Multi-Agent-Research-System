@@ -46,6 +46,17 @@ def checkpoint(session: RunSession, *, pending: str | None = None) -> Path:
     return root / 'checkpoint.json'
 
 
+
+def bounded_budget(root: Path, limit: int) -> RunModelBudget:
+    """Freeze a real bounded test policy without changing deployment defaults."""
+    configuration = RunModelBudget(root).configuration
+    configuration['limits']['max_model_requests'] = limit
+    policy_path = root / 'resources/model_budget.policy.yaml'
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(yaml.safe_dump(configuration))
+    return RunModelBudget(root)
+
+
 def test_failed_stage_without_checkpoint_can_retry_in_same_run(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
     before = sorted(tmp_path.iterdir())
@@ -149,7 +160,7 @@ def test_token_usage_is_statistics_only_but_corrupt_ledger_blocks_recovery(tmp_p
     assert recovery_status(orch, session.run.run_id, project='pimc')['status'] == 'blocked'
 
 
-def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> None:
+def test_approval_idle_time_does_not_expire_recoverable_model_checkpoint(tmp_path: Path) -> None:
     orch, session = session_at(tmp_path)
     checkpoint(session)
     budget = RunModelBudget(session.run.root)
@@ -159,7 +170,29 @@ def test_expired_execution_window_offers_explicit_retry_only(tmp_path: Path) -> 
     budget.path.write_text(json.dumps(state))
     before = budget.path.read_bytes()
     view = recovery_status(orch, session.run.run_id, project='pimc')
-    assert [action['action'] for action in view['actions']] == ['retry']
+    assert [action['action'] for action in view['actions']] == ['resume', 'retry']
+    assert budget.path.read_bytes() == before
+
+
+def test_consumed_model_activity_blocks_recovery_without_refunding_usage(tmp_path: Path) -> None:
+    import time
+    orch, session = session_at(tmp_path)
+    checkpoint(session)
+    initial = RunModelBudget(session.run.root)
+    policy = initial.configuration
+    policy['limits']['max_elapsed_seconds'] = 0.02
+    policy_path = session.run.root / 'resources/model_budget.policy.yaml'
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_path.write_text(yaml.safe_dump(policy))
+    budget = RunModelBudget(session.run.root, active_model_time=True)
+    reservation = budget.reserve([Message(role='user', content='Real budget reservation, no provider called.')],
+        LLMConfig(provider='custom', model='not-called', max_tokens=8, max_retries=0), {})
+    time.sleep(0.03)
+    budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
+    before = budget.path.read_bytes()
+    view = recovery_status(orch, session.run.run_id, project='pimc')
+    assert view['status'] == 'blocked' and not view['actions']
+    assert '有效模型调用时间' in view['message']
     assert budget.path.read_bytes() == before
 
 
@@ -187,11 +220,11 @@ def test_retry_reservation_and_completion_mode_use_same_budget_after_restart(
                                           entrypoint=stage, standalone=True))
     session.graph.restore_state(stage, NodeState.FAILED)
     orch._persist_state(session, status='failed')
-    budget = RunModelBudget(session.run.root, completion_driven=True)
-    limit = budget.configuration['limits']['max_model_requests']
-    assert type(limit) is int
-    # Use real reservations/cancellations to leave one slot. No model is called.
-    for _ in range(limit - 1):
+    limit = 2
+    budget = bounded_budget(session.run.root, limit)
+    # Exhaust actual reservations. Retries may narrow to a remaining slot, but
+    # no recovery may reset a fully consumed request cap. No model is called.
+    for _ in range(limit):
         reservation = budget.reserve([Message('user', 'Accounting admission only')],
             LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
         budget.settle(reservation, usage=None, complete=False, outcome='cancelled')
@@ -199,7 +232,7 @@ def test_retry_reservation_and_completion_mode_use_same_budget_after_restart(
     for instance in (orch, Orchestrator(run_store=store, registry=registry, bus=InProcessEventBus())):
         view = recovery_status(instance, session.run.run_id, project='pimc')
         assert view['status'] == 'blocked' and not view['actions']
-        assert f'已计入 {limit - 1} 次' in view['message'] and '预留 3 次' in view['message']
+        assert f'已计入 {limit} 次' in view['message'] and '预留 1 次' in view['message']
         assert instance.owned_tasks.active(session.run.run_id) is None
         assert budget.path.read_bytes() == before
 
@@ -211,8 +244,8 @@ def test_deterministic_execution_retry_does_not_need_a_model_reservation(tmp_pat
     session = orch.create_session(RunRequest(task='deterministic recovery', project='pimc',
         entrypoint='execution', standalone=True))
     session.graph.restore_state('execution', NodeState.FAILED)
-    budget = RunModelBudget(session.run.root)
-    limit = budget.configuration['limits']['max_model_requests']
+    limit = 2
+    budget = bounded_budget(session.run.root, limit)
     for _ in range(limit):
         reservation = budget.reserve([Message('user', 'Accounting admission only')],
             LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})

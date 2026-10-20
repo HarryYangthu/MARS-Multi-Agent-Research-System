@@ -25,7 +25,7 @@ async function main() {
   const runtimeRoot = await seedRuntime(source, output);
   const token = randomBytes(32).toString('hex');
   gateway = await createGateway({ token, timeoutMs: 10000 });
-  const env = { ...process.env, PYTHONHOME: pythonRoot, PYTHONPATH: [path.join(source, 'backend'), path.join(source, 'projects/synthetic_regression/src')].join(path.delimiter),
+  const env = { ...process.env, PYTHONHOME: pythonRoot, PYTHONPATH: path.join(source, 'backend'),
     PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1',
     MARS_RUNTIME_ROOT: runtimeRoot, MARS_DESKTOP_SESSION_TOKEN: token, MARS_CORS_ORIGINS: gateway.origin };
   stage = 'python-origins';

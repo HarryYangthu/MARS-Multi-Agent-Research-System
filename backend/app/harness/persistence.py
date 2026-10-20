@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,7 +28,7 @@ def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     key = str(path.resolve())
     with _LOCKS_GUARD:
-        lock = _LOCKS.setdefault(key, FileLock(key))
+        lock = _LOCKS.setdefault(key, FileLock(key, preserve_lock_file=True))
     with lock.acquire(timeout=timeout):
         yield
 
@@ -53,10 +54,29 @@ def atomic_write_text(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _replace_complete_file(temporary, path)
         fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _replace_complete_file(temporary: Path, path: Path) -> None:
+    """Allow a Windows reader to close its handle before atomic replacement.
+
+    Windows readers and virus scanners can briefly deny delete sharing. Keep
+    the complete temporary file intact and retry only these OS errors, for at
+    most two seconds. Permanent permissions and other errors still propagate.
+    """
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError as error:
+            if (os.name != "nt" or getattr(error, "winerror", None) not in {5, 32, 33}
+                    or time.monotonic() >= deadline):
+                raise
+            time.sleep(0.01)
 
 
 def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:

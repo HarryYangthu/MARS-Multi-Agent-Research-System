@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.bridge.commander import _parse_decision
+from app.bridge.commander import _decision_from_response, _parse_decision
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.harness.runtime.conversation_state import ConversationState
 
@@ -28,6 +28,67 @@ def test_incident_extra_closings_preserve_the_complete_start_action() -> None:
     assert decision.reply == authored["reply"]
     assert decision.next_state == "executing"
     assert decision.actions == authored["actions"]
+
+
+def test_actual_incident_stray_array_close_preserves_complete_existing_model_action() -> None:
+    # Captured response shape from conv_2026-10-18T155011. This is pure parsing,
+    # not a generated model response or a substituted tool execution.
+    text = ('{"reply":"改用基线专用快捷通道。","next_state":"executing","actions":['
+            '{"tool":"run.existing_model","args":{"model_name":"StaticPIMC",'
+            '"config_path":"configs/static.yaml","entrypoint":"train_static.py",'
+            '"max_iters":1,"budget_unit":"epochs","stop_after_execution":false}]}]}')
+    decision = _decision_from_response(text)
+    assert decision.response_mode == "structured"
+    assert decision.reply == "改用基线专用快捷通道。"
+    assert decision.next_state == "executing"
+    assert decision.actions == [{"tool": "run.existing_model", "args": {
+        "model_name": "StaticPIMC", "config_path": "configs/static.yaml",
+        "entrypoint": "train_static.py", "max_iters": 1, "budget_unit": "epochs",
+        "stop_after_execution": False}}]
+    assert "seed" not in decision.actions[0]["args"]  # Never invent a missing scientific parameter.
+
+
+@pytest.mark.parametrize("text", [
+    "请告诉我需要运行哪个模型，以及训练多少轮。",
+    "我可以先解释这些设置分别控制什么。",
+    "参数名可以写成 `lr_init`，不需要指定 JSON。",
+    '```yaml\nmodel_name: ExistingModel\nlr_init: 0.0001\n```',
+    '["参数量", "性能", "收敛速度"]',
+])
+def test_natural_response_is_retained_without_inventing_tool_actions(text: str) -> None:
+    decision = _decision_from_response(text)
+    assert decision.reply == text and decision.response_mode == "plain_reply"
+    assert decision.actions == [] and decision.next_state is None
+
+
+@pytest.mark.parametrize("text", [
+    "", '{"actions":[{"tool":"run.existing_model","args":',
+    '{"reply":"first"} {"actions":[{"tool":"create_and_start_run"}]}',
+    '{"actions":[{"tool":"get_run_status"},{"tool":"create_and_start_run","args":false}]}',
+    '{"actions":[{"tool":"get_run_status","tool":"create_and_start_run"}]}',
+    '{"actions":[{"tool":"run.existing_model","args":{"seed":NaN}}]}',
+    "任务已启动，我会继续处理。",
+    "我现在创建仿真任务。",
+    "The experiment has started.",
+    "当前任务正在运行。",
+    "已停止当前实验。", "已暂停仿真。", "已取消当前任务。", "已删除临时任务。", "已批准方案。", "已修改代码。",
+    "已经停止当前实验。", "已经批准方案。", "已经保存改动。", "代码已经提交。",
+    "The experiment was stopped.", "The run is paused.",
+])
+def test_unrecoverable_response_requests_clarification_without_partial_dispatch_or_http_error(text: str) -> None:
+    decision = _decision_from_response(text)
+    assert decision.response_mode == "clarification"
+    assert decision.reply and "已有任务和结果已保留" in decision.reply
+    assert decision.actions == [] and decision.next_state is None
+
+
+def test_single_stray_close_repair_does_not_accept_multiple_decisions_or_missing_values() -> None:
+    for text in (
+        '{"actions":[{"tool":"get_run_status","args":{}}]}] {"actions":[]}',
+        '{"actions":[{"tool":"run.existing_model","args":{"seed":]}]}',
+        '{"actions":[{"tool":"run.existing_model","args":{"seed":2026}]}',
+    ):
+        assert _decision_from_response(text).response_mode == "clarification"
 
 
 @pytest.mark.parametrize("suffix", ["", " \n\t", "}", "]}", " \n] }\t"])
@@ -68,23 +129,37 @@ def test_optional_fields_keep_their_protocol_defaults() -> None:
     assert action.actions == [{"tool": "get_run_status", "args": {}}]
 
 
+def test_actual_flat_source_search_keeps_all_arguments_without_execution() -> None:
+    action = {'tool': 'code.repo_search', 'query': 'loss', 'path': 'libs/engine.py'}
+    result = _parse_decision(json.dumps({'actions': [action]}))
+    assert result.actions == [{'tool': 'code.repo_search', 'args': {'query': 'loss', 'path': 'libs/engine.py'}}]
+    with pytest.raises(CommanderDecisionError, match='ambiguous'):
+        _parse_decision(json.dumps({'actions': [{**action, 'args': {'query': 'another'}}]}))
+
+
 @pytest.mark.parametrize("text", [
     "", "模型只返回了普通文本", "null", "[]", '[{"reply":"nested"}]',
-    'prefix {"reply":"not a root decision"}',
     '{"reply":"first"} {"reply":"second"}',
-    '{"reply":"first"},', '{"reply":"first"} prose', '{"reply":"first"}{',
-    '{"reply":"first"}[', '{"reply":"first"};',
+    '{"reply":"first"}{', '{"reply":"first"}[',
     '{"reply":"truncated"', '{"reply":"broken,"actions":[]}',
-    '{"reply":"first","actions":[],}',
-    '```json\n{"reply":"unclosed fence"}',
-    '```python\n{"reply":"wrong fence"}\n```',
-    '```json {"reply":"no newline"}```',
-    '```json\n{"reply":"first"}\n``` trailing prose',
     '```json\n{"reply":"first"}\n```\n{"reply":"second"}',
 ])
 def test_ambiguous_or_malformed_documents_fail_explicitly(text: str) -> None:
     with pytest.raises(CommanderDecisionError):
         _parse_decision(text)
+
+
+@pytest.mark.parametrize('text', [
+    'prefix {"reply":"first"}', '{"reply":"first"},', '{"reply":"first"} prose',
+    '{"reply":"first"};', '{"reply":"first","actions":[],}',
+    '```json\n{"reply":"first"}', '```python\n{"reply":"first"}\n```',
+    '```json {"reply":"first"}```', '```json\n{"reply":"first"}\n``` trailing prose',
+    '\ufeff```JSON\r\n{"reply":"first"}\r\n```',
+])
+def test_noncritical_presentation_does_not_block_complete_decision(text: str) -> None:
+    decision = _decision_from_response(text)
+    assert decision.reply == 'first' and decision.actions == []
+    assert decision.response_mode == 'structured'
 
 
 @pytest.mark.parametrize("payload", [
@@ -151,6 +226,32 @@ def test_protocol_error_mapping_is_actionable_and_does_not_expose_raw_payload() 
     code, message = failure
     assert code == "invalid_commander_decision"
     assert "对话" in message and "已保留" in message
-    assert "重新读取" in message
-    assert "继续" in message
+    assert "不会因此被停止" in message
+    assert "格式" not in message and "发送" not in message
     assert all(value not in message for value in ("private-provider-payload", "/private/path", "api_key", "secret"))
+
+
+def test_api_response_fallback_keeps_existing_task_and_messages() -> None:
+    from app.api.chat import preserve_conversation_on_response_error
+    from app.bridge.commander_session import ChatMessage, CommanderSession
+    session = CommanderSession(conv_id='response-fallback', project='synthetic_regression')
+    session.linked_run_id = 'existing_actual_task_reference'
+    user = ChatMessage(role='user', content='查看当前进度')
+    session.add(user)
+    preserve_conversation_on_response_error(session)
+    assert session.messages[0] == user and session.linked_run_id == 'existing_actual_task_reference'
+    assert len(session.messages) == 2 and session.messages[-1].role == 'assistant'
+    assert all(message.role != 'tool' for message in session.messages)
+
+
+def test_edit_response_fallback_stays_in_its_original_turn() -> None:
+    from app.api.chat import preserve_conversation_on_response_error
+    from app.bridge.commander_session import ChatMessage, CommanderSession
+    session = CommanderSession(conv_id='edited-response', project='synthetic_regression')
+    first = session.add(ChatMessage(role='user', content='运行旧模型'))
+    second = session.add(ChatMessage(role='user', content='解释输出'))
+    later = session.add(ChatMessage(role='assistant', content='后一个回合的回复', turn_id=second.id))
+    preserve_conversation_on_response_error(session, first.id)
+    assert session.messages[0] == first and session.messages[2:] == [second, later]
+    assert session.messages[1].role == 'assistant' and session.messages[1].turn_id == first.id
+    assert session.edit_cursor is None and session.active_turn_id is None

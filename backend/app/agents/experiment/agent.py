@@ -1,6 +1,7 @@
 """Experiment Agent — proposal → experiment_plan."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.agents.base import Artifact, BaseAgent, ContextPack, RunRequest
@@ -24,7 +25,18 @@ class ExperimentAgent(BaseAgent):
         "不得混用步数和轮数；estimated_runs 必须与矩阵数量一致。"
         "cfg/config_path 只写实际文件路径，不拼接解释；解释放 role。产物文件名逐字核对源码，"
         "不得删减 json/jsonl 等扩展名或猜测运行目录。"
+        "先核对 configured_execution_delivery 中当前项目可用的登记命令、entrypoints 与 config_paths；"
+        "派生配置的目标路径也必须匹配该命令允许的范围，不能先设计任意新目录再让编码迁移。"
+        "目录名不能代替实际 model_name 作为模型身份。没有兼容命令或目标路径时明确列出能力缺口，"
+        "不得自行扩大白名单、换模型、改数据或把未登记方案称为可执行；计划和预算仍须按原流程审批。"
     )
+
+    async def build_context(self, request: RunRequest) -> ContextPack:
+        context = await super().build_context(request)
+        from app.harness.tools.execution.handoff import execution_delivery_context
+        context.upstream['configured_execution_delivery'] = json.dumps(
+            execution_delivery_context(), ensure_ascii=False)
+        return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:

@@ -19,6 +19,7 @@ from app.harness.agent_loop.revision_seed import RevisionSeed
 from app.harness.llm.model_registry import AgentConfig, get_agent_config, select_provider
 from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import guarded_complete, run_resource_scope
+from app.harness.llm.structured_output import normalize_document_output
 from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 from app.harness.schema.validator import ValidationResult, validate_document
 from app.harness.runtime.project_scope import ProjectScope, current_project_scope
@@ -194,7 +195,8 @@ class BaseAgent(ABC):
             metadata["code_profile"] = role_profile(runtime_policy, self.name)
             if sources["code_repositories"] and (any(r.exists and r.repo_path for r in repositories) or scope is not None):
                 from app.harness.context.repo_index import repository_index
-                metadata["repository_index"] = repository_index(request.project, int(runtime_policy["index_files"]))
+                metadata["repository_index"] = await asyncio.to_thread(
+                    repository_index, request.project, int(runtime_policy["index_files"]))
         self._prepare_runtime_context(request, upstream, metadata)
         return ContextPack(
             system=f"MARS {self.name} agent. {self.agent_brief}",
@@ -209,7 +211,7 @@ class BaseAgent(ABC):
         from app.harness.context.injection_runtime import prepare_memory_context
         from app.harness.agent_loop.trace import atomic_json, digest
         from app.harness.persistence import path_lock
-        from app.harness.tools.config import tool_config
+        from app.harness.tools.config import ToolConfig, load_tool_configs
 
         root = _request_run_root(request)
         request.runtime["run_root"] = str(root)
@@ -220,7 +222,8 @@ class BaseAgent(ABC):
             raise ValueError("invalid invocation ID")
         request.runtime["invocation_id"] = invocation
         metadata["run_root"] = str(root)
-        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        tool_configs = load_tool_configs()
+        tools = tuple(name for name in self.config.tools if tool_configs.get(name, ToolConfig()).enabled)
         selected = request.extra.get("skills", [])
         if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected):
             raise ValueError("skills must be a list of registered skill IDs")
@@ -338,7 +341,7 @@ class BaseAgent(ABC):
         if debate_role:
             config.extra["debate_role"] = debate_role
         try:
-            return await asyncio.wait_for(guarded_complete(provider, list(messages), config),
+            return await asyncio.wait_for(guarded_complete(provider, list(messages), config, active_model_time=True),
                                           timeout=llm_call_deadline_seconds(config))
         finally:
             await provider.close()
@@ -483,7 +486,7 @@ class BaseAgent(ABC):
                              executor: AgentLoopExecutor | None = None,
                              structured_schema: dict[str, Any] | None = None) -> Artifact:
         from app.harness.tools.registry import ToolContext
-        from app.harness.tools.config import tool_config
+        from app.harness.tools.config import ToolConfig, load_tool_configs
         from app.harness.agent_loop.review import ExternalReview
         run_root = _request_run_root(request)
         request.extra["run_root"] = str(run_root)
@@ -502,12 +505,13 @@ class BaseAgent(ABC):
         correlation.setdefault("node_id", str(request.extra.get("node_key", self.name)))
         correlation.setdefault("task_id", correlation["node_id"])
         extra_read_tools: tuple[str, ...] = ()
-        tools = tuple(name for name in self.config.tools if tool_config(name).enabled)
+        tool_configs = load_tool_configs()
+        tools = tuple(name for name in self.config.tools if tool_configs.get(name, ToolConfig()).enabled)
         if context.metadata.get("runtime_policy", {}).get("version") == 3:
             extras = ["context.read_material"]
             if context.metadata.get("context_sources", {}).get("code_repositories", True):
                 extras.append("code.repo_reader")
-            extra_read_tools = tuple(name for name in extras if tool_config(name).enabled)
+            extra_read_tools = tuple(name for name in extras if tool_configs.get(name, ToolConfig()).enabled)
             tools = tuple(dict.fromkeys((*tools, *extra_read_tools)))
         registry = self.loop_registry(request, context)
         read_tools = self.configured_read_tools()
@@ -575,9 +579,9 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _unwrap_llm_text(text: str) -> str:
-        # Never add fields, close incomplete frontmatter, or discard a preamble to make
-        # an invalid model document appear valid.
-        return text.strip()
+        # Provider-text packaging only, before candidate validation/review.
+        # Never add fields, close frontmatter or alter YAML/Markdown body bytes.
+        return normalize_document_output(text)
 
 
 def _request_project_scope(request: RunRequest) -> ProjectScope | None:

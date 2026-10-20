@@ -29,6 +29,7 @@ export default function ProjectResearchPage(): JSX.Element {
   const failure = error || history.error;
   return <div className="min-h-screen bg-mars-bg"><TopBar /><main className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
     <Link href="/projects" className="text-sm text-slate-400 hover:text-white">← 返回项目</Link>
+    <Link href={`/projects/${encodeURIComponent(name)}/memory`} className="ml-5 inline-block rounded-lg border border-mars-border px-3 py-2 text-sm text-indigo-200 hover:bg-mars-panel2">基线与实验记忆</Link>
     <header className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold">{label} · 所有研究</h1><p className="mt-2 text-sm text-slate-400">每次研究保留独立对话，按最近更新排序。</p></div><Link href={`/runs/new?project=${encodeURIComponent(name)}&new=1`} className="rounded-lg bg-mars-accent px-4 py-2 text-sm font-medium">启动研究</Link></header>
     <div className="flex gap-3"><input type="search" aria-label="搜索研究" placeholder="搜索研究内容" value={filter} onChange={event => setFilter(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-mars-border bg-mars-panel px-4 py-2 text-sm" /><button type="button" onClick={() => { setRevision(value => value + 1); void history.refresh(); }} disabled={loading || history.loading} className="rounded-lg border border-mars-border px-4 py-2 text-sm disabled:opacity-40">刷新</button></div>
     {failure ? <p role="alert" className="rounded-lg border border-amber-500/30 p-4 text-sm text-amber-200">{failure}</p> : null}

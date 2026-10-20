@@ -1,4 +1,5 @@
 """Real numerical fixtures and files; no provider or service substitutes."""
+import os
 from pathlib import Path
 
 import numpy as np
@@ -59,12 +60,14 @@ def test_parameters_and_schema() -> None:
         summary_document('project', 'a' * 32, 'a' * 601, 600)
 
 
-@pytest.mark.parametrize('repository', ['/Users/harry/Documents/20_paper/code/exports/static_pimc_minimal_20260908', '/Users/harry/Desktop/pimc'])
-def test_real_pimc_functions_and_output_provenance(tmp_path: Path, repository: str) -> None:
-    # The real reference stays outside MARS. CI without this repository skips this integration check.
-    repo = Path(repository)
-    if not (repo / 'libs/dsp.py').exists():
-        pytest.skip('External PIMC reference not installed')
+def test_real_pimc_functions_and_output_provenance(tmp_path: Path) -> None:
+    # Select an actual compatible external reference explicitly. A mutable personal
+    # checkout is not an implicit fixture; a selected incompatible source must fail.
+    repository = os.environ.get('MARS_TEST_PIMC_PIPELINE_REPO', '')
+    if not repository:
+        pytest.skip('Set MARS_TEST_PIMC_PIPELINE_REPO to an actual compatible external reference')
+    repo = Path(repository).resolve(strict=True)
+    assert (repo / 'libs/dsp.py').is_file(), 'Selected external reference lacks libs/dsp.py'
     time = np.arange(8192)
     ref = (np.exp(2j * np.pi * .05 * time) + .3 * np.exp(2j * np.pi * .3 * time))[None, :]
     raw = tmp_path / 'capture.npz'

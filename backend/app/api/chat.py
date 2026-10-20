@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
-from app.bridge.commander_errors import conversation_failure
+from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.bridge.conversation_edit import MessageEditConflict, MessageEditRequest
 from app.bridge.commander_session import (
     ChatMessage,
@@ -18,6 +18,23 @@ from app.bridge.commander_session import (
 )
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def preserve_conversation_on_response_error(session: CommanderSession, user_message_id: str | None = None) -> None:
+    """Last-resort presentation failure stays in chat, never stops a run."""
+    users = [(index, message) for index, message in enumerate(session.messages)
+             if message.role == 'user' and (user_message_id is None or message.id == user_message_id)]
+    index, user = users[-1] if users else (-1, None)
+    boundary = (next((offset for offset in range(index + 1, len(session.messages))
+                     if session.messages[offset].role == 'user'), len(session.messages)) if user is not None
+                else len(session.messages))
+    previous_cursor = session.edit_cursor
+    session.edit_cursor = boundary
+    try:
+        session.add(ChatMessage(role='assistant', turn_id=(user.turn_id or user.id) if user is not None else None,
+            content='当前回复没有可执行的新操作。你的请求、对话和已有任务均已保留，已有实验不会因此被停止。'))
+    finally:
+        session.edit_cursor = previous_cursor
 
 
 class CreateConversationPayload(BaseModel):
@@ -66,6 +83,7 @@ class ConversationView(BaseModel):
     messages: list[MessageView]
     processing: bool = False
     active_turn_id: str | None = None
+    completion_state: dict[str, Any] = Field(default_factory=dict)
     activities: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -96,6 +114,7 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         messages=[_msg_view(m) for m in s.messages],
         processing=s.processing,
         active_turn_id=s.active_turn_id,
+        completion_state=dict(s.completion_state),
         activities=[asdict(item) for item in s.activities],
     )
 
@@ -160,6 +179,8 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
     commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
     try:
         await commander.handle_user_message(session, payload.text)
+    except CommanderDecisionError:
+        preserve_conversation_on_response_error(session)
     except Exception as exc:
         failure = conversation_failure(exc)
         if failure is None:
@@ -188,6 +209,8 @@ async def edit_message(conv_id: str, message_id: str, payload: EditMessagePayloa
         ))
     except MessageEditConflict as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "message_saved": False}) from exc
+    except CommanderDecisionError:
+        preserve_conversation_on_response_error(session, message_id)
     except Exception as exc:
         failure = conversation_failure(exc)
         code, message = failure or ("regeneration_failed", "消息已替换，但重新生成回复失败。请重新读取对话核对进度；旧回复没有恢复，系统没有自动重试。")

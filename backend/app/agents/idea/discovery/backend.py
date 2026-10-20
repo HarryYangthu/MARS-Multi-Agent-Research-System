@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
 
@@ -17,6 +16,7 @@ from app.agents.idea.discovery.models import (
     stable_hash,
 )
 from app.harness.discovery import HypothesisRecord, ReflectionRecord
+from app.harness.llm.structured_output import parse_json_object
 
 
 class DiscoveryRoleBackend(Protocol):
@@ -273,19 +273,9 @@ def _validate_reflection_ids(rows: Sequence[Mapping[str, Any]], *, expected: Seq
 
 
 def _extract_json(text: str) -> object:
-    stripped = text.strip()
-    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped, flags=re.IGNORECASE)
-    candidate = fenced.group(1).strip() if fenced else stripped
     try:
-        return json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        start = candidate.find("{")
-        end = candidate.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return json.loads(candidate[start : end + 1])
-            except json.JSONDecodeError:
-                pass
+        return parse_json_object(text)
+    except ValueError as exc:
         raise DiscoveryProtocolError("role response is not valid JSON") from exc
 
 

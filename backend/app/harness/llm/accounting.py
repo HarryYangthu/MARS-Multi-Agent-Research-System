@@ -120,13 +120,18 @@ class ModelRequestCapacity:
 
 
 def model_request_capacity(state: Mapping[str, Any], max_retries: int) -> ModelRequestCapacity:
-    """Admission and recovery use the same worst-case SDK-attempt reservation."""
+    """Use remaining quota to bound retries without increasing the hard limit."""
     if type(max_retries) is not int:
         raise ValueError("max_retries must be an integer")
+    used = sum(charged_model_attempts(row) for row in state["requests"].values())
+    limit = state["configuration"]["limits"]["max_model_requests"]
+    required = min(max(max_retries, 0), MAX_LLM_RETRIES) + 1
+    if limit is not None:
+        # A remaining slot can fund a request even when the full retry policy
+        # cannot fit. With no slots left, require() must still reject the call.
+        required = min(required, max(1, limit - used))
     return ModelRequestCapacity(
-        used=sum(charged_model_attempts(row) for row in state["requests"].values()),
-        limit=state["configuration"]["limits"]["max_model_requests"],
-        required=min(max(max_retries, 0), MAX_LLM_RETRIES) + 1,
+        used=used, limit=limit, required=required,
     )
 
 
@@ -297,6 +302,35 @@ class RunModelBudget:
                          revision_started_at=started_at)
             atomic_write_json(self.path, state)
 
+    def change_request_limit(self, *, actor: str, reason: str) -> None:
+        """Apply an authorized request-limit change without renewing time or usage.
+
+        The new configuration must differ solely in max_model_requests. This is
+        a policy update, not a retry, provider reconciliation or quota refund.
+        """
+        if not actor.strip() or not reason.strip():
+            raise ValueError("request-limit change requires actor and reason")
+        with path_lock(self.lock_path):
+            raw = json.loads(self.path.read_text())
+            previous = RunModelBudget(self.root, configuration=raw["configuration"])
+            state = previous._read()
+            if state["configuration_sha256"] == self.configuration_hash:
+                return
+            expected = json.loads(_canonical(state["configuration"]))
+            expected["limits"]["max_model_requests"] = self.configuration["limits"]["max_model_requests"]
+            if _canonical(expected) != _canonical(self.configuration):
+                raise ResourceBudgetError("request-limit change cannot modify other resource limits")
+            if any(row["status"] in {"in_flight", "reconciliation_required"}
+                   for row in state["requests"].values()):
+                raise ResourceBudgetError("cannot change request limit while model requests are active or unresolved")
+            state.setdefault("policy_changes", []).append({
+                "kind": "model_request_limit", "actor": actor, "reason": reason,
+                "timestamp": time.time(), "previous_configuration": state["configuration"],
+                "previous_configuration_sha256": state["configuration_sha256"],
+                "configuration_sha256": self.configuration_hash})
+            state.update(configuration=self.configuration, configuration_sha256=self.configuration_hash)
+            atomic_write_json(self.path, state)
+
     def _lease_path(self, request_id: str) -> Path:
         return self.path.parent / "requests" / f"{request_id}.lock"
 
@@ -359,20 +393,16 @@ class RunModelBudget:
             raise ValueError("max_tokens must bound a positive output length")
         if type(config.max_retries) is not int:
             raise ValueError("max_retries must be an integer")
-        attempts = min(max(config.max_retries, 0), MAX_LLM_RETRIES) + 1
         prompt_bound = len(_canonical({"messages": [m.to_wire() for m in messages],
                                       "tools": config.tools}).encode()) + 32 * (len(messages) + 1)
-        reserved_tokens = (prompt_bound + config.max_tokens) * attempts
-        reserved_input = prompt_bound * attempts
-        reserved_output = config.max_tokens * attempts
         price = self.configuration.get("prices", {}).get(config.provider + "/" + config.model)
-        cost: float | None = None
+        attempt_cost: float | None = None
         if price is not None:
             if not isinstance(price, dict):
                 raise ValueError("model price must be an object")
             input_rate = _number(price.get("input_per_million"), "input price")
             output_rate = _number(price.get("output_per_million"), "output price")
-            cost = (prompt_bound * input_rate + config.max_tokens * output_rate) * attempts / 1_000_000
+            attempt_cost = (prompt_bound * input_rate + config.max_tokens * output_rate) / 1_000_000
         identifier = uuid.uuid4().hex
         with path_lock(self.lock_path):
             state = self._read()
@@ -387,7 +417,13 @@ class RunModelBudget:
             if self.active_model_time:
                 state['elapsed_clock'] = 'cumulative_model_activity'
             rows = list(state["requests"].values())
-            model_request_capacity(state, config.max_retries).require()
+            capacity = model_request_capacity(state, config.max_retries)
+            capacity.require()
+            attempts = capacity.required
+            reserved_tokens = (prompt_bound + config.max_tokens) * attempts
+            reserved_input = prompt_bound * attempts
+            reserved_output = config.max_tokens * attempts
+            cost = attempt_cost * attempts if attempt_cost is not None else None
             if self.token_mode == 'limited' and sum(row["charged_tokens"] for row in rows) + reserved_tokens > limits["max_total_tokens"]:
                 raise ResourceBudgetError("run total-token reservation exceeds remaining budget")
             for component, key, amount in (("input", "max_input_tokens", reserved_input),
@@ -528,7 +564,8 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
 
     # Config objects may be shared across concurrent roles; never mutate their observers.
     from dataclasses import replace
-    actual = replace(config, attempt_observer=observe)
+    actual = replace(config, attempt_observer=observe,
+                     max_retries=min(config.max_retries, reservation.attempts - 1))
     try:
         if isinstance(budget, RunModelBudget) and active_model_time:
             try:

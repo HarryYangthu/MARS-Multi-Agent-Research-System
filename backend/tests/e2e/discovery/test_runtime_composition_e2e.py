@@ -70,6 +70,7 @@ async def _run_distribution(
     runtime = build_extension_runtime(
         distribution=distribution,
         pack_roots=(PACK_ROOT,),
+        workspace_runs_root=root / distribution,
     )
     service = DiscoveryService(
         run_store=RunStore(root / distribution),

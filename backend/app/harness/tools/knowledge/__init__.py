@@ -111,20 +111,22 @@ async def baseline_match_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRes
     plan = args.get("plan")
     if not isinstance(plan, dict):
         return ToolResult(ok=False, error="plan (object) is required")
-    threshold = float(args.get("threshold", 0.85) or 0.85)
-    match = find_match(plan=plan, threshold=threshold)
+    from app.harness.research_memory import ResearchMemory
+    try:
+        memory = ResearchMemory(ctx.project)
+        retained = memory.retrieve(str(plan), protocol=plan.get("protocol"), limit=10)
+        compatible = next((h for h in retained["hits"] if h["comparison"]["reuse_allowed"] and h["roles"]), None)
+    except (OSError, ValueError) as exc:
+        return ToolResult(ok=False, error=str(exc))
     return ToolResult(
         ok=True,
         output={
-            "matched_run_id": match.matched_run_id,
-            "match_score": round(match.match_score, 4),
-            "reuse_recommended": match.above(threshold),
-            "matched_artifacts": (
-                [f"runs/{match.matched_run_id}/execution/metrics.json"]
-                if match.matched_run_id
-                else []
-            ),
-            "recommended_action": "reuse" if match.above(threshold) else "rerun",
+            "matched_run_id": compatible["id"] if compatible else None,
+            "match_score": 1.0 if compatible else 0.0,
+            "reuse_recommended": compatible is not None,
+            "matched_artifacts": [compatible["detail_ref"]] if compatible else [],
+            "recommended_action": "reuse" if compatible else "inspect_missing_conditions",
+            "research_memory": retained,
         },
     )
 
@@ -175,3 +177,29 @@ experiment_memory_tool = _zone_tool("run_archive")
 code_assets_tool = _zone_tool("code_assets")
 methodology_tool = _zone_tool("methodology")
 run_archive_tool = _zone_tool("run_archive")
+
+
+async def research_memory_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    from app.harness.research_memory import ResearchMemory
+    try:
+        output = ResearchMemory(ctx.project).retrieve(str(args.get("query") or args.get("q") or ""),
+                limit=int(args.get("limit", 4)), protocol=args.get("protocol"))
+        return ToolResult(ok=True, output=output, evidence_refs=[h["detail_ref"] for h in output["hits"]])
+    except (OSError, ValueError) as exc:
+        return ToolResult(ok=False, error=str(exc))
+
+
+async def research_memory_read_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    from app.harness.research_memory import ResearchMemory
+    try:
+        row = ResearchMemory(ctx.project).get(str(args.get("record_id", "")))
+        offset = int(args.get("evidence_offset", 0))
+        if offset < 0:
+            raise ValueError("evidence_offset不能为负数")
+        assets = row.pop("evidence")
+        row["evidence"] = assets[offset:offset+20]
+        row["evidence_count"] = len(assets)
+        row["next_evidence_offset"] = offset+20 if offset+20 < len(assets) else None
+        return ToolResult(ok=True, output=row, evidence_refs=[f"research_memory/{row['id']}"])
+    except (OSError, ValueError) as exc:
+        return ToolResult(ok=False, error=str(exc))

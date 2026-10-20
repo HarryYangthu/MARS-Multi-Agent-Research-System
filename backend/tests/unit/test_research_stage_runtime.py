@@ -28,8 +28,21 @@ from app.harness.runtime.task_contract import FailureEnvelope, ResultEnvelope
 from app.harness.tools.registry import ToolContext, get_registry
 from app.storage.artifact_store import ArtifactStore
 from app.storage.run_state_store import RunStateStore
+from app.settings import reset_settings_cache
 from tests.unit.test_research_stage_service import fixture, bind, approved
 from tests.unit.test_research_scope_recovery import files
+
+
+@pytest.fixture(autouse=True)
+def configured_native_contract(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # This suite admits the native contract runner, not the optional Z Code path.
+    # Configure the actual runtime; no Agent/provider execution is substituted.
+    monkeypatch.setenv("MARS_CODING_BACKEND", "native_llm")
+    reset_settings_cache()
+    try:
+        yield
+    finally:
+        reset_settings_cache()
 
 
 def transition(stage: BoundResearchStage, *, status: str = "running", state: NodeState = NodeState.RUNNING) -> None:

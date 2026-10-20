@@ -77,6 +77,7 @@ class ToolPlan:
     fingerprint: str
     backup: tuple[str, str] | None = None
     requested_version_digest: str | None = None
+    read_inputs: dict[str, object] | None = None
 
     @property
     def identifier(self) -> str:
@@ -128,6 +129,7 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
     adapters: dict[str, ToolFn] = {
         "context.read_material": read_material_tool,
         "code.repo_reader": code.repo_reader_tool, "code.write_file": code.write_file_tool,
+        "code.copy_yaml": code.copy_yaml_tool,
         "code.apply_patch": code.apply_patch_tool, "code.delete_file": code.delete_file_tool,
         "code.rollback_patch": code.rollback_patch_tool,
     }
@@ -137,7 +139,8 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
         raise ValueError("contract dry-run tool accounting is not admitted")
     fields = {"context.read_material": {"ref", "char_offset"}, "code.repo_reader": {"path", "char_offset"}, "code.write_file": {"path", "content"},
               "code.apply_patch": {"diff", "version", "files"}, "code.delete_file": {"path"},
-              "code.rollback_patch": {"rollback_ref"}}[name]
+              "code.rollback_patch": {"rollback_ref"},
+              "code.copy_yaml": {"source", "variants", "common_updates", "allow_new_keys", "dry_run"}}[name]
     if args.keys() - fields - {"_approval_id"}:
         raise ValueError("unsupported contract tool argument")
     actual = dict(args)
@@ -145,6 +148,7 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
     paths: tuple[str, ...]
     backup: tuple[str, str] | None = None
     requested_version_digest = None
+    read_inputs = None
     if name == "context.read_material":
         from app.harness.context.runtime_pack import read_material
         ref, offset = str(args.get("ref", "")), args.get("char_offset", 0)
@@ -154,6 +158,27 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
         page = read_material(project.run_root, ref, offset, 1)
         paths = ()
         meaningful = {"ref": ref, "char_offset": offset, "sha256": page["ref"]}
+    elif name == "code.copy_yaml":
+        source = str(args.get('source', '')).strip()
+        target = project.resolve_file(source, write=False, must_exist=True)
+        source = target.relative_to(project.candidate_root).as_posix()
+        variants = args.get('variants')
+        if args.get('dry_run') or not isinstance(variants, list) or not 1 <= len(variants) <= 128:
+            raise ValueError('contract YAML copy requires 1 to 128 real destinations')
+        normalized = []
+        for variant in variants:
+            if not isinstance(variant, dict) or variant.keys() - {'path', 'updates'}:
+                raise ValueError('invalid YAML variant declaration')
+            destination = project.resolve_file(str(variant.get('path', '')).strip(), write=True)
+            relative = destination.relative_to(project.candidate_root).as_posix()
+            normalized.append({**variant, 'path': relative})
+        paths = tuple(item['path'] for item in normalized)
+        if len(set(paths)) != len(paths) or source in paths:
+            raise ValueError('duplicate YAML destination or source overwrite')
+        actual.update({'source': source, 'variants': normalized})
+        read_inputs = _states(project, (source,), write=False)
+        meaningful = {key: value for key, value in actual.items() if key != '_approval_id'}
+        meaningful['source_inputs'] = read_inputs
     elif name == "code.apply_patch":
         diff = args.get("diff")
         if not isinstance(diff, str) or not diff:
@@ -197,7 +222,8 @@ def prepare_tool(execution: ResearchExecutionScope, project: ProjectScope, name:
         "snapshot": project.snapshot_id, "tool": name, "arguments": meaningful, "before": before})
     if name == "code.apply_patch":
         actual["version"] = "host_" + fingerprint.removeprefix("sha256:")
-    return ToolPlan(execution, project, name, actual, paths, before, fingerprint, backup, requested_version_digest)
+    return ToolPlan(execution, project, name, actual, paths, before, fingerprint, backup,
+                    requested_version_digest, read_inputs)
 
 
 def _blocked(reason: str) -> ToolResult:
@@ -251,7 +277,7 @@ def _receipt(plan: ToolPlan, result: ToolResult, after: dict[str, object] | None
     data = {"schema": "contract_tool_receipt.v1", "operation_id": plan.identifier,
         "operation_fingerprint": plan.fingerprint, "run_id": plan.project.run_id,
         "task_sha256": plan.project.task_sha256, "tool": plan.name, "outcome": outcome,
-        "before": plan.before, "after": after, "handler_started": handler_started,
+        "before": plan.before, "after": after, "read_inputs": plan.read_inputs, "handler_started": handler_started,
         "changed_paths": [name for name in plan.paths if after is not None and plan.before[name] != after[name]],
         "output_sha256": digest(result.output), "error_sha256": digest(result.error) if result.error else None,
         "host_version": plan.args.get("version"), "requested_version_sha256": plan.requested_version_digest}
@@ -305,6 +331,8 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
     try:
         if _states(plan.project, plan.paths, write=plan.name not in {"code.repo_reader", "context.read_material"}) != plan.before:
             return _blocked("source changed after tool preflight; prepare a new operation")
+        if plan.read_inputs is not None and _states(plan.project, tuple(plan.read_inputs), write=False) != plan.read_inputs:
+            return _blocked('YAML copy source changed after tool preflight')
         if plan.backup:
             path = plan.project.run_file(plan.backup[0], must_exist=True)
             if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != plan.backup[1]:
@@ -341,6 +369,8 @@ async def execute_tool(plan: ToolPlan, handler: ToolFn, ctx: ToolContext,
             after = _states(plan.project, plan.paths, write=plan.name not in {"code.repo_reader", "context.read_material"})
             if plan.name in {"code.repo_reader", "context.read_material"} and after != plan.before:
                 raise ValueError("source changed during read")
+            if plan.read_inputs is not None and _states(plan.project, tuple(plan.read_inputs), write=False) != plan.read_inputs:
+                raise ValueError('YAML copy source changed during execution')
             reference, evidence_hash = _receipt(plan, result, after, outcome="observed_success")
             with plan.execution.ledger.transaction() as transaction:
                 transaction.settle(plan.identifier, BudgetSettlement(actual=BudgetAmounts(tool_executions=1),

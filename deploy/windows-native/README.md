@@ -1,16 +1,18 @@
 # MARS：Windows 原生 CPU 一键安装与启动
 
+离线包请先看 [Windows 离线使用说明](README-OFFLINE.md)。含 `WINDOWS-OFFLINE.json` 的包严格使用包内依赖，不会转向外网安装。
+
 适用：Windows 10/11 **x64**，可联网安装，CPU 本地调试。使用当前 MARS 代码，
 无需另备旧 Overlay 项目或 Docker。建议解压到 `D:\MARS` 这样的短路径。
 
 ## 最短操作步骤
 
 1. 把完整代码包解压到 Windows；不要在压缩包预览窗口里直接运行。
-2. 双击根目录 **`MARS-Windows.cmd`**，按回车选择“启动”。首次自动安装全部依赖。
+2. 双击根目录 **`MARS-Windows.cmd`**，首次自动安装全部依赖。
 3. 按向导填写 API 地址、模型名称和 Key。Key 输入不显示。
 4. 安装与健康检查完成后，自动打开 **http://127.0.0.1:3001/**。
 
-之后仍双击 `MARS-Windows.cmd`，按回车即可启动。启动完成后可以关闭启动窗口，
+之后仍双击 `MARS-Windows.cmd`，即可启动。启动完成后可以关闭启动窗口，
 服务在后台运行。停止时双击 `stop-mars-windows-native.cmd`。
 
 也提供独立入口：
@@ -21,7 +23,7 @@
 | `start-mars-windows-native.cmd` | 一键启动前后端，缺依赖时自动安装 |
 | `configure-mars-api.cmd` | 配置云端/本地模型 API；更改前先停止服务 |
 | `stop-mars-windows-native.cmd` | 停止本目录启动的服务，保留任务、配置和数据 |
-| `MARS-Windows.cmd` 菜单 5 / 6 | 查看状态 / 发出小型真实模型请求检查 API |
+| `manage-mars-windows.cmd` 菜单 5 / 6 | 查看状态 / 发出小型真实模型请求检查 API |
 
 原有 `start-mars-windows.cmd` 是旧 **Docker** 入口，本方案使用带 `native` 的启动入口。
 
@@ -72,7 +74,7 @@ Key 只写入 Git 忽略的根目录 `.env.local`，脚本会限制该文件的 
 不会写进 YAML、下载包、命令行参数或检查报告。系统环境中已有的同名 Key 优先于
 `.env.local`；如切换后仍使用旧账号，请检查 Windows 的用户环境变量。
 
-配置后可用 `MARS-Windows.cmd` 的 **6 Test API** 发出作者/评审者各一次小型真实请求。
+配置后可用 `manage-mars-windows.cmd` 的 **6 Test API** 发出作者/评审者各一次小型真实请求。
 这会使用所配置账号的少量额度。HTTP 402 通常是余额/计费问题，401 是 Key 问题；
 脚本会显示脱敏错误码，不会把服务启动或模型列表查询当成完成了研究任务。
 检查保留 GLM 所需 thinking，每次最多 2048 输出 token、45 秒、无自动重试；上限在
@@ -106,7 +108,7 @@ Execution 开始后，已有 TensorBoard 集成会展示该次实际实验过程
 - **端口占用**：停止占用程序，或修改 `configs/windows_native.yaml` 的两项端口再启动。
   脚本不会根据端口随意结束其他程序。
 - **前后端启动失败**：查看 `local/windows/logs/` 下对应启动时间的日志。
-  菜单 5 可查健康状态。只有前端页面、后端健康和前端到后端代理都通过才显示 ready。
+  管理入口的菜单 5 可查健康状态。只有前端页面、后端健康和前端到后端代理都通过才显示 ready。
 - **复制到了另一位置**：重新运行安装。Python 虚拟环境包含绝对路径，不应直接搬用。
 - **停止时仍在关闭**：等待后再次执行停止；后端会先请求任务退出并执行清理，避免立即强杀。
 

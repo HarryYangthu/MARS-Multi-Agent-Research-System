@@ -409,15 +409,30 @@ def _metric_summary_text(
     return " · ".join(parts)
 
 
+def curve_plot_values(curve: Sequence[float], *, value_scale: str = "linear_ratio") -> NDArray[np.float64]:
+    """A returned dB or other native measurement must never be logged again."""
+    values = np.asarray(curve, dtype=np.float64)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("curve measurements must be finite")
+    if value_scale == "native":
+        return values
+    if value_scale != "linear_ratio":
+        raise ValueError("unknown curve value scale")
+    return np.asarray(10.0 * np.log10(np.maximum(values, 1e-12)), dtype=np.float64)
+
+
 def plot_loss_curves(
     loss_curves: Mapping[str, Sequence[float]],
     path: str | Path,
     *,
     title: str = "16-way PIM Cancellation Loss Sweep",
+    value_scale: str = "linear_ratio",
 ) -> None:
     """Save a detailed overlay plot for a batch of loss curves."""
     if not loss_curves:
         raise ValueError("loss_curves must not be empty")
+    for curve in loss_curves.values():
+        curve_plot_values(curve, value_scale=value_scale)
     try:
         plt = _load_pyplot()
     except ImportError:
@@ -429,11 +444,12 @@ def plot_loss_curves(
                     for name, curve in loss_curves.items()
                 },
                 "title": title,
+                "value_scale": value_scale,
             },
             path=path,
         ):
             return
-        _write_simple_loss_png(loss_curve=_aggregate_loss_curve(loss_curves), path=path)
+        _write_simple_loss_png(loss_curve=_aggregate_loss_curve(loss_curves), path=path, value_scale=value_scale)
         return
 
     with _PLOT_LOCK:
@@ -446,8 +462,7 @@ def plot_loss_curves(
             if not curve:
                 continue
             steps = np.arange(len(curve))
-            loss = np.maximum(np.asarray(curve, dtype=np.float64), 1e-12)
-            loss_db = 10.0 * np.log10(loss)
+            loss_db = curve_plot_values(curve, value_scale=value_scale)
             max_len = max(max_len, len(curve))
             all_db.extend(float(v) for v in loss_db)
             final_db.append(float(loss_db[-1]))
@@ -469,10 +484,11 @@ def plot_loss_curves(
         if not all_db:
             raise ValueError("loss_curves contains no points")
         ax.set_title(title)
-        ax.set_xlabel("epoch")
-        ax.set_ylabel("dB")
+        ax.set_xlabel("record index" if value_scale == "native" else "epoch")
+        ax.set_ylabel("reported value (adapter units)" if value_scale == "native" else "dB")
         ax.set_xlim(0, max(1, max_len - 1))
-        ax.set_ylim(min(-34.0, min(all_db) - 2.0), max(2.0, max(all_db) + 1.0))
+        ax.set_ylim(min(all_db) - 2.0 if value_scale == "native" else min(-34.0, min(all_db) - 2.0),
+                    max(all_db) + 1.0 if value_scale == "native" else max(2.0, max(all_db) + 1.0))
         ax.grid(True, alpha=0.32)
         ax.legend(
             loc="center left",
@@ -484,8 +500,10 @@ def plot_loss_curves(
         ax.text(
             0.01,
             0.02,
-            f"{len(loss_curves)} experiments · {max_len} epochs · "
-            f"final RES {min(final_db):.2f} to {max(final_db):.2f} dB",
+            (f"{len(loss_curves)} experiments · {max_len} records · "
+             f"final value {min(final_db):.2f} to {max(final_db):.2f}" if value_scale == "native" else
+             f"{len(loss_curves)} experiments · {max_len} epochs · "
+             f"final RES {min(final_db):.2f} to {max(final_db):.2f} dB"),
             transform=ax.transAxes,
             fontsize=8.5,
             bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92},
@@ -595,7 +613,7 @@ elif mode == "batch":
     for index, (name, curve) in enumerate(sorted(curves.items())):
         if not curve:
             continue
-        loss_db = db_from_loss(curve)
+        loss_db = np.asarray(curve, dtype=np.float64) if payload.get("value_scale") == "native" else db_from_loss(curve)
         steps = np.arange(len(loss_db))
         all_db.extend(float(v) for v in loss_db)
         final_db.append(float(loss_db[-1]))
@@ -605,14 +623,17 @@ elif mode == "batch":
     if not all_db:
         raise SystemExit(2)
     ax.set_title(payload.get("title") or "Execution Loss Sweep")
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("dB")
+    native = payload.get("value_scale") == "native"
+    ax.set_xlabel("record index" if native else "epoch")
+    ax.set_ylabel("reported value (adapter units)" if native else "dB")
     ax.set_xlim(0, max(1, max_len - 1))
-    ax.set_ylim(min(-34.0, min(all_db) - 2.0), max(2.0, max(all_db) + 1.0))
+    ax.set_ylim(min(all_db) - 2.0 if native else min(-34.0, min(all_db) - 2.0),
+                max(all_db) + 1.0 if native else max(2.0, max(all_db) + 1.0))
     ax.grid(True, alpha=0.32)
     ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=True, fontsize=7.5, title="Experiment")
     ax.text(0.01, 0.02,
-            f"{len(curves)} experiments · {max_len} epochs · final RES {min(final_db):.2f} to {max(final_db):.2f} dB",
+            (f"{len(curves)} experiments · {max_len} records · final value {min(final_db):.2f} to {max(final_db):.2f}" if native else
+             f"{len(curves)} experiments · {max_len} epochs · final RES {min(final_db):.2f} to {max(final_db):.2f} dB"),
             transform=ax.transAxes, fontsize=8.5,
             bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#d1d5db", "alpha": 0.92})
     finish(fig)
@@ -721,7 +742,7 @@ def _save_figure(fig: Any, plt: Any, path: str | Path) -> None:
             tmp.unlink()
 
 
-def _write_simple_loss_png(*, loss_curve: list[float], path: str | Path) -> None:
+def _write_simple_loss_png(*, loss_curve: list[float], path: str | Path, value_scale: str = "linear_ratio") -> None:
     """Write a small RGB PNG without importing matplotlib."""
     width = 640
     height = 360
@@ -738,7 +759,7 @@ def _write_simple_loss_png(*, loss_curve: list[float], path: str | Path) -> None
     for y in range(margin, height - margin):
         put(margin, y, (180, 190, 200))
 
-    values = [10.0 * float(np.log10(max(value, 1e-12))) for value in loss_curve]
+    values = list(curve_plot_values(loss_curve, value_scale=value_scale))
     if not values:
         values = [0.0]
     low = min(values)

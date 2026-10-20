@@ -10,7 +10,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from app.agents.idea.discovery.backend import (
-    DiscoveryProtocolError, _role_prompt, _task_input,
+    DiscoveryProtocolError, _extract_json, _role_prompt, _task_input,
     _validate_reflection_ids, _validate_role_response,
 )
 from app.agents.idea.discovery.contracts import role_schema
@@ -78,8 +78,26 @@ def test_missing_statement_is_rejected_without_alias_substitution() -> None:
     ("meta_review", {"recurring_errors": [], "successful_patterns": [], "evidence_gaps": [],
                      "unexplored_regions": [], "next_round_guidance": []}),
 ])
-def test_complete_authored_records_pass_without_rewriting(role: str, payload: dict[str, Any]) -> None:
-    assert _validate_role_response(json.dumps(payload), role=role, schema=role_schema(role)) == payload
+@pytest.mark.parametrize('style', ['plain', 'fence', 'prose', 'trailing_comma', 'extra_closers', 'combined'])
+def test_complete_authored_records_pass_without_rewriting(role: str, payload: dict[str, Any], style: str) -> None:
+    original = deepcopy(payload)
+    text = json.dumps(payload, ensure_ascii=False)
+    rendered = {'plain': text, 'fence': '\ufeff```JSON\r\n' + text + '\r\n```',
+        'prose': '完整结论如下：\n' + text + '\n以上是原有字段。',
+        'trailing_comma': text[:-1] + ',}', 'extra_closers': text + '}]}',
+        'combined': '结果：\n```JSON\r\n' + text[:-1] + ',}}]}\r\n```\n说明结束。'}[style]
+    assert _validate_role_response(rendered, role=role, schema=role_schema(role)) == original
+    assert payload == original
+
+
+@pytest.mark.parametrize('text', [
+    '{"hypotheses": ', '{"hypotheses":}', '[{"hypotheses":[]}]',
+    '{"hypotheses":[]} {"hypotheses":[{}]}', '{"hypotheses":[],"hypotheses":[{}]}',
+    '{"hypotheses":NaN}', '{"hypotheses":1e999}',
+])
+def test_role_presentation_cleanup_never_invents_or_selects_scientific_values(text: str) -> None:
+    with pytest.raises(DiscoveryProtocolError, match='valid JSON'):
+        _extract_json(text)
 
 
 @pytest.mark.parametrize("field", ["correctness", "novelty", "falsifiability"])

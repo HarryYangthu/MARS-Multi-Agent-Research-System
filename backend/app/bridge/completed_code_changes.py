@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from app.bridge.code_changes import _read, parse_diff
+from app.bridge.code_changes import _copy_yaml_operations, _read, parse_diff
 from app.bridge.code_repository import CodeRepository, run_code_repository
 from app.settings import repo_root
 from app.storage.run_store import RunHandle
@@ -108,6 +108,8 @@ def _patched(before: str | None, item: dict[str, Any]) -> str | None:
 
 
 def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tuple[str, str | None, str | None]]:
+    if record['tool'] == 'code.copy_yaml':
+        return [(path, before, after) for path, before, after in _copy_yaml_operations(run, record, limit)]
     snapshots = _snapshots(run, record, limit)
     args, tool = record["args"], record["tool"]
     if tool in {"code.write_file", "code.delete_file"}:
@@ -145,6 +147,43 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
     for key in ("max_record_bytes", "max_records", "max_scan_records", "max_preview_lines", "context_lines"):
         if type(policy.get(key)) is not int or policy[key] <= 0:
             raise ValueError("invalid code review policy")
+    candidates = sorted(((int(match[1]), path) for path in (run.root / 'coding').glob('code_spec.v*.md')
+                         if (match := re.fullmatch(r'code_spec\.v([1-9]\d*)\.md', path.name))), key=lambda row: row[0])
+    if candidates:
+        from app.harness.schema.frontmatter_parser import parse
+        from app.bridge.git_code_delivery import verify_git_delivery, git_delivery_is_approved, verify_approved_git_history
+        text = _read(candidates[-1][1], run.root, policy['max_record_bytes'])
+        metadata = parse(text).metadata
+        backend = metadata.get('coding_backend')
+        if isinstance(backend, dict) and backend.get('type') == 'git_commit':
+            approved = git_delivery_is_approved(run, text)
+            actual = verify_approved_git_history(run, text) if approved else verify_git_delivery(run, metadata)
+            source = 'approved_git_history' if approved else 'verified_git_commit'
+            status = 'approved_history' if approved else 'applied'
+            history_state: dict[str, Any] = {
+                key: actual[key] for key in ('historical', 'current_mismatch', 'workspace', 'execution_eligible') if key in actual}
+            files = parse_diff(actual['canonical_diff'])
+            if {item['path']: item['change'] for item in files} != {row['path']: row['type'] for row in actual['files_changed']}:
+                raise ValueError('Git 交付差异无法完整展示，未冒充已完成工具写入')
+            git_items = []
+            for item in files:
+                fingerprint = hashlib.sha256(json.dumps([actual['coding_backend'], item['path']], sort_keys=True).encode()).hexdigest()
+                lines = item.pop('lines')
+                item.update(id='git:' + fingerprint, status=status, source=source,
+                            timestamp='', truncated=len(lines) > policy['max_preview_lines'])
+                if change_id == item['id']:
+                    return {**item, **history_state, 'run_id': run.run_id, 'project': project,
+                            'lines': lines[:policy['max_preview_lines']]}
+                git_items.append(item)
+            if change_id is not None:
+                raise KeyError('Git 提交或文件内容已变化，请刷新后重试')
+            git_warnings = (['展示已批准提交的历史差异；当前工作目录有变化，不能据此判断可重新执行。']
+                            if actual.get('current_mismatch') else [])
+            return {'run_id': run.run_id, 'project': project, 'items': git_items, 'warnings': git_warnings,
+                    'write_records': 0, 'unchanged': [], 'source': source, **history_state,
+                    'coding_backend': actual['coding_backend'], 'artifact_version': candidates[-1][1].stem.split('.')[-1],
+                    'approved': approved,
+                    'historical_write_records': len(list((run.root / 'coding/tool_applications').glob('*.json')))}
     paths = sorted(p for p in (run.root / "coding/tool_applications").glob("*.json") if not p.name.startswith("rollback_"))
     if len(paths) > policy["max_scan_records"]:
         raise ValueError("改动记录超出核对范围，不能展示不完整的改动统计")
@@ -155,7 +194,7 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
             record = json.loads(_read(record_path, run.root, policy["max_record_bytes"]))
             if (record.get("run_id") == run.run_id and record.get("project") == project
                     and record.get("agent") == "coding" and record.get("status") == "success"
-                    and record.get("tool") in {"code.write_file", "code.delete_file", "code.apply_patch"}):
+                    and record.get("tool") in {"code.write_file", "code.delete_file", "code.apply_patch", "code.copy_yaml"}):
                 records.append(record)
         except (OSError, ValueError, AttributeError):
             warnings.append(f"{record_path.name} 无法安全核对。")
@@ -180,6 +219,9 @@ def completed_code_changes(run: RunHandle, *, project: str, change_id: str | Non
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             args = record.get("args", {})
             affected = ([PurePosixPath(args["path"].strip()).as_posix()] if isinstance(args.get("path"), str)
+                        else [PurePosixPath(item['path']).as_posix() for item in args.get('variants', [])
+                              if isinstance(item, dict) and isinstance(item.get('path'), str)]
+                        if record.get('tool') == 'code.copy_yaml'
                         else [item["path"] for item in parse_diff(str(args.get("diff", "")))])
             if not affected:
                 raise ValueError("存在无法核对的成功写入记录，不能展示不完整的改动统计")

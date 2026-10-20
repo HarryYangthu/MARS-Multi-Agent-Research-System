@@ -102,13 +102,22 @@ def checkpoint_approved_code(run: RunHandle) -> None:
         return
     # Check the entire candidate against its baseline, including auto-saved
     # commits. A clean checkout alone does not imply human/Commander approval.
-    changed = changed_files(repo.root, repo.git_branch.baseline_commit)
-    if not changed:
-        return
+    changed = changed_files(repo.root, repo.git_branch.initial_commit or repo.git_branch.baseline_commit)
     approved = run.root / "coding" / "code_spec.approved.md"
     if not approved.is_file():
+        if not changed:
+            return
         raise GitWorkspaceError("编码改动尚未审核，不能提交或开始实验。", "git_workspace_code_unapproved")
     metadata = parse(approved.read_text(encoding="utf-8")).metadata
+    backend = metadata.get('coding_backend')
+    if isinstance(backend, dict) and backend.get('type') == 'git_commit':
+        from app.bridge.git_code_delivery import verify_git_delivery, git_delivery_is_approved
+        if not git_delivery_is_approved(run, approved.read_text(encoding='utf-8')):
+            raise GitWorkspaceError('已提交代码仍需真实审核批准，尚未启动实验。', 'git_workspace_code_unapproved')
+        verify_git_delivery(run, metadata)
+        return  # Independently checked clean, committed code needs no reapplication.
+    if not changed:
+        return
     rows = metadata.get("files_changed", [])
     declared = {str(row.get("path", "")) for row in rows if isinstance(row, dict)} if isinstance(rows, list) else set()
     if not changed.issubset(declared):

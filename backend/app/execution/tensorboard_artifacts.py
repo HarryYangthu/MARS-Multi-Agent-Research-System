@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from filelock import FileLock
+import yaml
 
 from app.execution.tensorboard_writer import ScalarWriter
 from app.harness.persistence import atomic_write_json
@@ -23,6 +25,108 @@ def _inside(path: Path, root: Path) -> bool:
 
 def _read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _regular_inside(path: Path, root: Path) -> bool:
+    if not path.is_file() or not _inside(path, root):
+        return False
+    for parent in (path, *path.parents):
+        if parent == root:
+            return True
+        if parent.is_symlink():
+            return False
+    return False
+
+
+def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            # Native observers append while the experiment is running.
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _is_baseline(request: dict[str, Any], configuration: dict[str, Any]) -> bool:
+    job = request.get("config", {})
+    role = job.get("role") if isinstance(job, dict) else None
+    if isinstance(role, str) and role in {"baseline", "candidate", "ablation"}:
+        return role == "baseline"
+    # Interpret only an individual job's explicit name when its role is absent.
+    # This is display metadata; immutable requests and scientific values remain
+    # unchanged. A comparison task's name cannot select either side for it.
+    identity = request.get("experiment_id")
+    if (isinstance(job, dict) and "role" not in job and isinstance(identity, str)
+            and identity.isascii() and all(char.isalnum() or char in "_.-" for char in identity)):
+        name = identity.casefold()
+        tokens = set(name.replace("-", "_").replace(".", "_").split("_"))
+        if "vs" not in tokens:
+            if name.startswith("baseline_") and "candidate" not in tokens:
+                return True
+            if name.startswith("candidate_") and "baseline" not in tokens:
+                return False
+    return bool(configuration.get("model") == "baseline")
+
+
+def _native_models(root: Path, attempt: Path, group: Path, request: dict[str, Any],
+                   identity: str, record_index: int, record_count: int,
+                   registered: set[str]) -> list[dict[str, Any]]:
+    """Index real native observations without creating or rewriting any events."""
+    if (request.get("schema") != "local_command_request.v1"
+            or request.get("invocation_id") != attempt.name
+            or request.get("experiment_id") != attempt.parent.name
+            or not isinstance(request.get("project"), str) or not request["project"]):
+        return []
+    models = []
+    for steps_path in sorted(attempt.rglob("steps.jsonl")):
+        method_root = steps_path.parent
+        key = method_root.relative_to(attempt).as_posix()
+        scalar_dir = method_root / "tensorboard"
+        if (key in registered or not _regular_inside(steps_path, attempt)
+                or not any(_regular_inside(path, attempt)
+                           for path in scalar_dir.glob("events.out.tfevents.*"))):
+            continue
+        updates = [row["optimizer_step"] for row in _jsonl_rows(steps_path)
+                   if type(row.get("optimizer_step")) is int and row["optimizer_step"] > 0]
+        if not updates:
+            continue
+        training_steps = max(updates)
+        configuration: dict[str, Any] = {}
+        for name in ("config.yaml", "config.json"):
+            path = method_root / name
+            if _regular_inside(path, attempt):
+                try:
+                    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) if name.endswith("yaml") else _read(path)
+                except (OSError, ValueError, yaml.YAMLError):
+                    continue  # A missing display label does not hide actual native observations.
+                if isinstance(loaded, dict):
+                    configuration = loaded
+                    break
+        epochs_path = method_root / "epochs.jsonl"
+        epochs = {row["epoch"] for row in _jsonl_rows(epochs_path)
+                  if type(row.get("epoch")) is int and row["epoch"] > 0
+                  and type(row.get("optimizer_steps")) is int
+                  and 0 < row["optimizer_steps"] <= training_steps} if _regular_inside(epochs_path, attempt) else set()
+        raw_model = configuration.get("model_name", configuration.get("model"))
+        model_name = raw_model if isinstance(raw_model, str) and raw_model else method_root.name
+        snapshot_dir = method_root / "tensorboard_snapshots"
+        histogram_dir = snapshot_dir if snapshot_dir.is_dir() and not snapshot_dir.is_symlink() else scalar_dir
+        models.append({"id": identity + "/" + key, "name": key,
+            "label": model_name + " · " + (f"记录 {record_index} · " if record_count > 1 else "")
+                     + str(request.get("experiment_id", "")),
+            "is_baseline": _is_baseline(request, configuration), "native": True,
+            "scalar_run": scalar_dir.relative_to(root).as_posix(),
+            "histogram_run": histogram_dir.relative_to(root).as_posix(),
+            "image_run": (group / "model_figures" / key).relative_to(root).as_posix(),
+            "gallery_run": (group / "figures").relative_to(root).as_posix(),
+            "comparison_run": (group / "comparison_figures").relative_to(root).as_posix(),
+            "image_tags": [], "comparison_tags": [], "attempt": identity,
+            "training_steps": training_steps, "validation_points": len(epochs)})
+    return models
 
 
 def _scalar_rows(writer: ScalarWriter, rows: list[Any], cursor: int,
@@ -129,15 +233,26 @@ def _sync(root: Path, destination: Path) -> dict[str, Any]:
                 histogram_dir = snapshot_dir if snapshot_dir.is_dir() else scalar_dir
                 report["models"].append({"id": identity + "/" + key, "name": key,
                     "label": model_name + " · " + (f"记录 {record_index} · " if len(request_paths) > 1 else "") + str(request.get("experiment_id", "")),
-                    "is_baseline": config.get("model") == "baseline", "native": native,
+                    "is_baseline": _is_baseline(request, config), "native": native,
                     "scalar_run": scalar_dir.relative_to(root).as_posix(),
                     "histogram_run": histogram_dir.relative_to(root).as_posix(),
-                    "image_run": (group / "figures").relative_to(root).as_posix(),
+                    "image_run": (group / "model_figures" / key).relative_to(root).as_posix(),
+                    "gallery_run": (group / "figures").relative_to(root).as_posix(),
+                    "comparison_run": (group / "comparison_figures").relative_to(root).as_posix(),
                     "image_tags": [], "comparison_tags": [], "attempt": identity,
                     "training_steps": previous["steps"], "validation_points": len(history)})
+            registered = {model["name"] for model in report["models"] if model["attempt"] == identity}
+            native_models = _native_models(root, attempt, group, request, identity, record_index,
+                                            len(request_paths), registered)
+            report["models"].extend(native_models)
+            for model in native_models:
+                state["models"][model["name"]] = {"steps": model["training_steps"], "history": -1}
             # Include every image generated by this invocation, including coefficient
             # dashboards; never scan other experiments in the repository.
-            with ScalarWriter(group / "figures") as writer:
+            state.setdefault("owned_images", {})
+            with ExitStack() as image_stack:
+                writer = image_stack.enter_context(ScalarWriter(group / "figures"))
+                owned_writers: dict[str, ScalarWriter] = {}
                 for path in sorted(attempt.rglob("*")):
                     if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"} or not path.is_file():
                         continue
@@ -145,15 +260,30 @@ def _sync(root: Path, destination: Path) -> dict[str, Any]:
                         report["warnings"].append("跳过运行目录之外的图像链接")
                         continue
                     key = path.relative_to(attempt).as_posix()
+                    signature = hashlib.sha256(path.read_bytes()).hexdigest()
+                    owners: set[str] = set()
                     for model_record in report["models"]:
                         if model_record["attempt"] != identity:
                             continue
                         method_name = Path(model_record["name"]).name
                         if key.startswith(model_record["name"] + "/") or key.startswith("visualizations/" + method_name + "/"):
                             model_record["image_tags"].append("figures/" + key)
+                            owners.add(model_record["image_run"])
                         if path.name.startswith("comparison_"):
                             model_record["comparison_tags"].append("figures/" + key)
-                    signature = hashlib.sha256(path.read_bytes()).hexdigest()
+                            owners.add(model_record["comparison_run"])
+                    for owner in owners:
+                        observation_key = owner + ":" + key
+                        if state["owned_images"].get(observation_key) == signature:
+                            continue
+                        owned_writer = owned_writers.get(owner)
+                        if owned_writer is None:
+                            owned_writer = owned_writers[owner] = image_stack.enter_context(ScalarWriter(root / owner))
+                        try:
+                            owned_writer.image("figures/" + key, path)
+                            state["owned_images"][observation_key] = signature
+                        except (OSError, ValueError) as exc:
+                            report["warnings"].append(f"模型图像未接入：{key}：{exc}")
                     if state["images"].get(key) != signature:
                         try:
                             writer.image("figures/" + key, path)

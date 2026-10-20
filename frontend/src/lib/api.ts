@@ -7,6 +7,27 @@ import { ApiError } from "./apiError";
 const CONFIGURED_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
 const BASE = CONFIGURED_BACKEND_URL;
 
+export type ResearchMemoryRecord = {
+  id: string; title: string; created_at: string; kind: string; status: string;
+  run_id: string; result_quality: string; is_mock: boolean;
+  metrics: Record<string, unknown>; architecture: Record<string, unknown>;
+  recipe: Record<string, unknown>; config: Record<string, unknown>; protocol: Record<string, unknown>;
+  missing: string[]; error?: string; annotations: Record<string, unknown>;
+  integrity?: { intact: boolean; problems: string[] };
+  evidence: { name: string; asset: string; sha256: string; source: string; category: string; bytes: number }[];
+};
+export type ResearchMemoryOverview = {
+  project: string; pointers: Record<string, string>; records: ResearchMemoryRecord[]; storage: string; policy: string;
+};
+export async function researchMemoryRequest<T>(project: string, suffix = "", body?: unknown, method = "POST"): Promise<T> {
+  const response = await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/research-memory${suffix}`,
+    body === undefined ? { cache: "no-store" } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return jsonOrThrow<T>(response);
+}
+export function researchMemoryEvidenceUrl(project: string, id: string, index: number): string {
+  return `${BASE}/api/projects/${encodeURIComponent(project)}/research-memory/${encodeURIComponent(id)}/evidence/${index}`;
+}
+
 function apiUrl(path: string): URL {
   const origin =
     BASE ||
@@ -2085,8 +2106,12 @@ export class ChatMessageFailure extends Error {
 
 export type RecoveryAction = { action: "resume" | "retry"; node: string; label: string };
 export type CodeChange = { id: string; path: string; additions: number | null; deletions: number | null; change: string; status: string; source: string; timestamp: string; truncated: boolean; warning?: string };
-export type CodeChanges = { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
-export type CodeChangeDetail = CodeChange & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
+export type ApprovedCodeHistory = {
+  source?: string; approved?: boolean; historical?: boolean; current_mismatch?: boolean; execution_eligible?: boolean;
+  workspace?: { head: string; head_matches: boolean; clean: boolean; tracked_changes: boolean; untracked_files: boolean };
+};
+export type CodeChanges = ApprovedCodeHistory & { run_id: string; project: string; items: CodeChange[]; warnings: string[] };
+export type CodeChangeDetail = CodeChange & ApprovedCodeHistory & { run_id: string; project: string; lines: { kind: string; text: string; old_line: number | null; new_line: number | null }[] };
 export async function getCodeChanges(runId: string, project: string, signal?: AbortSignal): Promise<CodeChanges> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/code-changes?project=${encodeURIComponent(project)}`, { signal, cache: "no-store" }));
 }

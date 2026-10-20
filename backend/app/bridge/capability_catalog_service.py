@@ -149,6 +149,7 @@ def _contract_handlers() -> dict[str, ToolFn]:
     # identity-checked adapters, never an authorization list used by dispatch.
     from app.harness.tools import code
     return {"code.repo_reader": code.repo_reader_tool, "code.write_file": code.write_file_tool,
+            "code.copy_yaml": code.copy_yaml_tool,
             "code.apply_patch": code.apply_patch_tool, "code.delete_file": code.delete_file_tool,
             "code.rollback_patch": code.rollback_patch_tool}
 

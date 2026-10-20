@@ -85,13 +85,20 @@ async def test_actual_mutations_compile_rollback_and_baseline_preserved(research
 def test_preflight_never_switches_or_copies_and_preserves_dirty_baseline(research: tuple[RunHandle, Path]) -> None:
     run, source = research
     (source / "main.py").write_text("USER_CHANGE = True\n")
-    assert "未提交改动" in coding_workspace_blocker(run)
-    with pytest.raises(GitWorkspaceError, match="未提交改动"):
-        with research_branch_scope(run, "coding"):
-            pytest.fail("should not enter")
+    index = (source / '.git/index').read_bytes()
+    baseline = git(source, 'rev-parse', 'HEAD')
+    assert coding_workspace_blocker(run) == ''
+    assert not receipt_path(run.root).exists()
+    with research_branch_scope(run, 'coding'):
+        work = load_project_repo(run.project).root
+        assert work != source and (work / 'main.py').read_text() == 'USER_CHANGE = True\n'
+        branch = current_git_branch(run.project); assert branch is not None
+        assert branch.baseline_commit == baseline and branch.initial_commit != baseline
+        assert git(work, 'status', '--porcelain') == ''
+        assert git(work, 'rev-parse', 'HEAD') == branch.initial_commit
     assert git(source, "branch", "--show-current") == "baseline"
     assert (source / "main.py").read_text() == "USER_CHANGE = True\n"
-    assert not receipt_path(run.root).exists()
+    assert (source / '.git/index').read_bytes() == index
 
 
 def test_detached_baseline_and_changed_saved_identity_are_rejected(research: tuple[RunHandle, Path]) -> None:
@@ -104,6 +111,213 @@ def test_detached_baseline_and_changed_saved_identity_are_rejected(research: tup
     raw = json.loads(receipt_path(run.root).read_text()); raw["run_id"] = "another_run"
     receipt_path(run.root).write_text(json.dumps(raw))
     assert "无法校验" in coding_workspace_blocker(run)
+
+
+def _dirty_source(source: Path) -> dict[str, bytes | str]:
+    (source / 'configs').mkdir(exist_ok=True)
+    for name in ('remove.yaml', 'staged_remove.yaml'):
+        (source / 'configs' / name).write_text('enabled: true\n')
+    git(source, 'add', '.')
+    git(source, '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false',
+        'commit', '-m', 'Actual source configuration baseline')
+    (source / 'main.py').write_text('VALUE = 2\n')
+    git(source, 'add', 'main.py')
+    (source / 'main.py').write_text('VALUE = 3\n')
+    (source / 'configs/remove.yaml').unlink()
+    git(source, 'rm', 'configs/staged_remove.yaml')
+    (source / 'configs').mkdir(exist_ok=True)
+    (source / 'configs/new 中文 file.yaml').write_text('current_value: 3\n')
+    return {'head': git(source, 'rev-parse', 'HEAD'), 'branch': git(source, 'branch', '--show-current'),
+        'index': (source / '.git/index').read_bytes(),
+        'status': git(source, '--no-optional-locks', 'status', '--porcelain=v1', '-z'),
+        'refs': git(source, 'show-ref')}
+
+
+def _assert_source_preserved(source: Path, before: dict[str, bytes | str]) -> None:
+    assert git(source, 'rev-parse', 'HEAD') == before['head']
+    assert git(source, 'branch', '--show-current') == before['branch']
+    assert (source / '.git/index').read_bytes() == before['index']
+    assert git(source, '--no-optional-locks', 'status', '--porcelain=v1', '-z') == before['status']
+    assert git(source, 'show-ref') == before['refs']
+    assert (source / 'main.py').read_text() == 'VALUE = 3\n'
+    assert not (source / 'configs/remove.yaml').exists()
+    assert not (source / 'configs/staged_remove.yaml').exists()
+
+
+def test_dirty_snapshot_captures_final_working_code_deletions_and_untracked_without_touching_index(
+        research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    before = _dirty_source(source)
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        work = branch.root
+        assert branch.baseline_commit == before['head'] and branch.initial_commit != before['head']
+        assert git(work, 'rev-parse', 'HEAD^') == before['head']
+        assert git(work, 'rev-parse', 'HEAD') == branch.initial_commit
+        assert (work / 'main.py').read_text() == 'VALUE = 3\n'
+        assert (work / 'configs/new 中文 file.yaml').read_text() == 'current_value: 3\n'
+        assert not (work / 'configs/remove.yaml').exists() and not (work / 'configs/staged_remove.yaml').exists()
+        assert git(work, 'status', '--porcelain') == ''
+    _assert_source_preserved(source, before)
+    receipt = json.loads((run.root / 'input/research_source_snapshot.json').read_text())
+    assert receipt['initial_commit'] != receipt['baseline_commit']
+    assert receipt['source_index_sha256']
+    assert receipt['snapshot_is_agent_code_change'] is False and receipt['source_modified'] is False
+
+
+def test_dirty_snapshot_retry_and_new_task_use_distinct_frozen_inputs(research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    _dirty_source(source)
+    with research_branch_scope(run, 'coding'):
+        first = current_git_branch(run.project); assert first is not None
+    receipt = receipt_path(run.root).read_bytes()
+    (source / 'main.py').write_text('VALUE = 8\n')
+    (source / 'configs/new 中文 file.yaml').write_text('current_value: 8\n')
+    other = other_run(run)
+    with research_branch_scope(other, 'coding'):
+        second = current_git_branch(run.project); assert second is not None
+        assert (second.root / 'main.py').read_text() == 'VALUE = 8\n'
+    with research_branch_scope(run, 'coding_attempt_2'):
+        assert current_git_branch(run.project) == first
+        assert (first.root / 'main.py').read_text() == 'VALUE = 3\n'
+        assert (first.root / 'configs/new 中文 file.yaml').read_text() == 'current_value: 3\n'
+    assert receipt_path(run.root).read_bytes() == receipt and first.root != second.root
+    assert first.initial_commit != second.initial_commit
+
+
+def test_parallel_dirty_snapshots_have_independent_indexes_and_keep_source_untouched(
+        research: tuple[RunHandle, Path]) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from app.harness.tools.git_branch import prepare
+    run, source = research
+    before = _dirty_source(source)
+    other = other_run(run)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        calls = [executor.submit(prepare, source, task.root, task.project, task.run_id) for task in (run, other)]
+        branches = [call.result(timeout=20) for call in calls]
+    assert branches[0].root != branches[1].root and branches[0].branch != branches[1].branch
+    assert branches[0].initial_commit != branches[1].initial_commit
+    assert len({git(branch.root, 'rev-parse', 'HEAD^{tree}') for branch in branches}) == 1
+    assert all(git(branch.root, 'status', '--porcelain') == '' for branch in branches)
+    _assert_source_preserved(source, before)
+
+
+def test_snapshot_inputs_are_not_misreported_as_agent_writes_or_unapproved_code(
+        research: tuple[RunHandle, Path]) -> None:
+    from app.bridge.git_code_delivery import describe_committed_delivery
+    run, source = research
+    _dirty_source(source)
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        description = describe_committed_delivery(run)
+        assert description['files_changed'] == []
+        assert description['canonical_diff'] == ''
+        assert description['coding_backend']['baseline_commit'] == branch.initial_commit
+    with research_branch_scope(run, 'execution'):
+        result = subprocess.run([sys.executable, '-c', "import runpy; assert runpy.run_path('main.py')['VALUE']==3"],
+                                cwd=checkout(run), capture_output=True)
+        assert result.returncode == 0 and not result.stderr
+
+
+def test_snapshot_explicitly_excludes_runtime_data_credentials_and_links(
+        research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    _dirty_source(source)
+    (source / 'outputs').mkdir(); (source / 'outputs/run.txt').write_text('not code\n')
+    (source / 'data').mkdir(); (source / 'data/values.txt').write_text('not a code input\n')
+    (source / '.env.local').write_text('PRIVATE_TEST_CONFIGURATION=not_for_snapshot\n')
+    outside = source.parent / 'outside.py'; outside.write_text('OUTSIDE = True\n')
+    (source / 'configs/link.py').symlink_to(outside)
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        assert (branch.root / 'main.py').read_text() == 'VALUE = 3\n'
+        for relative in ('outputs/run.txt', 'data/values.txt', '.env.local', 'configs/link.py'):
+            assert not (branch.root / relative).exists()
+    record = json.loads((run.root / 'input/research_source_snapshot.json').read_text())
+    excluded = {row['path'] for row in record['excluded']}
+    assert {'outputs/run.txt', 'data/values.txt', '.env.local', 'configs/link.py'} <= excluded
+
+
+def test_oversized_source_fails_explicitly_instead_of_reusing_old_code(research: tuple[RunHandle, Path]) -> None:
+    from app.harness.discovery.snapshots import SnapshotPolicy
+    from app.harness.tools.git_branch import prepare
+    run, source = research
+    before = _dirty_source(source)
+    with (source / 'main.py').open('wb') as stream:
+        stream.truncate(SnapshotPolicy(allowed_paths=('*',)).max_file_bytes + 1)
+    before['status'] = git(source, '--no-optional-locks', 'status', '--porcelain=v1', '-z')
+    with pytest.raises(ValueError, match='source_snapshot_input_too_large'):
+        prepare(source, run.root, run.project, run.run_id)
+    from app.harness.tools.git_branch import workspace_path
+    assert not receipt_path(run.root).exists() and not workspace_path(source, run.project, run.run_id).exists()
+    assert (source / '.git/index').read_bytes() == before['index']
+    assert git(source, 'rev-parse', 'HEAD') == before['head']
+
+
+def test_changed_tracked_source_symlink_is_rejected_instead_of_running_old_code(
+        research: tuple[RunHandle, Path]) -> None:
+    from app.harness.tools.git_branch import prepare
+    run, source = research
+    head = git(source, 'rev-parse', 'HEAD')
+    index = (source / '.git/index').read_bytes()
+    outside = source.parent / 'outside-source.py'; outside.write_text('VALUE = 29\n')
+    (source / 'main.py').unlink(); (source / 'main.py').symlink_to(outside)
+    with pytest.raises(ValueError, match='source_snapshot_input_unsupported'):
+        prepare(source, run.root, run.project, run.run_id)
+    assert not receipt_path(run.root).exists() and (source / 'main.py').is_symlink()
+    assert outside.read_text() == 'VALUE = 29\n'
+    assert (source / '.git/index').read_bytes() == index and git(source, 'rev-parse', 'HEAD') == head
+
+
+def test_snapshot_checkout_is_clean_with_inherited_autocrlf_true(
+        research: tuple[RunHandle, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    run, source = research
+    before = _dirty_source(source)
+    global_config = run.root.parent / 'actual-global-gitconfig'
+    global_config.write_text('[core]\n\tautocrlf = true\n')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(global_config))
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    assert git(source, 'config', '--get', 'core.autocrlf') == 'true'
+    (source / 'main.py').write_bytes(b'VALUE = 3\r\n')
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        assert (branch.root / 'main.py').read_bytes() == b'VALUE = 3\r\n'
+        assert (branch.root / 'baseline/ref.py').read_bytes() == b'REFERENCE = 1\n'
+        assert git(branch.root, 'status', '--porcelain') == ''
+    _assert_source_preserved(source, before)
+
+
+def test_captured_snapshot_recovers_after_source_advances_before_workspace_publication(
+        research: tuple[RunHandle, Path], tmp_path: Path) -> None:
+    from dataclasses import asdict, replace
+    from app.harness.agent_loop.trace import atomic_json
+    from app.harness.tools.git_branch import _inspect, prepare
+    from app.harness.tools.git_source_snapshot import capture_source_snapshot, apply_source_snapshot, save_source_snapshot_binding
+    run, source = research
+    _dirty_source(source)
+    (run.root / 'input').mkdir(exist_ok=True)
+    original = _inspect(source, run.root, run.project, run.run_id)
+    snapshot = capture_source_snapshot(source, run.root, run.project, run.run_id,
+        original.baseline_branch, original.baseline_commit)
+    assert snapshot is not None
+    # Build actual Git objects just as a process that ended before publication;
+    # no fake command response or patched tool is used.
+    interrupted = tmp_path / 'interrupted-clone'
+    git(source, 'clone', '--local', '--no-hardlinks', '--no-checkout', str(source), str(interrupted))
+    git(interrupted, 'switch', '-c', original.branch, original.baseline_commit)
+    commit = apply_source_snapshot(snapshot, interrupted)
+    saved = replace(original, initial_commit=commit)
+    save_source_snapshot_binding(snapshot, run.root, commit)
+    atomic_json(run.root / 'input/research_workspace_intent.json',
+        {'schema_id': 'research.git_workspace_intent.v1', **asdict(saved)})
+    (source / 'main.py').write_text('VALUE = 19\n')
+    git(source, 'add', 'main.py')
+    git(source, '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false',
+        'commit', '-m', 'Actual source advances after frozen input')
+    recovered = prepare(source, run.root, run.project, run.run_id)
+    assert recovered == saved and git(recovered.root, 'rev-parse', 'HEAD') == commit
+    assert (recovered.root / 'main.py').read_text() == 'VALUE = 3\n'
+    assert (source / 'main.py').read_text() == 'VALUE = 19\n'
 
 
 @pytest.mark.asyncio
@@ -292,7 +506,7 @@ async def test_legacy_migration_saves_governed_partial_work_keeps_branch_and_rec
         assert (load_project_repo(run.project).root / "main.py").read_text() == "VALUE = 1\n"
 
 
-def test_missing_checkout_or_changed_baseline_never_restarts_from_wrong_code(research: tuple[RunHandle, Path]) -> None:
+def test_missing_checkout_blocks_but_source_advance_preserves_frozen_candidate(research: tuple[RunHandle, Path]) -> None:
     import shutil
     run, source = research
     with research_branch_scope(run, "coding"):
@@ -300,9 +514,15 @@ def test_missing_checkout_or_changed_baseline_never_restarts_from_wrong_code(res
     work = checkout(run); renamed = work.with_name(work.name + "-retained"); work.rename(renamed)
     assert "代码目录缺失" in coding_workspace_blocker(run)
     renamed.rename(work)
+    frozen = json.loads(receipt_path(run.root).read_text())
+    original_head = git(work, "rev-parse", "HEAD")
     (source / "main.py").write_text("VALUE = 2\n"); git(source, "add", ".")
     git(source, "-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "New baseline")
-    assert "基线分支已有新提交" in coding_workspace_blocker(run)
+    assert coding_workspace_blocker(run) == ""
+    with research_branch_scope(run, "coding"):
+        assert git(work, "rev-parse", "HEAD") == original_head
+        assert (work / "main.py").read_text() == "VALUE = 1\n"
+    assert json.loads(receipt_path(run.root).read_text()) == frozen
 
 
 def test_read_permission_does_not_cover_mutations_or_network() -> None:
@@ -378,5 +598,5 @@ async def test_parallel_registered_commands_use_exact_reviewed_checkouts_and_com
             assert all(Path(row['path']).is_relative_to(task.root) for row in receipt['evidence'])
             return result.metrics['mse']
     measured = await asyncio.gather(execute(run), execute(other))
-    assert measured == [0, pytest.approx(14 / 3)]
+    assert len(measured) == 2 and measured[0] == 0 and measured[1] == pytest.approx(14 / 3)
     assert (source / 'main.py').read_text() == 'VALUE = 1\n'

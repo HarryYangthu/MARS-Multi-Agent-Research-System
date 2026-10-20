@@ -71,12 +71,22 @@ def test_review_parser_requires_bound_evidence() -> None:
     '{"decision":"approve","reason":" ","evidence_refs":["candidate.md"]}',
     '{"decision":"approve","reason":"No evidence","evidence_refs":[]}',
     '{"decision":"approve","reason":"Wrong type","evidence_refs":"candidate.md"}',
-    '{"decision":"approve","reason":"Unknown field","evidence_refs":["candidate.md"],"action":"start"}',
     '{"decision":"approve"}',
 ])
 def test_invalid_decisions_never_become_approval(text: str) -> None:
     with pytest.raises(ValueError):
         parse_decision(text, ["candidate.md"])
+
+
+@pytest.mark.parametrize('wrapper', [
+    '\ufeff说明：\n```JSON\r\n%s\r\n```\n审核结束。', '%s]}', '%s',
+])
+def test_review_presentation_and_commentary_preserve_actual_evidence(wrapper: str) -> None:
+    raw = {'decision': ' Approve ', 'reason': 'Checked the actual supplied candidate',
+        'evidence_refs': ['candidate.md'], 'confidence': 0.9, 'action': 'unused commentary'}
+    decision = parse_decision(wrapper % json.dumps(raw), ['candidate.md'])
+    assert decision.model_dump() == {'decision': 'approve', 'reason': raw['reason'],
+        'evidence_refs': ['candidate.md']}
 
 
 def saved_run(tmp_path: Path) -> tuple[Orchestrator, RunSession]:

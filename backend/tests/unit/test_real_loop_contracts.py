@@ -17,10 +17,10 @@ from app.harness.llm.provider_base import Message
 from app.settings import Settings
 
 
-@pytest.mark.parametrize("text", ['{}', '[]', '{"tool":"x","args":{}}',
+@pytest.mark.parametrize("text", ['{}', '[]',
                                       '{"tool":"x","args":[],"reason":"query"}',
                                       '{"final":"x","tool":"x"}', '{"final":""}',
-                                      'prose before {"final":"x"}', '{"tool_calls":[]}'])
+                                      '{"final":"first"}{"final":"second"}', '{"tool_calls":[]}'])
 def test_protocol_rejects_ambiguous_actions(text: str) -> None:
     with pytest.raises(ValueError):
         parse_action(text)
@@ -36,12 +36,15 @@ def test_flat_protocol_preserves_arguments() -> None:
     {"tool": "registered.name", "args": {"reason": "An argument does not supply the action reason"}},
     *[{"tool": "registered.name", "args": {}, "reason": value} for value in ("", " \n\t", None, 7)],
 ])
-def test_protocol_reason_diagnostic_requires_nonempty_top_level_string(action: dict[str, Any]) -> None:
+def test_protocol_reason_commentary_is_optional_and_cannot_change_arguments(action: dict[str, Any]) -> None:
     # Authored parser inputs only; no tool is registered or dispatched here.
-    with pytest.raises(ValueError, match="non-empty top-level string") as error:
-        parse_action(json.dumps(action))
-    assert "why this tool call is needed" in str(error.value)
-    assert "sibling of tool and args, not only inside args" in str(error.value)
+    parsed = parse_action(json.dumps(action))
+    assert parsed['tool'] == action['tool'] and parsed['args'] == action['args']
+    assert isinstance(parsed['reason'], str)
+
+
+def test_protocol_single_complete_decision_accepts_noncritical_prose() -> None:
+    assert parse_action('prose before {"final":"x"} explanatory suffix') == {'final': 'x'}
 
 
 def test_protocol_accepts_and_preserves_a_nonempty_top_level_reason() -> None:

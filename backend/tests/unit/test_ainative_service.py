@@ -116,14 +116,19 @@ def test_bind_code_folder_ainative_role_is_writable_and_keeps_baseline(tmp_path:
     folder = open_folder(str(code), registry=tmp_path / "registry.json")
     baseline = tmp_path / "baseline-repo"
     baseline.mkdir()
-    bind_code_folder(folder, str(baseline))
+    (baseline / "model.py").write_text("VALUE = 1\n")
+    imported_baseline = bind_code_folder(folder, str(baseline))
     generated = tmp_path / "ainative"
     generated.mkdir()
-    bind_code_folder(folder, str(generated), role="ainative")
+    (generated / "model.py").write_text("VALUE = 2\n")
+    imported_generated = bind_code_folder(folder, str(generated), role="ainative")
     link = yaml.safe_load((folder.metadata_root / "repo_link.yaml").read_text())
-    assert link["repo_path"] == str(generated)
+    assert (folder.metadata_root / link["repo_path"]).resolve() == imported_generated
     assert link["repo_role"] == "ainative" and link["read_only"] is False
-    assert link["baseline_repo_path"] == str(baseline)
+    assert (folder.metadata_root / link["baseline_repo_path"]).resolve() == imported_baseline
+    assert imported_baseline.is_relative_to(folder.root) and imported_generated.is_relative_to(folder.root)
+    assert (imported_baseline / "model.py").read_text() == (baseline / "model.py").read_text() == "VALUE = 1\n"
+    assert (imported_generated / "model.py").read_text() == "VALUE = 2\n"
     with pytest.raises(ValueError, match="未知"):
         bind_code_folder(folder, str(baseline), role="bogus")
 

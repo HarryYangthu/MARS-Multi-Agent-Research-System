@@ -127,8 +127,17 @@ class ResearchCreationStore:
                 or phase == "rejected" and run_id is not None):
             raise CreationCatalogIntegrityError("Invalid creation intent identity")
         assert isinstance(binding, str) and (run_id is None or isinstance(run_id, str))
-        assert phase in ("pending", "created", "unknown", "rejected")
-        return CreationIntent(request_id, name, task_sha256, binding, run_id, phase)
+        # Map the already validated SQLite value to the exact phase contract.
+        validated_phase: Literal["pending", "created", "unknown", "rejected"]
+        if phase == "pending":
+            validated_phase = "pending"
+        elif phase == "created":
+            validated_phase = "created"
+        elif phase == "unknown":
+            validated_phase = "unknown"
+        else:
+            validated_phase = "rejected"
+        return CreationIntent(request_id, name, task_sha256, binding, run_id, validated_phase)
 
     def get(self, request_id: str) -> CreationIntent | None:
         validate_request_id(request_id)
@@ -176,7 +185,7 @@ class ResearchCreationStore:
 
     @contextmanager
     def lease(self, request_id: str) -> Iterator[bool]:
-        lock = FileLock(self._lease_path(request_id), timeout=0)
+        lock = FileLock(self._lease_path(request_id), timeout=0, preserve_lock_file=True)
         try:
             lock.acquire()
         except Timeout:

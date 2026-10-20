@@ -75,11 +75,13 @@ def test_role_validator_rejects_empty_or_tool_envelope(text: str, code: str) -> 
     assert caught.value.reason["code"] == code
 
 
-def test_schema_invalid_authored_document_is_preserved_for_validation_without_repair() -> None:
-    text = "---\nschema: proposal.v1\nproject: pimc\nagent: idea\n"
+@pytest.mark.parametrize("ending", ["", "\n", "\n\n", "  \n"])
+def test_schema_invalid_authored_document_is_preserved_for_validation_without_repair(ending: str) -> None:
+    text = "---\nschema: proposal.v1\nproject: pimc\nagent: idea" + ending
     result = _validate_role_completion(role="judge", text=text, output_schema="proposal.v1")
     artifact = _artifact_from_text(result, "proposal.v1")
-    assert artifact.text == text.strip()
+    assert result == text
+    assert artifact.text == text
     assert not validate_document(artifact.text, expected_schema="proposal.v1").valid
 
 

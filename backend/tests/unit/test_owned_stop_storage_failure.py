@@ -38,6 +38,35 @@ def _refuse_update(store: RunStateStore, *, cleanup_only: bool = False) -> None:
                            + "BEGIN SELECT RAISE(ABORT,'real storage fault'); END")
 
 
+@pytest.mark.asyncio
+async def test_completed_stop_preserves_review_without_claiming_cleanup_is_running(tmp_path: Path) -> None:
+    orch, session, store = _session(tmp_path)
+    session.graph.restore_state("idea", NodeState.WAITING_REVIEW)
+    orch._persist_state(session, status="waiting_review")
+    started, cleaned = asyncio.Event(), asyncio.Event()
+
+    async def owned_wait() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.set()
+
+    assert orch._spawn_owned(session, "actual-review-wait", owned_wait)
+    await started.wait()
+    result = await orch.stop_owned_run(session.run.run_id, grace_seconds=1)
+    control = orch.run_control(session.run.run_id)
+    assert result["ok"] and cleaned.is_set()
+    assert control["cleanup_complete"] and control["owned_task_done"] and control["state_persisted"]
+    assert not control["stopping"] and not control["owned_task_active"]
+    assert control["available_actions"] == []
+    saved = store.load()
+    assert saved and saved.status == "waiting_review" and saved.graph.state("idea") == NodeState.WAITING_REVIEW
+    # The display fix must not release the durable stop or schedule new work.
+    assert orch.owned_tasks.stopping(session.run.run_id) and orch._stopping(session)
+    assert not orch._spawn_owned(session, "unapproved-restart", owned_wait)
+
+
 @pytest.mark.parametrize("failure", ["sqlite", "cas"])
 @pytest.mark.asyncio
 async def test_request_persistence_failure_still_cancels_and_cleans_owned_task(tmp_path: Path, failure: str) -> None:

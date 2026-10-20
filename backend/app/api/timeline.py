@@ -383,6 +383,10 @@ def _tool_worklog_text(
     if tool == "code.write_file":
         path = str(args.get("path") or "")
         return ("写入代码文件", f"path={path}", "写入后运行 lint/test 并保留回滚信息。")
+    if tool == "code.copy_yaml":
+        count = len(args.get('variants') or [])
+        source = str(args.get('source') or '')
+        return ("复制配置并修改参数", f"从 {source} 生成 {count} 组配置，只修改指定字段。", "核对配置差异并保留原配置与回滚记录。")
     if tool == "code.delete_file":
         path = str(args.get("path") or "")
         return ("删除代码文件", f"path={path}", "删除属于高风险动作，需要审计和回滚。")

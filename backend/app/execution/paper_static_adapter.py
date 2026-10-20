@@ -26,6 +26,7 @@ from app.execution.results import SimulationResult
 from app.execution.paper_static_protocol import static_summary_errors, static_training_protocol
 from app.execution.subprocess_env import sanitized_subprocess_environment
 from app.harness.tools.process_runtime import start_process, terminate_process_tree
+from app.harness.tools.execution.command_preflight import bounded_error
 from app.settings import repo_root
 
 _EPOCH_RE = re.compile(
@@ -274,6 +275,10 @@ async def run_paper_static_simulation(
         },
     )
 
+    error = (bounded_error(f"paper_static exited with status {returncode}:\n" + "\n".join(stderr_lines))
+             if status != "completed" else "")
+    if status != "completed" and dry_run:
+        error = bounded_error(error + "\nA dry run is not a completed research measurement.")
     from app.harness.persistence import atomic_write_json
     receipt_path = output_root / "execution_receipt.json"
     atomic_write_json(receipt_path, {"schema": "paper_static_receipt.v1", "run_id": spec.run_id,
@@ -282,7 +287,7 @@ async def run_paper_static_simulation(
         "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(), "argv": argv,
         "summary_path": str(summary_path) if summary_path is not None else None,
         "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path is not None else None,
-        "log_path": str(log_path), "log_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest()})
+        "log_path": str(log_path), "log_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(), "error": error})
     fingerprint_hash = "sha256:" + hashlib.sha256(receipt_path.read_bytes()).hexdigest()
 
     if bus_publish is not None:
@@ -295,6 +300,7 @@ async def run_paper_static_simulation(
                 "metrics": metrics,
                 "backend": "paper_static",
                 "log_file": log_path.name,
+                "error": error,
             },
         )
 
@@ -307,6 +313,8 @@ async def run_paper_static_simulation(
         fingerprint_hash=fingerprint_hash,
         is_mock=False,
         loss_curve=loss_curve,
+        error=error,
+        evidence_refs=[str(receipt_path), str(log_path)],
     )
 
 
@@ -529,6 +537,8 @@ def _write_manifest(*, run_root: Path, experiment_id: str, payload: dict[str, An
 
 
 def _failed_result(spec: Any, started: float, message: str) -> SimulationResult:
+    run_root = Path(spec.run_root) if spec.run_root is not None else repo_root() / "runs" / spec.run_id
+    log_path = run_root / "execution/logs" / f"{_safe_name(spec.experiment_id)}_paper_static.log"
     return SimulationResult(
         run_id=spec.run_id,
         experiment_id=spec.experiment_id,
@@ -538,6 +548,8 @@ def _failed_result(spec: Any, started: float, message: str) -> SimulationResult:
         fingerprint_hash="sha256:" + hashlib.sha256(message.encode("utf-8")).hexdigest()[:24],
         is_mock=False,
         loss_curve=[],
+        error=bounded_error(message),
+        evidence_refs=[str(log_path)] if log_path.is_file() else [],
     )
 
 

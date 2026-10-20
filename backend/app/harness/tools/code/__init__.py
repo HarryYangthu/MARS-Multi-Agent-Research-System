@@ -7,6 +7,7 @@ import fnmatch
 import hashlib
 import json
 import re
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -137,6 +138,11 @@ async def patch_generator_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRe
         output={"diff": rendered, "files": [{"path": rel}]},
         evidence_refs=[rel],
     )
+
+
+async def copy_yaml_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+    from app.harness.tools.code.yaml_copy import copy_yaml
+    return await copy_yaml(args, ctx)
 
 
 async def write_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
@@ -384,18 +390,27 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
             )
         from app.harness.tools.check_interpreter import check_argv
         argv = check_argv(command.argv)
-        from app.harness.tools.git_branch import current_git_branch
-        check_environment = None
-        if current_git_branch(ctx.project, ctx.run_id) is not None:
-            from app.harness.runtime.git_runtime import git_child_environment
-            check_environment = git_child_environment()
+        from app.harness.tools.code.check_environment import check_environment
+        try:
+            environment = check_environment(ctx, root, project_binding=command.project_binding)
+        except (OSError, ValueError) as exc:
+            return ToolResult(ok=False, error=f'{command.id} input binding failed: {exc}',
+                              output={'executed': False})
+        from app.harness.tools.code.check_receipts import build_check_identity, record_check, reuse_check
+        identity = build_check_identity(ctx, root, kind, command, argv, environment,
+                                        tool_config(tool_name), timeout)
+        cached = reuse_check(identity)
+        if cached is not None:
+            results.append(cached)
+            continue
+        started = time.monotonic()
         process = await start_process(
             argv,
             backend=tool_config(tool_name).process_backend,
             require_isolation=tool_config(tool_name).require_isolation,
             cwd=str(root),
-            env=check_environment,
-            replace_environment=check_environment is not None,
+            env=environment,
+            replace_environment=True,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -403,8 +418,7 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
             stdout, stderr = await communicate_process(process, timeout=timeout)
         except asyncio.TimeoutError:
             return ToolResult(ok=False, error=f"{command.id} timed out after {timeout}s")
-        results.append(
-            {
+        result = {
                 "id": command.id,
                 "label": command.label,
                 "argv": list(argv),
@@ -412,7 +426,8 @@ async def _run_configured_commands(kind: str, args: dict[str, Any], ctx: ToolCon
                 "stdout": _check_output_excerpt(stdout.decode("utf-8", errors="replace")),
                 "stderr": _check_output_excerpt(stderr.decode("utf-8", errors="replace")),
             }
-        )
+        results.append(record_check(identity, result, pid=process.pid,
+                                    duration_seconds=time.monotonic() - started))
     ok = all(item["returncode"] == 0 for item in results)
     return ToolResult(ok=ok, output={"kind": kind, "results": results})
 
@@ -645,7 +660,8 @@ def _record_branch_write(ctx: ToolContext, files: list[str]) -> None:
     record_changed_files(ctx.project, ctx.run_id, files)
 
 
-def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapshot]) -> str | None:
+def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapshot], *,
+                    after_snapshots: list[FileSnapshot] | None = None) -> str | None:
     run_root = Path(str(ctx.extra.get("run_root"))) if ctx.extra.get("run_root") else repo_root() / "runs" / ctx.run_id
     scope = current_project_scope(ctx.project, ctx.run_id)
     if scope is not None:
@@ -664,6 +680,8 @@ def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapsh
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "snapshots": [asdict(item) for item in snapshots],
     }
+    if after_snapshots is not None:
+        payload["after_snapshots"] = [asdict(item) for item in after_snapshots]
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(target)
 

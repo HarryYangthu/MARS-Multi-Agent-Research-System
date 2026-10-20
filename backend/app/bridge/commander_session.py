@@ -89,6 +89,7 @@ class CommanderSession:
     messages: list[ChatMessage] = field(default_factory=list)
     context_version: int = 3
     context_compaction: dict[str, Any] = field(default_factory=dict)
+    completion_state: dict[str, Any] = field(default_factory=dict)
     activities: list[ConversationActivity] = field(default_factory=list)
     processing: bool = False
     active_turn_id: str | None = None
@@ -128,6 +129,7 @@ class CommanderSession:
         return {
             "context_version": self.context_version,
             "context_compaction": self.context_compaction,
+            "completion_state": dict(self.completion_state),
             "conv_id": self.conv_id,
             "project": self.project,
             "state": self.state.value,
@@ -306,6 +308,8 @@ class CommanderSessionStore:
             messages=messages,
             context_version=int(meta.get("context_version", 2)),
             context_compaction=dict(meta.get("context_compaction", {})),
+            completion_state=(dict(meta["completion_state"])
+                              if isinstance(meta.get("completion_state"), dict) else {}),
             activities=[ConversationActivity(**item) for item in meta.get("activities", [])],
         )
         # A process restart cannot imply that an old provider/tool call is still live.

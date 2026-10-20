@@ -62,6 +62,12 @@ def backend(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveBackend]:
             destination = runtime / line
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / line, destination)
+    # Production starts without preinstalled user projects. This lifecycle
+    # fixture explicitly installs its genuine public package metadata only;
+    # no command, execution permission or measurement is synthesized.
+    project_metadata = runtime / 'projects/synthetic_regression/project.yaml'
+    project_metadata.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / 'projects/synthetic_regression/project.yaml', project_metadata)
     token = secrets.token_urlsafe(32)
     port_file, log_path = root / "port", root / "backend.log"
     # This is the unmodified production app and routes, with an owned socket

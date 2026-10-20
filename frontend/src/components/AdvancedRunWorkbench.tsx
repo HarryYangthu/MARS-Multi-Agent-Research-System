@@ -2,7 +2,7 @@
 
 /* eslint-disable react/jsx-no-undef */
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -255,6 +255,24 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
   const [revisionSubmitting, setRevisionSubmitting] = useState(false);
   const activeAgentState = latestStateForStage(run?.states, activeAgent);
 
+  const loadLatest = useCallback(async (agentDir: string, stem: string): Promise<void> => {
+    try {
+      const versions = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || ""}/api/artifacts/${runId}/${agentDir}/${stem}/versions`,
+      ).then((r) => r.json());
+      if (!Array.isArray(versions) || versions.length === 0) {
+        setArtifact(null);
+        return;
+      }
+      const last = versions[versions.length - 1];
+      const view = await getArtifact(runId, agentDir, stem, last.version);
+      setArtifact(view);
+      setEditing(splitFrontmatter(view.text).body);
+    } catch {
+      setArtifact(null);
+    }
+  }, [runId]);
+
   useEffect(() => {
     setActiveAgent(initialAgent);
   }, [initialAgent, runId]);
@@ -430,13 +448,13 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
       closeWS();
       clearInterval(poll);
     };
-  }, [runId, toolFilter, toolStatusFilter, toolEventFilter, toolCallIdFilter, toolLimit]);
+  }, [runId, run?.project, toolFilter, toolStatusFilter, toolEventFilter, toolCallIdFilter, toolLimit]);
 
   useEffect(() => {
     const stem = STAGE_TO_STEM[activeAgent];
     if (!stem) return;
     void loadLatest(stem.agentDir, stem.stem);
-  }, [activeAgent, activeAgentState, runId]);
+  }, [activeAgent, activeAgentState, runId, loadLatest]);
 
   useEffect(() => {
     if (!run) return;
@@ -603,23 +621,6 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
     };
   }, [activeAgent, runId]);
 
-  async function loadLatest(agentDir: string, stem: string): Promise<void> {
-    try {
-      const versions = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || ""}/api/artifacts/${runId}/${agentDir}/${stem}/versions`,
-      ).then((r) => r.json());
-      if (!Array.isArray(versions) || versions.length === 0) {
-        setArtifact(null);
-        return;
-      }
-      const last = versions[versions.length - 1];
-      const view = await getArtifact(runId, agentDir, stem, last.version);
-      setArtifact(view);
-      setEditing(splitFrontmatter(view.text).body);
-    } catch {
-      setArtifact(null);
-    }
-  }
 
   async function approve(): Promise<void> {
     if (!artifact) {
@@ -670,7 +671,7 @@ function RunDetailPageInner({ initialRunId }: { initialRunId: string }): JSX.Ele
         );
         selectAgent("commander");
       } else {
-        setToolActionMessage(`${agentLabel(artifact.agent_dir)} 已批准，正在推进执行流。`);
+        setToolActionMessage(`${agentLabel(artifact.agent_dir)} 已批准；${nextRun?.status === "failed" ? "任务未完成，请按详情中的原因修正后，在原任务中重试。" : ["completed", "done"].includes(nextRun?.status || "") ? "当前流程已结束，已保存产物可查看。" : "请查看当前阶段的进度与审核状态。"}`);
       }
     } catch (error) {
       setToolActionMessage(error instanceof Error ? error.message : "批准失败");
@@ -4806,7 +4807,7 @@ function WorkbenchCodeRepositoriesPanel({
     setStatus("");
   }, [repositories]);
   const repo = draft[0] ?? emptyCodeRepository();
-  const persistedRepo = repositories[0] ?? emptyCodeRepository();
+  const persistedRepo = useMemo(() => repositories[0] ?? emptyCodeRepository(), [repositories]);
   const persistedSignature = codeRepositorySignature(persistedRepo);
   const configDirty = codeRepositorySignature(repo) !== persistedSignature;
   const activeSource = workspace?.selected_source ?? source;
@@ -4871,7 +4872,7 @@ function WorkbenchCodeRepositoriesPanel({
     return () => {
       alive = false;
     };
-  }, [project, runId, source, persistedSignature, reloadToken]);
+  }, [project, runId, source, persistedRepo, persistedSignature, reloadToken]);
 
   useEffect(() => {
     let alive = true;
@@ -6170,7 +6171,7 @@ function WorkbenchProcessPanel({
   );
 }
 
-function AgentWorkSummary({
+export function AgentWorkSummary({
   run,
   agent,
   artifact,
@@ -7822,7 +7823,7 @@ function patchLineClassName(kind: PatchLineKind): string {
   return "border-l-2 border-transparent text-slate-300";
 }
 
-function TraceView({ trace }: { trace: TraceManifest | null }): JSX.Element | null {
+export function TraceView({ trace }: { trace: TraceManifest | null }): JSX.Element | null {
   const { t } = useI18n();
   if (!trace) return null;
   const spans = [...trace.spans].slice(-16);

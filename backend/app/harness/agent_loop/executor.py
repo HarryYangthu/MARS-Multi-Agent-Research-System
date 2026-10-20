@@ -20,6 +20,7 @@ from app.harness.agent_loop.review_plan import (
     WHOLE_REVIEW_UNIT, ReviewPlan, ReviewPlanFactory, ReviewUnit, UnitReviewResult, completed_plan_decision, finish_review_unit, pack_review_unit,
     prepare_review_plan, remaining_budget_message, review_plan_fingerprint, review_unit_config,
     start_review_unit, validate_review_plan_resume, validate_review_provider,
+    format_correction_message, queue_review_format_correction,
 )
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
@@ -27,6 +28,7 @@ from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_finge
 from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
+from app.harness.llm.structured_output import normalize_document_output
 from app.harness.tools.registry import ToolContext, ToolPolicy, ToolRegistry
 
 Validator = Callable[[str, list[dict[str, Any]]], Awaitable[list[str]]]
@@ -562,6 +564,9 @@ class NativeAgentLoop:
                 if counts["model_requests"] == 0:
                     await progress("started")
                 extra: list[Message] = [budget_message(p, counts)]
+                planned_correction = state.get('planned_review_format_correction') if planned_review else None
+                if planned_correction is not None:
+                    extra.append(format_correction_message(planned_correction))
                 if p.document_revisions_enabled and state["candidate"] and not reviewing:
                     extra.append(Message("user", "[host current candidate receipt]\n" + canonical({
                         "base_sha256": digest(state["candidate"]),
@@ -587,7 +592,7 @@ class NativeAgentLoop:
                 if unit is not None:
                     try:
                         messages, manifest = pack_review_unit(unit, budget=effective_budget,
-                                                              budget_context=budget_message(p, counts))
+                            budget_context=budget_message(p, counts), format_correction=planned_correction)
                     except ValueError as exc:
                         state["status"] = "review_evidence_unavailable"
                         state["feedback"] = str(exc)
@@ -656,7 +661,8 @@ class NativeAgentLoop:
                                              "provider": call_config.provider, "model": call_config.model,
                                              "reasoning_effort": call_config.reasoning_effort,
                                              "thinking_enabled": call_config.thinking_enabled,
-                                             "repair_mode": "review_format" if format_repair else None,
+                                             "repair_mode": ("planned_review_format" if planned_correction is not None
+                                                             else "review_format" if format_repair else None),
                                              "max_tokens": call_config.max_tokens,
                                              **({"review_unit_id": review_request["unit_id"],
                                                  "review_plan_sha256": review_request["plan_sha256"],
@@ -670,6 +676,7 @@ class NativeAgentLoop:
                             request.review_provider if reviewing and request.review_provider else request.provider,
                             messages, call_config,
                             run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)),
+                            active_model_time=True,
                             correlation=correlation),
                         timeout=llm_call_deadline_seconds(call_config))
                 except ResourceBudgetError as exc:
@@ -746,9 +753,19 @@ class NativeAgentLoop:
                 if parse_error is not None:
                     counts["protocol_repairs"] += 1
                     if planned_review:
-                        # A malformed reviewer response is an execution failure,
-                        # not an invitation to edit the scientific candidate or
-                        # silently call the same review unit again.
+                        # A known formatting failure gets at most one explicit,
+                        # charged correction. It never replays tools, an unknown
+                        # provider request, or a substantive scientific rejection.
+                        correction = (queue_review_format_correction(state, error=str(parse_error),
+                            response_text=completion.text, response_visible=response_visible)
+                            if is_review_format_error(parse_error) and p.allows_model_calls(counts['model_requests'])
+                            and counts['protocol_repairs'] <= p.max_protocol_repairs else None)
+                        if correction is not None:
+                            trace.emit('review_unit_format_error', {'request': correction['request'],
+                                'unit_id': correction['unit_id'], 'automatic_format_correction': True,
+                                'tools_replayed': False, 'candidate_changed': False}, visible=correction)
+                            trace.snapshot(state)
+                            continue
                         failure = UnitReviewResult({"accept": False, "issues": ["Review response failed its contract: " + str(parse_error)],
                                                     "rationale": "No usable review decision; the candidate is not accepted."},
                                                    {"protocol_error": str(parse_error)})
@@ -853,7 +870,13 @@ class NativeAgentLoop:
                     if counts["reflections"] >= p.max_reflections:
                         break
                 elif "final" in decision:
-                    state["candidate"] = decision["final"]
+                    original_candidate = decision['final']
+                    state["candidate"] = normalize_document_output(original_candidate)
+                    if state['candidate'] != original_candidate:
+                        trace.emit('document_transport_normalized', {
+                            'original_sha256': digest(original_candidate), 'candidate_sha256': digest(state['candidate']),
+                            'content_invented': False, 'validation_required': True,
+                            'body_rewritten': False})
                     if decision.get("format_compatibility"):
                         trace.emit("document_format_normalized", {"call_id": decision["submission_id"],
                             "candidate_sha256": digest(state["candidate"]), "content_invented": False,

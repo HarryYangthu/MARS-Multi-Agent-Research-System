@@ -67,16 +67,6 @@ configs/tensorboard.yaml
 configs/tools.yaml
 configs/windows_native.yaml
 configs/workflow.yaml
-projects/synthetic_regression/AGENTS.md
-projects/synthetic_regression/README.md
-projects/synthetic_regression/project.yaml
-projects/synthetic_regression/project_pack.yaml
-projects/synthetic_regression/repo_link.yaml
-projects/synthetic_regression/src/synthetic_regression_adapter/resources/dataset.json
-projects/synthetic_regression/src/synthetic_regression_adapter/resources/discovery.yaml
-projects/synthetic_regression/src/synthetic_regression_adapter/resources/metrics.yaml
-projects/synthetic_regression/ui_schema.json
-projects/synthetic_regression/workflow.yaml
 templates/artifacts/code_spec.v1.md
 templates/artifacts/diagnosis.v1.md
 templates/artifacts/evaluation_report.v1.md
@@ -97,3 +87,11 @@ configs/git_runtime.yaml
 configs/skills/imported/f7ecc96802d44685b630665fb9ec732f7790a06b5cd51701b5018542bd1226a2/SKILL.md
 
 configs/project_storage.yaml
+configs/code_inspection.yaml
+configs/code_review.yaml
+configs/execution_review.yaml
+configs/literature_search.yaml
+configs/model_usage.yaml
+configs/zcode.yaml
+projects/.gitkeep
+templates/code_rules/pimc_python.md

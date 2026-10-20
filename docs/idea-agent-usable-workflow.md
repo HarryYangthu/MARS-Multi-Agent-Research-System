@@ -21,11 +21,11 @@ Idea Agent 在理解 PIMC、实际代码与当前任务的基础上，寻找有�
 3. 摘要用于筛选。采用论文前，实际阅读完整的关键方法、公式、假设，以及所依赖的附录和相关实验。PDF 与全文 HTML 均可提供正文；只下载文件不代表已读完。
 4. 结合真实代码形成一个方案，明确改动位置、输入输出、步骤或公式、初始化、适用边界和最小验证办法。
 5. 评审者在独立会话中接收原任务、完整背景、实际阅读窗口和候选方案进行评审。当前配置为 DeepSeek V4.1 Flash（API 标识 `deepseek-flash`）生成和评审，分别使用独立会话；发现阻断问题后修订并复核，最多四轮有效评审，受同一个总调用预算约束。
-6. 宿主验证 schema、引用对应关系、文件完整性、实际调用及评审记录，输出交付物并进入人工查看状态。
+6. MARS验证 schema、引用对应关系、文件完整性、实际调用及评审记录，输出交付物并进入人工查看状态。
 
 ## 论文证据
 
-`research_context` 记录研究问题、选文原则、每个候选的判断、原方法、迁移思路、限制和结束理由。新任务使用 `idea.research_context.v2`：采用 PDF 时通过 `method_pages` 声明关键方法所在页；宿主合并这些页的实际字符窗口，缺少前缀、中间段或结尾时拒绝提交，并显示缺口。HTML 的 `method_pages` 使用空数组。采用项还必须引用真实全文读取返回的 `source_id`，并关联具体 `method_spec` 字段。宿主核对实际 URL、读取记录、文件位置和哈希；评审模型进一步判断方法理解和迁移是否成立。历史 v1 收据按原契约审核，不升级为 v2 通过记录。
+`research_context` 记录研究问题、选文原则、每个候选的判断、原方法、迁移思路、限制和结束理由。新任务使用 `idea.research_context.v2`：采用 PDF 时通过 `method_pages` 声明关键方法所在页；MARS合并这些页的实际字符窗口，缺少前缀、中间段或结尾时拒绝提交，并显示缺口。HTML 的 `method_pages` 使用空数组。采用项还必须引用真实全文读取返回的 `source_id`，并关联具体 `method_spec` 字段。MARS核对实际 URL、读取记录、文件位置和哈希；评审模型进一步判断方法理解和迁移是否成立。历史 v1 收据按原契约审核，不升级为 v2 通过记录。
 
 PDF 成功下载后保存在运行目录，可在工作台打开。后续页段和字符窗口复用本地文件，不重复下载。大文件、网络限流、不可访问全文和公式提取缺失均保留失败信息；不得把摘要或失败下载标为完整方法证据。
 
@@ -49,9 +49,9 @@ PDF 成功下载后保存在运行目录，可在工作台打开。后续页段�
 
 当前聚焦 Idea 路径使用 `loop.max_model_calls: null`，取消原 36 次 LLM 请求上限；共享资源配置 `limits.max_model_requests: null` 同时取消原 256 次总请求门槛。`null` 明确表示不限制请求次数，实际请求、SDK 尝试和用量继续累计记录，模型可见预算也说明该含义。工具、校验修复、评审轮数、token、运行时长和人工停止仍各自生效。此配置用于新任务；已保存的历史任务仍按其原始快照核验，不能通过修改配置重置旧预算或自动重放未知调用。
 
-生成者默认关闭 thinking，使用原生工具检索、阅读和简洁起草，单次输出上限为 16,384 tokens；独立评审仍启用 high thinking。宿主以公开 Observation 重建输入（`native_observation_history`），不回放缺少私有推理历史的 assistant/tool 对话。真实调用、结果与来源保留在审计轨迹，私有推理内容不保存或显示。
+生成者默认关闭 thinking，使用原生工具检索、阅读和简洁起草，单次输出上限为 16,384 tokens；独立评审仍启用 high thinking。MARS以公开 Observation 重建输入（`native_observation_history`），不回放缺少私有推理历史的 assistant/tool 对话。真实调用、结果与来源保留在审计轨迹，私有推理内容不保存或显示。
 
-`submission_body_field: human_summary` 让初稿直接提交完整 metadata 对象，去掉冗余的 metadata/body 包装；宿主只将作者的 `human_summary` 原样复制为正文，不补写内容。`document_revisions_enabled` 提供 `mars_revise_document`：作者提交当前候选的 SHA256 和明确的 set/remove 字段操作，宿主原子应用后，对完整结果重新执行 schema、材料、约束和模型评审。父路径不存在、数组越界、旧版本哈希或非法值会拒绝整批操作；它不能绕过验收，也不会代写科学内容。初稿仍需要完整提交。
+`submission_body_field: human_summary` 让初稿直接提交完整 metadata 对象，去掉冗余的 metadata/body 包装；MARS只将作者的 `human_summary` 原样复制为正文，不补写内容。`document_revisions_enabled` 提供 `mars_revise_document`：作者提交当前候选的 SHA256 和明确的 set/remove 字段操作，MARS原子应用后，对完整结果重新执行 schema、材料、约束和模型评审。父路径不存在、数组越界、旧版本哈希或非法值会拒绝整批操作；它不能绕过验收，也不会代写科学内容。初稿仍需要完整提交。
 
 `deduplicate_evidence_enabled` 只在同一次评审输入内移除完全相同的源码/正文副本，保留完整原文、定位信息和原始轨迹。评审强制保留实际源码读取与论文阅读窗口；预算无法容纳时明确失败，不靠截断源码继续给出通过意见。作者应核验评审提出的数学反例，有依据的反驳可以写入 `method_spec.review_resolutions`，不能把评审意见自动当作事实。
 
@@ -65,7 +65,7 @@ API 可在 `idea_requirements.performance_requirement` 中明确性能门槛。�
 {"metric":"RES","direction":"minimize","max_degradation":0.0,"unit":"dB","baseline":"matched_run","acceptance_split":"held_out_test"}
 ```
 
-候选的 `decision_rule.performance` 必须保留这些字段，同时明确 `selection_split=validation`、`report_split=held_out_test`、`status=pending_experiment` 和比较公式。宿主拒绝把 0 改成 0.3、用历史分数替代同条件重跑基线、用测试集挑选方案或声明实验已通过。自然语言中是否也满足同一门槛仍需模型和人工核对；自动检查不证明实验收益。
+候选的 `decision_rule.performance` 必须保留这些字段，同时明确 `selection_split=validation`、`report_split=held_out_test`、`status=pending_experiment` 和比较公式。MARS拒绝把 0 改成 0.3、用历史分数替代同条件重跑基线、用测试集挑选方案或声明实验已通过。自然语言中是否也满足同一门槛仍需模型和人工核对；自动检查不证明实验收益。
 
 `acceptance_split` 是可选的显式输入：指定 `held_out_test` 后，候选必须原样保留，区分“验证集选模型”与“保留测试集最终验收”。未指定该字段的历史任务仍按原始约束检查。
 
@@ -85,7 +85,7 @@ API 可在 `idea_requirements.performance_requirement` 中明确性能门槛。�
 
 `start --request-file <task.json> --record <record.json> --serve --wait` 在同一进程环境启动真实本地 API，提交指定任务，等待 `waiting_review`、完成或失败后退出。`waiting_review` 表示已生成供人查看的结果，不自动批准或启动下游。`--timeout` 和 `--poll-interval` 控制等待上限；失败以非零退出码结束。任务文件只提供输入，不能包含预写输出。已有服务可省略 `--serve`。
 
-`revise --record <record.json> --reason-file <feedback.txt> --serve --wait` 通过正式 retry API 修订已有任务。Bridge 将最新数值版本的真实候选与反馈一起交给 Idea Agent；作者保留不受影响的内容，只针对具体证据缺口补读。脚本等待新版本，不能把上一版的 `waiting_review` 误判为修订完成。修订仍使用真实作者调用、完整宿主校验和独立会话评审，不自动批准方案。
+`revise --record <record.json> --reason-file <feedback.txt> --serve --wait` 通过正式 retry API 修订已有任务。Bridge 将最新数值版本的真实候选与反馈一起交给 Idea Agent；作者保留不受影响的内容，只针对具体证据缺口补读。脚本等待新版本，不能把上一版的 `waiting_review` 误判为修订完成。修订仍使用真实作者调用、完整MARS校验和独立会话评审，不自动批准方案。
 
 运行目录保存知识快照、模型和工具轨迹、初稿、评审意见、失败原因和最终交付。结构检查通过、独立模型评审通过、真实仿真完成是不同证据层，报告应分别说明。
 

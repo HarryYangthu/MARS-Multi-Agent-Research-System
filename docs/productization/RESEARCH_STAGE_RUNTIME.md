@@ -24,6 +24,6 @@
 
 ## 尚未达到的标准
 
-该诊断由开发宿主显式构造一个 Coding graph 节点，未调用正常 product start。`research_execution_admission.ready` 仍为 false。Execution 必须走合同 job adapter，禁止使用旧 execution Agent 路径。本增量不声称完整 Idea/Reader/审查/Experiment/Execution/Writing 编排、项目级 OS 隔离、checkpoint 续跑、暂停/终止调度或正式发布已通过；完整任务启动保持阻断。
+该诊断由MARS开发环境显式构造一个 Coding graph 节点，未调用正常 product start。`research_execution_admission.ready` 仍为 false。Execution 必须走合同 job adapter，禁止使用旧 execution Agent 路径。本增量不声称完整 Idea/Reader/审查/Experiment/Execution/Writing 编排、项目级 OS 隔离、checkpoint 续跑、暂停/终止调度或正式发布已通过；完整任务启动保持阻断。
 
 全量回归：**3461 passed、181 skipped，202.74 秒**；strict mypy **641 个源文件**通过，**4 条**导入边界通过。181 项跳过涉及外部环境、平台或历史证据前置条件，不记为正向验收。[回执](evidence/bound-stage-checks.json)。

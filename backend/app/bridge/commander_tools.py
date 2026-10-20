@@ -8,8 +8,11 @@ verbs the Commander LLM can pick from. Dependencies are injected via
 from __future__ import annotations
 
 import time
+import json
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -18,10 +21,11 @@ from app.bridge.orchestrator import Orchestrator, RunRequest
 from app.bridge.discovery_commander_tools import DiscoveryCommanderTools
 from app.bridge.discovery_service import DiscoveryService
 from app.bridge.discovery_types import DiscoveryRunSpec
-from app.bridge.commander_code import execute_code_inspection
+from app.bridge.commander_code import execute_code_inspection, routing_repository_check
+from app.bridge.commander_existing_sources import existing_retry, existing_user_sources
 from app.harness.observability.events import write_event
 from app.harness.schema.validator import validate_document
-from app.harness.tools.config import tool_config
+from app.harness.tools.config import load_tool_configs, tool_config
 from app.harness.tools.registry import (
     ToolContext as HarnessToolContext,
     ToolResult as HarnessToolResult,
@@ -56,6 +60,7 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]   # JSON-schema-ish, shown to the LLM
     handler: ToolHandler
+    mutation_level: str = "write"
 
 
 _COMMANDER_CONTEXTS: dict[str, ToolContext] = {}
@@ -75,6 +80,57 @@ def configure_discovery_commander_tools(service: DiscoveryService | None) -> Non
 # --------------------------------------------------------------------- tools
 
 
+def existing_execution_job_for_route(
+    args: dict[str, Any], routing: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Normalize explicit no-code intent; source admission remains host-owned.
+
+    This is a request to inspect a reusable delivery, never evidence that one
+    exists or has been approved. Missing exact configuration reads retain the
+    ordinary Coding path instead of adding another creation blocker.
+    """
+    raw = args.get("existing_execution_job")
+    if raw is None:
+        return None
+    fields = {"config_path", "entrypoint", "max_iters", "budget_unit", "seed"}
+    # This optional shortcut must not turn a valid Coding request into a
+    # creation failure. In particular an unseeded source configuration cannot
+    # supply a seed merely to satisfy a model-output shape requirement. Let
+    # ordinary Coding inspect that entrypoint and preserve its actual defaults.
+    if not isinstance(raw, dict) or set(raw) < fields:
+        return None
+    if set(raw) != fields:
+        raise ValueError("existing_execution_job 必须只包含 config_path、entrypoint、max_iters、budget_unit、seed。")
+    normalized: dict[str, Any] = {}
+    for key in ("config_path", "entrypoint"):
+        value = raw[key]
+        if not isinstance(value, str) or not value or value != value.strip() or "\x00" in value:
+            raise ValueError(f"existing_execution_job.{key} 必须是非空的代码仓相对文件路径。")
+        name = value.replace("\\", "/")
+        path = PurePosixPath(name)
+        if (path.is_absolute() or PureWindowsPath(value).drive or ".." in path.parts
+                or name in {".", ".."} or name.endswith("/")):
+            raise ValueError(f"existing_execution_job.{key} 必须是代码仓内的相对文件路径，不能逃逸目录。")
+        normalized[key] = path.as_posix()
+    if not isinstance(raw["budget_unit"], str) or raw["budget_unit"] not in {"steps", "epochs"}:
+        raise ValueError("existing_execution_job.budget_unit 必须为 steps 或 epochs。")
+    if type(raw["max_iters"]) is not int or raw["max_iters"] < 1:
+        raise ValueError("existing_execution_job.max_iters 必须是正整数，按本次用户预算填写。")
+    if type(raw["seed"]) is not int or raw["seed"] < 0:
+        raise ValueError("existing_execution_job.seed 必须是非负整数。")
+    normalized.update({key: raw[key] for key in ("max_iters", "budget_unit", "seed")})
+    if (args.get("entrypoint", "pipeline") != "coding" or args.get("standalone")
+            or args.get("seed_artifact") or routing.get("ok") is not True
+            or routing.get("repository_scope") != "required"):
+        return None
+    evidence = routing.get("evidence", [])
+    if not isinstance(evidence, list) or not any(
+        isinstance(row, dict) and row.get("path") == normalized["config_path"] for row in evidence
+    ):
+        return None
+    return normalized
+
+
 async def _create_and_start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     created = await _create_run(args, ctx)
     if not created.get("ok"):
@@ -83,10 +139,67 @@ async def _create_and_start_run(args: dict[str, Any], ctx: ToolContext) -> dict[
 
 
 async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    routing = routing_repository_check(args, ctx.session)
+    if not routing['ok']:
+        return routing
+    return await _create_run_with_routing(args, ctx, routing)
+
+
+def _project_default_data_source(project: str) -> dict[str, Any] | None:
+    """Resolve the project's actual selection once, before allocating the run."""
+    from app.storage.data_source_store import DataSourceStore
+
+    store = DataSourceStore()
+    source_id = store.default_id(project)
+    if not source_id:
+        return None
+    profile = store.default_profile(project)
+    if profile is None:
+        raise ValueError("项目默认数据档案已丢失，请重新选择数据；不能悄悄改用配置中的另一份数据。")
+    if profile.get("id") != source_id or profile.get("project") != project:
+        raise ValueError("默认数据身份或项目归属不一致，不能使用其他项目的数据。")
+    stored_path = profile.get("stored_path")
+    if not isinstance(stored_path, str) or not stored_path or not Path(stored_path).is_absolute():
+        raise ValueError("默认数据缺少有效的绝对存储路径，请重新选择数据。")
+    path = Path(stored_path).resolve(strict=True)
+    if not path.is_file():
+        raise ValueError("默认数据必须指向真实文件。")
+    with path.open("rb"):
+        pass  # Basic readability only; the real preflight binds content hashes.
+    return {**profile, "stored_path": str(path)}
+
+
+async def _create_run_with_routing(
+    args: dict[str, Any], ctx: ToolContext, routing: dict[str, Any], *,
+    additional_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Shared mutation after a real public reader or bounded host admission.
+
+    This private boundary accepts host-created evidence, never a model's claim
+    that inspection occurred. The ordinary creation tools still use the public
+    current-turn reader check above.
+    """
     entrypoint = str(args.get("entrypoint", "pipeline"))
+    if entrypoint == 'execution':
+        return {'ok': False, 'status': 'execution_delivery_required',
+                'error': '新任务尚未绑定编码交付与 execution_jobs 运行清单，任务未创建。已有模型/训练 YAML 不等于系统可消费的执行交接。请从 coding 复用现有模型、只补必要运行交付；需设计比较协议才从 experiment 开始。已有任务的执行清单通过 run.recovery_status/run.recover 复用，不要重新研究模型。'}
+    try:
+        existing_job = existing_execution_job_for_route(args, routing)
+    except ValueError as exc:
+        return {"ok": False, "status": "existing_execution_job_invalid", "error": str(exc)}
+    try:
+        data_source = _project_default_data_source(ctx.session.project)
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "status": "selected_data_source_invalid", "error": str(exc)}
     user_request = str(args.get("user_request", ""))
     seed_artifact = args.get("seed_artifact")
     task = str(args.get("task") or user_request[:60] or "commander_run")
+    from app.bridge.commander_existing import existing_execution_stage_limit
+    # Stage limits come from actual user messages, not the model's rewritten
+    # task or optional declaration. Trusted specialised admission may already
+    # have frozen this boundary; an absent ordinary source does not erase it.
+    user_sources = _stage_limit_user_sources(ctx.session)
+    stop_at_execution = existing_execution_stage_limit({}, [row['content'] for row in user_sources])
 
     request = RunRequest(
         task=task,
@@ -94,8 +207,13 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         entrypoint=entrypoint,  # type: ignore[arg-type]
         standalone=bool(args.get("standalone", False)),
         user_request=user_request,
+        data_source=data_source,
         review_mode="commander" if ctx.session.auto_mode else "manual",
-        extra=({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {}),
+        extra={"routing": routing,
+               **({"existing_execution_job": existing_job} if existing_job is not None else {}),
+               **(additional_extra or {}),
+               **({"stop_after": "execution"} if stop_at_execution else {}),
+               **({"experiment_id": ctx.session.experiment_id} if ctx.session.experiment_id else {})},
     )
     rsession = ctx.orchestrator.create_session(request)
     run_id = rsession.run.run_id
@@ -124,6 +242,125 @@ async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     }
 
 
+def _existing_retry(text: str) -> bool:
+    return existing_retry(text)
+
+
+def _existing_user_sources(session: CommanderSession) -> list[dict[str, str]]:
+    return existing_user_sources(session)
+
+
+def _stage_limit_user_sources(session: CommanderSession) -> list[dict[str, str]]:
+    """Retain an unallocated pending user's boundary across pure continuations."""
+    ordinary = existing_user_sources(session)
+    messages = session.context_messages()
+    users = [message for message in messages if message.role == 'user']
+    if (not users or session.linked_run_id or users[-1].id != session.active_turn_id
+            or not existing_retry(users[-1].content)):
+        return ordinary
+    state = session.completion_state
+    previous = state.get('previous_goal')
+    if (state.get('previous_status') != 'pending' or not isinstance(previous, dict)
+            or previous.get('schema') != 'commander.turn_goal.v1'
+            or previous.get('intent') != 'action' or previous.get('run_target') != 'new'
+            or previous.get('project') != session.project):
+        return ordinary
+    index = next((i for i, user in enumerate(users) if user.id == previous.get('source_turn_id')), None)
+    if (index is None or hashlib.sha256(users[index].content.encode()).hexdigest()
+            != previous.get('source_user_sha256')
+            or any(not existing_retry(user.content) for user in users[index + 1:])):
+        return ordinary
+    # A pending goal may itself be bound to a preceding "continue" turn.
+    # Walk only its contiguous actual user chain, never model summaries.
+    while index > 0 and existing_retry(users[index].content):
+        index -= 1
+    source = users[index]
+    start = next(i for i, message in enumerate(messages) if message.id == source.id)
+    if any(message.role == 'tool' and message.tool_name in {
+            'run.create', 'create_and_start_run', 'run.existing_model'}
+            and isinstance(message.tool_result, dict) and message.tool_result.get('run_id')
+            for message in messages[start:]):
+        return ordinary  # Even a failed start with an allocated run is not new admission.
+    return [{'id': user.id, 'content': user.content} for user in users[index:]]
+
+
+async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.commander_existing import (
+        existing_execution_stage_limit, materialize_existing_seed, resolve_existing_request,
+        user_requests_additional_changes, validate_existing_user_intent,
+    )
+    from app.harness.persistence import atomic_write_json
+    from app.harness.tools.config import load_execution_config
+    from app.harness.tools.project_repo import load_project_repo
+
+    source_messages = _existing_user_sources(ctx.session)
+    if (ctx.session.linked_run_id and source_messages
+            and _existing_retry(source_messages[-1]["content"])):
+        return {"ok": False, "status": "existing_run_recovery_required", "run_id": ctx.session.linked_run_id,
+                "error": "当前对话已有任务；继续或重试应核对并恢复原任务，不重复创建研究。"}
+    try:
+        resolved = resolve_existing_request(load_project_repo(ctx.session.project),
+            load_execution_config()["execution"].get("local_commands", []), args,
+            user_texts=[m["content"] for m in source_messages])
+    except (OSError, UnicodeError, ValueError) as exc:
+        return {"ok": False, "status": "existing_model_request_invalid", "error": str(exc)}
+    if not resolved["ok"]:
+        return resolved
+    try:
+        if not source_messages:
+            raise ValueError("已有模型运行必须绑定实际用户消息。")
+        validate_existing_user_intent(resolved, [m["content"] for m in source_messages])
+        stop_after_execution = existing_execution_stage_limit(args, [m["content"] for m in source_messages])
+    except ValueError as exc:
+        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc)}
+    if user_requests_additional_changes([m["content"] for m in source_messages]):
+        resolved["ordinary_coding"] = True
+    resolved = materialize_existing_seed(resolved)
+    requested = resolved["requested"]
+    resolved["stop_after_execution"] = stop_after_execution
+    original = "\n\n".join(f'[用户消息 {m["id"]}]\n{m["content"]}' for m in source_messages)
+    original += "\n\n[MARS 核实的当前配置、预算和种子]\n" + json.dumps(requested, ensure_ascii=False)
+    if resolved["seed_source"] == "generated_for_run":
+        original += f'\n当前配置及登记默认文件未固定seed；MARS为本次新任务生成并冻结seed={requested["seed"]}。'
+    elif resolved["ordinary_coding_reason"]:
+        original += "\n当前配置的种子默认值尚不能完整确认；由普通Coding按真实入口核对，不借用历史种子。"
+    if resolved["parameter_overrides"]:
+        original += "\n用户明确的参数调整（由普通Coding核对并实现，不改变其意义）：" + json.dumps(
+            resolved["parameter_overrides"], ensure_ascii=False)
+    routing = {"ok": True, "repository_scope": "required", "verification": "host_registered_current_source",
+               "reason": "已有登记模型的运行请求；MARS读取当前配置及入口，直接从Coding准备执行。",
+               "evidence": resolved["evidence"]}
+    create_args: dict[str, Any] = {"entrypoint": "coding", "user_request": original,
+                                  "task": f'existing_{Path(requested["config_path"]).stem}'}
+    if not resolved["ordinary_coding"]:
+        create_args["existing_execution_job"] = requested
+    record = {"schema": "commander.existing_model_request.v1", "conversation_id": ctx.session.conv_id,
+              "turn_id": ctx.session.active_turn_id, "source_messages": source_messages, **resolved}
+    created = await _create_run_with_routing(create_args, ctx, routing,
+        additional_extra={"existing_model_request": record,
+                          **({"stop_after": "execution"} if stop_after_execution else {})})
+    if not created.get("ok"):
+        return created
+    run = ctx.run_store.get(str(created["run_id"]))
+    if run is None:
+        raise ValueError("Created existing-model task is unavailable")
+    atomic_write_json(run.root / "context/existing_model_request.json", record)
+    run.write_event("agent_events", {"event": "commander.existing_model_admitted",
+        "entrypoint": "coding", "configuration": requested["config_path"],
+        "ordinary_coding": resolved["ordinary_coding"], "evidence": resolved["evidence"]})
+    result = {**created, "status": "created", "requested": requested,
+              "seed_source": resolved["seed_source"],
+              "ordinary_coding": resolved["ordinary_coding"], "training_started": False,
+              "stop_after_execution": stop_after_execution,
+              "inspection_ref": "context/existing_model_request.json"}
+    if args.get("start", True):
+        started = await _start_run({"run_id": created["run_id"]}, ctx)
+        if not started.get("ok"):
+            return {**started, "run_id": created["run_id"], "entrypoint": "coding"}
+        result.update({"status": "preparation_started", "states": started.get("states", {})})
+    return result
+
+
 async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     run_id = str(args.get("run_id") or ctx.session.linked_run_id or "")
     if not run_id:
@@ -140,7 +377,7 @@ async def _start_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         "ok": True,
         "status": started["status"],
         "run_id": run_id,
-        "entrypoint": rsession.request.entrypoint,
+        "entrypoint": rsession.request.extra.get('scope_entrypoint', rsession.request.entrypoint),
         "auto_approve": rsession.request.auto_approve,
         "review_mode": rsession.request.review_mode,
         "states": {k: s.value for k, s in rsession.graph.all_states().items()},
@@ -159,7 +396,36 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     waiting = [k for k, v in states.items() if v == "waiting_review"]
     from app.bridge.managed_review import review_state
     return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting,
+            "entrypoint": rsession.request.extra.get('scope_entrypoint', rsession.request.entrypoint),
+            "initial_entrypoint": rsession.request.entrypoint, "task_request": rsession.request.user_request,
+            "routing": rsession.request.extra.get('routing'),
+            "routing_note": '运行状态不证明旧任务的目标或入口正确。用户纠正需求时须重新核对代码；空字面搜索不证明没有实现。',
             "review_mode": rsession.request.review_mode, "managed_review": review_state(rsession.run)}
+
+
+async def _routing_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    result = routing_repository_check(args, ctx.session)
+    turn = ctx.session.active_turn_id
+    result['original_request'] = next((m.content for m in reversed(ctx.session.context_messages())
+                                      if m.role == 'user' and m.turn_id == turn), '')
+    result['attempted_queries'] = [m.tool_args.get('query') for m in ctx.session.context_messages()
+        if m.turn_id == turn and m.tool_name == 'code.repo_search' and m.tool_args]
+    return result
+
+
+async def _correct_scope(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    routing = routing_repository_check(args, ctx.session)
+    if not routing['ok']:
+        return routing
+    run_id = str(args.get('run_id') or ctx.session.linked_run_id or '')
+    if not run_id:
+        return {'ok': False, 'error': 'No linked run to correct.'}
+    result = ctx.orchestrator.correct_initial_scope(run_id, project=ctx.session.project,
+        entrypoint=str(args.get('entrypoint', '')), user_request=str(args.get('user_request', '')),
+        reason=str(args.get('reason', '')), routing=routing)
+    if result['ok'] and args.get('start', True) is True:
+        return {**result, 'start': await _start_run({'run_id': run_id}, ctx)}
+    return result
 
 
 async def _recovery_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -515,31 +781,70 @@ async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     return await execute_code_inspection("code.repo_read_lines", args, ctx)
 
 
+async def _research_memory(args: dict[str, Any], ctx: ToolContext, read: bool) -> dict[str, Any]:
+    from app.harness.tools.knowledge import research_memory_tool, research_memory_read_tool
+    fn = research_memory_read_tool if read else research_memory_tool
+    result = await fn(args, HarnessToolContext(ctx.session.conv_id, ctx.session.project, "commander"))
+    return {"ok": result.ok, "output": result.output, "error": result.error}
+
+
 TOOLS: dict[str, ToolSpec] = {
+    "knowledge.research_memory": ToolSpec(name="knowledge.research_memory",
+        description="Search this project's baseline capability and experiment history for the current task. Returns provenance, missing conditions and strict protocol compatibility. Failed execution is not a rejected hypothesis.",
+        parameters={"query": "current research task", "protocol": "optional exact dataset hash, split, preprocessing and evaluator object", "limit": "1 to 10, default 4"},
+        handler=lambda args, ctx: _research_memory(args, ctx, False)),
+    "knowledge.research_memory_read": ToolSpec(name="knowledge.research_memory_read",
+        description="Read a retained research record including architecture, full config, training recipe, measured results and preserved evidence. Read-only; cannot change baseline or launch training.",
+        parameters={"record_id": "mem_ record ID", "evidence_offset": "optional evidence page offset"},
+        handler=lambda args, ctx: _research_memory(args, ctx, True)),
+
+    'run.existing_model': ToolSpec(name='run.existing_model',
+        description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Omit seed unless the user explicitly supplied it: the host reads declared config defaults or generates and freezes a new seed only under an explicit host policy; never borrow a historical seed. An existing but unregistered config returns execution_registration_required, not missing-model evidence. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
+        parameters={'model_name': 'optional existing model name, exact or an unambiguous abbreviation',
+                    'config_path': 'optional exact connected-repository relative configuration path; preferred when known',
+                    'entrypoint': 'optional registered relative entrypoint, needed only if more than one matches',
+                    'max_iters': 'required positive integer from current requested training budget',
+                    'budget_unit': 'required steps|epochs; do not interpret repetition count as optimizer steps',
+                    'seed': 'optional nonnegative integer; otherwise read actual config seed',
+                    'parameter_overrides': 'optional explicit config-key/value object; unsupported by host shortcut, so ordinary Coding only',
+                    'stop_after_execution': 'optional boolean, default false; true only when user explicitly requests stopping at results/no report; frozen before start',
+                    'start': 'optional boolean, default true; false only if user requests preparation without starting'},
+        handler=_run_existing_model),
+    'routing.repository_check': ToolSpec(name='routing.repository_check',
+        description='Verify current-turn source evidence before concluding that the existing run has the correct code-related route. Empty literal search is not evidence of absence. Read matching configuration/registration before concluding.',
+        parameters={}, handler=_routing_check, mutation_level="read"),
+    'run.correct_scope': ToolSpec(name='run.correct_scope',
+        description='Correct an early misrouted existing task after the user corrects its scope. Preserve the same run ID, history and cumulative budget. Requires current code evidence. Refuses active/approved/executed/unreconciled work; cannot bypass it by creating another run.',
+        parameters={'run_id':'optional linked run', 'entrypoint':'coding|experiment',
+                    'user_request':'corrected task using verified existing implementation; no invented redesign',
+                    'reason':'user correction and evidence', 'start':'boolean, default true'}, handler=_correct_scope),
     "code.repo_list": ToolSpec(name="code.repo_list",
         description="List the connected project's source paths, without reading contents. Browse relevant directories or filter filenames. Read-only; no shell. Paginate with next_offset; narrow the path if scan_limited.",
         parameters={"path": "relative directory, default .", "glob": "optional filename glob", "depth": "1 by default, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
-        handler=_repo_list),
+        handler=_repo_list, mutation_level="read"),
     "code.repo_search": ToolSpec(name="code.repo_search",
-        description="Search literal text (case-insensitive) in selected source files. Returns path, line, snippet and SHA256, not whole files. Use task-related names, config keys or functions. Never scan unrelated code unnecessarily.",
-        parameters={"query": "literal text, not regex", "path": "relative directory, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
-        handler=_repo_search),
+        description="Search literal text in a relative directory or exact text file (default '.'). If a permitted relative path is absent, MARS searches the connected repository root and reports requested_path/effective_path/warning; invalid, excluded, symbolic or unreadable paths remain errors. Returns bounded snippets with source SHA256.",
+        parameters={"query": "literal text, not regex", "path": "relative directory or exact text file, default .", "glob": "optional filename glob", "depth": "optional depth, at most 16", "offset": "optional page offset", "limit": "optional result count, at most 100"},
+        handler=_repo_search, mutation_level="read"),
     "code.repo_read_lines": ToolSpec(name="code.repo_read_lines",
         description="Read only a relevant source/config line range from the connected repository. Returns exact source, line numbers and SHA256. Maximum 160 lines/12000 characters per call. Use search results to pick ranges; no execution or modification.",
         parameters={"path": "exact project-relative file path", "start_line": "first line, 1-based", "end_line": "last line, inclusive; at most 160 lines"},
-        handler=_repo_read),
+        handler=_repo_read, mutation_level="read"),
     "context.read_material": ToolSpec(name="context.read_material",
         description="Read original run-local context material. Follow next_offset for further pages.",
         parameters={"ref": "exact SHA256 ref from context", "char_offset": "optional character offset"},
-        handler=_read_context_material),
+        handler=_read_context_material, mutation_level="read"),
     "run.create": ToolSpec(
         name="run.create",
-        description="Create a run without starting it; supports pipeline or single-stage entrypoints.",
+        description="Create without starting. Inspect task-relevant connected source in this turn before choosing entrypoint. For an explicit unchanged existing model/configuration with a supported entrypoint and resolved budget/seed, always pass coding plus existing_execution_job after reading the exact configuration. No history lookup is required: the host checks actual approved delivery and execution receipts plus fresh validation. Old memory summaries, failed short checks or reuse_allowed=false cannot reject this reuse request; they cannot certify it either. The host may generate a fresh validated delivery without Coding model calls; unavailable evidence falls back to ordinary Coding. This does not approve artifacts or start simulation. Do not use it for code changes or new methods. For unrelated tasks explain repository_scope=not_applicable in routing_reason.",
         parameters={
-            "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
+            "entrypoint": "one of pipeline|idea|experiment|coding|writing; new execution-only runs require coding delivery first",
+            "repository_scope": "required (default) or not_applicable for tasks unrelated to code",
+            "routing_reason": "why this is the earliest necessary stage, based on inspected code or non-code scope",
             "user_request": "natural-language task",
             "task": "optional short slug",
             "seed_artifact": "optional complete schema-valid markdown doc",
+            "existing_execution_job": "optional no-code execution intent object: {config_path: exact inspected relative configuration path, entrypoint: existing relative training entry, max_iters: positive integer from current budget, budget_unit: steps|epochs, seed: nonnegative integer}; only with coding, never command_id/data/output paths or code modifications",
         },
         handler=_create_run,
     ),
@@ -554,6 +859,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Inspect checkpoint recovery and stage-retry options for the existing linked run. Read this before recovery; returns actions and a state token.",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_recovery_status,
+        mutation_level="read",
     ),
     "run.recover": ToolSpec(
         name="run.recover",
@@ -567,6 +873,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Get the per-node states of a run.",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_get_run_status,
+        mutation_level="read",
     ),
     "run.feedback_loop": ToolSpec(
         name="run.feedback_loop",
@@ -579,6 +886,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Read an artifact body and frontmatter.",
         parameters={"run_id": "optional", "agent": "stage name", "version": "default approved"},
         handler=_read_artifact,
+        mutation_level="read",
     ),
     "artifact.review": ToolSpec(
         name="artifact.review",
@@ -591,12 +899,14 @@ TOOLS: dict[str, ToolSpec] = {
         description="Compare execution metrics.json against Commander metric targets.",
         parameters={"run_id": "optional", "targets": "optional metric -> numeric target"},
         handler=_evaluate_metrics,
+        mutation_level="read",
     ),
     "diagnosis.failure_analysis": ToolSpec(
         name="diagnosis.failure_analysis",
         description="Read the latest self-healing diagnosis for a run.",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_get_diagnosis,
+        mutation_level="read",
     ),
     "user.approval": ToolSpec(
         name="user.approval",
@@ -608,9 +918,21 @@ TOOLS: dict[str, ToolSpec] = {
         name="create_and_start_run",
         description=(
             "Create and immediately start a pipeline/standalone run. Use the "
+            "task-relevant source read in this turn to choose the earliest necessary stage. "
+            "For a NEW existing-model simulation use coding to bind execution delivery; "
+            "for an explicit unchanged configuration and resolved budget/seed, always pass "
+            "existing_execution_job after reading that exact configuration. No Commander history "
+            "lookup is required. Old memory summaries, failed short checks or reuse_allowed=false "
+            "neither reject nor certify reuse: the host checks actual receipts and fresh validation. "
+            "This requests host-verified delivery reuse without Coding model calls. The host creates a fresh "
+            "artifact for the current inputs and budget, retaining review and simulation confirmation; "
+            "missing or changed evidence falls back to normal Coding. Do not request this for code "
+            "changes or new methods, and never treat it as an imported approval or old result. "
+            "Use recovery tools for existing execution runs. "
+            "Running an existing model must not be expanded into designing a new one. "
             "`entrypoint` to SKIP agents the user doesn't need: 'pipeline' runs "
             "the full Idea→Experiment→Coding→Execution→Writing chain; or pick a "
-            "single stage ('idea'|'experiment'|'coding'|'execution'|'writing') to "
+            "single stage ('idea'|'experiment'|'coding'|'writing') to "
             "enter mid-chain (upstream stages are skipped). The entered stage's "
             "Agent drafts its artifact from `user_request` automatically. DO NOT "
             "pass seed_artifact unless the user gave a COMPLETE structured doc "
@@ -618,10 +940,13 @@ TOOLS: dict[str, ToolSpec] = {
             "seed_artifact; in that case just set entrypoint + user_request."
         ),
         parameters={
-            "entrypoint": "one of pipeline|idea|experiment|coding|execution|writing",
+            "entrypoint": "one of pipeline|idea|experiment|coding|writing; new execution-only runs require coding delivery first",
             "user_request": "the research question / task description (natural language)",
             "task": "optional short slug for the run",
+            "repository_scope": "required (default); not_applicable only for tasks unrelated to the connected code",
+            "routing_reason": "evidence-backed reason for the selected stage; required when repository_scope=not_applicable",
             "seed_artifact": "RARELY used — only a complete schema-valid markdown doc",
+            "existing_execution_job": "optional no-code execution intent object: {config_path: exact inspected relative configuration path, entrypoint: existing relative training entry, max_iters: positive integer from current budget, budget_unit: steps|epochs, seed: nonnegative integer}; only with coding, never command_id/data/output paths or code modifications",
         },
         handler=_create_and_start_run,
     ),
@@ -630,6 +955,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Get the per-node states of a run (defaults to the linked run).",
         parameters={"run_id": "optional; defaults to the conversation's linked run"},
         handler=_get_run_status,
+        mutation_level="read",
     ),
     "get_diagnosis": ToolSpec(
         name="get_diagnosis",
@@ -640,6 +966,7 @@ TOOLS: dict[str, ToolSpec] = {
         ),
         parameters={"run_id": "optional; defaults to the linked run"},
         handler=_get_diagnosis,
+        mutation_level="read",
     ),
     "approve_node": ToolSpec(
         name="approve_node",
@@ -673,6 +1000,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="List recent runs (run_id, task, project, entrypoint).",
         parameters={},
         handler=_list_runs,
+        mutation_level="read",
     ),
     "discovery.create": ToolSpec(
         name="discovery.create",
@@ -691,6 +1019,7 @@ TOOLS: dict[str, ToolSpec] = {
         description="Read lifecycle, budget, archive, and HITL state for Discovery.",
         parameters={"run_id": "optional linked run"},
         handler=_discovery_status,
+        mutation_level="read",
     ),
     "discovery.pause": ToolSpec(
         name="discovery.pause",
@@ -715,8 +1044,18 @@ TOOLS: dict[str, ToolSpec] = {
         description="Replay candidates, evaluations, archive, budget, and events.",
         parameters={"run_id": "optional linked run"},
         handler=_discovery_replay,
+        mutation_level="read",
     ),
 }
+
+
+def commander_tool_mutates(name: str) -> bool:
+    """Use current configured policy, then declared metadata; unknown is write."""
+    configured = load_tool_configs().get(name)
+    if configured is not None:
+        return configured.mutation_level != "read"
+    spec = TOOLS.get(name)
+    return spec is None or spec.mutation_level != "read"
 
 
 async def execute_tool(name: str, args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:

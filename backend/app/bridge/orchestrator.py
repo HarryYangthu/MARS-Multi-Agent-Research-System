@@ -11,10 +11,11 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -170,6 +171,7 @@ class Orchestrator:
         from app.harness.schema.validator import validate_document
         from app.storage.artifact_store import SCHEMA_TO_AGENT
         from app.harness.context.folder_context import load_folder_context
+        from app.bridge.managed_coding_evidence import coding_preparation_review_evidence
 
         generation = session.request.review_generation
         state = review_state(session.run) or {}
@@ -208,11 +210,18 @@ class Orchestrator:
         tool_log = session.run.root / "events/tool_calls.jsonl"
         code_checks = [row for line in (tool_log.read_text().splitlines() if tool_log.exists() else [])
                        if (row := json.loads(line)).get("agent") == "coding" and row.get("tool") == "code.run_tests"]
+        preparation_evidence: dict[str, dict[str, Any]] = {}
+        if ref.agent_dir == "coding" and not blocker:
+            try:
+                preparation_evidence = coding_preparation_review_evidence(session.run, validation.metadata)
+            except (OSError, ValueError, KeyError, TypeError):
+                blocker = "本次执行准备或真实预检证据无法核验，请重新核对；主控未批准。"
         payload = {"goal": session.request.user_request, "task": session.request.task, "project": session.run.project,
                    "artifact_ref": artifact_ref, "candidate": text, "approved_upstream": upstream,
                    "project_context": folder_context, "actual_code_checks": code_checks,
+                   "execution_preparation_evidence": preparation_evidence,
                    "evaluation": evaluation, "stop_after": session.request.extra.get("stop_after"),
-                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
+                   "evidence_refs": [artifact_ref, *upstream.keys(), "artifact_evaluation", *preparation_evidence.keys(), *(["input/folder_context.v1.json"] if folder_context else []), *(["events/tool_calls.jsonl"] if code_checks else [])]}
         decision = await review_once(run=session.run, node=node_key, kind="artifact", payload=payload, generation=generation,
                                      eligible=eligible, bus=session.bus, blocker=blocker)
         if decision is None or not eligible():
@@ -232,6 +241,14 @@ class Orchestrator:
         if ref.path.read_text(encoding="utf-8") != text or any((session.run.root / path).read_text(encoding="utf-8") != value for path, value in upstream.items()):
             await finish_review(session.run, session.bus, "needs_user", "审核期间方案或上游依据已变化，请重新核对。", identity=decision._identity)
             return
+        if preparation_evidence:
+            try:
+                unchanged = coding_preparation_review_evidence(session.run, validation.metadata) == preparation_evidence
+            except (OSError, ValueError, KeyError, TypeError):
+                unchanged = False
+            if not unchanged:
+                await finish_review(session.run, session.bus, "needs_user", "审核期间执行准备或真实预检证据已变化，请重新核对。", identity=decision._identity)
+                return
         if decision.decision == "approve":
             # Repeat host checks at the write boundary. LLM judgement cannot
             # override a changed checkout, evaluation or immutable candidate.
@@ -329,6 +346,80 @@ class Orchestrator:
         self._contract_execution_block(session)
         return session
 
+    def correct_initial_scope(self, run_id: str, *, project: str, entrypoint: str,
+                              user_request: str, reason: str, routing: dict[str, Any]) -> dict[str, Any]:
+        """Correct a user-rejected early route without allocating a new budget/run."""
+        session = self.session(run_id)
+        if session.run.project != project or session.read_only or CONTRACT_HASH_KEY in session.request.extra:
+            return {'ok': False, 'status': 'scope_correction_blocked', 'error': '任务归属、历史状态或冻结合同不允许原地改写。'}
+        if entrypoint not in {'experiment', 'coding'} or not user_request.strip() or not reason.strip():
+            return {'ok': False, 'error': '入口纠正必须指定 experiment/coding、用户纠正的目标与原因。'}
+        if routing.get('ok') is not True or not routing.get('evidence'):
+            return {'ok': False, 'error': '纠正代码相关任务前必须核对当前源文件。'}
+        if self.owned_tasks.active(run_id) is not None or self.owned_tasks.closing:
+            return {'ok': False, 'status': 'scope_correction_active', 'error': '任务仍在运行，请先停止并核对，再纠正入口。'}
+        if session.termination and session.termination.get('cleanup_complete') is not True:
+            return {'ok': False, 'error': '停止清理尚未完成，不能改写入口。'}
+        target_index = LINEAR_STAGES.index(entrypoint)
+        for key, state in session.graph.all_states().items():
+            index = LINEAR_STAGES.index(parse_node_key(key).stage)
+            allowed = {NodeState.PENDING, NodeState.SKIPPED}
+            if index < target_index:
+                allowed.add(NodeState.FAILED)
+            if state not in allowed:
+                return {'ok': False, 'error': '已有阶段产物待审核、已完成，或目标及后续阶段已开始；不能覆盖这些工作。'}
+        if any(list((session.run.root / stage).glob('*.approved.md')) for stage in LINEAR_STAGES):
+            return {'ok': False, 'error': '已有批准产物，不能用入口纠正丢弃原审批。'}
+        from app.harness.llm.accounting import RunModelBudget
+        ledger = session.run.root / 'resources/model_budget.v1.json'
+        if ledger.is_file():
+            budget = RunModelBudget(session.run.root).recovery_snapshot()
+            if any(row.get('status') in {'in_flight', 'reconciliation_required'}
+                   for row in budget.get('requests', {}).values()):
+                return {'ok': False, 'error': '存在结果未确认的模型调用，需先核对；入口纠正不会清空用量。'}
+        from app.harness.runtime.task_contract import TaskEnvelope
+        for path in (session.run.root / 'input/task_contracts').glob('*.json'):
+            task = TaskEnvelope.model_validate_json(path.read_text())
+            if task.run_id != run_id or task.project != project:
+                return {'ok': False, 'error': '原任务检查点归属无法核验。'}
+            checkpoint = session.run.root / 'agent_traces' / task.agent / task.invocation_id / 'checkpoint.json'
+            if not checkpoint.resolve().is_relative_to(session.run.root.resolve()):
+                return {'ok': False, 'error': '原任务检查点路径无法核验。'}
+            if checkpoint.is_file():
+                state = json.loads(checkpoint.read_text())
+                if state.get('pending') == 'tool' or state.get('pending_batch'):
+                    return {'ok': False, 'error': '存在结果未确认的工具操作，不能重排任务。'}
+        from app.harness.persistence import atomic_write_json, atomic_write_text
+        correction_id = uuid4().hex
+        record = {'schema_id': 'run.scope_correction.v1', 'id': correction_id,
+                  'run_id': run_id, 'project': project, 'reason': reason,
+                  'created_at': datetime.now(timezone.utc).isoformat(),
+                  'previous_revision': session.state_revision, 'previous_request': asdict(session.request),
+                  'previous_graph': session.graph.to_dict(), 'previous_termination': session.termination,
+                  'entrypoint': entrypoint, 'user_request': user_request, 'routing': routing}
+        record_path = session.run.root / 'input/scope_corrections' / (correction_id + '.json')
+        atomic_write_json(record_path, record)
+        # Creation identity remains immutable in the state journal. The graph
+        # and explicit active scope describe the corrected operational entry.
+        session.request = replace(session.request,
+            user_request=user_request, extra={**session.request.extra, 'routing': routing,
+                                             'scope_entrypoint': entrypoint,
+                                             'scope_correction_id': correction_id})
+        session.graph = (build_standalone(entrypoint) if session.request.standalone
+                         else build_pipeline(cast(EntryPoint, entrypoint)))
+        session.termination = None
+        self._persist_state(session, status='created')
+        session.run.meta.update(active_entrypoint=entrypoint, scope_correction_id=correction_id)
+        atomic_write_json(session.run.root / 'run_meta.json', session.run.meta)
+        atomic_write_text(session.run.root / 'input/user_request.md', user_request)
+        self._persist_request_extra(session.run, session.request.extra)
+        if self.langgraph_runtime.enabled():
+            self.langgraph_runtime.write_manifest(run=session.run, graph=session.graph)
+        return {'ok': True, 'run_id': run_id, 'entrypoint': entrypoint, 'status': 'scope_corrected',
+                'scope_correction_id': correction_id, 'history_preserved': True,
+                'cumulative_budget_preserved': True,
+                'states': {key: state.value for key, state in session.graph.all_states().items()}}
+
     def session(self, run_id: str) -> RunSession:
         if run_id not in self._sessions:
             recovered = self._recover_session(run_id)
@@ -373,11 +464,15 @@ class Orchestrator:
                                "message": "research dispatch barrier could not be persisted"}
         if contract and termination is not None and termination.get("scope") == "research_contract":
             stopping = not bool(termination.get("cleanup_complete"))
+        elif termination is not None and termination.get("cleanup_complete") and state_error is None:
+            # Keep the internal cancellation barrier until explicit recovery,
+            # but do not present completed cleanup as an active stop operation.
+            stopping = False
         if stopping and session is None and not contract:
             state_error = {"type": "MissingRunSession", "phase": "request",
                            "message": "owned task has no in-memory persistence session"}
         return {"run_id": run_id, "owned_task_active": active, "stopping": stopping,
-            "owned_task_done": not active if active or stopping else None,
+            "owned_task_done": not active if active or stopping or termination is not None else None,
             "cleanup_complete": bool(termination.get("cleanup_complete")) if termination is not None else None,
             "state_persisted": False if state_error is not None else True if termination is not None else None,
             "state_persistence_error": state_error,
@@ -1143,8 +1238,9 @@ class Orchestrator:
                         return (session.request.review_mode == "commander" and session.request.review_generation == generation
                                 and not self._stopping(session) and not session.read_only
                                 and not (session.run.root / 'execution/confirmations' / (str(token) + '.json')).exists())
+                    review_payload = execution_review_payload(session.run, goal=session.request.user_request, configuration=view)
                     decision = await review_once(run=session.run, node=node_key, kind="execution_configuration",
-                        payload=execution_review_payload(session.run, goal=session.request.user_request, configuration=view),
+                        payload=review_payload,
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
@@ -1153,8 +1249,13 @@ class Orchestrator:
                             return True
                         if current['token'] != token or current['blockers']:
                             await finish_review(session.run, session.bus, "needs_user", "审核期间实际仿真配置已变化，请重新核对。", identity=decision._identity)
+                        elif (review_payload.get('execution_preparation_evidence')
+                              and execution_review_payload(session.run, goal=session.request.user_request, configuration=current)
+                                  .get('execution_preparation_evidence') != review_payload['execution_preparation_evidence']):
+                            await finish_review(session.run, session.bus, "needs_user", "审核期间执行准备或真实预检证据已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
-                            save_confirmation(session.run, node_key, str(token), actor="commander")
+                            await asyncio.to_thread(save_confirmation, session.run, node_key,
+                                                    str(token), actor="commander")
                             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
                             return True
                         else:
@@ -1414,11 +1515,36 @@ class Orchestrator:
         if stop_after not in (None, "execution"):
             raise ValueError("目前支持在 execution 完成后停住")
         session = self.session(run_id)
-        if self.owned_tasks.active(run_id) is not None or session.read_only:
+        if session.read_only or (self.owned_tasks.active(run_id) is not None
+                                 and not self._waiting_execution_without_jobs(session)):
             raise ValueError("只能在启动前设置阶段边界")
         session.request.extra = {**session.request.extra, "stop_after": stop_after}
         self._persist_request_extra(session.run, session.request.extra)
         self._persist_state(session, status="waiting_execution_confirmation")
+
+    def _waiting_execution_without_jobs(self, session: RunSession) -> bool:
+        """An owned confirmation waiter has not admitted actual execution yet."""
+        if self._stopping(session) or self.owned_tasks.closing:
+            return False
+        key = self._latest_node_for_stage(session, 'execution')
+        if (key is None or session.graph.state(key) not in {NodeState.PENDING, NodeState.APPROVED}
+                or any(state == NodeState.RUNNING for state in session.graph.all_states().values())):
+            return False
+        try:
+            snapshot = RunStateStore(session.run).load()
+            if (snapshot is None or snapshot.status != 'waiting_execution_confirmation'
+                    or snapshot.revision != session.state_revision
+                    or snapshot.graph.all_states() != session.graph.all_states()):
+                return False
+            execution = session.run.subdir('execution')
+            # Managed jobs claim their durable journal before entering an
+            # adapter; retained attempts/results are never a prelaunch waiter.
+            if any((execution / name).exists() for name in ('batch_summary.json', 'metrics.json', 'results.json')):
+                return False
+            return not any(directory.exists() and any(directory.iterdir()) for directory in
+                (execution / name for name in ('jobs', 'local_commands', 'pim_cpu', 'paper_static')))
+        except (OSError, ValueError):
+            return False
 
     @staticmethod
     def _stage_limit_reached(session: RunSession) -> bool:

@@ -1,6 +1,6 @@
 """Persistent per-run Git checkouts; the configured baseline never switches.
 
-Local clones contain committed code and independent Git objects/indexes. No
+Local clones contain frozen working code and independent Git objects/indexes. No
 stash, reset, network pull, automatic merge, or data directory copy is used.
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -83,10 +83,25 @@ class GitBranch:
         if _branch(self.root) != self.branch:
             raise GitWorkspaceError("代码仓已切换到其他分支，当前操作已停止；请恢复本任务分支。",
                                     "git_workspace_branch_changed")
-        if git(self.source_root, "rev-parse", "--verify", f"refs/heads/{self.baseline_branch}") != self.baseline_commit:
-            raise GitWorkspaceError("原基线分支已有新提交，请核对后重新开展研究；不会覆盖基线。",
-                                    "git_workspace_baseline_changed")
-        git(self.root, "merge-base", "--is-ancestor", self.baseline_commit, "HEAD")
+        if not self.source_repo_path:
+            # Legacy tasks still share their source checkout. Advancing its
+            # mutable baseline ref must not broaden their original write grant.
+            if git(self.source_root, "rev-parse", "--verify", f"refs/heads/{self.baseline_branch}") != self.baseline_commit:
+                raise GitWorkspaceError("原基线分支已有新提交，请核对后重新开展研究；不会覆盖基线。",
+                                        "git_workspace_baseline_changed")
+            git(self.root, "merge-base", "--is-ancestor", self.baseline_commit, "HEAD")
+            return
+        # An isolated clone owns an immutable starting commit, not today's tip
+        # of the source branch. Other studies may legitimately advance main.
+        for commit in {self.baseline_commit, self.initial_commit}:
+            if re.fullmatch(r"[0-9a-f]{40,64}", commit) is None:
+                raise GitWorkspaceError("保存的研究起点提交无法校验，未绑定代码。", "git_workspace_history_changed")
+            try:
+                git(self.root, "cat-file", "-e", commit + "^{commit}")
+                git(self.root, "merge-base", "--is-ancestor", commit, "HEAD")
+            except GitWorkspaceError as exc:
+                raise GitWorkspaceError("保存的基线或研究起点不在本任务代码历史中，未绑定代码。",
+                                        "git_workspace_history_changed") from exc
 
 
 def receipt_path(run_root: Path) -> Path:
@@ -141,8 +156,8 @@ def branch_owner(root: Path) -> tuple[GitBranch, Path] | None:
 
 
 def changed_files(root: Path, base: str = "HEAD") -> set[str]:
-    changed = set(filter(None, git(root, "diff", "--name-only", "--no-renames", "-z", base).split("\0")))
-    changed.update(filter(None, git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
+    changed = set(filter(None, git(root, "--no-optional-locks", "diff", "--name-only", "--no-renames", "-z", base).split("\0")))
+    changed.update(filter(None, git(root, "--no-optional-locks", "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
     return changed
 
 
@@ -234,6 +249,11 @@ def _load(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch | 
         if branch.source_repo_path and (branch.root != workspace_path(root, project, run_id)
                 or not re.fullmatch(r"[0-9a-f]{40,64}", branch.initial_commit)):
             raise ValueError("workspace")
+        from app.harness.tools.git_source_snapshot import load_source_snapshot, snapshot_initial_commit
+        snapshot = load_source_snapshot(root, run_root, project, run_id)
+        if snapshot is not None and (snapshot.manifest['baseline_commit'] != branch.baseline_commit
+                or snapshot_initial_commit(snapshot, run_root) != branch.initial_commit):
+            raise ValueError('snapshot binding')
         git(root, "check-ref-format", f"refs/heads/{branch.baseline_branch}")
         return branch
     except (OSError, TypeError, ValueError) as exc:
@@ -245,20 +265,22 @@ def _inspect(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
     _git_root(root)
     saved = _load(root, run_root, project, run_id)
     if saved is not None:
-        if git(root, "rev-parse", "--verify", f"refs/heads/{saved.baseline_branch}") != saved.baseline_commit:
+        if not saved.source_repo_path and git(root, "rev-parse", "--verify", f"refs/heads/{saved.baseline_branch}") != saved.baseline_commit:
             raise GitWorkspaceError("原基线分支已有新提交，请核对研究基线。", "git_workspace_baseline_changed")
         if saved.source_repo_path:
             if not saved.root.exists():
                 raise GitWorkspaceError("本研究的代码目录缺失，请恢复保存的副本；不会用基线覆盖研究结果。", "git_workspace_missing")
             saved.validate(project, run_id)
         return saved
-    current = _branch(root)
     expected = branch_name(project, run_id)
+    from app.harness.tools.git_source_snapshot import load_source_snapshot, snapshot_initial_commit
+    frozen = load_source_snapshot(root, run_root, project, run_id)
+    if frozen is not None:
+        return GitBranch(project, run_id, str(workspace_path(root, project, run_id)), expected,
+            str(frozen.manifest['baseline_branch']), str(frozen.manifest['baseline_commit']), str(root.resolve()),
+            snapshot_initial_commit(frozen, run_root))
+    current = _branch(root)
     owner = branch_owner(root)
-    pending = changed_files(root)
-    if owner is None and pending:
-        raise GitWorkspaceError("代码仓有非本任务记录的未提交改动，请先核对；已记录的编码改动会自动提交，不会混入其他文件。",
-                                "git_workspace_dirty")
     # Never claim a pre-existing, unowned branch (including interrupted creation).
     branches = git(root, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{expected}").splitlines()
     if expected in branches:
@@ -314,6 +336,10 @@ def prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch:
 
 
 def _prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch:
+    from app.harness.tools.git_source_snapshot import (
+        apply_source_snapshot, capture_source_snapshot, load_source_snapshot,
+        save_source_snapshot_binding,
+    )
     branch = _inspect(root, run_root, project, run_id)
     path = receipt_path(run_root)
     legacy = not branch.source_repo_path
@@ -329,13 +355,16 @@ def _prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
             seed = git(root, "rev-parse", "--verify", f"refs/heads/{branch.branch}")
         branch = GitBranch(project, run_id, str(workspace_path(root, project, run_id)),
             branch.branch, branch.baseline_branch, branch.baseline_commit, str(root.resolve()), seed)
+    snapshot = load_source_snapshot(root, run_root, project, run_id, verify_files=True)
+    if not legacy and not path.exists() and snapshot is None and branch_owner(root) is None:
+        snapshot = capture_source_snapshot(root, run_root, project, run_id,
+            branch.baseline_branch, branch.baseline_commit)
     intent_path = run_root / "input/research_workspace_intent.json"
     intent = {"schema_id": "research.git_workspace_intent.v1", **asdict(branch)}
     if intent_path.exists() and json.loads(intent_path.read_text()) != intent:
         # A completed workspace may have advanced beyond its initial commit;
         # its persisted branch still keeps the original initialization intent.
         raise GitWorkspaceError("代码目录初始化记录不匹配，未覆盖任何目录。", "git_workspace_identity_changed")
-    atomic_json(intent_path, intent)
     if branch.root.exists():
         owner = branch_owner(branch.root)
         if owner is None or owner[0] != branch:
@@ -346,14 +375,26 @@ def _prepare(root: Path, run_root: Path, project: str, run_id: str) -> GitBranch
         # --no-hardlinks makes the clone independently recoverable and avoids
         # cross-checkout object writes. Only Git-tracked code is checked out.
         git(root, "clone", "--local", "--no-hardlinks", "--no-checkout", "--", str(root.resolve()), str(staging))
+        # Configure this independent clone before its first checkout. Changing
+        # autocrlf after checkout can falsely dirty every tracked file on Windows.
+        git(staging, "config", "core.autocrlf", "false")
+        seed = branch.baseline_commit if snapshot is not None else branch.initial_commit
         exists = branch.branch in git(staging, "for-each-ref", "--format=%(refname:short)",
                                       f"refs/heads/{branch.branch}").splitlines()
         if exists:
-            if git(staging, "rev-parse", "HEAD") != branch.initial_commit:
+            if git(staging, "rev-parse", "HEAD") != seed:
                 raise GitWorkspaceError("初始化分支版本已变化，副本保留待核对。", "git_workspace_identity_changed")
             git(staging, "switch", branch.branch)
         else:
-            git(staging, "switch", "-c", branch.branch, branch.initial_commit)
+            git(staging, "switch", "-c", branch.branch, seed)
+        if snapshot is not None:
+            initial = apply_source_snapshot(snapshot, staging)
+            if branch.initial_commit not in {branch.baseline_commit, initial}:
+                raise GitWorkspaceError('源代码快照提交与保存的初始化意图不一致。', 'git_workspace_identity_changed')
+            branch = replace(branch, initial_commit=initial)
+            save_source_snapshot_binding(snapshot, run_root, initial)
+        # Persist only the final snapshot commit, never a provisional HEAD.
+        atomic_json(intent_path, {"schema_id": "research.git_workspace_intent.v1", **asdict(branch)})
         atomic_json(_owner_path(staging, branch.branch), {"run_root": str(run_root.resolve()),
             "project": project, "run_id": run_id, "binding": asdict(branch)})
         staging.rename(branch.root)

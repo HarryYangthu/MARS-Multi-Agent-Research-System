@@ -10,12 +10,13 @@ if __package__ in (None, ""):
 
 import os
 from pathlib import Path
-import selectors
+import queue
 import signal
 import subprocess
 import sys
 import time
-from typing import Any
+from threading import Event, Thread
+from typing import Any, BinaryIO
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
@@ -23,14 +24,24 @@ from app.execution.local.runner import LocalRunner, _check_files, _digest, _read
 from app.harness.persistence import atomic_write_json, path_lock
 from app.harness.tools.execution.local_command import _file_hash, _read_result
 from app.harness.tools.process_runtime import sanitized_subprocess_environment
+from app.execution.local.process_group import OwnedProcessGroup
 
 
-def _kill_group(process: subprocess.Popen[bytes]) -> None:
+def _read_pipe(stream: BinaryIO, index: int, messages: queue.Queue[tuple[int, bytes | None]], stop: Event) -> None:
     try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    process.wait()
+        while not stop.is_set():
+            data = stream.read1(8192) if hasattr(stream, "read1") else stream.read(8192)
+            while not stop.is_set():
+                try:
+                    messages.put((index, data or None), timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
+            if not data:
+                return
+    except (OSError, ValueError):
+        # Cleanup can close a pipe after terminating the owned command group.
+        return
 
 
 def supervise(directory: Path) -> None:
@@ -69,6 +80,9 @@ def _supervise_owned(directory: Path) -> None:
     monotonic_deadline = time.monotonic() + max(0.0, deadline - time.time())
     started_at, started = time.time(), time.monotonic()
     process: subprocess.Popen[bytes] | None = None
+    group: OwnedProcessGroup | None = None
+    readers: list[Thread] = []
+    reader_stop = Event()
     interrupted = False
 
     def cancel(_number: int, _frame: object) -> None:
@@ -105,33 +119,35 @@ def _supervise_owned(directory: Path) -> None:
                     "CUDA_VISIBLE_DEVICES": "", "HIP_VISIBLE_DEVICES": "", "ROCR_VISIBLE_DEVICES": "",
                     "PYTHONDONTWRITEBYTECODE": "1",
                 })
-                process = subprocess.Popen(spec.argv, cwd=spec.cwd, env=environment,
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    start_new_session=True, close_fds=True)
+                group = OwnedProcessGroup()
+                process = group.start(spec.argv, cwd=spec.cwd, env=environment)
                 assert process.stdout is not None and process.stderr is not None
-                with selectors.DefaultSelector() as selector:
-                    selector.register(process.stdout, selectors.EVENT_READ, output)
-                    selector.register(process.stderr, selectors.EVENT_READ, error)
-                    while selector.get_map():
-                        if interrupted or (directory / "stop.json").exists():
-                            status, reason = "cancelled", "stop_requested"
-                            break
-                        if time.monotonic() >= monotonic_deadline or time.time() >= deadline:
-                            reason = "deadline_exceeded"
-                            break
-                        for key, _ in selector.select(timeout=min(0.05, max(0.0, monotonic_deadline - time.monotonic()))):
-                            chunk = os.read(key.fd, 8192)
-                            if not chunk:
-                                selector.unregister(key.fileobj)
-                                continue
-                            available = max(0, spec.max_output_bytes - written)
-                            key.data.write(chunk[:available])
-                            written += min(len(chunk), available)
-                            if len(chunk) > available:
-                                reason = "output_limit_exceeded"
-                                break
-                        if reason:
-                            break
+                messages: queue.Queue[tuple[int, bytes | None]] = queue.Queue(maxsize=16)
+                for index, stream in enumerate((process.stdout, process.stderr)):
+                    reader = Thread(target=_read_pipe, args=(stream, index, messages, reader_stop), daemon=True)
+                    reader.start()
+                    readers.append(reader)
+                open_pipes = {0, 1}
+                while open_pipes:
+                    if interrupted or (directory / "stop.json").exists():
+                        status, reason = "cancelled", "stop_requested"
+                        break
+                    if time.monotonic() >= monotonic_deadline or time.time() >= deadline:
+                        reason = "deadline_exceeded"
+                        break
+                    try:
+                        index, chunk = messages.get(timeout=0.05)
+                    except queue.Empty:
+                        continue
+                    if chunk is None:
+                        open_pipes.discard(index)
+                        continue
+                    available = max(0, spec.max_output_bytes - written)
+                    (output if index == 0 else error).write(chunk[:available])
+                    written += min(len(chunk), available)
+                    if len(chunk) > available:
+                        reason = "output_limit_exceeded"
+                        break
                 if not reason:
                     # Pipes may close before the child terminates. Still supervise
                     # this period, and kill descendants even after leader exit.
@@ -152,8 +168,12 @@ def _supervise_owned(directory: Path) -> None:
     except Exception:
         reason = "supervisor_execution_failed"
     finally:
+        reader_stop.set()
+        if group is not None:
+            group.stop()
+        for reader in readers:
+            reader.join(timeout=2)
         if process is not None:
-            _kill_group(process)
             if process.stdout is not None:
                 process.stdout.close()
             if process.stderr is not None:
