@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 
 from app.agents.base import RunRequest
@@ -79,8 +80,14 @@ async def test_deterministic_intake_keeps_matrix_without_a_model_key(tmp_path: P
             'execution_jobs': [{'name': row['name'], 'config': {'command_id': 'regression'}} for row in rows]}
     from app.harness.schema.experiment_contract import document_hash
     code['experiment_plan_sha256'] = document_hash(dumps(plan, 'Human-authored matrix.'))
+    # Exhaust a real explicit policy; the product default may leave this cap unset.
+    configuration = RunModelBudget(tmp_path).configuration
+    configuration['limits']['max_model_requests'] = 1
+    resource_dir = tmp_path / 'resources'
+    resource_dir.mkdir()
+    (resource_dir / 'model_budget.policy.yaml').write_text(yaml.safe_dump(configuration))
     budget = RunModelBudget(tmp_path)
-    for _ in range(budget.configuration['limits']['max_model_requests']):
+    for _ in range(1):
         reservation = budget.reserve([Message('user', 'Accounting only')],
             LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
         budget.settle(reservation, usage=None, complete=False, outcome='cancelled')

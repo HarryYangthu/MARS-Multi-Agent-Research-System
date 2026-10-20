@@ -167,10 +167,14 @@ async def validate_run_log(text: str, observations: list[dict[str, Any]]) -> lis
 
 @pytest.mark.asyncio
 async def test_native_loop_reports_budget_block_without_sending_or_refunding(tmp_path: Path) -> None:
+    # This check exercises an explicit bounded policy, not the optional default cap.
+    configuration = RunModelBudget(tmp_path).configuration
+    configuration['limits']['max_model_requests'] = 1
+    resource_dir = tmp_path / 'resources'
+    resource_dir.mkdir()
+    (resource_dir / 'model_budget.policy.yaml').write_text(yaml.safe_dump(configuration))
     budget = RunModelBudget(tmp_path)
-    limit = budget.configuration['limits']['max_model_requests']
-    assert type(limit) is int
-    for _ in range(limit):
+    for _ in range(1):
         reservation = budget.reserve([Message('user', 'Admission arithmetic only')],
             LLMConfig(provider='custom', model='ledger-only', max_tokens=8, max_retries=0), {})
         budget.settle(reservation, usage=None, complete=False, outcome='cancelled')

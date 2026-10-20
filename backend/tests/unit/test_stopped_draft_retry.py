@@ -9,9 +9,8 @@ import pytest
 from app.bridge.orchestrator import Orchestrator, RunSession
 from app.bridge.run_recovery import recovery_status
 from app.bridge.stopped_draft_retry import stopped_draft_retry_blocker
-from app.harness.llm.accounting import RunModelBudget
 from app.harness.llm.provider_base import LLMConfig, Message
-from tests.unit.test_run_recovery import checkpoint, session_at
+from tests.unit.test_run_recovery import bounded_budget, checkpoint, session_at
 
 
 def stopped_session(root: Path) -> tuple[Orchestrator, RunSession]:
@@ -47,7 +46,7 @@ def test_ambiguous_stop_is_blocked(tmp_path: Path, change: str) -> None:
 
 def test_stopped_draft_still_preserves_unknown_and_exhausted_model_charges(tmp_path: Path) -> None:
     orch, session = stopped_session(tmp_path)
-    budget = RunModelBudget(session.run.root)
+    budget = bounded_budget(session.run.root, 2)
     reservation = budget.reserve([Message("user", "Admission arithmetic only")],
         LLMConfig(provider="custom", model="no-model-called", max_tokens=8, max_retries=0), {})
     original = budget.path.read_bytes()

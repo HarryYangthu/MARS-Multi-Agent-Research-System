@@ -251,6 +251,8 @@ profiles:
         - search.fetch_sources
         - search.local_docs
         - knowledge.kb_query
+        - knowledge.research_memory
+        - knowledge.research_memory_read
         - knowledge.baseline_match
         - search.cvf_search
       model:
@@ -330,6 +332,8 @@ profiles:
         - search.fetch_sources
         - search.local_docs
         - knowledge.kb_query
+        - knowledge.research_memory
+        - knowledge.research_memory_read
         - knowledge.baseline_match
         - search.cvf_search
       model:
@@ -410,6 +414,8 @@ profiles:
         - search.fetch_sources
         - search.local_docs
         - knowledge.kb_query
+        - knowledge.research_memory
+        - knowledge.research_memory_read
         - knowledge.baseline_match
         - search.cvf_search
         - search.neurips_search
