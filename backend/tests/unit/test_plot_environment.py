@@ -79,8 +79,11 @@ def test_fresh_process_initialization_and_two_real_plots_keep_environment_digest
         environment["MPLCONFIGDIR"] = ""
     else:
         environment.pop("MPLCONFIGDIR", None)
+    # Native Matplotlib may spend more than 30 seconds scanning the font cache
+    # in a new directory. This test checks PNGs/environment stability, not a
+    # rendering latency SLO; production timeouts are separate and unchanged.
     completed = subprocess.run([sys.executable, "-c", _RENDER, str(backend), str(tmp_path)],
-        env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90)
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
     assert len(set(result["environment_digests"])) == 1
