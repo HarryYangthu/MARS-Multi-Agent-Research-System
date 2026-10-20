@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
+from typing import Any, cast
 import re
 import shutil
 import subprocess
@@ -25,6 +27,17 @@ import zipfile
 from packaging.tags import compatible_tags, cpython_tags
 from packaging.utils import parse_wheel_filename
 import yaml
+
+_CORE_SPEC = importlib.util.spec_from_file_location('mars_windows_core_builder', Path(__file__).with_name('build_windows_core.py'))
+if _CORE_SPEC is None or _CORE_SPEC.loader is None:
+    raise RuntimeError('Core release builder is unavailable')
+_CORE = importlib.util.module_from_spec(_CORE_SPEC)
+_CORE_SPEC.loader.exec_module(_CORE)
+
+
+def dependency_fingerprint(source: Path) -> dict[str, str]:
+    return cast(dict[str, str], _CORE.dependency_fingerprint(source))
+
 
 PYTHON_URL = "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
 PYTHON_SHA256 = "c2a7b0bb86eb9f1cc094a01bdabef7ddc77f89f8e45161fa7819f2b4a7ba7bc1"
@@ -53,6 +66,7 @@ def verify_prepared_dependencies(prepared: Path, source: Path) -> None:
     manifest = json.loads(_prepared_file(root, 'manifest.json').read_text(encoding='utf-8'))
     if (not isinstance(manifest, dict) or manifest.get('schema') != 'mars.windows.dependencies.v1'
             or manifest.get('platform') != 'windows-x64' or manifest.get('python') != '3.11.14'
+            or manifest.get('dependency_fingerprint') != dependency_fingerprint(source)
             or not isinstance(manifest.get('files'), list) or not manifest['files']):
         raise ValueError('Invalid prepared dependency manifest')
     seen: set[str] = set()
@@ -63,7 +77,7 @@ def verify_prepared_dependencies(prepared: Path, source: Path) -> None:
         name = entry['path']
         checksum = entry.get('sha256')
         if (name.casefold() in seen or name == 'manifest.json' or not isinstance(checksum, str)
-                or not re.fullmatch('[a-f0-9]{64}', checksum) or type(entry.get('bytes')) is not int):
+                or not re.fullmatch('[a-f0-9]{64}', checksum) or type(entry.get('bytes')) is not int or entry['bytes'] < 0):
             raise ValueError('Invalid or duplicate prepared dependency entry')
         path = _prepared_file(root, name)
         if path.stat().st_size != entry['bytes'] or digest(path) != checksum:
@@ -91,7 +105,8 @@ def verify_prepared_dependencies(prepared: Path, source: Path) -> None:
 
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def fetch(url: str, path: Path, expected: str | None = None) -> None:
@@ -117,6 +132,19 @@ def zip_tree(root: Path, target: Path, prefix: str = "") -> None:
 
 
 def copy_source(source: Path, stage: Path, *, product: bool) -> None:
+    if not product:
+        for name in cast(tuple[str, ...], _CORE.source_files(source)):
+            target = stage / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(cast(bytes, _CORE.file_bytes(source, name)))
+        (stage / 'projects').mkdir(exist_ok=True)
+        execution_path = stage / 'configs/execution.yaml'
+        config = yaml.safe_load(execution_path.read_text(encoding='utf-8'))
+        execution = config['execution']
+        execution.update(device='cpu', backend='local_command', local_commands=[])
+        execution['paper_static'].update(enabled=False, python='python', repo_path='', data_path='')
+        execution_path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding='utf-8')
+        return
     roots = {"backend", "frontend", "configs", "deploy", "scripts", "desktop", "templates", "projects", "docs"}
     top_files = {"LICENSE", "pyproject.toml", "uv.lock", ".env.example", ".gitignore", "PRODUCT-SNAPSHOT.json", "README.md", "README.zh-CN.md"}
     cache_names = {"__pycache__", "node_modules", ".venv", ".pytest_cache", ".mypy_cache"}
@@ -162,8 +190,11 @@ def copy_source(source: Path, stage: Path, *, product: bool) -> None:
 def prepare_dependencies(source: Path, offline: Path, downloads: Path, *, uv: str, sevenzip: str) -> None:
     config = yaml.safe_load((source / "configs/windows_native.yaml").read_text(encoding="utf-8"))
     for name in ("uv", "node", "git"):
-        fetch(config[name + "_url"], offline / (name + ".zip"), config[name + "_sha256"])
-    fetch(config["vc_runtime_url"], offline / "vc_redist.x64.exe")
+        cached = downloads / (name + '.zip')
+        fetch(config[name + "_url"], cached, config[name + "_sha256"])
+        shutil.copyfile(cached, offline / (name + '.zip'))
+    fetch(config["vc_runtime_url"], downloads / 'vc_redist.x64.exe')
+    shutil.copyfile(downloads / 'vc_redist.x64.exe', offline / 'vc_redist.x64.exe')
     python_archive = downloads / "python-win.tar.gz"
     fetch(PYTHON_URL, python_archive, PYTHON_SHA256)
     with tempfile.TemporaryDirectory(prefix="mars-python-") as directory:
@@ -218,7 +249,10 @@ def prepare_dependencies(source: Path, offline: Path, downloads: Path, *, uv: st
             wheels.append({"name": name, "version": data["info"]["version"], "url": file["url"], "filename": file["filename"], "sha256": file["digests"]["sha256"]})
         wheelhouse = offline / "wheelhouse"
         def get_wheel(record: dict[str, str]) -> None:
-            fetch(record["url"], wheelhouse / record["filename"], record["sha256"])
+            cached = downloads / 'wheelhouse' / record['filename']
+            fetch(record["url"], cached, record["sha256"])
+            wheelhouse.mkdir(exist_ok=True)
+            shutil.copyfile(cached, wheelhouse / record['filename'])
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(get_wheel, wheels))
         (offline / "requirements.windows.txt").write_text("\n".join(f"{row['name']}=={row['version']} --hash=sha256:{row['sha256']}" for row in wheels) + "\n", encoding="utf-8")
@@ -244,7 +278,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--source-profile", choices=("product", "repository"), default="product")
+    parser.add_argument("--source-profile", choices=("product", "repository"), default="repository")
+    parser.add_argument("--version", default="local-build")
     parser.add_argument("--prepared-dependencies", type=Path)
     parser.add_argument("--download-cache", type=Path)
     parser.add_argument("--sevenzip")
@@ -266,13 +301,15 @@ def main() -> None:
         if "windows-native\\Mars.ps1" in content and "%*" in content and "-OfflineRequired" not in content:
             content = content.replace(" %*", " -OfflineRequired %*")
             entry.write_bytes(content.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
-    offline = stage / "offline"
+    offline = stage / "dependencies/offline"
+    (stage / "dependencies/windows").mkdir(parents=True)
+    (stage / "dependencies/frontend/node_modules").mkdir(parents=True)
     if arguments.prepared_dependencies:
         verify_prepared_dependencies(arguments.prepared_dependencies, source)
         shutil.copytree(arguments.prepared_dependencies, offline)
         verify_prepared_dependencies(offline, source)
     else:
-        offline.mkdir()
+        offline.mkdir(parents=True)
         uv = shutil.which("uv")
         sevenzip = arguments.sevenzip or shutil.which("7z") or shutil.which("7zz")
         if uv is None or sevenzip is None:
@@ -281,10 +318,12 @@ def main() -> None:
     files = [{"path": path.relative_to(offline).as_posix(), "bytes": path.stat().st_size, "sha256": digest(path)}
         for path in sorted(offline.rglob("*")) if path.is_file() and path.name != "manifest.json"]
     manifest = offline / "manifest.json"
-    manifest.write_text(json.dumps({"schema": "mars.windows.dependencies.v1", "platform": "windows-x64", "python": "3.11.14", "files": files}, indent=2), encoding="utf-8")
+    manifest.write_text(json.dumps({"schema": "mars.windows.dependencies.v1", "platform": "windows-x64", "python": "3.11.14", "dependency_fingerprint": dependency_fingerprint(source), "files": files}, indent=2), encoding="utf-8")
+    core = cast(dict[str, Any], _CORE.core_manifest(stage, version=arguments.version))
+    (stage / 'CORE-UPDATE.json').write_text(json.dumps(core, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     source_files = [{"path": path.relative_to(stage).as_posix(), "sha256": digest(path)}
-        for path in sorted(stage.rglob("*")) if path.is_file() and not path.is_relative_to(offline)]
-    (stage / "WINDOWS-OFFLINE.json").write_text(json.dumps({"schema": "mars.windows.offline.v1", "manifest_sha256": digest(manifest), "source_files": source_files, "windows_acceptance": "see accompanying verification receipt"}, indent=2), encoding="utf-8")
+        for path in sorted(stage.rglob("*")) if path.is_file() and not path.is_relative_to(stage / "dependencies")]
+    (stage / "WINDOWS-OFFLINE.json").write_text(json.dumps({"schema": "mars.windows.offline.v1", "manifest_sha256": digest(manifest), "dependency_directory": "dependencies/offline", "dependency_fingerprint": dependency_fingerprint(source), "version": arguments.version, "source_files": source_files, "windows_acceptance": "see accompanying verification receipt"}, indent=2), encoding="utf-8")
     zip_tree(stage, output / "MARS-Product-Windows-Offline.zip", "MARS-Product/")
     print(json.dumps({"archive": str(output / "MARS-Product-Windows-Offline.zip"), "source_files": len(source_files), "dependency_files": len(files), "offline_bytes": sum(item["bytes"] for item in files)}), flush=True)
 

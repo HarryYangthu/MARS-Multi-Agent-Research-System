@@ -23,6 +23,7 @@
 | `start-mars-windows-native.cmd` | 一键启动前后端，缺依赖时自动安装 |
 | `configure-mars-api.cmd` | 配置云端/本地模型 API；更改前先停止服务 |
 | `stop-mars-windows-native.cmd` | 停止本目录启动的服务，保留任务、配置和数据 |
+| `Update-MARS.cmd` | 只更新核心；可以把已下载的核心 ZIP 或目录拖到此入口 |
 | `manage-mars-windows.cmd` 菜单 5 / 6 | 查看状态 / 发出小型真实模型请求检查 API |
 
 原有 `start-mars-windows.cmd` 是旧 **Docker** 入口，本方案使用带 `native` 的启动入口。
@@ -35,13 +36,32 @@
 - 前端：按照 `frontend/package-lock.json` 安装，随后执行类型检查。
 - 缺少 Microsoft C++ 运行库时，从微软下载并检查数字签名后安装；Windows 可能要求管理员确认。
 
-工具、虚拟环境和下载缓存放在 `local/windows/`，不会复用拷贝过来的 Mac `.venv`，
+工具、虚拟环境和下载缓存放在 `dependencies/windows/`，前端依赖放在
+`dependencies/frontend/node_modules/`，核心目录中的 `frontend/node_modules` 通过目录联接使用它。
+旧安装的 `local/windows/` 运行环境仍可识别。不会复用拷贝过来的 Mac `.venv`，
 不会修改全局 Python/Node 或系统 PATH。初次安装需要访问 GitHub、nodejs.org、
 PyPI、npm、download.pytorch.org；不是离线安装包。重装会重建这个专用虚拟环境。
 
 启动时将 Python 指向 Windows 虚拟环境，同时统一前后端地址、Socket.IO 和 CORS。
 单机使用一个后端进程，事件总线可使用内置进程内实现，无需另装 Redis 服务。
 脚本不会下载模型权重、自动充值 API 账号或生成示例研究结果。
+
+## 以后只更新核心
+
+首次可直接使用完整离线包。以后保留整个 `dependencies/` 文件夹，双击
+`Update-MARS.cmd`：入口只从官方 GitHub `windows-core` 分支下载核心 ZIP，不下载
+Python、Node、pip 或 npm 依赖。GitHub 不可达时，在另一台电脑下载核心 ZIP，复制过来，
+再把 ZIP 拖到 `Update-MARS.cmd`；也支持拖入含 `CORE-UPDATE.json` 的已解压核心目录。
+
+入口先核对依赖锁与兼容性，检查通过后正常停止服务，备份并替换清单中的核心文件，
+实际检查后端导入、离线构建前端，再启动并检查健康。源码变化只重建需要更新的前端，
+不重装已有依赖。端口、模型 API、项目、数据、任务与结果继续保留；现有用户配置不会
+被默认配置覆盖。日志及服务状态仍位于 `local/windows/`，更新收据与备份位于
+`local/core-updates/`。不要手工删除这些恢复记录。
+
+若依赖锁不兼容，更新会在停止服务前拒绝：需要新版完整离线包，不能强行只覆盖核心。
+应用后的导入、构建或启动失败时，本次更新会恢复旧核心；异常中断后再次运行入口会先
+恢复未完成事务，再提示重新更新。更新会停止本目录服务，请先结束或暂停正在进行的研究。
 
 运行时版本、端口、下载地址与 SHA256 在 `configs/windows_native.yaml`。启动前校验
 工具压缩包，校验失败会停止；不会关闭 TLS 校验。发行来源：

@@ -824,3 +824,11 @@ configs/model_usage.yaml
 configs/zcode.yaml
 projects/.gitkeep
 templates/code_rules/pimc_python.md
+
+scripts/release/build_windows_core.py
+
+Update-MARS.cmd
+
+deploy/windows-native/Update.ps1
+
+deploy/windows-native/update_core.py

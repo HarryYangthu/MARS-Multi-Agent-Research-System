@@ -4,13 +4,16 @@ param(
     [string]$Action = 'Menu',
     [switch]$NoBrowser,
     [switch]$SkipConfigure,
-    [switch]$OfflineRequired
+    [switch]$OfflineRequired,
+    [switch]$LibraryOnly
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$runtime = Join-Path $root 'local/windows'
+$layout = Get-MarsWindowsLayout $root
+$runtime = $layout.Runtime
+$stateRoot = $layout.State
 $config = Read-MarsNativeConfig (Join-Path $root 'configs/windows_native.yaml')
-$statePath = Join-Path $runtime 'services.json'
+$statePath = Join-Path $stateRoot 'services.json'
 $python = Join-Path $runtime 'venv/Scripts/python.exe'
 $uv = Join-Path $runtime ('tools/uv/' + $config.uv_executable)
 $node = Join-Path $runtime ('tools/node/' + $config.node_executable)
@@ -62,10 +65,45 @@ function Set-NativeEnvironment {
     $env:NEXT_TELEMETRY_DISABLED = '1'
 }
 
+function Install-FrontendDependencies {
+    param([switch]$Offline)
+    Connect-MarsFrontendDependencies $root
+    $directory = $layout.Frontend
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    foreach ($name in @('package.json', 'package-lock.json')) {
+        Copy-Item -LiteralPath (Join-Path $root "frontend/$name") -Destination (Join-Path $directory $name) -Force
+    }
+    $npm = Join-Path (Split-Path $node) 'node_modules/npm/bin/npm-cli.js'
+    $arguments = @($npm, 'ci', '--include=dev', '--no-audit', '--no-fund')
+    if ($Offline) { $arguments += @('--offline', '--ignore-scripts', '--cache', (Join-Path $runtime 'npm-cache')) }
+    Invoke-MarsNativeCommand $node $arguments $directory
+    Connect-MarsFrontendDependencies $root
+}
+
+function Ensure-FrontendBuild {
+    Connect-MarsFrontendDependencies $root
+    $stamp = Join-Path $stateRoot 'frontend-build.json'
+    $current = Get-MarsFrontendFingerprint $root
+    if ((Test-Path -LiteralPath $stamp) -and (Test-Path -LiteralPath (Join-Path $root 'frontend/.next/BUILD_ID'))) {
+        try {
+            $old = Get-Content -LiteralPath $stamp -Raw | ConvertFrom-Json
+            if ($old.schema -eq 'mars.windows.frontend_build.v1' -and $old.root -eq $root -and
+                (Test-MarsFingerprint $old.fingerprint $current)) { return }
+        } catch { }
+    }
+    Remove-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
+    $npm = Join-Path (Split-Path $node) 'node_modules/npm/bin/npm-cli.js'
+    Invoke-MarsNativeCommand $node @($npm, 'run', 'typecheck') (Join-Path $root 'frontend')
+    Invoke-MarsNativeCommand $node @($npm, 'run', 'build') (Join-Path $root 'frontend')
+    New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+    @{ schema = 'mars.windows.frontend_build.v1'; root = $root; fingerprint = (Get-MarsFrontendFingerprint $root) } |
+        ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $stamp -Encoding UTF8
+}
+
 function Install-NativeDependencies {
     Assert-ServicesStopped
     if ($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) -or
-        (Test-Path -LiteralPath (Join-Path $root 'offline'))) {
+        (Test-Path -LiteralPath $layout.Offline)) {
         Install-OfflineDependencies
         return
     }
@@ -99,8 +137,8 @@ function Install-NativeDependencies {
     Invoke-MarsNativeCommand $uv @('pip', 'install', '--python', $python, '--no-deps', '-e', '.') $root
     Invoke-MarsNativeCommand $uv @('pip', 'check', '--python', $python) $root
     Invoke-MarsNativeCommand $python @('-c', 'import torch, scipy, matplotlib, tensorboard, chromadb, app.main; assert torch.ones(2).sum().item() == 2') $root
+    Install-FrontendDependencies
     $npm = Join-Path (Split-Path $node) 'node_modules/npm/bin/npm-cli.js'
-    Invoke-MarsNativeCommand $node @($npm, 'ci', '--include=dev', '--no-audit', '--no-fund') (Join-Path $root 'frontend')
     Invoke-MarsNativeCommand $node @($npm, 'run', 'typecheck') (Join-Path $root 'frontend')
     $fingerprint = Get-MarsDependencyFingerprint $root
     $fingerprint['root'] = $root
@@ -109,7 +147,7 @@ function Install-NativeDependencies {
 }
 
 function Test-InstallationCurrent {
-    if (($OfflineRequired -or (Test-Path -LiteralPath (Join-Path $root 'offline'))) -and
+    if (($OfflineRequired -or (Test-Path -LiteralPath $layout.Offline)) -and
         -not (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json'))) { return $false }
     $stamp = Join-Path $runtime 'installed.json'
     if (-not (Test-Path -LiteralPath $stamp)) { return $false }
@@ -119,11 +157,7 @@ function Test-InstallationCurrent {
     try { $old = Get-Content -LiteralPath $stamp -Raw | ConvertFrom-Json }
     catch { return $false }
     if ($null -eq $old -or 'root' -notin $old.PSObject.Properties.Name -or $old.root -ne $root) { return $false }
-    $current = Get-MarsDependencyFingerprint $root
-    foreach ($key in $current.Keys) {
-        if ($key -notin $old.PSObject.Properties.Name -or $old.$key -ne $current[$key]) { return $false }
-    }
-    return $true
+    return (Test-MarsInstalledFingerprint $old $root)
 }
 
 function Configure-NativeApi {
@@ -156,16 +190,20 @@ function Start-NativeServices {
         return
     }
     Assert-ServicesStopped
+    Connect-MarsFrontendDependencies $root
     if (-not (Test-InstallationCurrent)) { Install-NativeDependencies }
-    if (-not $SkipConfigure -and -not (Test-Path (Join-Path $runtime 'api-configured.json'))) { Configure-NativeApi }
+    if (-not $SkipConfigure -and -not (Test-Path (Join-Path $stateRoot 'api-configured.json'))) { Configure-NativeApi }
     Set-NativeEnvironment
+    $frontendMode = if ((Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) -or
+        (Test-Path -LiteralPath $layout.Offline)) { 'start' } else { 'dev' }
+    if ($frontendMode -eq 'start') { Ensure-FrontendBuild }
     foreach ($port in @([int]$config.backend_port, [int]$config.frontend_port)) {
         if (Test-MarsPort $port) { throw "Port $port is occupied. Stop its owner or edit configs/windows_native.yaml." }
     }
-    $logs = Join-Path $runtime 'logs'
+    $logs = Join-Path $stateRoot 'logs'
     New-Item -ItemType Directory -Force -Path $logs | Out-Null
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $shutdown = Join-Path $runtime ('shutdown-' + [guid]::NewGuid().ToString('N'))
+    $shutdown = Join-Path $stateRoot ('shutdown-' + [guid]::NewGuid().ToString('N'))
     $backend = $null
     $frontend = $null
     try {
@@ -182,7 +220,6 @@ function Start-NativeServices {
             Start-Sleep -Milliseconds 500
         } while ((Get-Date) -lt $deadline)
         if ((Get-Date) -ge $deadline) { throw "Backend health timeout. See $logs" }
-        $frontendMode = if (Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) { 'start' } else { 'dev' }
         $arguments = ConvertTo-MarsArgumentString @((Join-Path $root 'frontend/node_modules/next/dist/bin/next'), $frontendMode, '--hostname', '127.0.0.1', '--port', $config.frontend_port)
         $frontend = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory (Join-Path $root 'frontend') -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (Join-Path $logs "frontend-$stamp.out.log") -RedirectStandardError (Join-Path $logs "frontend-$stamp.err.log")
@@ -246,6 +283,7 @@ function Show-NativeStatus {
     catch { Write-Warning 'Backend health request failed.' }
 }
 
+if ($LibraryOnly) { return }
 $mutex = $null
 $locked = $false
 try {
@@ -260,6 +298,7 @@ try {
     try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
     if (-not $locked) { throw 'Another MARS launcher is already installing or starting this folder.' }
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+    New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
     if ($Action -eq 'Menu') {
         Write-Host 'MARS Windows: 1 Start (auto install) | 2 Install/repair | 3 Configure API | 4 Stop | 5 Status | 6 Test API | 0 Exit'
         $choice = Read-Host 'Choose [1]'

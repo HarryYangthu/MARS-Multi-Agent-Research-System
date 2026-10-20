@@ -43,17 +43,19 @@ class ZCodeConfig:
             if binary is None:
                 raise ValueError("Configured ZCode executable is unavailable")
             return (binary, *self.command[1:])
-        # The Windows offline launcher owns this runtime; never inherit an
-        # unrelated user's CLI shim or depend on the macOS app path.
-        portable = repo_root() / "local/windows/tools/zcode/glm/zcode.cjs"
-        if portable.is_file():
-            native = yaml.safe_load((repo_root() / "configs/windows_native.yaml").read_text(encoding="utf-8"))
-            portable_node = repo_root() / "local/windows/tools/node" / native["node_executable"]
-            if portable_node.is_file():
-                return (str(portable_node), str(portable))
         binary = shutil.which("zcode")
         if binary:
             return (binary,)
+        # The portable launcher keeps dependencies outside the replaceable
+        # core. Legacy installations retain their existing runtime location.
+        for relative in ("dependencies/windows", "local/windows"):
+            tools = repo_root() / relative / "tools"
+            portable = tools / "zcode/glm/zcode.cjs"
+            if portable.is_file():
+                native = yaml.safe_load((repo_root() / "configs/windows_native.yaml").read_text(encoding="utf-8"))
+                portable_node = tools / "node" / native["node_executable"]
+                if portable_node.is_file():
+                    return (str(portable_node), str(portable))
         # Local desktop fallback. Other teams may use PATH or configure an argv above.
         bundle = Path("/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs")
         node = shutil.which("node")
