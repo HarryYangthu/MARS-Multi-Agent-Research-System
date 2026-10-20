@@ -328,7 +328,7 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         original += "\n用户明确的参数调整（由普通Coding核对并实现，不改变其意义）：" + json.dumps(
             resolved["parameter_overrides"], ensure_ascii=False)
     routing = {"ok": True, "repository_scope": "required", "verification": "host_registered_current_source",
-               "reason": "已有登记模型的运行请求；MARS 读取当前配置及入口，直接从Coding准备执行。",
+               "reason": "已有登记模型的运行请求；MARS读取当前配置及入口，直接从Coding准备执行。",
                "evidence": resolved["evidence"]}
     create_args: dict[str, Any] = {"entrypoint": "coding", "user_request": original,
                                   "task": f'existing_{Path(requested["config_path"]).stem}'}
@@ -781,7 +781,23 @@ async def _repo_read(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     return await execute_code_inspection("code.repo_read_lines", args, ctx)
 
 
+async def _research_memory(args: dict[str, Any], ctx: ToolContext, read: bool) -> dict[str, Any]:
+    from app.harness.tools.knowledge import research_memory_tool, research_memory_read_tool
+    fn = research_memory_read_tool if read else research_memory_tool
+    result = await fn(args, HarnessToolContext(ctx.session.conv_id, ctx.session.project, "commander"))
+    return {"ok": result.ok, "output": result.output, "error": result.error}
+
+
 TOOLS: dict[str, ToolSpec] = {
+    "knowledge.research_memory": ToolSpec(name="knowledge.research_memory",
+        description="Search this project's baseline capability and experiment history for the current task. Returns provenance, missing conditions and strict protocol compatibility. Failed execution is not a rejected hypothesis.",
+        parameters={"query": "current research task", "protocol": "optional exact dataset hash, split, preprocessing and evaluator object", "limit": "1 to 10, default 4"},
+        handler=lambda args, ctx: _research_memory(args, ctx, False)),
+    "knowledge.research_memory_read": ToolSpec(name="knowledge.research_memory_read",
+        description="Read a retained research record including architecture, full config, training recipe, measured results and preserved evidence. Read-only; cannot change baseline or launch training.",
+        parameters={"record_id": "mem_ record ID", "evidence_offset": "optional evidence page offset"},
+        handler=lambda args, ctx: _research_memory(args, ctx, True)),
+
     'run.existing_model': ToolSpec(name='run.existing_model',
         description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Omit seed unless the user explicitly supplied it: the host reads declared config defaults or generates and freezes a new seed only under an explicit host policy; never borrow a historical seed. An existing but unregistered config returns execution_registration_required, not missing-model evidence. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
         parameters={'model_name': 'optional existing model name, exact or an unambiguous abbreviation',

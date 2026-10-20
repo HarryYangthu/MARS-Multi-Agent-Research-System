@@ -6,19 +6,13 @@ gates:
     files_changed_threshold: 5
   experiment_launch:
     enabled: true
-    # Holds an execution batch for human approval when the estimated GPU budget
-    # is large. Dormant in the CPU/mock demo (estimated_gpu_hours≈0); this is the
-    # V2 real-L40S-training guard. The 16-cell PIM sweep runs on CPU, so it
-    # auto-proceeds rather than parking at this gate.
     gpu_hours_threshold: 12
   conclusion_output:
     enabled: true
   baseline_compatibility:
     enabled: true
-    # Tools whose dispatch must be checked. The check reads the project's
-    # AGENTS.md / repo_link.yaml protected paths.
     monitored_tools:
-      - code.patch_generator
-      - code.write_file
-      - code.copy_yaml
-      - code.delete_file
+    - code.patch_generator
+    - code.write_file
+    - code.delete_file
+    - code.copy_yaml

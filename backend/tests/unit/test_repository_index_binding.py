@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from types import FrameType
 
 import pytest
 import yaml
@@ -166,7 +167,7 @@ def test_context_tool_config_is_loaded_once_and_next_context_and_dispatch_observ
     def observe(event: str, arguments: tuple[object, ...]) -> None:
         if event != "open" or not arguments or str(arguments[0]) != str(config_path):
             return
-        frame = sys._getframe(1)
+        frame: FrameType | None = sys._getframe(1)
         callers: list[str] = []
         while frame is not None:
             callers.append(frame.f_code.co_name)

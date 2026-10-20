@@ -9,6 +9,7 @@ from app.bridge.commander_session import CommanderSession
 from app.bridge.commander_tools import ToolContext, execute_tool
 from app.bridge.orchestrator import Orchestrator
 from app.harness.runtime.event_bus import InProcessEventBus
+from app.harness.runtime.project_scope import ProjectScope, bind_project_scope
 from app.storage.run_store import RunStore
 
 
@@ -41,9 +42,20 @@ async def test_commander_tool_chain_writes_run_event(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_uninspected_connected_task_is_not_created(tmp_path: Path) -> None:
     store = RunStore(tmp_path / 'runs')
+    bound = (tmp_path / 'bound-project').resolve()
+    metadata, snapshot, source = (bound / name for name in ('metadata', 'snapshot', 'source'))
+    for directory in (metadata, snapshot, source):
+        directory.mkdir(parents=True)
+    (metadata / 'project.yaml').write_text('display_name: Source admission test\n')
+    (source / 'model.py').write_text('class ExistingModel:\n    pass\n')
+    scope = ProjectScope(run_id=bound.name, project='connected-test', task_sha256='0' * 64,
+        run_root=bound, metadata_root=metadata, snapshot_root=snapshot, candidate_root=source,
+        snapshot_id='authored-admission-scope', readable_files=('model.py',),
+        allowed_write_paths=(), protected_paths=())
     ctx = ToolContext(Orchestrator(run_store=store, bus=InProcessEventBus()),
-                      CommanderSession(conv_id='unchecked', project='pimc'), store)
-    result = await execute_tool('create_and_start_run', {'entrypoint': 'pipeline', 'user_request': 'Run existing model'}, ctx)
+                      CommanderSession(conv_id='unchecked', project='connected-test'), store)
+    with bind_project_scope(scope):
+        result = await execute_tool('create_and_start_run', {'entrypoint': 'pipeline', 'user_request': 'Run existing model'}, ctx)
     assert not result['ok'] and result['status'] == 'repository_inspection_required'
     assert ctx.session.linked_run_id is None
     assert not list((tmp_path / 'runs').iterdir())

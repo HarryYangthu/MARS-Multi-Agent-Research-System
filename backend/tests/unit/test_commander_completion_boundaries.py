@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from app.bridge.commander import (
     Decision, _begin_turn_completion, _completion_fingerprint, _decision_goal, _parse_decision,
@@ -94,7 +95,7 @@ def test_real_choice_reducer_yields_a_specific_question_instead_of_a_promise() -
 
 def test_legacy_approval_cannot_be_queued_or_replayed_twice() -> None:
     session = _session()
-    action = {'tool': 'approve_node', 'args': {'agent': 'coding'}}
+    action: dict[str, Any] = {'tool': 'approve_node', 'args': {'agent': 'coding'}}
     assert _prevent_duplicate_creation(session, Decision(actions=[action, action])).actions == [action]
     session.add(ChatMessage(role='tool', content='approval reducer input', tool_name='approve_node',
         tool_args=action['args'], tool_result={'ok': True}))

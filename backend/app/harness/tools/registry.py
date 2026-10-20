@@ -516,6 +516,9 @@ def _install_default_tools(reg: ToolRegistry) -> None:
     # knowledge.*
     reg.register("knowledge.kb_query", kb_query_tool)
     reg.register("knowledge.baseline_match", baseline_match_tool)
+    from app.harness.tools.knowledge import research_memory_tool, research_memory_read_tool
+    reg.register("knowledge.research_memory", research_memory_tool)
+    reg.register("knowledge.research_memory_read", research_memory_read_tool)
     reg.register("knowledge.experiment_memory", experiment_memory_tool)
     reg.register("knowledge.code_assets", code_assets_tool)
     reg.register("knowledge.methodology", methodology_tool)

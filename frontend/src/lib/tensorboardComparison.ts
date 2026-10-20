@@ -8,6 +8,8 @@ export type ComparisonSource = {
   scalar_run: string;
   histogram_run: string;
   image_run: string;
+  comparison_run: string;
+  gallery_run: string;
   image_tags: string[];
   comparison_tags: string[];
   attempt: string;
@@ -19,7 +21,7 @@ const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]
 export const exactRunFilter = (values: string[]): string => `^(?:${Array.from(new Set(values)).map(escapeRegex).join("|")})$`;
 
 export function comparisonUrl(base: string, dashboard: TensorBoardDashboard, sources: ComparisonSource[], overlay: boolean): string {
-  const runNames = sources.map((source) => dashboard === "histograms" ? source.histogram_run : dashboard === "images" ? source.image_run : source.scalar_run);
+  const runNames = sources.map((source) => dashboard === "histograms" ? source.histogram_run : dashboard === "images" ? overlay && sources.length > 1 ? source.comparison_run : source.image_run : source.scalar_run);
   const values = new URLSearchParams({ regexInput: exactRunFilter(runNames), _smoothingWeight: "0" });
   if (dashboard === "scalars") values.set("tagFilter", "^(train/loss|train/learning_rate|validation/RES_db|test/RES_db|heldout/(PIM|RES|APE|PIM_MAX|RES_MAX)_db)$");
   if (dashboard === "images") {

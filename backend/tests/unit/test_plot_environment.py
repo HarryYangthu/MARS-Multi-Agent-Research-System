@@ -12,13 +12,15 @@ from app.harness.tools.process_runtime import sanitized_subprocess_environment
 
 
 _RENDER = r'''
-import hashlib, json, os, sys, tempfile
+import hashlib, importlib.util, json, os, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from app.harness.runtime.plot_environment import initialize_plot_environment
 from app.harness.tools.process_runtime import sanitized_subprocess_environment
 
 original = os.environ.get('MPLCONFIGDIR')
+# Core installs still render actual PNGs without optional in-process Matplotlib.
+matplotlib_available = importlib.util.find_spec('matplotlib') is not None
 assert 'matplotlib' not in sys.modules
 assert initialize_plot_environment() is True
 assert 'matplotlib' not in sys.modules
@@ -46,13 +48,18 @@ for index in (1, 2):
     assert image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     current, digest = fingerprint()
     changed = sorted(key for key in set(before) | set(current) if before.get(key) != current.get(key))
-    assert not changed, changed
+    assert not changed, {'changed_environment_names': changed, 'matplotlib_available': matplotlib_available}
     digests.append(digest)
     images.append(str(image))
-assert 'matplotlib' in sys.modules
+matplotlib_loaded = 'matplotlib' in sys.modules
+assert matplotlib_loaded == matplotlib_available, {
+    'matplotlib_available': matplotlib_available, 'matplotlib_loaded': matplotlib_loaded,
+    'python': sys.executable,
+}
 assert os.environ['MPLCONFIGDIR'] == selected
 print(json.dumps({'original': original, 'selected': selected, 'directory_exists': Path(selected).is_dir(),
-                  'environment_digests': digests, 'images': images, 'matplotlib_loaded_only_for_plot': True}))
+                  'environment_digests': digests, 'images': images,
+                  'matplotlib_available': matplotlib_available, 'matplotlib_loaded_for_plot': matplotlib_loaded}))
 '''
 
 
@@ -77,7 +84,8 @@ def test_fresh_process_initialization_and_two_real_plots_keep_environment_digest
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
     assert len(set(result["environment_digests"])) == 1
-    assert result["directory_exists"] and result["matplotlib_loaded_only_for_plot"]
+    assert result["directory_exists"]
+    assert result["matplotlib_loaded_for_plot"] == result["matplotlib_available"], result
     assert result["selected"] == explicit if mode == "preset" else result["original"] in (None, "")
     assert len(result["images"]) == 2 and all(Path(name).is_file() for name in result["images"])
 

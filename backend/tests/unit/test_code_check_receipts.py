@@ -39,6 +39,9 @@ class Fixture:
 
 @pytest.fixture
 def actual(tmp_path: Path) -> Fixture:
+    prefix = tmp_path / 'registered-check-venv'
+    venv.EnvBuilder(with_pip=False).create(prefix)
+    python = prefix / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     project = tmp_path / 'project'
     root = project / 'code'; root.mkdir(parents=True)
     (root / '.gitignore').write_text('__pycache__/\n.pytest_cache/\ngenerated.log\n')
@@ -62,7 +65,7 @@ sys.exit(int(os.environ.get('CHECK_EXIT', '0')))
     data.write_text('{"values":[2,3,5]}')
     (run / 'input/selected_data_source.json').write_text(json.dumps({'stored_path':str(data)}))
     ctx = ToolContext(run_id=run.name, project='actual-project', agent='coding', extra={'run_root':str(run)})
-    argv = (sys.executable, 'check.py')
+    argv = (str(python), 'check.py')
     env = sanitized_subprocess_environment(overrides={'MARS_CODE_ROOT':str(root),
         'MARS_RUN_ROOT':str(run),'MARS_RUN_ID':run.name,'MARS_PROJECT':ctx.project,
         'MARS_TEST_PROJECT_ROOT':str(project),'MARS_TEST_DATA_PATH':str(data)})
@@ -108,10 +111,12 @@ def test_changed_real_inputs_cannot_reuse(actual: Fixture, change: str) -> None:
     elif change == 'environment': actual.environment['ACTUAL_CHECK_OPTION']='changed'
     elif change == 'command': actual.command=replace(actual.command,id='other_check')
     elif change == 'policy': actual.policy=replace(actual.policy,timeout_seconds=31)
-    else: actual.argv=(str(Path(sys.executable).resolve()),'-B','check.py')
+    else: actual.argv=(str(Path(getattr(sys, '_base_executable', sys.executable)).resolve()),'-B','check.py')
     changed = actual.identity()
-    if change == 'interpreter':
-        assert changed is None  # A base interpreter without a bound venv cannot reuse.
+    if change in {'interpreter', 'deleted'}:
+        # Neither an unbound base interpreter nor a missing registered script
+        # can certify a reusable check, even when an earlier run succeeded.
+        assert changed is None
     else:
         assert changed is not None and changed.fingerprint != first.fingerprint
     assert reuse_check(changed) is None
@@ -180,7 +185,7 @@ def test_coding_guidance_prefers_batch_yaml_without_extra_tests() -> None:
 
 def test_actual_venv_dependency_metadata_changes_are_bound(tmp_path: Path) -> None:
     prefix=tmp_path/'actual-venv'
-    venv.EnvBuilder(with_pip=False,symlinks=True).create(prefix)
+    venv.EnvBuilder(with_pip=False).create(prefix)
     python=prefix/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     before=_dependencies(str(python))
     site=next(prefix.glob('lib/python*/site-packages')) if os.name!='nt' else prefix/'Lib/site-packages'
@@ -208,7 +213,7 @@ def test_symbolic_receipt_directory_is_not_written(actual: Fixture,tmp_path: Pat
 def test_external_script_edit_never_reuses_old_success(actual: Fixture) -> None:
     external=actual.root.parent/'host-check.py'
     external.write_text('print("actual first external check")\n')
-    actual.argv=(sys.executable,str(external))
+    actual.argv=(actual.argv[0],str(external))
     actual.command=replace(actual.command,argv=actual.argv)
     first=actual.identity()
     assert first is None  # Its sibling imports cannot be certified by this repo.

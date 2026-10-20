@@ -8,13 +8,70 @@ import signal
 import subprocess
 import sys
 import time
+from threading import Event, Thread
 
 import pytest
 
 from app.execution.local.runner import LocalJobSpec, LocalJobStatus, LocalRunner
 from app.execution.local import worker
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="independent local runner currently supports POSIX")
+pytestmark = pytest.mark.skipif(os.name not in {"posix", "nt"}, reason="local runner requires POSIX or Windows")
+
+
+def _assert_killed(returncode: object) -> None:
+    assert returncode == (-signal.SIGKILL if os.name == "posix" else 1)
+
+
+def test_control_file_checks_accept_real_atomic_replacements(tmp_path: Path) -> None:
+    from app.execution.local.runner import _check_files
+    from app.harness.persistence import atomic_write_json
+
+    directory = tmp_path / "control"
+    directory.mkdir()
+    errors: list[Exception] = []
+    def replace() -> None:
+        try:
+            for index in range(250):
+                atomic_write_json(directory / "state.json", {"revision": index})
+        except Exception as error:
+            errors.append(error)
+    thread = Thread(target=replace)
+    thread.start()
+    while thread.is_alive():
+        _check_files(directory)
+        time.sleep(0.001)
+    thread.join(timeout=5)
+    assert not errors and not thread.is_alive()
+    assert json.loads((directory / "state.json").read_text())["revision"] == 249
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers deny delete sharing")
+def test_atomic_state_replacement_waits_for_actual_windows_reader(tmp_path: Path) -> None:
+    from app.harness.persistence import atomic_write_json
+
+    path = tmp_path / "state.json"
+    atomic_write_json(path, {"revision": 0})
+    started = Event()
+    errors: list[Exception] = []
+
+    def replace() -> None:
+        started.set()
+        try:
+            atomic_write_json(path, {"revision": 1})
+        except Exception as error:
+            errors.append(error)
+
+    with path.open("rb") as reader:
+        thread = Thread(target=replace)
+        thread.start()
+        assert started.wait(timeout=1)
+        time.sleep(0.1)
+        assert thread.is_alive()
+        assert json.loads(reader.read()) == {"revision": 0}
+    thread.join(timeout=3)
+    assert not errors and not thread.is_alive()
+    assert json.loads(path.read_text()) == {"revision": 1}
+    assert not list(tmp_path.glob(".state.json.*.tmp"))
 
 _MEASURE = '''import json, os
 from pathlib import Path
@@ -208,7 +265,7 @@ time.sleep(30)
     _wait_file(command.parent / "child_ticks")
     receipt = _wait(runner, spec.job_id).receipt
     assert receipt and receipt["status"] == "failed" and receipt["error"] == "deadline_exceeded"
-    assert receipt["returncode"] == -signal.SIGKILL
+    _assert_killed(receipt["returncode"])
     ticks = (command.parent / "child_ticks").read_bytes()
     time.sleep(0.15)
     assert (command.parent / "child_ticks").read_bytes() == ticks
@@ -224,7 +281,7 @@ def test_stop_uses_live_owner_and_is_idempotent(tmp_path: Path) -> None:
     stopped = _wait(runner, spec.job_id)
     assert stopped.status == "cancelled" and stopped.receipt
     assert stopped.receipt["error"] == "stop_requested"
-    assert stopped.receipt["returncode"] == -signal.SIGKILL
+    _assert_killed(stopped.receipt["returncode"])
 
 
 def test_launching_backend_sigkill_does_not_remove_worker_deadline(tmp_path: Path) -> None:
@@ -244,10 +301,11 @@ def test_launching_backend_sigkill_does_not_remove_worker_deadline(tmp_path: Pat
         assert backend.poll() is None and runner.status(spec.job_id).owner_active
         backend.kill()
         _, stderr = backend.communicate(timeout=5)
-        assert backend.returncode == -signal.SIGKILL and not stderr
+        _assert_killed(backend.returncode)
+        assert not stderr
         terminal = _wait(runner, spec.job_id)
         assert terminal.receipt and terminal.receipt["error"] == "deadline_exceeded"
-        assert terminal.receipt["returncode"] == -signal.SIGKILL
+        _assert_killed(terminal.receipt["returncode"])
     finally:
         if backend.poll() is None:
             backend.kill()

@@ -93,6 +93,36 @@ def _native_files(methods: list[Path]) -> dict[Path, str]:
             for method in methods for path in method.rglob('*') if path.is_file()}
 
 
+def test_model_and_comparison_images_have_independent_real_event_streams(tmp_path: Path) -> None:
+    run = tmp_path / 'owned-image-streams'
+    methods = [_native_method(run, 'control', 'baseline'), _native_method(run, 'variant', 'candidate')]
+    for method, color in zip(methods, ('blue', 'green')):
+        figure = method / 'figs/spectrum.png'
+        figure.parent.mkdir()
+        Image.new('RGB', (12, 10), color).save(figure)
+        Image.new('RGB', (14, 9), color).save(method.parent.parent / 'comparison_spectrum.png')
+    before = _native_files(methods)
+    report = sync_run_visualizations(run)
+    assert len(report['models']) == 2 and report['images'] == 4 and not report['warnings']
+    for model in report['models']:
+        assert len({model['image_run'], model['gallery_run'], model['comparison_run']}) == 3
+        owned = EventAccumulator(str(run / model['image_run'])).Reload()
+        assert owned.Tags()['images'] == ['figures/measurement/model/figs/spectrum.png']
+        image = owned.Images(owned.Tags()['images'][0])
+        assert len(image) == 1 and (image[0].width, image[0].height) == (12, 10)
+        comparison = EventAccumulator(str(run / model['comparison_run'])).Reload()
+        assert comparison.Tags()['images'] == ['figures/comparison_spectrum.png']
+        assert comparison.Images('figures/comparison_spectrum.png')[0].width == 14
+        gallery = EventAccumulator(str(run / model['gallery_run'])).Reload()
+        assert set(gallery.Tags()['images']) == {
+            'figures/measurement/model/figs/spectrum.png', 'figures/comparison_spectrum.png'}
+    assert sync_run_visualizations(run) == report
+    assert _native_files(methods) == before
+    for model in report['models']:
+        owned = EventAccumulator(str(run / model['image_run'])).Reload()
+        assert len(owned.Images('figures/measurement/model/figs/spectrum.png')) == 1
+
+
 def test_native_epochs_are_indexed_without_history_or_summary_and_events_remain_unchanged(tmp_path: Path) -> None:
     run = tmp_path / 'native-run'
     baseline = _native_method(run, 'control', 'baseline')

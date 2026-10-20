@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { canOverlayImages, comparisonUrl, exactRunFilter, type ComparisonSource } from "../src/lib/tensorboardComparison";
 
 const source = (id: string): ComparisonSource => ({ id, name: id, label: id, is_baseline: id === "baseline",
-  native: false, scalar_run: `logs/${id}.v1`, histogram_run: `weights/${id}`, image_run: "figures/attempt1",
+  native: false, scalar_run: `logs/${id}.v1`, histogram_run: `weights/${id}`, image_run: `figures/${id}`,
+  comparison_run: "figures/attempt1/comparison", gallery_run: "figures/attempt1/gallery",
   image_tags: [`figures/${id}/spectrum.png`], comparison_tags: ["figures/comparison_spectrum.png"], attempt: "attempt1",
   training_steps: 3800, validation_points: 101 });
 const baseline = source("baseline");
@@ -31,6 +32,12 @@ const imageUrl = comparisonUrl("/api/tensorboard/view/key/", "images", [baseline
 const imageSettings = new URLSearchParams(imageUrl.split("&").slice(1).join("&"));
 assert(new RegExp(imageSettings.get("tagFilter") || "").test(baseline.image_tags[0]));
 assert(!new RegExp(imageSettings.get("tagFilter") || "").test(candidate.image_tags[0]));
+assert.equal(imageSettings.get("regexInput"), exactRunFilter([baseline.image_run]));
+const overlayImageUrl = comparisonUrl("/api/tensorboard/view/key/", "images", pair, true);
+const overlayImageSettings = new URLSearchParams(overlayImageUrl.split("&").slice(1).join("&"));
+assert.equal(overlayImageSettings.get("regexInput"), exactRunFilter([baseline.comparison_run]));
+assert(!new RegExp(overlayImageSettings.get("regexInput") || "").test(baseline.image_run));
+assert(new RegExp(overlayImageSettings.get("tagFilter") || "").test(baseline.comparison_tags[0]));
 const nativePair = [
   { ...baseline, native: true, attempt: "baseline-job", scalar_run: "execution/local_commands/baseline/invocation/measurement/model/tensorboard", comparison_tags: [] },
   { ...candidate, native: true, attempt: "candidate-job", scalar_run: "execution/local_commands/candidate/invocation/measurement/model/tensorboard", comparison_tags: [] },

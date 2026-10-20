@@ -830,3 +830,64 @@ tools:
       type: object
       required: [ref, content, char_start, char_end, total_chars]
       additionalProperties: true
+
+  knowledge.research_memory:
+    enabled: true
+    description: Search task-related baseline capability and experiment history. Reuse
+      requires exact complete measurement protocol and intact evidence.
+    mutation_level: read
+    allowed_agents:
+    - commander
+    - idea
+    - idea_research
+    - experiment
+    - coding
+    - execution
+    - writing
+    timeout_seconds: 30
+    input_schema:
+      type: object
+      required:
+      - query
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        protocol:
+          type: object
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10
+    output_schema:
+      type: object
+  knowledge.research_memory_read:
+    enabled: true
+    description: Read a preserved baseline or experiment record with configuration,
+      recipe, metrics and paginated evidence.
+    mutation_level: read
+    allowed_agents:
+    - commander
+    - idea
+    - idea_research
+    - experiment
+    - coding
+    - execution
+    - writing
+    timeout_seconds: 30
+    input_schema:
+      type: object
+      required:
+      - record_id
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          pattern: ^mem_[0-9a-f]{32}$
+        evidence_offset:
+          type: integer
+          minimum: 0
+    output_schema:
+      type: object

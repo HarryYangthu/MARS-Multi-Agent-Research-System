@@ -121,7 +121,8 @@ def test_host_run_policy_requires_revision_and_preserves_history_and_other_runs(
     owner.settle(reservation, usage=None, complete=False, outcome="cancelled")
     original = owner.recovery_snapshot()
     revised_policy = json.loads(json.dumps(original_policy))
-    revised_policy["limits"]["max_model_requests"] += 2
+    original_limit = original_policy["limits"]["max_model_requests"]
+    revised_policy["limits"]["max_model_requests"] = 2 if original_limit is None else original_limit + 2
     (root / "resources/model_budget.policy.yaml").write_text(yaml.safe_dump(revised_policy))
     updated = RunModelBudget(root)
     with pytest.raises(ResourceBudgetError, match="policy changed"):
@@ -243,10 +244,11 @@ def test_only_explicit_request_null_is_unlimited(tmp_path: Path, key: str, value
         RunModelBudget(tmp_path, configuration=missing)
 
 
-def test_actual_resource_configuration_has_finite_product_limits(tmp_path: Path) -> None:
+def test_actual_resource_configuration_preserves_explicit_optional_request_limit(tmp_path: Path) -> None:
     budget = RunModelBudget(tmp_path)
     limits = budget.configuration["limits"]
-    assert type(limits["max_model_requests"]) is int and limits["max_model_requests"] > 0
+    assert limits["max_model_requests"] is None or (
+        type(limits["max_model_requests"]) is int and limits["max_model_requests"] > 0)
     assert limits["max_total_tokens"] == 1_128_000
     assert limits["max_parallel_model_calls"] == 2
     assert limits["max_elapsed_seconds"] == 5_400

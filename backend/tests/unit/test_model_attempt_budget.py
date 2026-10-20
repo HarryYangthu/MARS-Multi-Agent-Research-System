@@ -53,12 +53,9 @@ def _crash_after_reservation(root: str, connection: Connection) -> None:
     os._exit(0)
 
 
-def test_all_retry_attempts_are_reserved_before_sending(tmp_path: Path) -> None:
+def test_retry_attempts_are_bounded_by_remaining_quota_before_sending(tmp_path: Path) -> None:
     budget = RunModelBudget(tmp_path, configuration=_policy(2))
-    with pytest.raises(ResourceBudgetError, match="reserve all SDK attempts"):
-        budget.reserve(_messages(), _config(), {})
-    assert not budget.path.exists()
-    reserved = budget.reserve(_messages(), _config(retries=1), {})
+    reserved = budget.reserve(_messages(), _config(), {})
     assert reserved.attempts == 2
     assert _rows(budget)[reserved.request_id]["charged_attempts"] == 2
     budget.settle(reserved, usage=None, complete=False, outcome="cancelled")
@@ -111,12 +108,13 @@ def test_concurrent_reservations_cannot_oversubscribe_attempt_limit(tmp_path: Pa
     with ThreadPoolExecutor(max_workers=12) as workers:
         results = list(workers.map(reserve, range(12)))
     admitted = [(index, item) for index, item in results if item is not None]
-    assert len(admitted) == 2
-    assert sum(row["charged_attempts"] for row in _rows(owners[0]).values()) == 4
+    assert len(admitted) == 3
+    assert sorted(reservation.attempts for _, reservation in admitted) == [1, 2, 2]
+    assert sum(row["charged_attempts"] for row in _rows(owners[0]).values()) == 5
     for index, reservation in admitted:
         owners[index].settle(reservation, usage=None, complete=False, outcome="failed")
-    last = owners[0].reserve(_messages(), _config(retries=0), {})
-    owners[0].settle(last, usage=None, complete=False, outcome="cancelled")
+    with pytest.raises(ResourceBudgetError, match='model-request budget'):
+        owners[0].reserve(_messages(), _config(retries=0), {})
     assert sum(row["charged_attempts"] for row in _rows(owners[0]).values()) == 5
 
 
@@ -133,14 +131,15 @@ def test_legacy_rows_keep_their_retry_ceiling(tmp_path: Path, ceiling_missing: b
     if ceiling_missing:
         del row["max_sdk_attempts"]
     budget.path.write_text(json.dumps(state))
-    with pytest.raises(ResourceBudgetError, match="model-request budget"):
-        budget.reserve(_messages(), _config(retries=1), {})
     if ceiling_missing:
         with pytest.raises(ResourceBudgetError, match="model-request budget"):
-            budget.reserve(_messages(), _config(retries=0), {})
+            budget.reserve(_messages(), _config(retries=1), {})
     else:
-        final = budget.reserve(_messages(), _config(retries=0), {})
+        final = budget.reserve(_messages(), _config(retries=1), {})
+        assert final.attempts == 1
         budget.settle(final, usage=None, complete=False, outcome="failed")
+    with pytest.raises(ResourceBudgetError, match="model-request budget"):
+        budget.reserve(_messages(), _config(retries=0), {})
 
 
 @pytest.mark.parametrize("charged,known", [(0, True), (True, True), (4, True), (1, False)])

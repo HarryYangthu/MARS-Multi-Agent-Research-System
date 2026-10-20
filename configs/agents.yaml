@@ -26,6 +26,8 @@ commander:
   - code.repo_search
   - code.repo_read_lines
   - run.existing_model
+  - knowledge.research_memory
+  - knowledge.research_memory_read
   - run.create
   - run.start
   - run.status
@@ -95,6 +97,8 @@ idea:
   - search.web_search
   - search.fetch_sources
   - knowledge.kb_query
+  - knowledge.research_memory
+  - knowledge.research_memory_read
   - knowledge.baseline_match
   - code.repo_reader
 idea_research:
@@ -141,6 +145,8 @@ idea_research:
   - search.fetch_sources
   - search.local_docs
   - knowledge.kb_query
+  - knowledge.research_memory
+  - knowledge.research_memory_read
   - knowledge.baseline_match
 experiment:
   enabled: true
@@ -170,6 +176,8 @@ experiment:
   - knowledge.kb_query
   - knowledge.baseline_match
   - knowledge.experiment_memory
+  - knowledge.research_memory
+  - knowledge.research_memory_read
 coding:
   enabled: true
   output_schema: code_spec.v1
@@ -214,12 +222,14 @@ coding:
   - code.patch_generator
   - code.apply_patch
   - code.write_file
-  - code.copy_yaml
   - code.delete_file
   - code.rollback_patch
   - code.test_runner
   - code.lint
   - knowledge.code_assets
+  - knowledge.research_memory
+  - knowledge.research_memory_read
+  - code.copy_yaml
 execution:
   enabled: true
   output_schema: run_log.v1
@@ -232,6 +242,8 @@ execution:
     max_tool_steps: 6
   tools:
   - execution.log_streamer
+  - knowledge.research_memory
+  - knowledge.research_memory_read
   - execution.metrics_collector
 writing:
   enabled: true
@@ -269,6 +281,8 @@ writing:
   tools:
   - knowledge.methodology
   - knowledge.run_archive
+  - knowledge.research_memory
+  - knowledge.research_memory_read
   - code.repo_reader
 idea_author:
   enabled: true

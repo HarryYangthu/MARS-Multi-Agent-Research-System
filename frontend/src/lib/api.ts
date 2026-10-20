@@ -7,6 +7,27 @@ import { ApiError } from "./apiError";
 const CONFIGURED_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
 const BASE = CONFIGURED_BACKEND_URL;
 
+export type ResearchMemoryRecord = {
+  id: string; title: string; created_at: string; kind: string; status: string;
+  run_id: string; result_quality: string; is_mock: boolean;
+  metrics: Record<string, unknown>; architecture: Record<string, unknown>;
+  recipe: Record<string, unknown>; config: Record<string, unknown>; protocol: Record<string, unknown>;
+  missing: string[]; error?: string; annotations: Record<string, unknown>;
+  integrity?: { intact: boolean; problems: string[] };
+  evidence: { name: string; asset: string; sha256: string; source: string; category: string; bytes: number }[];
+};
+export type ResearchMemoryOverview = {
+  project: string; pointers: Record<string, string>; records: ResearchMemoryRecord[]; storage: string; policy: string;
+};
+export async function researchMemoryRequest<T>(project: string, suffix = "", body?: unknown, method = "POST"): Promise<T> {
+  const response = await boundedFetch(`${BASE}/api/projects/${encodeURIComponent(project)}/research-memory${suffix}`,
+    body === undefined ? { cache: "no-store" } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return jsonOrThrow<T>(response);
+}
+export function researchMemoryEvidenceUrl(project: string, id: string, index: number): string {
+  return `${BASE}/api/projects/${encodeURIComponent(project)}/research-memory/${encodeURIComponent(id)}/evidence/${index}`;
+}
+
 function apiUrl(path: string): URL {
   const origin =
     BASE ||

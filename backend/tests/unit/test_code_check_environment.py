@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import json
+import os
 from pathlib import Path
 import sys
+import venv
 
 import pytest
 import yaml
@@ -43,7 +45,15 @@ print(json.dumps({'sum': sum(values), 'python': sys.executable, 'code_root': str
 
 
 @pytest.fixture
-def bound_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[RunHandle, Path]]:
+def check_python(tmp_path: Path) -> Path:
+    prefix = tmp_path / 'registered-check-venv'
+    venv.EnvBuilder(with_pip=False).create(prefix)
+    return prefix / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+
+
+@pytest.fixture
+def bound_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                  check_python: Path) -> Iterator[tuple[RunHandle, Path]]:
     # Keep the genuinely verified host Git while later narrowing PATH to test
     # Python resolution. Do not turn that interpreter test into a missing-Git test.
     real_git = resolve_git().executable
@@ -78,8 +88,8 @@ def bound_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[t
     } for name in ('code.test_runner', 'code.lint')}}))
     monkeypatch.setenv('MARS_EXECUTION_CONFIG_PATH', str(execution))
     monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(tools))
-    # Resolve the host's Python before the native Git child PATH is installed.
-    monkeypatch.setenv('PATH', str(Path(sys.executable).parent))
+    # Resolve the registered isolated interpreter before Git narrows child PATH.
+    monkeypatch.setenv('PATH', str(check_python.parent) + os.pathsep + os.environ.get('PATH', ''))
     reset_settings_cache()
     try:
         yield run, data
@@ -100,7 +110,7 @@ def _select(run: RunHandle, path: Path | str) -> None:
 
 @pytest.mark.asyncio
 async def test_real_check_reads_project_data_beside_isolated_checkout(
-    bound_project: tuple[RunHandle, Path], monkeypatch: pytest.MonkeyPatch,
+    bound_project: tuple[RunHandle, Path], monkeypatch: pytest.MonkeyPatch, check_python: Path,
 ) -> None:
     run, data = bound_project
     for name in ('MARS_CODE_ROOT', 'MARS_PROJECT_ROOT', 'MARS_DATA_PATH', 'MARS_TEST_PROJECT_ROOT',
@@ -116,7 +126,7 @@ async def test_real_check_reads_project_data_beside_isolated_checkout(
         actual = json.loads(outcome.output['results'][0]['stdout'])
         assert actual['sum'] == 10 and actual['code_root'] == str(root)
         assert Path(actual['data']) == data and Path(actual['project_root']) == data.parent.parent
-        assert actual['python'] == sys.executable
+        assert actual['python'] == str(check_python)
         assert actual['selected'] is False and actual['secret'] is False
         assert actual['runtime_project'] is None and actual['runtime_data'] is None
         assert actual['request'] is None and actual['result'] is None and actual['validate_only'] is None
@@ -173,12 +183,14 @@ def test_only_project_child_opts_into_real_data():
         '-c', 'commit.gpgsign=false', 'commit', '-m', 'Real fixture isolation regression')
     config_path = Path(os.environ['MARS_EXECUTION_CONFIG_PATH'])
     config = yaml.safe_load(config_path.read_text())
+    # This one check genuinely runs pytest, so register the current test harness
+    # explicitly; the stdlib-only isolated check environment has no pytest.
     config['code_checks']['test']['commands'][0]['argv'] = [
-        'python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'test_binding.py']
+        sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'test_binding.py']
     config_path.write_text(yaml.safe_dump(config))
     tools_path = Path(os.environ['MARS_TOOLS_CONFIG_PATH'])
     tools = yaml.safe_load(tools_path.read_text())
-    tools['tools']['code.test_runner']['command_allowlist'] = [['python', '-m', 'pytest']]
+    tools['tools']['code.test_runner']['command_allowlist'] = [[sys.executable, '-m', 'pytest']]
     tools_path.write_text(yaml.safe_dump(tools))
     _select(run, data)
     monkeypatch.setenv('MARS_PROJECT_ROOT', '/stale/runtime/project')
@@ -192,7 +204,7 @@ def test_only_project_child_opts_into_real_data():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('kind', ['test', 'lint'])
 async def test_selected_data_and_interpreter_match_genuine_execution_bindings(
-    bound_project: tuple[RunHandle, Path], kind: str,
+    bound_project: tuple[RunHandle, Path], kind: str, check_python: Path,
 ) -> None:
     from app.harness.tools.execution.local_command import LocalCommandJob, _bound_workspace
     from app.harness.tools.execution.command_preflight import _checked_path
@@ -209,7 +221,7 @@ async def test_selected_data_and_interpreter_match_genuine_execution_bindings(
         code, project = _bound_workspace(job)
         assert actual['code_root'] == str(code) and actual['project_root'] == str(project)
         assert actual['data'] == str(_checked_path(job, str(alternate)))
-        assert actual['sum'] == 30 and actual['selected'] is True and actual['python'] == sys.executable
+        assert actual['sum'] == 30 and actual['selected'] is True and actual['python'] == str(check_python)
         assert actual['runtime_project'] is None and actual['runtime_data'] is None
 
 

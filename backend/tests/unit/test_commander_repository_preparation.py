@@ -58,7 +58,7 @@ async def _observe(ctx: ToolContext, action: dict[str, Any]) -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_premature_create_prepares_real_repository_then_requires_real_read(tmp_path: Path) -> None:
     with _project(tmp_path) as (ctx, source):
-        action = {'tool': 'create_and_start_run', 'args': {
+        action: dict[str, Any] = {'tool': 'create_and_start_run', 'args': {
             'entrypoint': 'experiment', 'user_request': '基于已有模型做学习率寻优'}}
         original = deepcopy(action)
         state = repository_admission_state(ctx.session)
@@ -82,7 +82,7 @@ async def test_discovered_explicit_source_is_really_read_before_route_is_reconsi
     with _project(tmp_path) as (ctx, source):
         listed = await _observe(ctx, {'tool': 'code.repo_list', 'args': {'path': 'configs'}})
         assert listed['ok']
-        action = {'tool': 'run.create', 'args': {'entrypoint': 'experiment',
+        action: dict[str, Any] = {'tool': 'run.create', 'args': {'entrypoint': 'experiment',
                   'user_request': '根据 configs/model.yaml 设计学习率对照，预算待审核'}}
         prepare = creation_source_preparation(ctx.session, action)
         assert prepare == {'tool': 'code.repo_read_lines', 'args': {'path': 'configs/model.yaml'}}

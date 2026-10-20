@@ -50,7 +50,12 @@ export function ProjectProvider({
       setProjects(next);
       setError("");
       setSelectedProjectState((current) => {
-        if (next.length === 0) return current || DEFAULT_PROJECT;
+        if (next.length === 0) {
+          if (typeof window !== "undefined") {
+            try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* session only */ }
+          }
+          return DEFAULT_PROJECT;
+        }
         if (next.some((project) => project.name === current)) return current;
         const fallback =
           next[0].name;

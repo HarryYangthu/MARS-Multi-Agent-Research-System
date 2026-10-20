@@ -109,5 +109,9 @@ function Get-MarsDependencyFingerprint {
     foreach ($file in @('pyproject.toml', 'uv.lock', 'frontend/package-lock.json', 'configs/windows_native.yaml')) {
         $result[$file] = (Get-FileHash -LiteralPath (Join-Path $Root $file) -Algorithm SHA256).Hash
     }
+    $marker = Join-Path $Root 'WINDOWS-OFFLINE.json'
+    if (Test-Path -LiteralPath $marker) {
+        $result['WINDOWS-OFFLINE.json'] = (Get-FileHash -LiteralPath $marker -Algorithm SHA256).Hash
+    }
     return $result
 }

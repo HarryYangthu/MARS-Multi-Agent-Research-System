@@ -83,7 +83,7 @@ async function start() {
   receipt.stage = 'backend';
   const backend = new OwnedProcess(python, [path.join(__dirname, 'backend-runner.py')], {
     cwd: runtimeRoot,
-    env: { ...environment, ...(layout.pythonRoot ? { PYTHONHOME: layout.pythonRoot } : {}), PYTHONPATH: [path.join(sourceRoot, 'backend'), path.join(sourceRoot, 'projects/synthetic_regression/src')].join(path.delimiter), PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', MARS_RUNTIME_ROOT: runtimeRoot, MARS_DESKTOP_SESSION_TOKEN: token, MARS_CORS_ORIGINS: gateway.origin },
+    env: { ...environment, ...(layout.pythonRoot ? { PYTHONHOME: layout.pythonRoot } : {}), PYTHONPATH: path.join(sourceRoot, 'backend'), PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', MARS_RUNTIME_ROOT: runtimeRoot, MARS_DESKTOP_SESSION_TOKEN: token, MARS_CORS_ORIGINS: gateway.origin },
   });
   services.push(backend);
   const backendPort = await waitForPort(backend, config.startup_timeout_ms);

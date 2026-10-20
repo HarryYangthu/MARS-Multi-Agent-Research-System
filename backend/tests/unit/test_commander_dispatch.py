@@ -110,6 +110,7 @@ async def test_dependent_start_must_use_the_actual_new_allocation(tmp_path: Path
         assert created['ok']
         bound = batch_created_identity(ctx.session, 'run.create', created, initial_run_id=None)
         assert bound == created['run_id']
+        assert bound is not None
         assert batch_start_is_bound(ctx.session, {}, created_run_id=bound)
         assert batch_start_is_bound(ctx.session, {'run_id': bound}, created_run_id=bound)
         assert not batch_start_is_bound(ctx.session, {'run_id': 'different-retained-task'}, created_run_id=bound)
