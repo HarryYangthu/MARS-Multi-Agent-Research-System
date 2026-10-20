@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu', 'Install', 'Start', 'Configure', 'Stop', 'Status', 'TestApi')]
+    [ValidateSet('Menu', 'Install', 'Start', 'Configure', 'Stop', 'Status', 'TestApi', 'SlowModel', 'RestoreModel')]
     [string]$Action = 'Menu',
     [switch]$NoBrowser,
     [switch]$SkipConfigure,
@@ -173,6 +173,16 @@ function Configure-NativeApi {
     }
 }
 
+function Configure-SlowModel {
+    param([switch]$Restore)
+    Assert-ServicesStopped
+    if (-not (Test-InstallationCurrent)) { Install-NativeDependencies }
+    Set-NativeEnvironment
+    $arguments = @((Join-Path $PSScriptRoot 'configure_slow_model.py'))
+    if ($Restore) { $arguments += '--restore' }
+    Invoke-MarsNativeCommand $python $arguments $root
+}
+
 function Start-NativeServices {
     $state = Read-ServiceState
     if ($null -ne $state -and $null -ne (Get-MarsOwnedProcess $state.backend) -and
@@ -302,10 +312,10 @@ try {
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
     New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
     if ($Action -eq 'Menu') {
-        Write-Host 'MARS Windows: 1 Start (auto install) | 2 Install/repair | 3 Configure API | 4 Stop | 5 Status | 6 Test API | 0 Exit'
+        Write-Host 'MARS Windows: 1 Start (auto install) | 2 Install/repair | 3 Configure API | 4 Stop | 5 Status | 6 Test API | 7 Slow model profile | 8 Restore model settings | 0 Exit'
         $choice = Read-Host 'Choose [1]'
         if ($choice -eq '') { $choice = '1' }
-        $actions = @{ '1' = 'Start'; '2' = 'Install'; '3' = 'Configure'; '4' = 'Stop'; '5' = 'Status'; '6' = 'TestApi' }
+        $actions = @{ '1' = 'Start'; '2' = 'Install'; '3' = 'Configure'; '4' = 'Stop'; '5' = 'Status'; '6' = 'TestApi'; '7' = 'SlowModel'; '8' = 'RestoreModel' }
         if ($choice -eq '0') { exit 0 }
         if (-not $actions.ContainsKey($choice)) { throw 'Unknown menu choice.' }
         $Action = $actions[$choice]
@@ -313,6 +323,8 @@ try {
     switch ($Action) {
         'Install' { Install-NativeDependencies }
         'Configure' { Configure-NativeApi }
+        'SlowModel' { Configure-SlowModel }
+        'RestoreModel' { Configure-SlowModel -Restore }
         'Start' { Start-NativeServices }
         'Stop' { Stop-NativeServices }
         'Status' { Show-NativeStatus }

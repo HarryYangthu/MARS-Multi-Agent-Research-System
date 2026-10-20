@@ -444,6 +444,7 @@ class Commander:
                                 and verdict.status in {"fulfilled", "delegated"})
         if verdict.status not in {"blocked", "needs_user"} and not grounded_handoff:
             from app.bridge.commander_semantics import review_turn_completion
+            from app.bridge.commander_native import commander_call_deadline_seconds
             key = hashlib.sha256((_completion_fingerprint(session, goal) + reply).encode()).hexdigest()
             review = reviews.get(key)
             if review is None:
@@ -453,8 +454,8 @@ class Commander:
                     review = await review_turn_completion(
                         session, reply, provider=self._provider, llm_config=self._llm_config,
                         run_root=get_session_store().session_directory(session),
-                        timeout_seconds=min(30.0, llm_call_deadline_seconds(self._llm_config,
-                            minimum_seconds=get_settings().mars_llm_timeout_seconds)))
+                        timeout_seconds=commander_call_deadline_seconds(self._llm_config,
+                            minimum_seconds=get_settings().mars_llm_timeout_seconds))
                 except BaseException:
                     session.finish_activity(activity, "failed")
                     raise
@@ -491,12 +492,12 @@ class Commander:
                           and session.completion_state.get("status") == "pending")
         # Conversation may use normal text; operations use the provider's native
         # function channel. No text JSON or promise is dispatched as an action.
-        from app.bridge.commander_native import native_commander_decision
+        from app.bridge.commander_native import native_commander_decision, commander_call_deadline_seconds
         raw = await native_commander_decision(
             session, self._build_messages(session, continuation=continuation),
             self._provider, self._llm_config, get_session_store().session_directory(session),
-            min(60.0, llm_call_deadline_seconds(self._llm_config,
-                minimum_seconds=get_settings().mars_llm_timeout_seconds)),
+            commander_call_deadline_seconds(self._llm_config,
+                minimum_seconds=get_settings().mars_llm_timeout_seconds),
             accept_text_reply=not action_pending)
         require_native_decision(raw)
         decision = _parse_decision(json.dumps({

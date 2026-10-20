@@ -19,7 +19,7 @@ from app.bridge.commander_tools import TOOLS
 from app.bridge.workflow_service import EntryPoint
 from app.harness.agent_loop.trace import LoopTrace
 from app.harness.llm.accounting import guarded_complete
-from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message
+from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.config import ToolConfig, load_tool_configs
 
 STEP = 'mars_commander_step'
@@ -224,6 +224,17 @@ def pack_native_commander_messages(session: CommanderSession, messages: list[Mes
     path = record_manifest(root, agent='commander', node=session.conv_id, project=session.project,
                            messages=wire, tools=config.tools, manifest=manifest)
     return wire, path
+
+
+def commander_call_deadline_seconds(config: LLMConfig, *, minimum_seconds: float = 0.0) -> float:
+    """One accounted decision/review, honoring the selected model's timeout.
+
+    Both callers disable provider retries. Include only this request and its
+    cancellation grace; never shorten a slow endpoint to a hidden 30/60s cap.
+    """
+    if not math.isfinite(config.request_timeout_seconds) or config.request_timeout_seconds <= 0:
+        raise ValueError('Model request timeout must be finite and positive')
+    return llm_call_deadline_seconds(replace(config, max_retries=0), minimum_seconds=minimum_seconds)
 
 
 def native_commander_config(config: LLMConfig, timeout_seconds: float) -> LLMConfig:

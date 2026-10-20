@@ -835,3 +835,9 @@ Update-MARS.cmd
 deploy/windows-native/Update.ps1
 
 deploy/windows-native/update_core.py
+backend/app/bridge/bundled_projects.py
+backend/app/bridge/commander_compat.py
+docs/glm-gateway-compatibility.md
+configs/model_runtime_profiles.yaml
+deploy/windows-native/configure_slow_model.py
+docs/slow-intranet-model.md
