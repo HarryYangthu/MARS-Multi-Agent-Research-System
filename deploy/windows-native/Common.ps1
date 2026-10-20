@@ -161,6 +161,12 @@ function Get-MarsFrontendFingerprint {
             $result[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         }
     }
+    foreach ($name in @('configs/frontend.yaml', 'configs/local_runtime.yaml')) {
+        $path = Join-Path $Root $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
     $native = Read-MarsNativeConfig (Join-Path $Root 'configs/windows_native.yaml')
     $result['windows.backend_port'] = $native.backend_port
     $result['windows.frontend_port'] = $native.frontend_port

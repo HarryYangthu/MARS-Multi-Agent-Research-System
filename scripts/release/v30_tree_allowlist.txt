@@ -4,6 +4,7 @@
 # See scripts/release/README.md and docs/productization/CLEANUP_INVENTORY.md.
 
 # Build metadata and license
+.gitattributes
 LICENSE
 pyproject.toml
 uv.lock

@@ -93,6 +93,8 @@ def file_bytes(source: Path, name: str) -> bytes:
     """The same portable product defaults are used by both delivery formats."""
     root = source.resolve(strict=True)
     path = _safe_file(root, name)
+    if name == '.gitattributes':
+        return b'* -text\n'
     if name == 'configs/execution.yaml':
         config: Any = yaml.safe_load(path.read_text(encoding='utf-8'))
         if not isinstance(config, dict) or not isinstance(config.get('execution'), dict):

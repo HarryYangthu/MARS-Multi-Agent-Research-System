@@ -39,6 +39,9 @@ try {
     }
     $nativePath = Join-Path $fixture 'configs/windows_native.yaml'
     Copy-Item -LiteralPath (Join-Path $Root 'configs/windows_native.yaml') -Destination $nativePath
+    foreach ($name in @('frontend.yaml', 'local_runtime.yaml')) {
+        Copy-Item -LiteralPath (Join-Path $Root "configs/$name") -Destination (Join-Path $fixture "configs/$name")
+    }
     [IO.File]::WriteAllText((Join-Path $fixture 'uv.lock'), 'actual dependency lock bytes')
     [IO.File]::WriteAllText((Join-Path $fixture 'frontend/package-lock.json'), '{"lockfileVersion":3}')
     [IO.File]::WriteAllText((Join-Path $fixture 'frontend/package.json'), '{"name":"actual-file-contract"}')
@@ -53,6 +56,13 @@ try {
     } | ConvertTo-Json | ConvertFrom-Json
     Assert-True (Test-MarsInstalledFingerprint $legacyFingerprint $fixture) 'Unchanged real legacy dependency bindings must remain reusable.'
     $frontendBefore = Get-MarsFrontendFingerprint $fixture | ConvertTo-Json | ConvertFrom-Json
+    foreach ($name in @('configs/frontend.yaml', 'configs/local_runtime.yaml')) {
+        $beforeConfigChange = Get-MarsFrontendFingerprint $fixture | ConvertTo-Json | ConvertFrom-Json
+        $configuration = Join-Path $fixture $name
+        [IO.File]::AppendAllText($configuration, "`n# actual frontend build input changed`n")
+        Assert-True (-not (Test-MarsFingerprint $beforeConfigChange (Get-MarsFrontendFingerprint $fixture))) "Changed $name must require a frontend build."
+        Assert-True (Test-MarsFingerprint $savedDependencies (Get-MarsDependencyFingerprint $fixture)) "Changed $name must not reinstall dependencies."
+    }
     [IO.File]::WriteAllText((Join-Path $fixture 'pyproject.toml'), 'description = "core metadata changed"')
     [IO.File]::WriteAllText((Join-Path $fixture 'WINDOWS-OFFLINE.json'), '{"dependency_directory":"dependencies/offline","source_marker":"changed"}')
     [IO.File]::WriteAllText((Join-Path $fixture 'frontend/src/page.tsx'), 'export default function Page() { return "updated core" }')

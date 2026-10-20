@@ -31,7 +31,7 @@ PREFIXES = ('backend/app/', 'frontend/src/', 'frontend/public/', 'configs/',
             'scripts/release/', 'frontend/scripts/', 'scripts/evaluators/',
             'desktop/src/', 'scripts/desktop/', 'deploy/desktop/', 'docs/')
 ROOT_FILES = frozenset({'LICENSE', 'README.md', 'README.zh-CN.md', 'pyproject.toml',
-    'uv.lock', '.env.example', '.gitignore', 'MARS-Windows.cmd', 'Update-MARS.cmd',
+    'uv.lock', '.env.example', '.gitignore', '.gitattributes', 'MARS-Windows.cmd', 'Update-MARS.cmd',
     'manage-mars-windows.cmd', 'install-mars-windows.cmd', 'configure-mars-api.cmd',
     'start-mars-windows-native.cmd', 'stop-mars-windows-native.cmd',
     'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json',

@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 from types import ModuleType
 import zipfile
 
@@ -28,6 +30,7 @@ CORE = _load()
 def _source(tmp_path: Path) -> Path:
     source = tmp_path / 'source'
     files = {
+        '.gitattributes': '*.cmd -text\n',
         'uv.lock': '# Concrete lock bytes\n', 'frontend/package-lock.json': '{"lockfileVersion":3}\n',
         'pyproject.toml': '[project]\nname="archive-contract"\n',
         'configs/windows_native.yaml': yaml.safe_dump({'python_version': '3.11.14', 'uv_sha256': 'a' * 64,
@@ -68,9 +71,63 @@ def test_actual_core_zip_policies_and_shared_portable_bytes(tmp_path: Path) -> N
             assert len(data) == row['bytes'] and hashlib.sha256(data).hexdigest() == row['sha256']
             assert row['policy'] == ('seed' if row['path'].split('/')[0] in {'configs', 'projects'} else 'replace')
         assert b'-OfflineRequired' in z.read('MARS-Windows.cmd')
+        assert z.read('.gitattributes') == b'* -text\n'
         assert z.read('README.md') == z.read('deploy/windows-native/README-OFFLINE.md')
         assert yaml.safe_load(z.read('configs/execution.yaml'))['execution']['local_commands'] == []
     assert (source / 'configs/execution.yaml').read_bytes() == original_settings
+
+
+def test_distribution_clone_and_fast_forward_preserve_manifest_bytes_with_autocrlf(tmp_path: Path) -> None:
+    source = _source(tmp_path)
+    publication = tmp_path / 'publication'
+    remote = tmp_path / 'distribution.git'
+    checkout = tmp_path / 'windows-user-checkout'
+    publication.mkdir()
+    git = os.environ.get('MARS_GIT_EXECUTABLE', 'git')
+
+    def run_git(cwd: Path, *args: str) -> str:
+        return subprocess.check_output([git, '-c', 'user.name=MARS release test', '-c',
+            'user.email=release-test@example.invalid', '-C', str(cwd), *args], text=True).strip()
+
+    def publish(version: str) -> None:
+        archive = tmp_path / (version + '.zip')
+        CORE.build_core(source, archive, version=version)
+        with zipfile.ZipFile(archive) as package:
+            package.extractall(publication)
+        run_git(publication, 'add', '--all')
+        run_git(publication, 'add', '-f', 'CORE-UPDATE.json')
+        run_git(publication, 'commit', '-m', version)
+        run_git(publication, 'push', 'origin', 'HEAD:main')
+
+    def assert_checkout(version: str) -> str:
+        marker_bytes = (checkout / 'CORE-UPDATE.json').read_bytes()
+        marker = json.loads(marker_bytes)
+        assert marker['version'] == version
+        assert marker_bytes == (publication / 'CORE-UPDATE.json').read_bytes()
+        assert (checkout / '.gitattributes').read_bytes() == b'* -text\n'
+        for row in marker['files']:
+            content = (checkout / row['path']).read_bytes()
+            assert len(content) == row['bytes']
+            assert hashlib.sha256(content).hexdigest() == row['sha256']
+        assert b'\r\n' in (checkout / 'MARS-Windows.cmd').read_bytes()
+        assert (checkout / 'uv.lock').read_bytes() == (source / 'uv.lock').read_bytes()
+        return run_git(checkout, 'rev-parse', 'HEAD')
+
+    run_git(tmp_path, 'init', '--bare', str(remote))
+    run_git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+    run_git(publication, 'init', '-b', 'main')
+    run_git(publication, 'config', 'core.autocrlf', 'false')
+    run_git(publication, 'remote', 'add', 'origin', str(remote))
+    publish('first-release')
+    run_git(tmp_path, 'clone', '--config', 'core.autocrlf=true', str(remote), str(checkout))
+    assert run_git(checkout, 'config', '--get', 'core.autocrlf') == 'true'
+    first_commit = assert_checkout('first-release')
+    (source / 'backend/app/execution/local/runner.py').write_text('VALUE = 3\n', encoding='utf-8')
+    publish('second-release')
+    run_git(checkout, 'pull', '--ff-only')
+    assert assert_checkout('second-release') != first_commit
+    assert run_git(checkout, 'rev-parse', 'HEAD^') == first_commit
+    assert run_git(checkout, 'status', '--porcelain') == ''
 
 
 def test_fingerprint_binds_only_six_declared_dependency_fields(tmp_path: Path) -> None:
