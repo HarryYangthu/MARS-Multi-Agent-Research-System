@@ -98,7 +98,9 @@ def test_reasoning_preserves_measured_feedback_after_a_large_prior_handoff() -> 
 
 def test_memory_index_does_not_invent_a_completed_execution(tmp_path: Path) -> None:
     run = RunStore(tmp_path).create(task='memory-no-measurement', project='parser')
-    assert archive_execution_memory(run, attempt=1)['status'] == 'not_available'
+    result = archive_execution_memory(run, attempt=1)
+    assert result['status'] == 'not_available'
+    assert result['reason'] == 'This custom run store has no global project-memory grant'
     assert not (run.root / 'memory/execution_archive_1.json').exists()
 
 

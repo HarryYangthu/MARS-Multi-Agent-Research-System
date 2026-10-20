@@ -280,8 +280,9 @@ def evolution_context(run: RunHandle, *, attempt: int, stage: str) -> str | None
     if stage == 'coding' and state['best'] is not None:
         best_path = safe_scope_path(run.root, state['best']['code_ref'], must_exist=True)
         context['best_parent_source'] = json.loads(best_path.read_text())
-        context['parent_selection'] = 'Start from the best measured parent above; propose one discriminating change. '
-        'Apply changes through the governed code tools. The frozen module boundaries still apply.'
+        context['parent_selection'] = (
+            'Start from the best measured parent above; propose one discriminating change. '
+            'Apply changes through the governed code tools. The frozen module boundaries still apply.')
     return json.dumps(context, ensure_ascii=False, allow_nan=False)
 
 
@@ -290,6 +291,11 @@ def archive_execution_memory(run: RunHandle, *, attempt: int) -> dict[str, Any]:
     from app.bridge.research_run_service import load_run_research_contract
     if load_run_research_contract(run) is not None:
         return {'status': 'not_available', 'reason': 'This sealed research namespace has no global project-memory grant'}
+    from app.harness.project_storage import project_storage_root
+    from app.settings import repo_root
+    owned = project_storage_root(run.project, 'runs', repo_root() / 'runs') / run.run_id
+    if run.root.resolve() != owned.resolve():
+        return {'status': 'not_available', 'reason': 'This custom run store has no global project-memory grant'}
     jobs = sorted((run.root / 'execution/jobs').glob('*.json'))
     current = [path for path in jobs if json.loads(path.read_text()).get('attempt') == attempt]
     if not current or any(json.loads(path.read_text()).get('status') != 'completed' for path in current):
