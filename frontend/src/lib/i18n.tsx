@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { interfaceText } from "./interfaceText";
 
 export type Lang = "zh" | "en";
 
@@ -271,7 +272,7 @@ const EN: Dict = {
   "chat.send": "Send",
   "chat.placeholder": "Tell me your research goal. Enter to send (Shift+Enter for newline)",
   "sidebar.input.research": "Research question",
-  "sidebar.input.research_placeholder": "例如：针对当前 paper_static PIMC 模型和真实 static capture，如何改善 PIM 抵消后的 residual 指标？",
+  "sidebar.input.research_placeholder": "How can we improve the PIM cancellation residual for the current paper_static model and real static capture?",
   "sidebar.input.tags": "Topics (semicolon separated)",
   "sidebar.input.tags_placeholder": "e.g. CV; VLM; World Model",
   "sidebar.input.config": "Config",
@@ -369,6 +370,7 @@ type I18nCtx = {
   setLang: (l: Lang) => void;
   t: (key: string) => string;
   toggle: () => void;
+  ui: (text: string) => string;
 };
 
 const Ctx = createContext<I18nCtx | null>(null);
@@ -379,9 +381,21 @@ export function I18nProvider({ children }: { children: React.ReactNode }): JSX.E
   // Hydrate from localStorage after mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem("mars.lang") as Lang | null;
-    if (saved === "zh" || saved === "en") setLangState(saved);
+    try {
+      const saved = window.localStorage.getItem("mars.lang");
+      if (saved === "zh" || saved === "en") setLangState(saved);
+    } catch { /* Language switching also works when browser storage is disabled. */ }
+    const receive = (event: StorageEvent): void => {
+      if (event.key === "mars.lang" && (event.newValue === "zh" || event.newValue === "en")) setLangState(event.newValue);
+    };
+    window.addEventListener("storage", receive);
+    return () => window.removeEventListener("storage", receive);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.title = DICTS[lang]["app.title"];
+  }, [lang]);
 
   const setLang = useCallback((l: Lang) => {
     setLangState(l);
@@ -403,10 +417,11 @@ export function I18nProvider({ children }: { children: React.ReactNode }): JSX.E
   const toggle = useCallback(() => {
     setLang(lang === "zh" ? "en" : "zh");
   }, [lang, setLang]);
+  const ui = useCallback((text: string) => interfaceText(lang, text), [lang]);
 
   const value = useMemo<I18nCtx>(
-    () => ({ lang, setLang, t, toggle }),
-    [lang, setLang, t, toggle],
+    () => ({ lang, setLang, t, toggle, ui }),
+    [lang, setLang, t, toggle, ui],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -419,6 +434,7 @@ export function useI18n(): I18nCtx {
       lang: "zh",
       setLang: () => {},
       toggle: () => {},
+      ui: (text) => text,
       t: (key) => DICTS.zh[key] ?? key,
     };
   }

@@ -1,9 +1,12 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { codingBackendSettings, type CodingBackend, type CodingBackendStatus } from "@/lib/codingBackend";
 
 export function CodingBackendSettings(): JSX.Element {
+  const { ui } = useI18n();
   const [status, setStatus] = useState<CodingBackendStatus | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -29,24 +32,24 @@ export function CodingBackendSettings(): JSX.Element {
     <section className="mt-6 rounded border border-mars-border bg-mars-panel/70 p-5" aria-labelledby="coding-engine-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="coding-engine-heading" className="text-lg font-semibold">编码引擎</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">在后台完成代码修改，过程、改动与审核都保留在研究对话中。</p>
+          <h2 id="coding-engine-heading" className="text-lg font-semibold">{ui("编码引擎")}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400">{ui("在后台完成代码修改，过程、改动与审核都保留在研究对话中。")}</p>
         </div>
-        {status && <span className="text-xs text-slate-400">ZCode {status.zcode_available ? "已安装" : "未就绪"}</span>}
+        {status && <span className="text-xs text-slate-400">ZCode {status.zcode_available ? ui("已安装") : ui("未就绪")}</span>}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="选择编码引擎">
-        {([{ id: "zcode", label: "ZCode" }, { id: "native_llm", label: "MARS 内置" }] as const).map((option) => (
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label={ui("选择编码引擎")}>
+        {([{ id: "zcode", label: "ZCode" }, { id: "native_llm", label: ui("MARS 内置") }] as const).map((option) => (
           <button key={option.id} type="button" aria-pressed={status?.selected === option.id}
             disabled={!status || saving || (option.id === "zcode" && !status.zcode_available)}
             onClick={() => { void choose(option.id); }}
             className={`rounded border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${status?.selected === option.id ? "border-mars-accent bg-mars-accent/15 text-indigo-100" : "border-mars-border text-slate-300 hover:bg-mars-panel2"}`}>
-            {option.label}{status?.selected === option.id ? " · 当前" : ""}
+            {ui(option.label)}{status?.selected === option.id ? ui(" · 当前") : ""}
           </button>
         ))}
       </div>
-      <p className="mt-3 text-xs leading-5 text-slate-500">已有编码任务恢复时沿用原引擎。ZCode 使用「模型连接」中编码 Agent 的配置。</p>
+      <p className="mt-3 text-xs leading-5 text-slate-500">{ui("已有编码任务恢复时沿用原引擎。ZCode 使用「模型连接」中编码 Agent 的配置。")}</p>
       {status?.reason && <p className="mt-3 text-sm text-amber-200">{status.reason}</p>}
-      {message && <p className="mt-3 text-sm text-slate-300" role="status">{message}</p>}
+      {message && <p className="mt-3 text-sm text-slate-300" role="status">{ui(message)}</p>}
     </section>
   );
 }

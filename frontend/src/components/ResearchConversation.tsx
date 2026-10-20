@@ -1,5 +1,7 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n";
+
 import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -34,6 +36,7 @@ function remember(project: string, id: string | null, experimentId?: string): vo
 }
 
 export function ResearchConversation({ project, name, experimentId, initialRunId, initialConversationId, fresh = false }: { project: string; name: string; experimentId?: string; initialRunId?: string; initialConversationId?: string; fresh?: boolean }): JSX.Element {
+  const { ui } = useI18n();
   const router = useRouter();
   const [conversation, setConversation] = useState<StoredConversation | null>(null);
   const [messageDraft, updateDraft] = useReducer(messageDraftReducer, emptyMessageDraft);
@@ -69,7 +72,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const commanderStartedAt = pending?.startedAt || activeUser?.timestamp || latestUser?.timestamp;
   const liveGroups = activeActivityGroups(groups, activity.run, processing, commanderStartedAt);
   const hasCommanderProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent === "commander"));
-  
+
   const runProcessing = activity.run && latestStages(activity.run).some(stage => stage.state === "running");
   const lastEntry = entries.at(-1)?.id;
   const current = [...publicActivities].reverse().find(item => item.status === "running")?.title;
@@ -197,23 +200,23 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
   const showPending = pending && !pendingSaved && !pending.replaceId;
-  return <section aria-label="研究对话" className="flex min-h-0 flex-1 flex-col">
+  return <section aria-label={ui("研究对话")} className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-mars-border px-4 py-3 sm:px-6">
-      <div className="min-w-0"><h1 className="text-base font-medium">研究对话</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
+      <div className="min-w-0"><h1 className="text-base font-medium">{ui("研究对话")}</h1><p className="mt-1 truncate text-xs text-slate-500">{name}</p></div>
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-        <button type="button" role="switch" aria-checked={conversation?.auto_mode === true} aria-label="主控托管" aria-describedby="managed-mode-description" disabled={processing || loading || modeSaving || needsRefresh} onClick={() => void toggleManaged()} className="flex items-center gap-2 rounded-lg border border-mars-border px-3 py-2 text-slate-200 hover:border-indigo-400/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-300 disabled:opacity-40">
-          主控托管<span className={`relative h-4 w-8 rounded-full ${conversation?.auto_mode ? "bg-mars-accent" : "bg-slate-600"}`} aria-hidden="true"><span className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${conversation?.auto_mode ? "translate-x-4" : "translate-x-0"}`} /></span><span>{modeSaving ? "保存中…" : conversation?.auto_mode ? "开" : "关"}</span>
+        <button type="button" role="switch" aria-checked={conversation?.auto_mode === true} aria-label={ui("主控托管")} aria-describedby="managed-mode-description" disabled={processing || loading || modeSaving || needsRefresh} onClick={() => void toggleManaged()} className="flex items-center gap-2 rounded-lg border border-mars-border px-3 py-2 text-slate-200 hover:border-indigo-400/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-300 disabled:opacity-40">
+          {ui("主控托管")}<span className={`relative h-4 w-8 rounded-full ${conversation?.auto_mode ? "bg-mars-accent" : "bg-slate-600"}`} aria-hidden="true"><span className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${conversation?.auto_mode ? "translate-x-4" : "translate-x-0"}`} /></span><span>{modeSaving ? ui("保存中…") : conversation?.auto_mode ? ui("开") : ui("关")}</span>
         </button>
-        <Link href={`/projects/${encodeURIComponent(project)}/research`} className="hover:text-white">所有研究</Link>
-        <button type="button" disabled={processing || loading || modeSaving} onClick={() => { remember(project, null, experimentId); creation.current = null; setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); const params = new URLSearchParams({ project, new: "1" }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); }} className="hover:text-white disabled:opacity-40">新对话</button>
+        <Link href={`/projects/${encodeURIComponent(project)}/research`} className="hover:text-white">{ui("所有研究")}</Link>
+        <button type="button" disabled={processing || loading || modeSaving} onClick={() => { remember(project, null, experimentId); creation.current = null; setConversation(null); setPending(null); updateDraft({ type: "reset" }); setError(""); setNeedsRefresh(false); const params = new URLSearchParams({ project, new: "1" }); if (experimentId) params.set("experiment", experimentId); router.replace(`/runs/new?${params}`); }} className="hover:text-white disabled:opacity-40">{ui("新对话")}</button>
       </div>
     </header>
-    <p id="managed-mode-description" className="border-b border-mars-border px-4 py-2 text-xs text-slate-500 sm:px-6">{conversation?.auto_mode ? "主控代替人工审核方案与仿真配置；需要你决定时会暂停并说明原因。" : "当前由你审批各阶段方案；开启主控托管后，由主控审核并推进流程。"}</p>
+    <p id="managed-mode-description" className="border-b border-mars-border px-4 py-2 text-xs text-slate-500 sm:px-6">{conversation?.auto_mode ? ui("主控代替人工审核方案与仿真配置；需要你决定时会暂停并说明原因。") : ui("当前由你审批各阶段方案；开启主控托管后，由主控审核并推进流程。")}</p>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
     <div className="flex min-h-[65vh] min-w-0 flex-1 flex-col lg:min-h-0">
     <div onScroll={event => { const el = event.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6">
-        {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">正在读取对话…</p> : messages.length === 0 && !pending && !conversation?.linked_run_id ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">这次想研究什么？</h2><p className="mt-3 text-sm text-slate-400">直接描述你的研究目标，也可以先一起讨论思路。</p></div> : null}
+        {loading && !conversation ? <p role="status" className="my-auto text-center text-sm text-slate-400">{ui("正在读取对话…")}</p> : messages.length === 0 && !pending && !conversation?.linked_run_id ? <div className="my-auto py-12 text-center"><h2 className="text-2xl font-medium">{ui("这次想研究什么？")}</h2><p className="mt-3 text-sm text-slate-400">{ui("直接描述你的研究目标，也可以先一起讨论思路。")}</p></div> : null}
         {groups.map(entry => {
           if (entry.kind === "message") return <ResearchMessage key={entry.id} message={entry.message} editing={editing?.messageId === entry.id} editDisabled={editDisabled || !entry.message.id} onEdit={() => editMessage(entry.message)} />;
           const research = entry.activities.some(item => item.id.startsWith("run:") || item.agent !== "commander");
@@ -237,17 +240,17 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     </div>
     <form onSubmit={(event) => { event.preventDefault(); void send(); }} className="shrink-0 px-4 pb-5 sm:px-6">
       <div className="mx-auto max-w-3xl">
-        {error ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200"><p>{error}</p><button type="button" disabled={loading || busy} onClick={() => void refresh()} className="mt-2 underline disabled:opacity-40">重新读取对话</button></div> : null}
+        {error ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200"><p>{error}</p><button type="button" disabled={loading || busy} onClick={() => void refresh()} className="mt-2 underline disabled:opacity-40">{ui("重新读取对话")}</button></div> : null}
         <div className="rounded-2xl border border-mars-border bg-mars-panel p-3 focus-within:border-indigo-400/60">
           {editing ? <div role="status" className="mb-2 flex items-start justify-between gap-3 border-b border-mars-border px-2 pb-3">
-            <div><p className="text-sm text-indigo-200">编辑并重新发送</p><p className="mt-1 text-xs text-slate-400">重新发送后替换这条消息，旧回复和处理记录不保留，其他消息保持原样。</p></div>
-            <button type="button" disabled={processing} onClick={() => { updateDraft({ type: "cancel" }); composer.current?.focus(); }} className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-300 hover:bg-white/5 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">取消编辑</button>
+            <div><p className="text-sm text-indigo-200">{ui("编辑并重新发送")}</p><p className="mt-1 text-xs text-slate-400">{ui("重新发送后替换这条消息，旧回复和处理记录不保留，其他消息保持原样。")}</p></div>
+            <button type="button" disabled={processing} onClick={() => { updateDraft({ type: "cancel" }); composer.current?.focus(); }} className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-300 hover:bg-white/5 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">{ui("取消编辑")}</button>
           </div> : null}
-          <textarea ref={composer} aria-label={editing ? "编辑消息内容" : "研究目标或补充要求"} value={draft} onChange={(event) => updateDraft({ type: "change", text: event.target.value })} rows={3} placeholder="描述你的研究目标，或继续补充要求…" onKeyDown={(event) => {
+          <textarea ref={composer} aria-label={editing ? ui("编辑消息内容") : ui("研究目标或补充要求")} value={draft} onChange={(event) => updateDraft({ type: "change", text: event.target.value })} rows={3} placeholder={ui("描述你的研究目标，或继续补充要求…")} onKeyDown={(event) => {
             if (event.key === "Escape" && editing && !processing && !event.nativeEvent.isComposing) { event.preventDefault(); updateDraft({ type: "cancel" }); }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Enter 发送 · Shift + Enter 换行{editing ? " · Esc 取消" : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? "处理中…" : editing ? "重新发送" : "发送"}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">{ui("Enter 发送 · Shift + Enter 换行")}{editing ? ui(" · Esc 取消") : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? ui("处理中…") : editing ? ui("重新发送") : ui("发送")}</button></div>
         </div>
       </div>
     </form>
@@ -258,15 +261,16 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 }
 
 function ResearchMessage({ message, editing, editDisabled, onEdit }: { message: StoredChatMessage; editing: boolean; editDisabled: boolean; onEdit: () => void }): JSX.Element {
+  const { ui } = useI18n();
   if (message.role === "tool") return <details className="rounded-lg border border-mars-border bg-mars-panel/40 px-4 py-3 text-xs text-slate-400">
-    <summary className="cursor-pointer">工具调用 · {message.tool_name}{message.tool_result?.ok === false ? " · 未完成" : ""}</summary>
+    <summary className="cursor-pointer">{ui("工具调用 ·")} {message.tool_name}{message.tool_result?.ok === false ? ui(" · 未完成") : ""}</summary>
     <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words leading-6">{message.content}{message.tool_result ? `\n${JSON.stringify(message.tool_result, null, 2)}` : ""}</pre>
   </details>;
   if (message.role === "user") return <div className="ml-auto flex max-w-[90%] flex-col items-end gap-1">
     <div className={`whitespace-pre-wrap break-words rounded-2xl bg-mars-accent/25 px-5 py-3 text-sm leading-7 ${editing ? "ring-1 ring-indigo-400/60" : ""}`}>{message.content}</div>
     <button type="button" disabled={editDisabled} aria-pressed={editing} onClick={onEdit} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-indigo-200 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5M4 20l4-1L21 6a2.8 2.8 0 0 0-4-4L4 15l-1 6Z" /></svg>
-      编辑并重新发送
+      {ui("编辑并重新发送")}
     </button>
   </div>;
   return <div className="min-w-0 break-words text-sm leading-7 text-slate-200 [&_p]:my-3 [&_li]:ml-5 [&_ul]:list-disc [&_ol]:list-decimal [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-mars-panel [&_pre]:p-4 [&_a]:text-indigo-300 [&_h2]:my-4 [&_h2]:text-lg [&_h2]:font-medium [&_table]:block [&_table]:overflow-x-auto [&_td]:border [&_td]:border-mars-border [&_td]:p-2 [&_th]:border [&_th]:border-mars-border [&_th]:p-2">

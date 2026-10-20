@@ -1,3 +1,7 @@
+"use client";
+
+import { useI18n } from "@/lib/i18n";
+
 import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 import { CodingBackendSettings } from "@/components/CodingBackendSettings";
@@ -24,6 +28,7 @@ const CONFIG_SECTIONS = [
 ];
 
 export default function ConfigIndexPage(): JSX.Element {
+  const { ui } = useI18n();
   return (
     <div className="min-h-screen bg-mars-bg"><TopBar /><main className="p-6 text-slate-100">
       <div className="mx-auto max-w-5xl">
@@ -32,11 +37,13 @@ export default function ConfigIndexPage(): JSX.Element {
             href="/projects"
             className="mb-4 inline-flex rounded border border-mars-border bg-mars-panel2 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-mars-subtle hover:text-white"
           >
-            ← 返回项目
+
+            {ui("← 返回项目")}
           </Link>
-          <h1 className="text-2xl font-semibold">设置</h1>
+          <h1 className="text-2xl font-semibold">{ui("设置")}</h1>
           <p className="mt-2 text-sm text-slate-500">
-            配置模型连接；内部参数与变更记录在高级设置中查看。
+
+            {ui("配置模型连接；内部参数与变更记录在高级设置中查看。")}
           </p>
         </div>
 
@@ -49,13 +56,13 @@ export default function ConfigIndexPage(): JSX.Element {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">{section.title}</h2>
+                  <h2 className="text-lg font-semibold">{ui(section.title)}</h2>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    {section.description}
+                    {ui(section.description)}
                   </p>
                 </div>
                 <span className="rounded bg-mars-accent/15 px-2 py-1 text-[11px] text-indigo-100">
-                  {section.badge}
+                  {ui(section.badge)}
                 </span>
               </div>
             </Link>

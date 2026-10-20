@@ -461,6 +461,7 @@ frontend/package.json
 frontend/postcss.config.mjs
 frontend/scripts/clean-next-types.cjs
 frontend/scripts/context-workbench-smoke.ts
+frontend/scripts/language-smoke.ts
 frontend/scripts/message-draft-smoke.ts
 frontend/scripts/message-replacement-smoke.ts
 frontend/src/app/config/agents/page.tsx
@@ -535,6 +536,7 @@ frontend/src/lib/contextWorkbench.ts
 frontend/src/lib/dashboard.ts
 frontend/src/lib/dataSourceSelection.ts
 frontend/src/lib/i18n.tsx
+frontend/src/lib/interfaceText.ts
 frontend/src/lib/messageDraft.ts
 frontend/src/lib/project.tsx
 frontend/src/lib/socket.ts
