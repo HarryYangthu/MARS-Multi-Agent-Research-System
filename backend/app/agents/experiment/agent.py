@@ -36,6 +36,15 @@ class ExperimentAgent(BaseAgent):
         from app.harness.tools.execution.handoff import execution_delivery_context
         context.upstream['configured_execution_delivery'] = json.dumps(
             execution_delivery_context(), ensure_ascii=False)
+        if request.extra.get('evolution'):
+            context.upstream['current_iteration_delivery_rules'] = (
+                'Auto Research: design only the CURRENT executable batch. Read evolution_task_context.current_iteration. '
+                'Use exactly its baseline_names for controls and candidate_pattern for candidates. '
+                'Future adaptation and verification are controller policy, never placeholder rows in ablations. '
+                'If YAML fields evolve, candidate config_path must be the actual allowed candidate YAML. '
+                'Do not add unconsumed candidate_config/lr_init overrides or copy to a different directory. '
+                'The same candidate YAML will be changed by Coding between batches, then read by the real registered entrypoint. '
+                'Do not freeze future parameter values into this batch. Keep only real execution bindings and the fixed training protocol in config.')
         return context
 
     async def validate_candidate(self, request: RunRequest, text: str,
@@ -43,6 +52,9 @@ class ExperimentAgent(BaseAgent):
         errors = await super().validate_candidate(request, text, observations)
         if not errors:
             errors.extend(experiment_errors(document_metadata(text)))
+        if request.extra.get('evolution'):
+            from app.harness.evolution import EvolutionContract, evolution_plan_errors
+            errors.extend(evolution_plan_errors(EvolutionContract.model_validate(request.extra['evolution']), document_metadata(text)))
         return errors
 
     async def draft(

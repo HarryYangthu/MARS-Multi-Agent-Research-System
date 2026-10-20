@@ -59,6 +59,14 @@ def commander_tool_input_schema(name: str, configured: dict[str, ToolConfig]) ->
         return deepcopy(policy.input_schema)
     string = {'type': 'string'}
     run_id = {'type': 'string', 'description': 'Optional; defaults to the actual linked run.'}
+    if name == 'models.list':
+        return {'type': 'object', 'properties': {}, 'additionalProperties': False}
+    if name == 'run.auto_research':
+        from app.harness.evolution import EvolutionContract
+        schema = EvolutionContract.model_json_schema()
+        definitions = schema.pop('$defs', {})
+        return {'type': 'object', 'additionalProperties': False, 'required': ['user_request', 'evolution'],
+            '$defs': definitions, 'properties': {'user_request': string, 'task': string, 'evolution': schema}}
     if name in {'run.create', 'create_and_start_run'}:
         return {'type': 'object', 'additionalProperties': False, 'properties': {
             'entrypoint': {'type': 'string',
@@ -262,7 +270,8 @@ def native_commander_config(config: LLMConfig, timeout_seconds: float,
         names = native_tool_names()
         tools = tuple(tool for tool in tools if tool['function']['name'] == INTERVENTION or (
             names[tool['function']['name']] not in _ALIASES and
-            (names[tool['function']['name']] != 'discovery.create' or 'discovery.create' in loaded)))
+            (names[tool['function']['name']] not in {'discovery.create', 'run.auto_research'}
+             or names[tool['function']['name']] in loaded)))
     return replace(config, tools=tools, json_mode=False, response_schema=None,
                    max_retries=0, request_timeout_seconds=min(timeout_seconds, config.request_timeout_seconds),
                    extra={**config.extra, 'native_observation_history': True})

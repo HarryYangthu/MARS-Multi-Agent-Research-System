@@ -852,3 +852,11 @@ deploy/windows-native/model_runtime_profiles.defaults.yaml
 frontend/src/components/ConversationModelPicker.tsx
 docs/intranet-core-update-20261021.md
 backend/app/harness/agent_loop/interrupted_model_resume.py
+
+# Goal-bound Auto Research and six-module evolution
+backend/app/agents/idea/evolution_planner.py
+backend/app/bridge/evolution_service.py
+backend/app/bridge/managed_review_context.py
+backend/app/execution/evolution_evidence.py
+backend/app/harness/evolution.py
+docs/auto-research.md

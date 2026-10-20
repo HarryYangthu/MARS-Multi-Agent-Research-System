@@ -122,8 +122,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
 
-  // Terminal runs stop polling, but a Commander turn can restart or correct
-  // the same run. Revalidate after its persisted reply, including replies
+  // Revalidate immediately when a Commander turn restarts or corrects the
+  // same run, without waiting for the slower terminal heartbeat. Include replies
   // observed through conversation polling from another open tab.
   useEffect(() => {
     if (conversation?.linked_run_id && settledMessage !== null) void refreshActivity();

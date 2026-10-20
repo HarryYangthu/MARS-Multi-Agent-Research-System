@@ -406,7 +406,8 @@ class BaseAgent(ABC):
         if validation.valid:
             metadata = parse_frontmatter(text).metadata
             if metadata.get("project") != request.project:
-                errors.append("/project: must equal the requested project")
+                errors.append(f"/project: must equal the exact requested project ID {request.project!r}; "
+                              "a display name or another project is not this run's identity")
             submission_schema = self.submission_schema(request)
             if submission_schema is not None:
                 errors.extend("/" + "/".join(str(p) for p in error.absolute_path) + ": " + error.message

@@ -1128,6 +1128,29 @@ export async function listTrashedRuns(project?: string): Promise<TrashRunSummary
 export async function getRun(runId: string): Promise<RunDetail> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${runId}`));
 }
+
+export type EvolutionView = {
+  status: string; verification_count: number;
+  contract: { goal: string; max_iterations: number; verification_runs: number };
+  best: { attempt: number; winner: { experiment_id: string; metrics: Record<string, number> } } | null;
+  last_decision?: { continue: boolean; reason: string };
+  proposal?: { mechanism: string; approval_recorded: boolean; modules: { module: string; path: string }[] };
+  attempts: { attempt: number; iteration?: number; passed: boolean; metrics_ref: string;
+    winner: { experiment_id: string; checks: { name: string; observed: number | null; target: number;
+      value: number | null; baseline: number | null; comparison: string;
+      direction: string; passed: boolean; gap: number | null }[] } | null;
+    protocol_errors: string[]; decision: { status: string; reason: string } }[];
+};
+
+export async function getEvolution(runId: string, project: string): Promise<{ evolution: EvolutionView | null }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/evolution?project=${encodeURIComponent(project)}`, { cache: "no-store" }));
+}
+
+export async function continueEvolution(runId: string, project: string): Promise<{ ok: boolean; status: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/evolution/continue`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project }),
+  }));
+}
 export type IdeaContext = Partial<Record<
   "background" | "baseline_code" | "data_description" | "analysis_results" | "metric_definition" | "literature_notes",
   string

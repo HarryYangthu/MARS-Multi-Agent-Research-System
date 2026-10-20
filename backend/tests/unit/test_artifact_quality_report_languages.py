@@ -15,10 +15,21 @@ import pytest
 from app.harness.evaluation.evaluators.artifact_quality import (
     ArtifactQualityEvaluator,
     _score_report,
+    _score_proposal,
 )
 from app.harness.evaluation.models import EvaluationTarget
 from app.harness.evaluation.rubrics import load_rubric
 from app.harness.schema.frontmatter_parser import dumps
+
+
+def test_focused_research_contract_has_equivalent_reference_presence_score() -> None:
+    source = {'source_id': 'paper_fixture', 'decision': 'use', 'url': 'https://example.org/paper',
+              'method_summary': 'Authored schema fixture, not actual research evidence',
+              'method_spec_ref': '/method_spec/example'}
+    linked = {'research_context': {'sources': [source], 'coverage': [{'source_ids': ['paper_fixture']}]}}
+    assert _score_proposal(linked, '')['evidence'] == _score_proposal({'evidence_refs': ['fixture']}, '')['evidence']
+    linked['research_context']['coverage'] = [{'source_ids': ['unrelated']}]
+    assert _score_proposal(linked, '')['evidence'] == .25
 
 
 def metadata() -> dict[str, Any]:

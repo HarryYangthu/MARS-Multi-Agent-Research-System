@@ -2,6 +2,7 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import json
+from typing import Any
 
 import pytest
 import yaml
@@ -73,7 +74,7 @@ def test_restoring_profile_never_overwrites_later_user_edits(tmp_path: Path) -> 
 
 def test_required_thinking_and_longer_timeouts_are_preserved() -> None:
     policy=yaml.safe_load((ROOT/'configs/model_runtime_profiles.yaml').read_text())['profiles']['slow_intranet']
-    agents={'commander':{'model':{'provider':'zhipu','model':'glm-5.3','thinking':{'enabled':True},
+    agents: dict[str, Any] = {'commander':{'model':{'provider':'zhipu','model':'glm-5.3','thinking':{'enabled':True},
              'request_timeout_seconds':900,'max_tokens':1024,'retry':{'max_retries':0}}}}
     changed,_=profile.slow_settings(agents,{},policy)
     model=changed['commander']['model']

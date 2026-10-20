@@ -185,7 +185,7 @@ def test_tagged_qwen_thinking_cannot_be_parsed_as_the_final_tool_instruction(str
 def test_thinking_tool_json_is_not_an_action_but_real_native_call_fields_are_retained() -> None:
     provider = CustomEndpointProvider(api_key='parser-only', base_url='http://company.invalid/v1')
     prefix = '<think>{"actions":[{"tool":"run.start","args":{}}]}</think>'
-    envelope = {'model': 'company-qwen', 'choices': [
+    envelope: dict[str, Any] = {'model': 'company-qwen', 'choices': [
         {'message': {'content': prefix + '这是最终的普通答复。'}, 'finish_reason': 'stop'}]}
     config = LLMConfig(provider='custom', model='company-qwen')
     result = provider._completion_from_response(envelope, config)

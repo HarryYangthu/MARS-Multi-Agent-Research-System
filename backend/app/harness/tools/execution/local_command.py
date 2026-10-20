@@ -146,6 +146,10 @@ def _bound_workspace(job: LocalCommandJob) -> tuple[Path | None, Path | None]:
         branch = saved_branch(load_project_repo(job.project).root, job.run_root, job.project, job.run_id)
     scope = current_project_scope(job.project, job.run_id)
     code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
+    from app.harness.evolution import frozen_baseline_root
+    reference = frozen_baseline_root(job.run_root, job.project, job.experiment_id)
+    if reference is not None:
+        code_root = reference
     from app.harness.project_workspace import folder_project, project_root
     folder = folder_project(job.project)
     project_path = folder.root if folder is not None else scope.run_root if scope is not None else project_root(job.project)
@@ -176,7 +180,7 @@ def _command(job: LocalCommandJob, tool_name: str, *, validation: bool = False) 
         from app.harness.tools.project_repo import load_project_repo
         branch = saved_branch(load_project_repo(job.project).root, job.run_root, job.project, job.run_id)
     scope = current_project_scope(job.project, job.run_id)
-    code_root = branch.root if branch is not None else scope.candidate_root if scope is not None else None
+    code_root, _ = _bound_workspace(job)
     routed = []
     for index, argument in enumerate(argv):
         if "{code_root}" in argument:
@@ -542,6 +546,8 @@ async def run_local_command(job: LocalCommandJob, *, tool_name: str = "execution
         "pid": process.pid if process is not None else None,
         "argv": list(argv), "command_files": command_files, "execution_backend": "local_process", "os_isolated": False,
         "request_sha256": request_sha256,
+        "scientific_request": _scientific_request(request),
+        "scientific_inputs": preflight.get('input_files', []),
         "result_sha256": _file_hash(result_path) if result_path.is_file() and not result_path.is_symlink() else None,
         "evidence": evidence, "error": error, "log_capture": capture.metadata(),
     }

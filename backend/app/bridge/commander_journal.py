@@ -69,7 +69,7 @@ def restore_action_receipts(root: Path, session: CommanderSession) -> int:
         session.add(ChatMessage(id=row['id'], role='tool', turn_id=row['turn_id'], tool_name=row['tool'],
             tool_args=row['args'], tool_result=row['result'], content=json.dumps(row['result'], ensure_ascii=False)))
         run_id = row['result'].get('run_id')
-        if run_id and row['tool'] in {'run.create', 'run.existing_model', 'create_and_start_run'}:
+        if run_id and row['tool'] in {'run.create', 'run.existing_model', 'create_and_start_run', 'run.auto_research'}:
             session.linked_run_id = str(run_id)
         restored += 1
     return restored

@@ -33,16 +33,20 @@ export function useResearchActivity(runId: string | null | undefined, project: s
       } catch { if (active) setError("运行状态更新失败，正在重试；下方为最近记录。"); }
       finally {
         reading = false;
-        if (active && (reread || !complete)) {
-          const delay = reread ? 0 : CLIENT_POLICY.controlRefreshMs;
+        if (active) {
+          // A run can resume from another tab or after a server restart.
+          // Retain a slow heartbeat instead of freezing a terminal snapshot.
+          const delay = reread ? 0 : complete ? Math.max(CLIENT_POLICY.readinessRefreshMs, CLIENT_POLICY.controlRefreshMs) : CLIENT_POLICY.controlRefreshMs;
           reread = false;
           timer = setTimeout(() => void refresh(), delay);
         }
       }
     };
     refreshRef.current = refresh;
+    const onFocus = (): void => { void refresh(); };
+    window.addEventListener('focus', onFocus);
     void refresh();
-    return () => { active = false; refreshRef.current = async () => {}; clearTimeout(timer); };
+    return () => { active = false; refreshRef.current = async () => {}; clearTimeout(timer); window.removeEventListener('focus', onFocus); };
   }, [runId, project]);
   const visible = snapshot && snapshot.run.run_id === runId && snapshot.run.project === project ? snapshot : null;
   return { run: visible?.run ?? null, activities: visible?.activities ?? [], error, updated: visible?.updated ?? "", refresh: refreshNow };

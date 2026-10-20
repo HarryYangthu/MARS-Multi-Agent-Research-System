@@ -48,8 +48,9 @@ def test_two_profiles_and_session_selection_are_shared_and_survive_reload(tmp_pa
     sessions.persist(a)
     sessions.persist(b)
     restored = CommanderSessionStore(tmp_path / 'sessions')
-    assert restored.get(a.conv_id).selected_model_id == qwen['id']
-    assert restored.get(b.conv_id).selected_model_id == gemma['id']
+    restored_a, restored_b = restored.get(a.conv_id), restored.get(b.conv_id)
+    assert restored_a is not None and restored_a.selected_model_id == qwen['id']
+    assert restored_b is not None and restored_b.selected_model_id == gemma['id']
     assert len(GlobalModelProfiles(tmp_path).public()['profiles']) == 2
 
 
@@ -79,7 +80,7 @@ def test_resolve_preserves_exact_private_route_and_leaves_agent_defaults_unchang
 
 
 def test_profile_input_secrets_are_not_in_the_metadata_payload() -> None:
-    model = SaveModelProfile(**payload(), api_key='private-input-marker')
+    model = SaveModelProfile.model_validate({**payload(), 'api_key': 'private-input-marker'})
     assert 'private-input-marker' not in repr(model)
     assert 'api_key' not in model.model_dump(exclude={'api_key'})
 

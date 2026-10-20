@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
+from app.harness.evolution import EvolutionContract
 
 from app.api.dependencies import existing_orchestrator, get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest, RunSession
@@ -22,6 +23,23 @@ from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+@router.get('/{run_id}/evolution')
+def get_evolution(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.evolution_service import evolution_view
+    run = get_run_store().get(run_id)
+    if run is None or run.project != project:
+        raise HTTPException(status_code=404, detail='研究任务不存在或不属于当前项目')
+    return {'evolution': evolution_view(run)}
+
+
+@router.post('/{run_id}/evolution/continue')
+async def continue_evolution(run_id: str, payload: dict[str, str]) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None or run.project != payload.get('project'):
+        raise HTTPException(status_code=404, detail='研究任务不存在或不属于当前项目')
+    return await get_orchestrator().start_feedback_loop(run_id=run_id, diagnosis_version='evolution')
 
 
 @router.get('/{run_id}/code-repository')
@@ -287,6 +305,7 @@ class CreateRunPayload(BaseModel):
     evaluation_policy: dict[str, Any] | None = None
     selected_skills_by_agent: dict[str, list[str]] = Field(default_factory=dict)
     experiment_id: str = Field(default="", max_length=64)
+    evolution: EvolutionContract | None = None
 
     @field_validator("idea_mode", mode="before")
     @classmethod
@@ -425,6 +444,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         payload = payload.model_copy(update={"execution_context": context})
     orch = get_orchestrator()
     request_extra: dict[str, Any] = payload.idea_request_extra()
+    if payload.evolution is not None:
+        request_extra['evolution'] = payload.evolution.model_dump(mode='json')
     if payload.idea_mode is not None:
         request_extra["idea_mode"] = payload.idea_mode
     if payload.idea_budget_profile is not None:

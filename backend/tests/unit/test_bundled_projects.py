@@ -84,9 +84,12 @@ def test_model_failure_is_specific_without_claiming_an_action() -> None:
     failure = conversation_failure(caught.value)
     assert failure and failure[0] == "model_response_unavailable"
     assert "接口支持工具调用" in failure[1]
-    assert conversation_failure(ValueError("zhipu provider requires API key"))[0] == "model_credentials_missing"
-    assert conversation_failure(RuntimeError("provider 'zhipu' is not configured for commander"))[0] == "model_credentials_missing"
-    assert conversation_failure(TimeoutError("private upstream detail"))[0] == "model_timeout"
-    assert "private upstream detail" not in conversation_failure(TimeoutError("private upstream detail"))[1]
+    for error in (ValueError("zhipu provider requires API key"),
+                  RuntimeError("provider 'zhipu' is not configured for commander")):
+        credentials = conversation_failure(error)
+        assert credentials is not None and credentials[0] == "model_credentials_missing"
+    timeout = conversation_failure(TimeoutError("private upstream detail"))
+    assert timeout is not None and timeout[0] == "model_timeout"
+    assert "private upstream detail" not in timeout[1]
     require_native_decision({"native_status": "text", "reply": "普通回答"})
     require_native_decision({"native_status": "action", "actions": [{"tool": "run.status"}]})

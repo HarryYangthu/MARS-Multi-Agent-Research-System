@@ -226,6 +226,9 @@ async def copy_yaml(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         if sum(len(item.content.encode('utf-8')) + len(item.before or b'') for item in prepared) > 64 * 1024 * 1024:
             raise YamlCopyError('YAML batch exceeds the 64 MiB snapshot limit; split into smaller calls')
         source_hash = code._sha_text(text)
+        from app.harness.evolution import check_evolution_write
+        for item in prepared:
+            check_evolution_write(root, item.path, item.content)
         files = [{'path': item.path, 'sha256': code._sha_text(item.content),
                   'bytes': len(item.content.encode('utf-8')), 'source_sha256': source_hash} for item in prepared]
         if ctx.dry_run or args.get('dry_run') is True:

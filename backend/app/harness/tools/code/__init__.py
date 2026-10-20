@@ -159,6 +159,11 @@ async def write_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return resolved
     _root, rel, target = resolved
     snapshots = [_snapshot(rel, target)]
+    from app.harness.evolution import check_evolution_write
+    try:
+        check_evolution_write(_root, rel, content)
+    except ValueError as exc:
+        return ToolResult(ok=False, error=str(exc))
     if ctx.dry_run:
         return ToolResult(ok=True, output={"dry_run": True, "path": rel})
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +199,11 @@ async def delete_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         return resolved
     _root, rel, target = resolved
     snapshots = [_snapshot(rel, target)]
+    from app.harness.evolution import check_evolution_write
+    try:
+        check_evolution_write(_root, rel, None)
+    except ValueError as exc:
+        return ToolResult(ok=False, error=str(exc))
     if ctx.dry_run:
         return ToolResult(ok=True, output={"dry_run": True, "path": rel})
     target.unlink()
@@ -269,6 +279,19 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         )
         _write_patch_result(ctx, version, payload)
         return applied
+    from app.harness.evolution import check_evolution_write
+    try:
+        for name in files:
+            changed = root / name
+            check_evolution_write(root, name, changed.read_text() if changed.is_file() else None)
+    except (ValueError, OSError) as exc:
+        for snapshot in snapshots:
+            target = root / snapshot.path
+            if snapshot.existed:
+                target.write_text(snapshot.content)
+            else:
+                target.unlink(missing_ok=True)
+        return ToolResult(ok=False, error=str(exc))
     rollback_ref = _write_rollback(ctx, "code.apply_patch", snapshots)
     payload = _patch_result_payload(
         ctx,

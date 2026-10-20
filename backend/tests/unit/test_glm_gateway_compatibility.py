@@ -1,5 +1,6 @@
 """Gateway serialization and parsing of authored envelopes; no simulated execution."""
 import json
+from typing import Any
 
 from openai.types.chat import ChatCompletion
 import pytest
@@ -42,7 +43,8 @@ def test_old_function_call_envelope_becomes_an_explicit_native_command() -> None
     '{"function_call":{"name":"mars_list_runs","arguments":"{}"}}',
 ])
 def test_explicit_text_commands_keep_exact_tool_and_arguments(text: str) -> None:
-    assert parse_text_decision(text)["actions"] == [{"tool": "list_runs", "args": {}}]
+    decision = parse_text_decision(text)
+    assert decision is not None and decision["actions"] == [{"tool": "list_runs", "args": {}}]
 
 
 @pytest.mark.parametrize("text", ["我将启动", "普通问题的回答", '{"actions":[{"tool":"invented","args":{}}]}',
@@ -73,12 +75,12 @@ def test_gateway_text_fallback_omits_optional_extensions_without_guessing_model_
     assert provider._client is None
 
 
-def _sse(events: list[dict]) -> str:
+def _sse(events: list[dict[str, Any]]) -> str:
     return ': keepalive\r\n\r\n' + ''.join('data: ' + json.dumps(e, ensure_ascii=False) + '\r\n\r\n' for e in events) + 'data: [DONE]\r\n\r\n'
 
 
-def _tool_events(legacy: bool = False) -> list[dict]:
-    events = []
+def _tool_events(legacy: bool = False) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     for name, args in [('mars_', '{"project":'), ('list_runs', '"原始项目"}')]:
         function = {'name': name, 'arguments': args}
         delta = {'function_call': function} if legacy else {'tool_calls': [{'index': 0, 'id': 'actual-call-id', 'function': function}]}

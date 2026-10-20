@@ -524,8 +524,9 @@ def memory_context(project: str, query: str, run_root: Path | None = None, invoc
     # Summaries only; exact config/metrics/figures remain available through the read tool.
     parts = ["## 项目基线与历史实验记忆（证据资料）", record["policy"]]
     for row in record["hits"]:
-        compact = {k: row[k] for k in ("id", "title", "roles", "status", "metrics", "architecture", "missing", "result_quality", "annotations", "detail_ref")}
-        parts.append(canonical(compact)[:2600])
+        compact = {k: row[k] for k in ("id", "title", "roles", "status", "metrics", "architecture", "recipe", "protocol",
+                                      "comparison", "missing", "result_quality", "annotations", "detail_ref")}
+        parts.append(canonical(compact))
     if snapshot:
         parts.append(f"本轮记忆快照: {snapshot}")
     parts.append("用 knowledge.research_memory 查询当前任务相关记录，knowledge.research_memory_read 读取完整配置、训练方式和证据。比较前传入实际protocol核对，未核对不得声称可复用。")

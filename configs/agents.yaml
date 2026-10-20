@@ -29,6 +29,7 @@ commander:
   - knowledge.research_memory
   - knowledge.research_memory_read
   - run.create
+  - run.auto_research
   - run.start
   - run.status
   - run.recovery_status

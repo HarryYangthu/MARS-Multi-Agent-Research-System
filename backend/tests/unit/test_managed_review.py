@@ -2,17 +2,69 @@
 from pathlib import Path
 import json
 from functools import partial
+from typing import Any
 
 import pytest
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review
 from app.bridge.managed_review import review_evidence_aliases
+from app.bridge.managed_review_context import bounded_review_payload
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.workflow_service import build_standalone
 from app.bridge.commander_session import CommanderSessionStore, ChatMessage
 from app.harness.llm import model_registry
 from app.harness.runtime.event_bus import InProcessEventBus
+
+
+def test_reference_selection_keeps_goals_instructions_and_full_artifact_metadata() -> None:
+    goal = 'Preserve RES <= -1 and seed=2026, train 2 epochs'
+    candidate = '---\nhuman_summary: Exact summary\nexecution_jobs: [{seed: 2026, max_iters: 2, budget_unit: epochs}]\n---\nExact summary\n'
+    original: dict[str, Any] = {'goal': goal, 'candidate': candidate, 'artifact_ref': 'candidate.md',
+        'project_context': {'files': [{'path': 'AGENTS.md', 'role': 'instructions', 'content': 'Frozen rules' * 500},
+            {'path': 'README.md', 'role': 'reference', 'content': 'Background\n\n' * 5000}]}}
+    reduced = bounded_review_payload(original, 20000)
+    assert original['candidate'] == candidate
+    assert reduced['goal'] == goal
+    assert reduced['candidate']['metadata']['execution_jobs'][0] == {'seed': 2026, 'max_iters': 2, 'budget_unit': 'epochs'}
+    files = reduced['project_context']['files']
+    assert files[0] == original['project_context']['files'][0]
+    assert files[1]['excerpt'] is True
+    assert len(files[1]['content']) <= 3000
+    assert 'omitted' in reduced['context_delivery']['instructions']
+
+
+def test_repeated_round_handoffs_reduce_reference_space_without_cutting_contracts() -> None:
+    candidate = '---\nhuman_summary: Exact summary\nexecution_jobs: [{seed: 2026, max_iters: 2, budget_unit: epochs}]\n---\nExact summary\n'
+    original: dict[str, Any] = {'goal': 'RES must improve by 0.5 dB, keep seed and epochs',
+        'candidate': candidate, 'artifact_ref': 'candidate.md',
+        'approved_upstream': {'evolution/handoff.json': json.dumps({'criteria': [{'target': -.5}],
+            'scientific_note': 'complete scientific handoff ' * 300})},
+        'project_context': {'files': [{'path': 'AGENTS.md', 'role': 'instructions', 'content': 'Frozen rules'},
+            {'path': 'README.md', 'role': 'reference', 'content': 'Background paragraph.\n\n' * 5000}]}}
+    reduced = bounded_review_payload(original, 10500)
+    assert len(json.dumps(reduced, ensure_ascii=False)) <= 10500
+    assert reduced['goal'] == original['goal']
+    assert reduced['candidate']['metadata']['execution_jobs'][0]['max_iters'] == 2
+    assert reduced['approved_upstream']['evolution/handoff.json']['json_document'] == json.loads(original['approved_upstream']['evolution/handoff.json'])
+    assert reduced['project_context']['files'][0] == original['project_context']['files'][0]
+    assert reduced['project_context']['files'][1]['excerpt']
+
+
+def test_downstream_review_keeps_approved_mechanism_without_repeating_discovery_audit() -> None:
+    from app.harness.schema.frontmatter_parser import dumps
+    metadata = {'schema': 'proposal.v1', 'project': 'authored', 'human_summary': 'Approved mechanism',
+        'method_spec': {'allowed_change': 'model.kernel', 'keep_seed': 2026},
+        'decision_rule': {'target': -0.5}, 'research_context': {'read_receipts': ['source detail'] * 3000}}
+    approved = dumps(metadata, 'Approved mechanism')
+    payload = {'goal': 'Keep the actual target and protocol', 'candidate': 'Current report stays byte exact',
+               'approved_upstream': {'idea/idea_proposal.approved.md': approved}}
+    actual = bounded_review_payload(payload, 10000)
+    previous = actual['approved_upstream']['idea/idea_proposal.approved.md']['metadata']
+    assert actual['candidate'] == payload['candidate'] and actual['goal'] == payload['goal']
+    assert previous['method_spec'] == metadata['method_spec'] and previous['decision_rule'] == metadata['decision_rule']
+    assert previous['research_context']['excerpt'] and previous['research_context']['sha256']
+    assert len(json.dumps(actual, ensure_ascii=False)) < 10000
 
 
 def test_execution_review_carries_exact_approvals_and_separates_budget_units(tmp_path: Path) -> None:
@@ -64,6 +116,18 @@ from app.storage.run_state_store import RunStateStore
 def test_review_parser_requires_bound_evidence() -> None:
     decision = parse_decision('{"decision":"approve","reason":"Checked the supplied document","evidence_refs":["candidate.md"]}', ["candidate.md"])
     assert decision.decision == "approve"
+
+
+def test_review_can_cite_the_exact_evaluation_report_in_its_supplied_summary() -> None:
+    path = 'idea/evals/candidate.quality.eval.md'
+    payload: dict[str, Any] = {'evidence_refs': ['artifact_evaluation'],
+               'evaluation': {'reports': [{'path': path}]}}
+    decision = parse_decision(json.dumps({'decision': 'revise', 'reason': 'Check supplied finding',
+        'evidence_refs': [path]}), payload['evidence_refs'], review_evidence_aliases(payload))
+    assert decision.evidence_refs == ['artifact_evaluation']
+    with pytest.raises(ValueError):
+        parse_decision(json.dumps({'decision': 'approve', 'reason': 'Invented source',
+            'evidence_refs': ['other-report.md']}), payload['evidence_refs'], review_evidence_aliases(payload))
 
 
 def test_review_can_cite_original_names_of_actual_frozen_project_documents() -> None:

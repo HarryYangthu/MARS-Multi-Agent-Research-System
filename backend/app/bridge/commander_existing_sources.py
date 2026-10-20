@@ -20,8 +20,11 @@ _FAILED_ADMISSIONS = frozenset({
 
 
 def existing_retry(text: str) -> bool:
-    return re.fullmatch(
-        r"\s*(?:好(?:的)?[，,\s]*)?(?:请)?(?:继续|重试|重新尝试|再试一次)(?:一下|吧)?[。.!！?？\s]*", text) is not None
+    if re.fullmatch(
+        r"\s*(?:好(?:的)?[，,\s]*)?(?:请)?(?:继续|重试|重新尝试|再试一次)(?:一下|吧)?[。.!！?？\s]*", text) is not None:
+        return True
+    return re.fullmatch(r'\s*(?:请)?继续[，,\s]*(?:按(?:刚才|上面|原来)(?:固定|确定|约定)?的?'
+        r'(?:研究)?目标(?:与约束)?)(?:启动|推进|完成)(?:原|当前|这个)?任务[。.!！\s]*', text) is not None
 
 
 def _has_run_reference(value: Any) -> bool:

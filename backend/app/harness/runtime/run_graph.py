@@ -39,6 +39,7 @@ class GraphNode:
 class GraphEdge:
     src: str
     dst: str
+    allow_failure: bool = False
 
 
 class GraphError(ValueError):
@@ -57,6 +58,7 @@ class RunGraph:
         self._out: dict[str, set[str]] = defaultdict(set)
         self._in: dict[str, set[str]] = defaultdict(set)
         self._entrypoints: list[str] = []
+        self._failure_edges: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------ build phase
 
@@ -73,12 +75,14 @@ class RunGraph:
         self._nodes[key] = node
         return node
 
-    def add_edge(self, src: str, dst: str) -> None:
+    def add_edge(self, src: str, dst: str, *, allow_failure: bool = False) -> None:
         if src not in self._nodes or dst not in self._nodes:
             raise GraphError(f"edge {src}->{dst} references unknown node")
         if src == dst:
             raise GraphError("self-loop disallowed")
         if dst in self._out[src]:
+            if allow_failure:
+                self._failure_edges.add((src, dst))
             return
         self._out[src].add(dst)
         self._in[dst].add(src)
@@ -88,6 +92,8 @@ class RunGraph:
             self._out[src].remove(dst)
             self._in[dst].remove(src)
             raise
+        if allow_failure:
+            self._failure_edges.add((src, dst))
 
     def set_entrypoint(self, key: str) -> None:
         if key not in self._nodes:
@@ -116,7 +122,7 @@ class RunGraph:
 
     @property
     def edges(self) -> list[GraphEdge]:
-        return [GraphEdge(src=s, dst=d) for s, ds in self._out.items() for d in ds]
+        return [GraphEdge(src=s, dst=d, allow_failure=(s, d) in self._failure_edges) for s, ds in self._out.items() for d in ds]
 
     @property
     def entrypoints(self) -> list[str]:
@@ -182,7 +188,8 @@ class RunGraph:
             if node.state != NodeState.PENDING:
                 continue
             preds = self._in.get(key, set())
-            if all(self._nodes[p].state in ready_states for p in preds):
+            if all(self._nodes[p].state in ready_states or (
+                    self._nodes[p].state == NodeState.FAILED and (p, key) in self._failure_edges) for p in preds):
                 out.append(key)
         return out
 
@@ -202,7 +209,7 @@ class RunGraph:
                 }
                 for k, n in self._nodes.items()
             ],
-            "edges": [{"src": e.src, "dst": e.dst} for e in self.edges],
+            "edges": [{"src": e.src, "dst": e.dst, **({'allow_failure': True} if e.allow_failure else {})} for e in self.edges],
             "entrypoints": list(self._entrypoints),
         }
 
@@ -228,7 +235,7 @@ class RunGraph:
             src = str(raw_edge.get("src", ""))
             dst = str(raw_edge.get("dst", ""))
             if src and dst and src in graph._nodes and dst in graph._nodes:
-                graph.add_edge(src, dst)
+                graph.add_edge(src, dst, allow_failure=raw_edge.get('allow_failure') is True)
         for entry in data.get("entrypoints", []):
             key = str(entry)
             if key in graph._nodes:

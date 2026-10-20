@@ -62,7 +62,9 @@ async def test_real_failed_request_resume_retains_counters_and_verifiable_source
                          raw={"loop": {"max_model_calls": max_calls, "trace": "full", "input_token_budget": 128000}})
         agent = IdeaAgent(agent_config=config)
         request = RunRequest(project="pimc", user_request="Actual connection-refusal resume test",
-                             extra={"run_root": str(tmp_path), "run_id": tmp_path.name})
+                             extra={"run_root": str(tmp_path), "run_id": tmp_path.name,
+                                    "task_id": tmp_path.name + ':idea', "parent_task_id": tmp_path.name,
+                                    "node_id": 'idea'})
         initial = {"run_id": tmp_path.name, "loop_policy": asdict(agent.loop_policy)}
         atomic_json(tmp_path / "input/request.json", initial)
         atomic_json(tmp_path / "summary.json", {"run_id": tmp_path.name, "status": "prepared"})

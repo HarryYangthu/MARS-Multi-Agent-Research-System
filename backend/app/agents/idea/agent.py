@@ -303,6 +303,19 @@ class IdeaAgent(BaseAgent):
             )
             if configured_research_unit(self.config.raw.get("research", {})) is not None:
                 context.task += UNIT_PARENT_GUIDANCE
+        if request.extra.get('evolution'):
+            context.task += (
+                '\nAuto Research scope: use the supplied evolution_task_context as the fixed objective, '
+                'module boundary and registered execution interface. Separate outer research rounds from '
+                'per-simulation epochs/optimizer updates. Candidate reasoning count is not a publication quota. '
+                'Research only the evidence gaps relevant to the allowed modules; one sufficient primary source '
+                'is preferable to repeatedly expanding an already-supported decision. Unchanged architecture '
+                'and numerical implementation are referenced by actual code/configuration, not redesigned. '
+                'MARS execution_jobs carry the seed and budget through the registered command protocol; '
+                'do not assume a source YAML must be edited to add a seed. Specify the required job seed and '
+                'have Coding validate the registered command and its effective configuration before training. '
+                'The baseline stays frozen in every round. Only the initial control round may use an unchanged '
+                'candidate; subsequent candidate tuning must never retune the control learning rate.')
         return context
 
     async def draft(self, request: RunRequest, context: ContextPack) -> Artifact:
@@ -331,6 +344,10 @@ class IdeaAgent(BaseAgent):
                     child_observations = []
                     atomic_json(trace_root / "research_evidence_error.json", {"error": str(exc)})
                 write_evidence(run_root, [*state["history"], *child_observations])
+
+    async def rank_for_evolution(self, request: RunRequest, artifact: Artifact) -> Artifact:
+        from app.agents.idea.evolution_planner import rank_for_evolution
+        return await rank_for_evolution(request, artifact, request.runtime.get('evolution_model_configs', [self.config]))
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:

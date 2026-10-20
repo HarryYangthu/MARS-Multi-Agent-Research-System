@@ -39,6 +39,11 @@ def baseline_repository_context(repo: ProjectRepo, upstream: dict[str, str]) -> 
             candidates = [item["config"].get("base_config") for item in metadata.get("ablations", [])
                           if isinstance(item, dict) and isinstance(item.get("config"), dict)]
         for ref in candidates:
+            if isinstance(ref, str):
+                for prefix in ('code.repo_reader:', 'repo_reader:'):
+                    if ref.startswith(prefix):
+                        ref = ref[len(prefix):]
+                        break
             # Mixed prose references are not file identities. Do not guess paths.
             if isinstance(ref, str) and not any(c.isspace() for c in ref) and Path(ref).suffix:
                 references.add(ref)

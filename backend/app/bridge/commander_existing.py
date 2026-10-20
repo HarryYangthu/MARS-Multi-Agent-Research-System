@@ -464,13 +464,14 @@ def _corrects_previous_intent(text: str, start: int) -> bool:
                               text[:start], re.IGNORECASE) is not None
 
 
-def _budget_mentions(text: str) -> list[tuple[int, int, str, int]]:
+def _budget_mentions(text: str, *, allow_unqualified_rounds: bool = True) -> list[tuple[int, int, str, int]]:
     number = r"(?<![\d.\-零〇一二两三四五六七八九十百千万负])([\d零〇一二两三四五六七八九十百千万]+)"
     found: set[tuple[int, int, str, int]] = set()
+    round_unit = r'轮(?:训练)?' if allow_unqualified_rounds else r'轮训练'
     for unit, patterns in (
         ("steps", (number + r"\s*(?:步|(?:次|个)?\s*(?:优化器\s*)?(?:更新|steps?(?![A-Za-z])|optimizer\s+updates?))",
                    r"(?:max[_-]steps)\s*[:=：]\s*(\d+)(?![\d.])")),
-        ("epochs", (number + r"\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|轮(?:训练)?)",
+        ("epochs", (number + rf"\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|{round_unit})",
                     r"\bepochs?\s*[:=：]\s*(\d+)(?![\d.])")),
     ):
         for pattern in patterns:
@@ -481,7 +482,8 @@ def _budget_mentions(text: str) -> list[tuple[int, int, str, int]]:
     return sorted(found)
 
 
-def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str]) -> None:
+def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str], *,
+                                  allow_unqualified_rounds: bool = True) -> None:
     """Validate extracted values against actual user text, not a rewritten goal.
 
     This is a consistency check after one model interpretation, not a regex
@@ -494,7 +496,7 @@ def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str
     for text in user_texts:
         current_budgets: set[tuple[str, int]] = set()
         rejected_end: int | None = None
-        for start, end, unit, count in _budget_mentions(text):
+        for start, end, unit, count in _budget_mentions(text, allow_unqualified_rounds=allow_unqualified_rounds):
             mention = (unit, count)
             rejected_alternative = rejected_end is not None and re.fullmatch(
                 r"\s*(?:或|和|以及|or|and)\s*", text[rejected_end:start], re.IGNORECASE) is not None
