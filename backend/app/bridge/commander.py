@@ -32,6 +32,7 @@ from app.bridge.commander_completion import (
     CompletionVerdict, TurnGoal, admitted_existing_model_goal, assess_completion, goal_state, parse_turn_goal, proposed_action_goal, receipt_intervention,
 )
 from app.bridge.commander_dispatch import (
+    RUN_CREATION_TOOLS, batch_created_identity, batch_start_is_bound,
     coding_handoff_clarification, ordinary_coding_handoff_actions, promised_source_read_action,
     PREPARING_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard, has_run_dispatch,
     retained_dispatch_failure_reply, retained_dispatch_run_id, run_dispatch_receipt, stale_executing_without_run,
@@ -272,6 +273,8 @@ class Commander:
                     break
 
                 handoff_run_id: str | None = None
+                batch_initial_run_id = session.linked_run_id
+                batch_creates = any(action.get('tool') in RUN_CREATION_TOOLS for action in decision.actions)
                 for action in decision.actions:
                     # Earlier actions in this same batch may already have
                     # allocated a task or performed this exact mutation.
@@ -288,8 +291,8 @@ class Commander:
                     args = action.get("args", {}) or {}
                     if not isinstance(args, dict):
                         args = {}
-                    if (decision.response_mode == "ordinary_coding_handoff" and tool == "run.start"
-                            and (handoff_run_id is None or session.linked_run_id != handoff_run_id)):
+                    if (batch_creates and tool == 'run.start' and not batch_start_is_bound(
+                            session, args, created_run_id=handoff_run_id)):
                         emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
                             "", failure_reason="未取得与当前会话一致的新任务创建回执，未派发启动。"))))
                         terminal_receipt = True
@@ -319,11 +322,9 @@ class Commander:
                     get_session_store().persist(session)
                     if prepared_action is not None:
                         break
-                    if decision.response_mode == "ordinary_coding_handoff" and tool == "run.create":
-                        created_id = result.get("run_id")
-                        if (result.get("ok") is True and isinstance(created_id, str) and created_id
-                                and session.linked_run_id == created_id):
-                            handoff_run_id = created_id
+                    if tool in RUN_CREATION_TOOLS:
+                        handoff_run_id = batch_created_identity(session, tool, result,
+                            initial_run_id=batch_initial_run_id)
                     if (decision.response_mode == "ordinary_coding_handoff"
                             and (result.get("ok") is not True or tool == "run.create" and handoff_run_id is None)):
                         # Creation and start are dependent operations. A failed
@@ -331,6 +332,11 @@ class Commander:
                         emitted.append(session.add(ChatMessage(role="assistant", content=truthful_unstarted_reply(
                             "", retained_run_id=result.get("run_id"), failure_reason=str(result.get("error") or "")))))
                         terminal_receipt = True
+                        break
+                    if tool in RUN_CREATION_TOOLS and handoff_run_id is None:
+                        # A failed admission may be repaired by the next model
+                        # decision. Its dependent actions cannot run now, even
+                        # if an older task remains linked to this conversation.
                         break
                     if receipt_intervention(result) is not None:
                         # Real choices and review boundaries stop this batch;

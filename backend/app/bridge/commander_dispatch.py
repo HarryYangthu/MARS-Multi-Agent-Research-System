@@ -23,6 +23,7 @@ from app.harness.tools.project_repo import ProjectRepo, load_project_repo, resol
 
 
 RUN_DISPATCH_TOOLS = frozenset({"run.existing_model", "run.create", "run.start", "create_and_start_run"})
+RUN_CREATION_TOOLS = frozenset({"run.existing_model", "run.create", "create_and_start_run"})
 _SOURCE_TOOLS = frozenset({"code.repo_list", "code.repo_search", "code.repo_read_lines"})
 _FALLBACK_STATUSES = frozenset({"model_not_resolved", "capability_unavailable", "execution_registration_required"})
 PREPARING_NOTICE = "MARS 正在核对本次任务配置，创建和启动结果以实际回执为准。"
@@ -42,6 +43,22 @@ class ActionContinuation:
     reason: str
     fingerprint: str
     prompt: str
+
+
+def batch_created_identity(session: CommanderSession, tool: str, result: dict[str, Any], *,
+                           initial_run_id: str | None) -> str | None:
+    """Only a real allocation receipt can bind a dependent start in this batch."""
+    identity = result.get('run_id')
+    if (tool in RUN_CREATION_TOOLS and result.get('ok') is True and isinstance(identity, str)
+            and identity and identity != initial_run_id and identity == session.linked_run_id):
+        return identity
+    return None
+
+
+def batch_start_is_bound(session: CommanderSession, args: dict[str, Any], *,
+                         created_run_id: str | None) -> bool:
+    return bool(created_run_id and session.linked_run_id == created_run_id
+                and (args.get('run_id') or session.linked_run_id) == created_run_id)
 
 
 _READ_ONLY_TOOLS = _SOURCE_TOOLS | frozenset({

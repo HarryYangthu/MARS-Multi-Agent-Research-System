@@ -15,6 +15,7 @@ import yaml
 
 from app.bridge.commander import Commander, _parse_decision, _receipt_ends_action_batch
 from app.bridge.commander_dispatch import (
+    batch_created_identity, batch_start_is_bound,
     PREPARING_NOTICE, UNSTARTED_NOTICE, dispatch_failure_reason, existing_model_fallback_action, existing_run_recovery_guard,
     has_run_dispatch, retained_dispatch_failure_reply, retained_dispatch_run_id,
     pending_existing_admission, run_dispatch_receipt, stale_executing_without_run,
@@ -73,6 +74,47 @@ def _project(tmp_path: Path) -> Iterator[tuple[ToolContext, Path]]:
 def _observe(session: CommanderSession, tool: str, args: dict[str, Any], result: dict[str, Any]) -> None:
     session.add(ChatMessage(role="tool", content=json.dumps(result, ensure_ascii=False),
                            tool_name=tool, tool_args=args, tool_result=result))
+
+
+@pytest.mark.asyncio
+async def test_failed_new_creation_cannot_bind_start_to_a_retained_task(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, _):
+        read = await execute_tool('code.repo_read_lines', {'path': 'configs/actual.yaml'}, ctx)
+        assert read['ok']
+        _observe(ctx.session, 'code.repo_read_lines', {'path': 'configs/actual.yaml'}, read)
+        old = await execute_tool('run.create', {'entrypoint': 'experiment', 'user_request': '准备方案'}, ctx)
+        assert old['ok']
+        retained = old['run_id']
+        user = ctx.session.add(ChatMessage(role='user', content='另开一项学习率寻优'))
+        user.turn_id = ctx.session.active_turn_id = user.id
+        listed = await execute_tool('code.repo_list', {'path': '.'}, ctx)
+        assert listed['ok']
+        _observe(ctx.session, 'code.repo_list', {'path': '.'}, listed)
+        failed = await execute_tool('run.create', {'entrypoint': 'experiment', 'user_request': user.content}, ctx)
+        assert not failed['ok'] and failed['status'] == 'repository_inspection_required'
+        bound = batch_created_identity(ctx.session, 'run.create', failed, initial_run_id=retained)
+        assert bound is None
+        assert not batch_start_is_bound(ctx.session, {}, created_run_id=bound)
+        assert not batch_start_is_bound(ctx.session, {'run_id': retained}, created_run_id=bound)
+        assert ctx.session.linked_run_id == retained and len(ctx.run_store.list()) == 1
+        assert ctx.orchestrator.owned_tasks.active(retained) is None
+
+
+@pytest.mark.asyncio
+async def test_dependent_start_must_use_the_actual_new_allocation(tmp_path: Path) -> None:
+    with _project(tmp_path) as (ctx, _):
+        read = await execute_tool('code.repo_read_lines', {'path': 'configs/actual.yaml'}, ctx)
+        assert read['ok']
+        _observe(ctx.session, 'code.repo_read_lines', {'path': 'configs/actual.yaml'}, read)
+        created = await execute_tool('run.create', {'entrypoint': 'experiment', 'user_request': '准备方案'}, ctx)
+        assert created['ok']
+        bound = batch_created_identity(ctx.session, 'run.create', created, initial_run_id=None)
+        assert bound == created['run_id']
+        assert batch_start_is_bound(ctx.session, {}, created_run_id=bound)
+        assert batch_start_is_bound(ctx.session, {'run_id': bound}, created_run_id=bound)
+        assert not batch_start_is_bound(ctx.session, {'run_id': 'different-retained-task'}, created_run_id=bound)
+        assert batch_created_identity(ctx.session, 'run.create', created, initial_run_id=bound) is None
+        assert not ctx.orchestrator.owned_tasks.active(bound)
 
 
 @pytest.mark.asyncio
