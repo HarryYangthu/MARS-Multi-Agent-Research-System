@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
-import time
+import threading
 from pathlib import Path
 from typing import Any
 import uuid
@@ -25,7 +25,9 @@ from app.storage.run_store import RunHandle
 
 def confirmation_policy() -> dict[str, Any]:
     import yaml
-    raw: dict[str, Any] = yaml.safe_load((repo_root() / 'configs/execution_review.yaml').read_text())
+    from app.harness.tools.config import _host_config_path
+    raw: dict[str, Any] = yaml.safe_load(_host_config_path(
+        'MARS_EXECUTION_REVIEW_CONFIG_PATH', 'execution_review.yaml').read_text())
     if raw.get('poll_interval_seconds', 0) <= 0 or raw.get('max_source_bytes', 0) < 1:
         raise ValueError('仿真配置核对策略无效')
     timeout = raw.get('preflight_total_timeout_seconds', 45)
@@ -435,19 +437,46 @@ def save_confirmation(run: RunHandle, node_key: str, token: str, *, actor: str =
                 from app.harness.tools.execution.local_command import LocalCommandJob
                 from app.harness.tools.execution.command_preflight import run_command_preflight
                 prepared = prepare_execution(run, node_key)
-                deadline = time.monotonic() + float(confirmation_policy().get('preflight_total_timeout_seconds', 45))
                 for spec in prepared.specs:
                     job = LocalCommandJob(run_id=run.run_id, experiment_id=spec.experiment_id,
                         project=run.project, run_root=run.root, config=spec.config, seed=spec.seed,
                         steps=prepared.batch_steps, command_id=str(spec.config.get('command_id') or ''))
-                    state = run_command_preflight(job, token, timeout_budget=deadline - time.monotonic(),
-                                                  source_token=view['base_inputs_token'])
+                    state = run_command_preflight(job, token, source_token=view['base_inputs_token'])
                     if state['status'] == 'failed':
                         raise ValueError(f"{spec.experiment_id}：运行前验证失败，尚未确认或启动仿真：{state['error']}")
                 refreshed = execution_preview(run, node_key)
                 if refreshed['token'] != token or refreshed['blockers']:
                     raise ValueError('验证期间配置或代码已变化，尚未确认或启动仿真。')
                 view = refreshed
+            atomic_write_json(_receipt_path(run, token), {'schema': 'execution.confirmation',
+                'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
+                'actor': actor, 'confirmed_at': datetime.now(timezone.utc).isoformat(),
+                'defaults': view['defaults'], 'experiment_names': [item['name'] for item in view['experiments']],
+                'validation': view['validation']})
+        return {**view, 'confirmed': True, 'created': not view['confirmed']}
+
+
+def save_prepared_confirmation(run: RunHandle, node_key: str, token: str, prepared: dict[str, Any], *,
+                               actor: str = 'user', cancel_event: threading.Event | None = None) -> dict[str, Any]:
+    """Commit an actual prepared snapshot after fresh admission, never run checkers.
+
+    Called by an owned background operation: freshness can involve real input
+    hashes, so the HTTP acknowledgement is independent of this work.
+    """
+    if actor not in {'user', 'auto_approve', 'commander'}:
+        raise ValueError('确认来源无效')
+    with path_lock(run.root / 'execution/.confirmation.lock'):
+        view = execution_preview(run, node_key)
+        if view['token'] != token or prepared.get('token') != token or view['blockers']:
+            raise ValueError('配置或代码已变化，请重新检查；尚未启动新的仿真。')
+        expected = {row['name']: row.get('receipt_sha256') for row in prepared['validation'] if row.get('configured')}
+        actual = {row['name']: row.get('receipt_sha256') for row in view['validation'] if row.get('configured')}
+        if (expected != actual or any(row.get('configured') and row['status'] != 'passed'
+                                      for row in view['validation'])):
+            raise ValueError('真实运行前检查回执已变化，请重新检查；尚未启动训练。')
+        if cancel_event is not None and cancel_event.is_set():
+            raise ValueError('配置确认已中止；尚未启动训练。')
+        if not view['confirmed']:
             atomic_write_json(_receipt_path(run, token), {'schema': 'execution.confirmation',
                 'run_id': run.run_id, 'project': run.project, 'node': node_key, 'token': token,
                 'actor': actor, 'confirmed_at': datetime.now(timezone.utc).isoformat(),

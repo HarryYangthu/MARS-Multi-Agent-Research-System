@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import threading
 import time
 from typing import Any, TYPE_CHECKING
 import uuid
@@ -21,6 +22,7 @@ import uuid
 from jsonschema import validate
 
 from app.harness.persistence import atomic_write_json, atomic_write_text, path_lock
+from app.harness.process_group import OwnedProcessGroup
 from app.harness.tools.process_runtime import require_process_backend, sanitized_subprocess_environment
 
 if TYPE_CHECKING:
@@ -178,7 +180,9 @@ def known_input_changes(job: LocalCommandJob, source_token: str) -> list[dict[st
     return changed
 
 
-def _verified_inputs(job: LocalCommandJob, result: dict[str, Any], *, deadline: float, max_bytes: int) -> list[dict[str, Any]]:
+def _verified_inputs(job: LocalCommandJob, result: dict[str, Any], *, deadline: float, max_bytes: int,
+                     cancel_event: threading.Event | None = None,
+                     verified_inputs: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     rows = [row for check in result['checks'] for row in check.get('details', {}).get('input_files', [])]
     if len(rows) > 256:
         raise ValueError('too many validated input files')
@@ -186,6 +190,8 @@ def _verified_inputs(job: LocalCommandJob, result: dict[str, Any], *, deadline: 
     records: dict[str, dict[str, Any]] = {}
     consumed = 0
     for row in rows:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ValueError('registered command validation cancelled; training was not started')
         if not isinstance(row, dict) or not isinstance(row.get('path'), str) or not isinstance(row.get('sha256'), str):
             raise ValueError('validated input_files must include absolute paths and SHA-256')
         target = _path_in_roots(row['path'], roots)
@@ -199,15 +205,26 @@ def _verified_inputs(job: LocalCommandJob, result: dict[str, Any], *, deadline: 
         consumed += before['bytes']
         if consumed > max_bytes:
             raise ValueError('validation input hashing exceeded its host byte budget')
+        # Only byte hashes already verified by this preparation operation can
+        # be shared. Every distinct checker still runs and declares its inputs.
+        cached = verified_inputs.get(str(target)) if verified_inputs is not None else None
+        if (cached is not None and all(cached.get(key) == value for key, value in before.items())
+                and cached.get('sha256') == row['sha256'].removeprefix('sha256:')):
+            records[str(target)] = dict(cached)
+            continue
         checksum = hashlib.sha256()
         with target.open('rb') as stream:
             for block in iter(lambda: stream.read(1048576), b''):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise ValueError('registered command validation cancelled; training was not started')
                 if time.monotonic() > deadline:
                     raise TimeoutError('validation input hashing exceeded its response time budget')
                 checksum.update(block)
         if _input_signature(target) != before or checksum.hexdigest() != row['sha256'].removeprefix('sha256:'):
             raise ValueError('validated input changed or its hash does not match the checker')
         records[str(target)] = {**before, 'sha256': checksum.hexdigest()}
+        if verified_inputs is not None:
+            verified_inputs[str(target)] = dict(records[str(target)])
     return [records[name] for name in sorted(records)]
 
 
@@ -274,7 +291,8 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
 
 
 def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_budget: float | None = None,
-                          source_token: str | None = None) -> dict[str, Any]:
+                          source_token: str | None = None, cancel_event: threading.Event | None = None,
+                          verified_inputs: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     """Run only an explicitly registered checker; legacy commands stay unverified."""
     from app.harness.tools.execution.local_command import (
         _command, _registered_command, _file_hash, command_request, command_environment,
@@ -311,21 +329,24 @@ def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_bu
     stdout_path, stderr_path = directory / 'stdout.log', directory / 'stderr.log'
     started = time.monotonic()
     process: subprocess.Popen[bytes] | None = None
+    group = OwnedProcessGroup()
     status, error = 'failed', ''
     result: dict[str, Any] = {}
     checked_inputs: list[dict[str, Any]] = []
     try:
-        options: dict[str, Any] = ({'creationflags': getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)}
-                                  if os.name == 'nt' else {'start_new_session': True})
+        if cancel_event is not None and cancel_event.is_set():
+            raise ValueError('registered command validation cancelled; training was not started')
         with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
-            process = subprocess.Popen(argv, cwd=directory, env=environment, stdin=subprocess.DEVNULL,
-                                       stdout=stdout, stderr=stderr, **options)
+            process = group.start(argv, cwd=str(directory), env=environment, stdout=stdout, stderr=stderr)
             while process.poll() is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    group.stop()
+                    raise ValueError('registered command validation cancelled; training was not started')
                 if time.monotonic() - started > policy['timeout_seconds']:
-                    _stop(process)
+                    group.stop()
                     raise TimeoutError('registered command validation timed out; training was not started')
                 if stdout_path.stat().st_size + stderr_path.stat().st_size > policy['max_output_bytes']:
-                    _stop(process)
+                    group.stop()
                     raise ValueError('registered command validation exceeded its output budget')
                 time.sleep(0.02)
         if stdout_path.stat().st_size + stderr_path.stat().st_size > policy['max_output_bytes']:
@@ -342,13 +363,15 @@ def run_command_preflight(job: LocalCommandJob, inputs_token: str, *, timeout_bu
         if any(result[key] != request[key] for key in ('invocation_id', 'run_id', 'experiment_id')):
             raise ValueError('validation result belongs to a different request')
         checked_inputs = _verified_inputs(job, result, deadline=started + policy['timeout_seconds'],
-                                          max_bytes=policy['max_input_bytes'])
+                                          max_bytes=policy['max_input_bytes'], cancel_event=cancel_event,
+                                          verified_inputs=verified_inputs)
         status = 'passed'
     except Exception as exc:
         error = bounded_error(f'{type(exc).__name__}: {exc}')
     finally:
-        if process is not None and process.poll() is None:
-            _stop(process)
+        # Closing ownership also kills descendants when the group leader has
+        # already exited; a finished checker must not leave background work.
+        group.stop()
     # Public diagnostics never contain unrestricted child output.
     for path in (stdout_path, stderr_path):
         if path.is_file():

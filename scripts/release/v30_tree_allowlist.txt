@@ -749,6 +749,8 @@ backend/app/bridge/context_preview.py
 backend/app/bridge/execution_batch_deadline.py
 backend/app/bridge/execution_batch_plan.py
 backend/app/bridge/execution_confirmation.py
+backend/app/bridge/execution_preparation.py
+backend/app/harness/process_group.py
 backend/app/bridge/execution_evidence_handoff.py
 backend/app/bridge/handoff_context_bindings.py
 backend/app/bridge/idea_revision_context.py
@@ -809,6 +811,7 @@ frontend/src/lib/codingBackend.ts
 frontend/src/lib/completedCodeChanges.ts
 frontend/src/lib/conversationHistory.ts
 frontend/src/lib/executionReviewPresentation.ts
+frontend/src/lib/executionPreparationState.ts
 frontend/src/lib/literatureEvidence.ts
 frontend/src/lib/reportExports.ts
 frontend/src/lib/runConversation.ts

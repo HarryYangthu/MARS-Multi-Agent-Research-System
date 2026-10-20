@@ -255,8 +255,9 @@ async def test_failed_or_wrong_project_confirmation_never_launches(execution: tu
     await orch._transition(session, 'execution', NodeState.FAILED)
     view = get_execution_configuration(session.run.run_id, session.run.project)
     assert view['visible'] and not view['can_confirm']
+    token = execution_preview(session.run, 'execution')['token']
     with pytest.raises(HTTPException) as failure:
-        await confirm_execution_configuration(session.run.run_id, ExecutionConfirmationPayload(project=session.run.project, token=view['token']))
+        await confirm_execution_configuration(session.run.run_id, ExecutionConfirmationPayload(project=session.run.project, token=token))
     assert failure.value.status_code == 409
     assert not (await orch.resume_after_artifact_approval(run_id=session.run.run_id, agent='execution'))['ok']
     with pytest.raises(HTTPException):
@@ -280,14 +281,15 @@ async def test_owned_gate_waits_without_jobs_and_duplicate_confirmation_wakes_sa
     owner = orch.owned_tasks.active(session.run.run_id)
     assert owner is not None
     await asyncio.sleep(0)
+    await orch.execution_preparations.wait(session.run, 'execution')
     view = get_execution_configuration(session.run.run_id, session.run.project)
     assert view['launch_ready'] and view['can_confirm']
     payload = ExecutionConfirmationPayload(project=session.run.project, token=view['token'])
     results = await asyncio.gather(*(confirm_execution_configuration(session.run.run_id, payload) for _ in range(2)))
-    assert all(result['confirmed'] and result['ok'] for result in results)
+    assert all(result['status'] == 'confirming' and result['ok'] for result in results)
     # The gate may finish during a concurrent POST. A replacement owner is forbidden.
     assert orch.owned_tasks.active(session.run.run_id) in (None, owner)
-    await asyncio.wait_for(arrived.wait(), timeout=3)
+    await asyncio.wait_for(arrived.wait(), timeout=10)
     await owner
     assert len(list((session.run.root / 'execution/confirmations').glob('*.json'))) == 1
     assert session.graph.state('execution') == NodeState.APPROVED

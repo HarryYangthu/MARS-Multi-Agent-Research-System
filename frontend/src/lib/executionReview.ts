@@ -1,7 +1,9 @@
 import { boundedFetch, CLIENT_POLICY } from "./clientPolicy";
 import { checkedExecutionBoundary, type ExecutionBoundary } from "./executionBoundaryState";
+import { checkedExecutionPreparation, type ExecutionPreparation } from "./executionPreparationState";
 
 export type { ExecutionBoundary } from "./executionBoundaryState";
+export type { ExecutionPreparation } from "./executionPreparationState";
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "";
 export type ExecutionConfiguration = {
@@ -34,6 +36,19 @@ export function confirmExecutionConfiguration(runId: string, project: string, to
   return request(`${encodeURIComponent(runId)}/execution-configuration/confirm`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, token }),
   }, CLIENT_POLICY.executionConfirmationTimeoutMs);
+}
+
+export async function getExecutionPreparation(runId: string, project: string, signal?: AbortSignal): Promise<ExecutionPreparation> {
+  const value = await request<unknown>(`${encodeURIComponent(runId)}/execution-configuration/preparation?project=${encodeURIComponent(project)}`, { signal });
+  return checkedExecutionPreparation(value, runId, project);
+}
+
+export async function prepareExecutionConfiguration(runId: string, project: string, token?: string): Promise<ExecutionPreparation> {
+  const value = await request<unknown>(`${encodeURIComponent(runId)}/execution-configuration/prepare`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project, ...(token ? { token } : {}) }),
+  });
+  return checkedExecutionPreparation(value, runId, project);
 }
 
 export async function getExecutionBoundary(runId: string, project: string, signal?: AbortSignal): Promise<ExecutionBoundary> {

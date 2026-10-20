@@ -118,6 +118,10 @@ jobs:
           node .tmp/literature-evidence/scripts/literature-evidence-smoke.js
           npx tsc --outDir .tmp/code-change-markers --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/code-change-markers-smoke.ts
           node .tmp/code-change-markers/scripts/code-change-markers-smoke.js
+          npx tsc --outDir .tmp/execution-boundary --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/execution-boundary-smoke.ts
+          node .tmp/execution-boundary/scripts/execution-boundary-smoke.js
+          npx tsc --outDir .tmp/execution-preparation --rootDir . --module commonjs --target ES2022 --moduleResolution node --skipLibCheck --esModuleInterop --noEmit false scripts/execution-preparation-smoke.ts
+          node .tmp/execution-preparation/scripts/execution-preparation-smoke.js
       - name: Production build
         working-directory: frontend
         env:

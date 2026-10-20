@@ -110,6 +110,8 @@ class Orchestrator:
         self.langgraph_runtime = LangGraphRuntimeFacade()
         self._sessions: dict[str, RunSession] = {}
         self.owned_tasks = OwnedRunTasks()
+        from app.bridge.execution_preparation import ExecutionPreparations
+        self.execution_preparations = ExecutionPreparations()
         from app.bridge.research_run_stop import ResearchRunStops
         self.research_stops = ResearchRunStops()
         self.max_parallel_nodes = scheduler_parallelism()
@@ -683,6 +685,15 @@ class Orchestrator:
                              grace_seconds: float = 10.0) -> dict[str, Any]:
         if not 0 <= grace_seconds <= 60:
             raise ValueError("stop grace must be in [0,60] seconds")
+        self.execution_preparations.signal_cancel(run_id)
+        try:
+            return await self._stop_owned_run(run_id, reason=reason, grace_seconds=grace_seconds)
+        finally:
+            await self.execution_preparations.cancel(run_id)
+
+    async def _stop_owned_run(self, run_id: str, *, reason: str, grace_seconds: float) -> dict[str, Any]:
+        if not 0 <= grace_seconds <= 60:
+            raise ValueError("stop grace must be in [0,60] seconds")
         task = self.owned_tasks.active(run_id)
         if task is not None and run_id not in self._sessions:
             # A removed registry/session record must not strand a live task.
@@ -720,6 +731,7 @@ class Orchestrator:
         if not 0 <= grace_seconds <= 60:
             raise ValueError("stop grace must be in [0,60] seconds")
         self.owned_tasks.closing = True
+        await self.execution_preparations.shutdown()
         results = list(await asyncio.gather(*(self.stop_owned_run(run_id, reason="server_shutdown",
             grace_seconds=grace_seconds) for run_id in self.owned_tasks.run_ids())))
         await self.research_stops.wait(timeout=grace_seconds)
@@ -1152,6 +1164,8 @@ class Orchestrator:
         if parse_node_key(node_key).stage == "execution":
             if not await self._await_execution_confirmation(session, node_key):
                 return
+            if self._stopping(session) or self.owned_tasks.closing or self.execution_preparations.closing:
+                return
             await self._transition(session, node_key, NodeState.RUNNING)
             failure_code = 'execution_batch_failed'
             try:
@@ -1223,19 +1237,29 @@ class Orchestrator:
             await self._after_execution(session, node_key)
 
     async def _await_execution_confirmation(self, session: RunSession, node_key: str) -> bool:
-        from app.bridge.execution_confirmation import confirmation_policy, execution_preview, save_confirmation
+        from app.bridge.execution_confirmation import confirmation_policy
         interval = float(confirmation_policy()['poll_interval_seconds'])
         announced = False
-        while not self._stopping(session):
+        if self.owned_tasks.closing or self.execution_preparations.closing:
+            return False
+        # Preparing checks inputs only. It neither approves a plan nor starts a
+        # training job, and failures require an explicit retry rather than a loop.
+        await self.execution_preparations.start(session.run, node_key)
+        while not self._stopping(session) and not self.owned_tasks.closing and not self.execution_preparations.closing:
             try:
-                view = await asyncio.to_thread(execution_preview, session.run, node_key)
-                if not view['blockers']:
+                preparation = self.execution_preparations.status(session.run, node_key)
+                view = preparation.get('configuration') or {'blockers': ['运行前检查正在准备。']}
+                if preparation['status'] != 'ready':
+                    view = {**view, 'blockers': [preparation.get('error') or '运行前检查尚未完成，请查看检查进度。']}
+                if not view['blockers'] and preparation['status'] == 'ready':
                     if view['confirmed']:
-                        return True
+                        return not self.owned_tasks.closing and not self.execution_preparations.closing
                     if session.request.auto_approve:
-                        await asyncio.to_thread(save_confirmation, session.run, node_key, view['token'], actor='auto_approve')
-                        return True
-                if session.request.review_mode == "commander":
+                        await self.execution_preparations.confirm(session.run, node_key, view['token'], actor='auto_approve')
+                        saved = await self.execution_preparations.wait_confirmation(session.run, node_key)
+                        if saved['confirmed'] and not self.execution_preparations.closing and not self._stopping(session):
+                            return True
+                if session.request.review_mode == "commander" and preparation['status'] == 'ready':
                     from app.bridge.managed_review import review_once, finish_review, execution_review_payload
                     generation = session.request.review_generation
                     token = view.get('token')
@@ -1249,7 +1273,7 @@ class Orchestrator:
                         generation=generation, eligible=eligible, bus=session.bus,
                         blocker="；".join(view['blockers']))
                     if decision and eligible():
-                        current = execution_preview(session.run, node_key)
+                        current = self.execution_preparations.ready_view(session.run, node_key, str(token))
                         if current['confirmed']:
                             return True
                         if current['token'] != token or current['blockers']:
@@ -1259,8 +1283,10 @@ class Orchestrator:
                                   .get('execution_preparation_evidence') != review_payload['execution_preparation_evidence']):
                             await finish_review(session.run, session.bus, "needs_user", "审核期间执行准备或真实预检证据已变化，请重新核对。", identity=decision._identity)
                         elif decision.decision == "approve":
-                            await asyncio.to_thread(save_confirmation, session.run, node_key,
-                                                    str(token), actor="commander")
+                            await self.execution_preparations.confirm(session.run, node_key, str(token), actor='commander')
+                            saved = await self.execution_preparations.wait_confirmation(session.run, node_key)
+                            if not saved['confirmed'] or self.execution_preparations.closing or self._stopping(session):
+                                raise ValueError('配置确认未完成；尚未开始训练。')
                             await finish_review(session.run, session.bus, "approved", decision.reason, identity=decision._identity)
                             return True
                         else:
