@@ -463,9 +463,16 @@ def test_execution_boundary_is_durable_and_blocks_writing_dispatch(
     # Real session persistence and graph states, without providers or tool doubles.
     from app.bridge.workflow_service import build_pipeline
     session.graph = build_pipeline('execution')
-    orch.set_stage_limit(session.run.run_id, stop_after='execution')
+    orch._persist_state(session, status='created')
     before = execution_preview(session.run, 'execution')
-    assert before['defaults']['stop_after_execution'] is True
+    save_confirmation(session.run, 'execution', before['token'])
+    options_path = session.run.root / 'input/run_request_options.v1.json'
+    options = options_path.read_bytes() if options_path.exists() else None
+    orch.set_stage_limit(session.run.run_id, stop_after='execution')
+    assert orch.execution_boundary(session.run.run_id)['stop_after_execution'] is True
+    preserved = execution_preview(session.run, 'execution')
+    assert preserved['token'] == before['token'] and preserved['confirmed']
+    assert (options_path.read_bytes() if options_path.exists() else None) == options
     assert not orch._stage_limit_reached(session)
     session.graph.restore_state('execution', NodeState.DONE)
     orch._persist_state(session, status='running')
@@ -477,5 +484,5 @@ def test_execution_boundary_is_durable_and_blocks_writing_dispatch(
     assert not (session.run.root / 'writing/research_report.v1.md').exists()
     orch.set_stage_limit(session.run.run_id, stop_after=None)
     after = execution_preview(session.run, 'execution')
-    assert after['token'] != before['token']
-    assert after['defaults']['stop_after_execution'] is False
+    assert after['token'] == before['token'] and after['confirmed']
+    assert orch.execution_boundary(session.run.run_id)['stop_after_execution'] is False

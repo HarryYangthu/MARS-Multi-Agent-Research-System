@@ -141,8 +141,19 @@ class ExecutionBoundaryPayload(BaseModel):
     stop_after_execution: bool
 
 
+@router.get('/{run_id}/execution-boundary')
+async def get_execution_boundary(run_id: str, project: str) -> dict[str, Any]:
+    session = _execution_session(run_id)
+    if session.run.project != project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目。')
+    try:
+        return get_orchestrator().execution_boundary(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post('/{run_id}/execution-boundary')
-def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
+async def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
     session = _execution_session(run_id)
     if session.run.project != payload.project:
         raise HTTPException(status_code=409, detail='任务不属于当前项目。')
@@ -150,7 +161,8 @@ def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> di
         get_orchestrator().set_stage_limit(run_id, stop_after='execution' if payload.stop_after_execution else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _execution_configuration(run_id, payload.project)[1]
+    # This control does not prepare, validate or confirm any simulation inputs.
+    return get_orchestrator().execution_boundary(run_id)
 
 
 @router.post('/{run_id}/execution-configuration/confirm')

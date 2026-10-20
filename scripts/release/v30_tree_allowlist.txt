@@ -347,7 +347,9 @@ backend/app/harness/tools/execution/local_command.py
 backend/app/harness/tools/execution/command_preflight.py
 configs/execution_review.yaml
 frontend/src/components/ExecutionConfigurationReview.tsx
+frontend/src/components/ExecutionBoundaryControl.tsx
 frontend/src/lib/executionReview.ts
+frontend/src/lib/executionBoundaryState.ts
 backend/app/bridge/git_code_delivery.py
 backend/app/bridge/research_branch.py
 backend/app/harness/tools/git_branch.py

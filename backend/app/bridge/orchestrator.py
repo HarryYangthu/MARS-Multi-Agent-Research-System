@@ -44,7 +44,7 @@ from app.harness.runtime.run_graph import RunGraph
 from app.harness.runtime.state_machine import NodeState
 from app.settings import get_settings
 from app.storage.run_store import RunHandle, RunStore
-from app.storage.run_state_store import RunStateStore
+from app.storage.run_state_store import RunStateSnapshot, RunStateStore
 
 
 # Node runners execute registered agents; missing registration fails explicitly.
@@ -854,6 +854,11 @@ class Orchestrator:
     async def _advance(self, session: RunSession, node_key: str) -> None:
         if self._stopping(session):
             return
+        # A boundary can be selected after this node was scheduled but before
+        # it starts. Recheck at the actual dispatch boundary without replaying.
+        if self._stage_limit_reached(session):
+            self._persist_state(session, status="waiting_feedback")
+            return
         await self._transition(session, node_key, NodeState.RUNNING)
         if not await self._run_node_runner(session, node_key):
             return
@@ -1511,40 +1516,69 @@ class Orchestrator:
         return _real
 
     def set_stage_limit(self, run_id: str, *, stop_after: str | None) -> None:
-        """Persist a user-selected boundary before acknowledging a launch."""
+        """Persist workflow control without changing execution or its inputs.
+
+        The async API calls this without yielding, so a coordinator cannot
+        begin a downstream node between the phase check and durable commit.
+        """
         if stop_after not in (None, "execution"):
             raise ValueError("目前支持在 execution 完成后停住")
         session = self.session(run_id)
-        if session.read_only or (self.owned_tasks.active(run_id) is not None
-                                 and not self._waiting_execution_without_jobs(session)):
-            raise ValueError("只能在启动前设置阶段边界")
-        session.request.extra = {**session.request.extra, "stop_after": stop_after}
-        self._persist_request_extra(session.run, session.request.extra)
-        self._persist_state(session, status="waiting_execution_confirmation")
-
-    def _waiting_execution_without_jobs(self, session: RunSession) -> bool:
-        """An owned confirmation waiter has not admitted actual execution yet."""
-        if self._stopping(session) or self.owned_tasks.closing:
-            return False
-        key = self._latest_node_for_stage(session, 'execution')
-        if (key is None or session.graph.state(key) not in {NodeState.PENDING, NodeState.APPROVED}
-                or any(state == NodeState.RUNNING for state in session.graph.all_states().values())):
-            return False
+        snapshot = RunStateStore(session.run).load()
+        reason = self._execution_boundary_reason(session, snapshot)
+        if reason:
+            raise ValueError(reason)
+        assert snapshot is not None
+        extra = snapshot.request.get('extra', {})
+        assert isinstance(extra, dict)
+        if extra.get('stop_after') == stop_after:
+            return
+        previous = session.request.extra
+        session.request.extra = {**extra, "stop_after": stop_after}
         try:
-            snapshot = RunStateStore(session.run).load()
-            if (snapshot is None or snapshot.status != 'waiting_execution_confirmation'
-                    or snapshot.revision != session.state_revision
-                    or snapshot.graph.all_states() != session.graph.all_states()):
-                return False
-            execution = session.run.subdir('execution')
-            # Managed jobs claim their durable journal before entering an
-            # adapter; retained attempts/results are never a prelaunch waiter.
-            if any((execution / name).exists() for name in ('batch_summary.json', 'metrics.json', 'results.json')):
-                return False
-            return not any(directory.exists() and any(directory.iterdir()) for directory in
-                (execution / name for name in ('jobs', 'local_commands', 'pim_cpu', 'paper_static')))
-        except (OSError, ValueError):
-            return False
+            # SQLite request state is authoritative for mutable flow control.
+            # Leave the original request-options input byte-exact: it is part
+            # of existing scientific confirmation/preflight fingerprints.
+            self._persist_state(session, status=snapshot.status)
+        except Exception:
+            session.request.extra = previous
+            raise
+
+    def execution_boundary(self, run_id: str) -> dict[str, Any]:
+        """Read the latest durable control without expensive input previews."""
+        session = self.session(run_id)
+        snapshot = RunStateStore(session.run).load()
+        extra = snapshot.request.get('extra', {}) if snapshot is not None else {}
+        reason = self._execution_boundary_reason(session, snapshot)
+        return {'run_id': run_id, 'project': session.run.project,
+                'stop_after_execution': isinstance(extra, dict) and extra.get('stop_after') == 'execution',
+                'can_update': reason is None, **({'reason': reason} if reason else {})}
+
+    def _execution_boundary_reason(self, session: RunSession, snapshot: RunStateSnapshot | None) -> str | None:
+        if session.read_only:
+            return '当前任务只读，不能修改阶段边界。'
+        if self.owned_tasks.closing:
+            return '服务正在关闭，请稍后重新设置阶段边界。'
+        if (snapshot is None or snapshot.migration_required
+                or not isinstance(snapshot.request.get('extra', {}), dict)):
+            return '任务状态不可核验，不能修改阶段边界。'
+        if (snapshot.revision != session.state_revision
+                or snapshot.graph.all_states() != session.graph.all_states()):
+            return '任务状态已变化，请刷新后重新设置阶段边界。'
+        key = self._latest_node_for_stage(session, 'execution')
+        if key is None:
+            return '当前任务没有仿真阶段。'
+        pending = list(session.graph.successors(key))
+        seen: set[str] = set()
+        while pending:
+            node = pending.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            if session.graph.state(node) not in {NodeState.PENDING, NodeState.SKIPPED}:
+                return '仿真后的阶段已经开始，不能追溯暂停；当前工作不会被中断。'
+            pending.extend(session.graph.successors(node))
+        return None
 
     @staticmethod
     def _stage_limit_reached(session: RunSession) -> bool:

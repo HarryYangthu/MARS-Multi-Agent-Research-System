@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
-import { confirmExecutionConfiguration, setExecutionBoundary, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
+import { confirmExecutionConfiguration, ExecutionReviewError, getExecutionConfiguration, type ExecutionConfiguration } from "@/lib/executionReview";
+import { ExecutionBoundaryControl } from "./ExecutionBoundaryControl";
 import { executionExperimentFields } from "@/lib/executionReviewPresentation";
 import type { RunDetail } from "@/lib/api";
 import { managedReviewPending, managedReviewReason } from "@/lib/managedReview";
@@ -118,18 +119,6 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
       if (generation === readGeneration.current) setError(issue instanceof Error ? issue.message : "配置核对失败。");
     }
   }
-  async function boundary(stop: boolean): Promise<void> {
-    if (launchBlocked) return;
-    const generation = ++readGeneration.current;
-    setBusy(true); setAcknowledged("");
-    try {
-      const next = await setExecutionBoundary(runId, project, stop);
-      if (generation === readGeneration.current) { setView(next); setError(""); }
-    } catch (issue) {
-      if (generation === readGeneration.current) setError(issue instanceof Error ? issue.message : "阶段边界保存失败。");
-    }
-    finally { setBusy(false); }
-  }
   async function confirm(ackToken = acknowledged): Promise<void> {
     if (!token || !view?.can_confirm || view.confirmed || ackToken !== token || currentDecision.current !== token || submitting.current || stale || error || launchBlocked) return;
     submitting.current = true; setBusy(true); setNotice("");
@@ -160,10 +149,12 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
     // a polling refresh may have cleared the checkbox without changing it.
     void confirm(token);
   }
-  if (!view?.visible) return visibleNotice ? <p role="status" className="text-xs text-amber-300">{visibleNotice}</p> : null;
-  if (view.state === "done") return <details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">仿真已完成<span className="ml-3 text-xs text-slate-400">{view.jobs.length} 条真实作业记录 · 展开结果</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? "已完成" : job.status === "interrupted" ? "已中断" : "失败"}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{formatMetric(value)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details>;
+  const boundaryControl = <ExecutionBoundaryControl runId={runId} project={project} />;
+  if (!view?.visible) return <>{boundaryControl}{visibleNotice ? <p role="status" className="text-xs text-amber-300">{visibleNotice}</p> : null}</>;
+  if (view.state === "done") return <>{boundaryControl}<details className="rounded-xl border border-mars-border bg-mars-panel px-4 py-3"><summary className="cursor-pointer text-sm text-slate-200">仿真已完成<span className="ml-3 text-xs text-slate-400">{view.jobs.length} 条真实作业记录 · 展开结果</span></summary><ul className="mt-3 space-y-3">{view.jobs.map(job => <li key={`${job.experiment_id}-${job.updated_at}`} className="rounded-lg border border-mars-border p-3 text-xs"><p className="text-slate-200">{job.experiment_id} · {job.status === "completed" ? "已完成" : job.status === "interrupted" ? "已中断" : "失败"}{job.duration_seconds !== undefined && job.duration_seconds !== null ? ` · ${job.duration_seconds.toFixed(2)} 秒` : ""}</p>{Object.keys(job.metrics).length ? <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">{Object.entries(job.metrics).map(([name, value]) => <div key={name}><dt className="text-slate-500">{name}</dt><dd className="mt-1 text-slate-300" title={String(value)}>{formatMetric(value)}</dd></div>)}</dl> : null}{job.error ? <p className="mt-2 text-amber-200">{job.error}</p> : null}</li>)}</ul></details></>;
   const id = `execution-config-${runId}`;
   return <>
+    {boundaryControl}
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-400/25 bg-indigo-400/5 px-4 py-3">
       <div><p className="text-sm text-indigo-100">{executionFailed ? "仿真执行失败" : interrupted ? "仿真推进已中止" : finished ? "研究已结束" : validationBlocked ? "运行前验证需重新核对" : view.confirmed ? "仿真配置已确认" : managedPending ? "主控正在核对仿真配置" : "启动仿真前核对配置"}</p><p className="mt-1 text-xs text-slate-400">{view.experiments.length} 组实验 · {display(view.defaults.device)} · {view.confirmed ? "配置确认已保存" : "配置待确认"}{view.blockers.length ? ` · ${view.blockers.length} 项待解决` : validationPassed ? " · 实际入口验证已通过" : ""}</p>{run?.review_mode === "commander" && !view.confirmed && !launchBlocked && managedReason ? <p role="status" className="mt-1 text-xs text-amber-200">{managedReason}</p> : null}</div>
       <button type="button" disabled={stale || Boolean(error)} onClick={() => { if (!dialog.current?.open) dialog.current?.showModal(); heading.current?.focus({ preventScroll: true }); }} className="rounded-lg border border-indigo-400/40 px-3 py-2 text-xs text-indigo-200 disabled:opacity-40">核对仿真配置</button>
@@ -174,7 +165,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-mars-border px-5 py-4"><div><h2 ref={heading} tabIndex={-1} id={`${id}-title`} className="text-lg font-semibold outline-none">启动仿真前核对配置</h2><p id={`${id}-description`} className="mt-1 text-xs text-slate-400">直接使用已批准实验与编码交付，不重新设计方案。下面的配置与实际启动一致；调整后须重新核对。</p></div><button type="button" disabled={busy} onClick={() => dialog.current?.close()} className="shrink-0 rounded-lg border border-mars-border px-3 py-2 text-xs disabled:opacity-40">稍后核对</button></header>
         <div className="min-h-0 space-y-5 overflow-y-auto p-5">
           {view.blockers.length ? <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4"><p className="text-sm font-medium text-amber-200">尚不能启动仿真</p><ul className="mt-2 list-disc space-y-2 pl-4 text-xs leading-6 text-amber-100/80">{view.blockers.map(item => <li key={item}>{item}</li>)}</ul></div> : null}
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">{Object.entries(view.defaults).map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-xs text-slate-500">{labels[key] || key}</dt><dd className="mt-1 break-all text-sm text-slate-200">{display(value)}</dd></div>)}</dl>
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">{Object.entries(view.defaults).filter(([key]) => key !== "stop_after_execution").map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-xs text-slate-500">{labels[key] || key}</dt><dd className="mt-1 break-all text-sm text-slate-200">{display(value)}</dd></div>)}</dl>
           <section><h3 className="text-sm font-medium">实验清单</h3><div className="mt-2 divide-y divide-mars-border rounded-lg border border-mars-border">{view.experiments.map(item => <article key={item.name} className="p-3">
             <h4 className="text-xs font-medium text-slate-200">{item.name}</h4>
             <dl className="mt-3 grid gap-3 sm:grid-cols-2">{executionExperimentFields(item).map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-all text-xs text-slate-300">{display(value)}</dd></div>)}</dl>
@@ -188,7 +179,7 @@ export function ExecutionConfigurationReview({ runId, project, stale, onChanged,
           {view.warnings.map(item => <p key={item} className="text-xs leading-6 text-amber-200">{item}</p>)}
         </div>
         <footer className="space-y-3 border-t border-mars-border px-5 py-4">
-          {!view.confirmed ? <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={view.defaults.stop_after_execution === true} disabled={busy || stale || Boolean(error) || launchBlocked} onChange={event => { void boundary(event.target.checked); }} />仿真完成后暂停，暂不生成报告</label> : null}
+          <button type="button" disabled={busy} onClick={() => { dialog.current?.close(); document.getElementById(`execution-boundary-control-${runId}`)?.focus(); }} className="text-xs text-indigo-300 disabled:opacity-40">设置仿真完成后的暂停与继续</button>
           {!view.confirmed ? <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={acknowledged === token} disabled={busy || !view.can_confirm || stale || Boolean(error) || launchBlocked} onChange={event => setAcknowledged(event.target.checked ? token : "")} />我已核对运行环境、数据与实验参数</label> : null}
           {visibleNotice ? <p role="status" className="text-xs text-amber-200">{visibleNotice}</p> : null}
           <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { void refresh(); }} disabled={busy && !uncertain} className="text-xs text-indigo-300 disabled:opacity-40">刷新配置</button>{uncertain ? <button type="button" onClick={retryConfirmation} disabled={uncertain !== token || !view.can_confirm || stale || Boolean(error) || launchBlocked} className="text-xs text-indigo-200 disabled:opacity-40">重新提交本次确认</button> : null}<button type="button" onClick={() => { void confirm(); }} disabled={busy || !view.can_confirm || view.confirmed || acknowledged !== token || stale || Boolean(error) || launchBlocked} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? uncertain ? "正在核对提交结果" : "正在确认" : launchBlocked ? "当前不可启动" : view.confirmed ? "已确认" : "确认配置，启动仿真"}</button></div>
