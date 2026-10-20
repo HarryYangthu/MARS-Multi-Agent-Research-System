@@ -785,15 +785,6 @@ backend/app/harness/tools/search/policy.py
 backend/app/harness/tools/search/readiness.py
 backend/app/reporting/presentation.py
 backend/app/storage/report_skill_store.py
-frontend/src/app/discovery/[id]/page.tsx
-frontend/src/app/discovery/candidates/[candidateId]/page.tsx
-frontend/src/app/projects/[name]/memory/page.tsx
-frontend/src/app/projects/[name]/page.tsx
-frontend/src/app/projects/[name]/research/page.tsx
-frontend/src/app/results/[id]/page.tsx
-frontend/src/app/runs/[id]/idea-discovery/page.tsx
-frontend/src/app/runs/[id]/multi/page.tsx
-frontend/src/app/runs/[id]/page.tsx
 frontend/src/components/AdvancedRunWorkbench.tsx
 frontend/src/components/ArtifactReviewDocument.tsx
 frontend/src/components/CodeChangeContent.tsx
@@ -820,3 +811,11 @@ frontend/src/lib/literatureEvidence.ts
 frontend/src/lib/reportExports.ts
 frontend/src/lib/runConversation.ts
 frontend/src/lib/runReview.ts
+
+# Required runtime resources
+configs/code_review.yaml
+configs/literature_search.yaml
+configs/model_usage.yaml
+configs/zcode.yaml
+projects/.gitkeep
+templates/code_rules/pimc_python.md
