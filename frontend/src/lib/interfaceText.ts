@@ -1,6 +1,9 @@
 // Explicit interface labels only. Never apply this dictionary to user content,
 // model responses, paths, source code or persisted research artifacts.
 const EN: Readonly<Record<string, string>> = {
+  "删除研究": "Delete research",
+  "撤销删除": "Undo deletion",
+  "研究记录已移入回收站。": "Research moved to trash.",
   "查看": "View",
   "已保存，下次编码开始时生效。": "Saved. Applies when the next coding task starts.",
   "研究提案": "Research proposal",

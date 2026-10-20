@@ -27,7 +27,7 @@ from typing import Any
 from loguru import logger
 
 from app.bridge.commander_session import ChatMessage, CommanderSession, get_session_store
-from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
+from app.bridge.commander_errors import CommanderDecisionError, conversation_failure, require_native_decision
 from app.bridge.commander_completion import (
     CompletionVerdict, TurnGoal, admitted_existing_model_goal, assess_completion, goal_state, parse_turn_goal, proposed_action_goal, receipt_intervention,
 )
@@ -416,6 +416,11 @@ class Commander:
                     self._try_transition(session, "planning")
             return emitted
 
+        except Exception as error:
+            failure = conversation_failure(error)
+            if failure is not None:
+                _store_turn_completion(session, goal, CompletionVerdict(status="blocked", reason=failure[1]))
+            raise
         finally:
             session.interrupt_activities()
             session.active_turn_id = None
@@ -493,6 +498,7 @@ class Commander:
             min(60.0, llm_call_deadline_seconds(self._llm_config,
                 minimum_seconds=get_settings().mars_llm_timeout_seconds)),
             accept_text_reply=not action_pending)
+        require_native_decision(raw)
         decision = _parse_decision(json.dumps({
             "actions": raw.get("actions", []), "reply": raw.get("reply", "")}, ensure_ascii=False))
         if raw.get("native_status") == "question":

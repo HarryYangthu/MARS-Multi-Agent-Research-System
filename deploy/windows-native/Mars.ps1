@@ -192,7 +192,9 @@ function Start-NativeServices {
     Assert-ServicesStopped
     Connect-MarsFrontendDependencies $root
     if (-not (Test-InstallationCurrent)) { Install-NativeDependencies }
-    if (-not $SkipConfigure -and -not (Test-Path (Join-Path $stateRoot 'api-configured.json'))) { Configure-NativeApi }
+    if (-not (Test-Path (Join-Path $stateRoot 'api-configured.json'))) {
+        Write-Host 'History browsing works without an API. Configure the model in Settings before starting new research.'
+    }
     Set-NativeEnvironment
     $frontendMode = if ((Test-Path -LiteralPath (Join-Path $root 'WINDOWS-OFFLINE.json')) -or
         (Test-Path -LiteralPath $layout.Offline)) { 'start' } else { 'dev' }

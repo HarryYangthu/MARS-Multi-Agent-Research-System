@@ -176,8 +176,9 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         raise HTTPException(status_code=404, detail="conversation not found")
     if session.processing:
         raise HTTPException(status_code=409, detail="conversation is already processing a message")
-    commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
+    message_count = len(session.messages)
     try:
+        commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
         await commander.handle_user_message(session, payload.text)
     except CommanderDecisionError:
         preserve_conversation_on_response_error(session)
@@ -186,11 +187,54 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         if failure is None:
             raise
         code, message = failure
+        if len(session.messages) == message_count:
+            session.add(ChatMessage(role="user", content=payload.text))
+        session.add(ChatMessage(role="assistant", content=message))
+        session.completion_state.update(status="blocked", reason=message)
         raise HTTPException(status_code=409, detail={
             'code': code, 'error': message, 'message_saved': True,
         }) from exc
     finally:
         store.persist(session)
+    return _conv_view(session)
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str) -> dict[str, Any]:
+    store = get_session_store()
+    session = store.get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    run_store = get_run_store()
+    run_id = session.linked_run_id
+    run = run_store.get(run_id) if run_id else None
+    if session.processing or (run_id and get_orchestrator().run_control(run_id).get("owned_task_active")):
+        raise HTTPException(status_code=409, detail="研究正在运行，请先停止或等待完成后删除")
+    if run is not None and run.project != session.project:
+        raise HTTPException(status_code=409, detail="关联任务不属于当前项目，未删除")
+    moved_run = False
+    try:
+        if run is not None and run_id:
+            run_store.trash(run_id)
+            moved_run = True
+        store.trash(conv_id)
+    except (OSError, ValueError) as error:
+        if moved_run and run_id:
+            run_store.restore(run_id)
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if run_id:
+        get_orchestrator().discard_session(run_id)
+    return {"ok": True, "conv_id": conv_id, "run_id": run_id, "recoverable": True}
+
+
+@router.post("/conversations/{conv_id}/restore", response_model=ConversationView)
+async def restore_conversation(conv_id: str) -> ConversationView:
+    try:
+        session = get_session_store().restore(conv_id)
+        if session.linked_run_id and get_run_store().get_trashed(session.linked_run_id) is not None:
+            get_run_store().restore(session.linked_run_id)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return _conv_view(session)
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -237,6 +238,37 @@ class CommanderSessionStore:
         return sorted(out.values(), key=lambda s: s.created_at, reverse=True)
 
     # ------------------------------------------------------------- persist
+
+    def trash(self, conv_id: str) -> CommanderSession:
+        session = self.get(conv_id)
+        if session is None:
+            raise FileNotFoundError(conv_id)
+        if session.processing:
+            raise ValueError("对话正在处理，请先等待本轮结束")
+        source = self.session_directory(session)
+        target = source.parent / ".trash" / conv_id
+        if target.exists():
+            raise FileExistsError("回收站中已有同名对话")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+        self._sessions.pop(conv_id, None)
+        return session
+
+    def restore(self, conv_id: str) -> CommanderSession:
+        self._find(conv_id)
+        for root in self._roots():
+            source = root / ".trash" / conv_id
+            if not (source / "session.json").is_file():
+                continue
+            target = root / conv_id
+            if target.exists():
+                raise FileExistsError("已有同名对话，未覆盖")
+            shutil.move(str(source), str(target))
+            session = self.get(conv_id)
+            if session is None:
+                raise ValueError("无法读取恢复的对话")
+            return session
+        raise FileNotFoundError(conv_id)
 
     def persist(self, session: CommanderSession) -> None:
         self._persist(session)

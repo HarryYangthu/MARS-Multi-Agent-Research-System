@@ -201,7 +201,7 @@ def pack_native_commander_messages(session: CommanderSession, messages: list[Mes
     from app.harness.context.runtime_pack import message_key, pack_messages
     from app.harness.context.runtime_policy import freeze_policy, input_budget
 
-    wire = observation_only_messages(messages)
+    wire = observation_only_messages(messages, add_instruction=config.extra.get("commander_text_transport") is not True)
     if session.context_version < 3:
         return wire, None
     materials = commander_materials(wire)
@@ -323,6 +323,42 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
             previous(kind, data)
         trace.emit(kind, {key: value for key, value in data.items() if key != 'wire_payload'}, visible=data.get('wire_payload'))
 
+    fallback_used = False
+
+    async def text_compatibility() -> dict[str, Any]:
+        nonlocal fallback_used
+        from app.bridge.commander_compat import parse_text_decision
+        from app.bridge.commander_errors import CommanderModelResponseError
+        from app.harness.llm.model_capabilities import requires_glm_thinking
+        if fallback_used:
+            raise CommanderModelResponseError("文本兼容模式仍未返回可执行指令。请核对公司模型网关的返回格式；本次未执行新操作。")
+        fallback_used = True
+        config = replace(llm_config, tools=(), response_schema=None, json_mode=False, max_retries=0,
+            thinking_enabled=True if requires_glm_thinking(llm_config.provider, llm_config.model) else False,
+            reasoning_effort="low" if requires_glm_thinking(llm_config.provider, llm_config.model) else None,
+            request_timeout_seconds=min(timeout_seconds, llm_config.request_timeout_seconds), attempt_observer=observe,
+            extra={**llm_config.extra, "commander_text_transport": True,
+                   "gateway_plain_request": not requires_glm_thinking(llm_config.provider, llm_config.model)})
+        instruction = Message("system", "当前接口使用文本工具交接。普通问答可直接回答。需要操作时，返回明确的 actions，"
+            "每项包括 tool 和 args；允许 Markdown JSON 围栏。只使用下面真实工具名与参数，不猜科学参数。"
+            "前文已成功的操作不要重做，缺信息请直接提问。工具定义：\n"
+            + json.dumps(list(commander_native_tools()), ensure_ascii=False))
+        wire, path = pack_native_commander_messages(session, [*messages, instruction], config, run_root)
+        trace.emit("compatibility_request", {"transport": "text_actions", "actions_executed": 0})
+        completion = await asyncio.wait_for(guarded_complete(provider, wire, config, run_root=run_root,
+            active_model_time=True, correlation={**correlation, "transport": "text_actions"}), timeout=timeout_seconds)
+        if path is not None:
+            from app.harness.context.runtime_manifest import record_usage
+            record_usage(path, completion.raw.get("usage"))
+        trace.emit("compatibility_response", {"transport": "text_actions"}, visible=completion.text)
+        parsed = parse_text_decision(completion.text)
+        if parsed is not None:
+            return parsed
+        if accept_text_reply and completion.text.strip():
+            return {"actions": [], "reply": completion.text.strip(), "native_status": "text"}
+        raise CommanderModelResponseError("已尝试原生工具调用和文本兼容模式，但模型仍未返回可执行指令。请核对公司模型网关的返回格式；本次未执行新操作。")
+
+    response_received = False
     try:
         config = replace(native_commander_config(llm_config, timeout_seconds), attempt_observer=observe)
         wire_messages, manifest_path = pack_native_commander_messages(session, messages, config, run_root)
@@ -333,12 +369,20 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
                    visible=[message.to_wire() for message in wire_messages])
         completion = await asyncio.wait_for(guarded_complete(provider, wire_messages, config, run_root=run_root,
             active_model_time=True, correlation=correlation), timeout=timeout_seconds)
+        response_received = True
         if manifest_path is not None:
             from app.harness.context.runtime_manifest import record_usage
             record_usage(manifest_path, completion.raw.get('usage'))
         trace.emit('model_response', {'model': config.model, 'usage': completion.raw.get('usage')},
                    visible={'text': completion.text, 'tool_calls': [call.to_wire() for call in completion.tool_calls]})
         result = parse_native_commander_completion(completion, accept_text_reply=accept_text_reply)
+        if not completion.tool_calls and completion.text.strip():
+            from app.bridge.commander_compat import parse_text_decision
+            compatible = parse_text_decision(completion.text)
+            if compatible is not None:
+                result = compatible
+        if result.get("native_status") == "unknown":
+            return await text_compatibility()
         trace.emit('native_decision', {'status': result['native_status'], 'proposed_actions': len(result['actions']),
                                        'actions_executed': 0})
         return result
@@ -348,7 +392,12 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
     except (ValueError, ValidationError, TimeoutError) as error:
         trace.emit('model_error', {'error_type': type(error).__name__, 'actions_executed': 0,
                                   'native_status': 'unknown'})
-        return native_decision_unavailable(error)
+        if not response_received or isinstance(error, TimeoutError):
+            raise
+        return await text_compatibility()
     except Exception as error:
         trace.emit('model_error', {'error_type': type(error).__name__, 'actions_executed': 0})
+        if getattr(error, "status_code", None) in {400, 404, 422} or (
+                type(error).__name__ == "LLMCompletionError" and getattr(error, "reason", {}).get("code") == "empty_final_content"):
+            return await text_compatibility()
         raise

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { TopBar } from "@/components/TopBar";
 import { useProject } from "@/lib/project";
-import { listRuns, type RunSummary } from "@/lib/api";
+import { deleteConversation, restoreConversation, listRuns, type RunSummary } from "@/lib/api";
 import { useConversationHistory } from "@/components/ConversationHistory";
 import { projectResearch, researchDate } from "@/lib/projectResearch";
 
@@ -18,6 +18,25 @@ export default function ProjectResearchPage(): JSX.Element {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const [revision, setRevision] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState<string | null>(null);
+  const remove = async (id: string): Promise<void> => {
+    setDeleting(id); setError("");
+    try {
+      await deleteConversation(id); setDeleted(id);
+      await history.refresh(); setRevision(value => value + 1);
+    } catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "删除失败，请重试。"); }
+    finally { setDeleting(null); }
+  };
+  const undo = async (): Promise<void> => {
+    if (!deleted) return;
+    setDeleting(deleted); setError("");
+    try {
+      await restoreConversation(deleted); setDeleted(null);
+      await history.refresh(); setRevision(value => value + 1);
+    } catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "恢复失败，请重试。"); }
+    finally { setDeleting(null); }
+  };
   useEffect(() => { if (projects.some(project => project.name === name)) setSelectedProject(name); }, [name, projects, setSelectedProject]);
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setError("");
@@ -33,7 +52,8 @@ export default function ProjectResearchPage(): JSX.Element {
     <header className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold">{label} · 所有研究</h1><p className="mt-2 text-sm text-slate-400">每次研究保留独立对话，按最近更新排序。</p></div><Link href={`/runs/new?project=${encodeURIComponent(name)}&new=1`} className="rounded-lg bg-mars-accent px-4 py-2 text-sm font-medium">启动研究</Link></header>
     <div className="flex gap-3"><input type="search" aria-label="搜索研究" placeholder="搜索研究内容" value={filter} onChange={event => setFilter(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-mars-border bg-mars-panel px-4 py-2 text-sm" /><button type="button" onClick={() => { setRevision(value => value + 1); void history.refresh(); }} disabled={loading || history.loading} className="rounded-lg border border-mars-border px-4 py-2 text-sm disabled:opacity-40">刷新</button></div>
     {failure ? <p role="alert" className="rounded-lg border border-amber-500/30 p-4 text-sm text-amber-200">{failure}</p> : null}
+    {deleted ? <p role="status" className="rounded-lg border border-mars-border p-3 text-sm text-slate-300">研究记录已移入回收站。<button type="button" onClick={() => void undo()} disabled={deleting !== null} className="ml-3 text-indigo-200 underline disabled:opacity-40">撤销删除</button></p> : null}
     {loading || history.loading ? <p role="status" className="py-12 text-center text-slate-400">正在读取研究…</p> : !failure && !records.length ? <p className="rounded-xl border border-dashed border-mars-border p-10 text-center text-slate-400">{filter ? "没有匹配的研究" : "还没有研究，点击启动研究开始新的对话。"}</p> : null}
-    <section aria-label="研究列表" className="space-y-3">{records.map(row => <article key={row.id} className="relative rounded-xl border border-mars-border bg-mars-panel p-5 transition hover:border-indigo-400/50"><Link href={row.href} className="absolute inset-0 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400" aria-label={`打开研究 ${row.title}`} /><div className="pointer-events-none"><h2 className="pr-28 text-base font-medium">{researchDate(row.createdAt)} · {row.title.replace(/\s+/g, " ").slice(0, 80)}</h2><p className="mt-3 text-xs text-slate-400">{row.processing ? "正在处理 · " : ""}{row.messages ? `${row.messages} 条消息 · ` : ""}更新于 {researchDate(row.updatedAt)}</p></div>{row.runId ? <Link href={`/results/${encodeURIComponent(row.runId)}`} className="relative z-10 mt-4 inline-block rounded-lg border border-mars-border px-3 py-2 text-xs text-indigo-200 hover:bg-mars-panel2">查看结果</Link> : <span className="mt-4 block text-xs text-slate-500">讨论中，尚未生成实验结果</span>}</article>)}</section>
+    <section aria-label="研究列表" className="space-y-3">{records.map(row => <article key={row.id} className="relative rounded-xl border border-mars-border bg-mars-panel p-5 transition hover:border-indigo-400/50"><Link href={row.href} className="absolute inset-0 rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400" aria-label={`打开研究 ${row.title}`} /><div className="pointer-events-none"><h2 className="pr-28 text-base font-medium">{researchDate(row.createdAt)} · {row.title.replace(/\s+/g, " ").slice(0, 80)}</h2><p className="mt-3 text-xs text-slate-400">{row.processing ? "正在处理 · " : ""}{row.messages ? `${row.messages} 条消息 · ` : ""}更新于 {researchDate(row.updatedAt)}</p></div>{row.runId ? <Link href={`/results/${encodeURIComponent(row.runId)}`} className="relative z-10 mt-4 inline-block rounded-lg border border-mars-border px-3 py-2 text-xs text-indigo-200 hover:bg-mars-panel2">查看结果</Link> : <span className="mt-4 block text-xs text-slate-500">讨论中，尚未生成实验结果</span>}{history.rows.some(item => item.conv_id === row.id) ? <button type="button" aria-label={`删除研究 ${row.title}`} onClick={() => void remove(row.id)} disabled={row.processing || deleting !== null} className="relative z-10 ml-3 rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-200 hover:bg-rose-500/10 disabled:opacity-40">{deleting === row.id ? "处理中…" : "删除研究"}</button> : null}</article>)}</section>
   </main></div>;
 }

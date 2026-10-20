@@ -2100,6 +2100,14 @@ export async function getConversation(convId: string): Promise<Conversation> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${convId}`));
 }
 
+export async function deleteConversation(convId: string): Promise<{ ok: boolean; recoverable: boolean }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" }));
+}
+
+export async function restoreConversation(convId: string): Promise<Conversation> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/restore`, { method: "POST" }));
+}
+
 export class ChatMessageFailure extends Error {
   constructor(message: string, public readonly messageSaved: boolean) { super(message); }
 }

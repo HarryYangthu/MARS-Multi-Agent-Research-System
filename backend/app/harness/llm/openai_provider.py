@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import math
 import os
 import re
@@ -13,7 +15,7 @@ from typing import Any, TypeVar
 
 from loguru import logger
 
-from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking, supports_glm_observation_tools
 from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import (
     Completion,
@@ -30,6 +32,10 @@ from app.harness.llm.provider_base import (
 
 
 _T = TypeVar("_T")
+
+
+def _envelope_field(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
 
 
 @dataclass
@@ -195,7 +201,7 @@ class _OpenAICompatProvider(LLMProvider):
                 # Never replay incomplete assistant/tool turns without the private
                 # reasoning history. GLM and DeepSeek use the same explicit
                 # observation-only contract; no hidden reasoning is replayed.
-                if ((self.name != "deepseek" and not glm_thinking)
+                if ((self.name != "deepseek" and not supports_glm_observation_tools(self.name, config.model))
                         or config.extra.get("native_observation_history") is not True
                         or any(m.role in {"assistant", "tool"} or m.tool_calls for m in messages)):
                     raise ModelCompatibilityError("native thinking tools require supported observation-only history")
@@ -244,6 +250,9 @@ class _OpenAICompatProvider(LLMProvider):
             # Keep it in extra_body so other compatible endpoints are unchanged
             # unless their own config explicitly enables it.
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        if config.extra.get("gateway_plain_request") is True and not config.tools:
+            for optional in ("extra_body", "reasoning_effort", "response_format", "parallel_tool_calls", "top_p"):
+                kwargs.pop(optional, None)
         return kwargs
 
     async def _request_with_retries(
@@ -333,28 +342,54 @@ class _OpenAICompatProvider(LLMProvider):
 
     def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
         """Pure SDK-envelope parsing; it performs no model/service execution."""
+        if not _envelope_field(resp, "choices"):
+            for wrapper in ("data", "result"):
+                nested = _envelope_field(resp, wrapper)
+                if _envelope_field(nested, "choices"):
+                    resp = nested
+                    break
         identity = ResponseModelIdentity()
-        identity.add(getattr(resp, "model", None))
-        if not resp.choices:
+        identity.add(_envelope_field(resp, "model"))
+        choices = _envelope_field(resp, "choices")
+        if not choices:
             raise LLMCompletionError(code="empty_final_content", provider=self.name, model=config.model,
                                      finish_reason=None, empty_final=True,
-                                     usage=_usage_payload(getattr(resp, "usage", None)),
+                                     usage=_usage_payload(_envelope_field(resp, "usage")),
                                      model_identity=identity.metadata(config.model))
-        response_choice = resp.choices[0]
-        message = response_choice.message
+        response_choice = choices[0]
+        message = _envelope_field(response_choice, "message")
         # Never surface or persist reasoning_content. It may contain hidden
         # chain-of-thought and is not the provider's final answer.
-        text = str(message.content or "")
+        content = _envelope_field(message, "content") if message is not None else _envelope_field(response_choice, "text")
+        text = (content if isinstance(content, str) else "".join(
+            str(block.get("text", "")) for block in content
+            if isinstance(block, dict) and block.get("type") in {"text", "output_text"}
+        ) if isinstance(content, list) else "")
         finish_reason = _optional_string(
-            getattr(response_choice, "finish_reason", None)
+            _envelope_field(response_choice, "finish_reason")
         )
-        calls = tuple(ToolCall(id=call.id, name=call.function.name,
-                               arguments=call.function.arguments)
-                      for call in (getattr(message, "tool_calls", None) or ()))
+        calls_list: list[ToolCall] = []
+        raw_calls = _envelope_field(message, "tool_calls") or ()
+        legacy = _envelope_field(message, "function_call")
+        if not raw_calls and legacy:
+            raw_calls = ({"function": legacy},)
+        for call in raw_calls:
+            function = call.get("function", {}) if isinstance(call, dict) else call.function
+            name = function.get("name") if isinstance(function, dict) else getattr(function, "name", None)
+            arguments = function.get("arguments", {}) if isinstance(function, dict) else getattr(function, "arguments", "{}")
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+            if not isinstance(name, str) or not name or not isinstance(arguments, str):
+                raise ValueError("Invalid upstream completion envelope")
+            call_id = call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+            if not call_id:
+                call_id = "compat_" + hashlib.sha256((name + arguments).encode()).hexdigest()[:24]
+            calls_list.append(ToolCall(id=call_id, name=name, arguments=arguments))
+        calls = tuple(calls_list)
         if calls and not config.tools:
             raise ValueError("unsolicited tool calls without configured tools")
         self._check_final(config, finish_reason, bool(text.strip()) or bool(calls),
-                          usage=_usage_payload(getattr(resp, "usage", None)),
+                          usage=_usage_payload(_envelope_field(resp, "usage")),
                           model_identity=identity.metadata(config.model))
         return Completion(
             text=text,
@@ -363,9 +398,9 @@ class _OpenAICompatProvider(LLMProvider):
             model=identity.model,
             is_mock=False,
             raw={
-                "usage": _usage_payload(getattr(resp, "usage", None)),
+                "usage": _usage_payload(_envelope_field(resp, "usage")),
                 "system_fingerprint": _optional_string(
-                    getattr(resp, "system_fingerprint", None)
+                    _envelope_field(resp, "system_fingerprint")
                 ),
                 "finish_reason": finish_reason,
                 **identity.metadata(config.model),
