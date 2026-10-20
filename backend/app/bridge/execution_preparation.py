@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import threading
 from typing import Any
 import uuid
@@ -78,10 +79,73 @@ def _guards(run: RunHandle, view: dict[str, Any]) -> list[dict[str, Any]]:
     return [_signature(path.absolute()) for path in sorted(paths)]
 
 
-def _unchanged(record: dict[str, Any]) -> bool:
+def _bound_receipt_hashes(record: dict[str, Any], run_root: Path) -> dict[str, str]:
+    """Only host-bound small preflight evidence can relax a ctime-only change."""
+    base = (run_root / 'execution/preflight').resolve()
+    rows = record.get('configuration', {}).get('validation', [])
+    hashes: dict[str, str] = {}
+    input_paths = {item.get('path') for row in rows for item in row.get('input_files', [])}
+    for row in rows:
+        for field in ('receipt', 'derivation'):
+            name, checksum = row.get(field + '_path'), row.get(field + '_sha256')
+            if not isinstance(name, str) or not isinstance(checksum, str) or name in input_paths:
+                continue
+            checksum = checksum.removeprefix('sha256:')
+            if re.fullmatch('[0-9a-f]{64}', checksum) is None:
+                continue
+            path = Path(name)
+            if (not path.is_absolute() or not path.resolve().is_relative_to(base)
+                    or any(part.is_symlink() for part in (path, *path.parents) if part.is_relative_to(base))):
+                continue
+            if name in hashes and hashes[name] != checksum:
+                return {}  # Conflicting bindings never grant a metadata exception.
+            hashes[name] = checksum
+    return hashes
+
+
+def _unchanged(record: dict[str, Any], run_root: Path) -> bool:
     try:
-        return (record.get('environment_sha256') == _environment()
-                and all(_signature(Path(row['path'])) == row for row in record.get('guards', [])))
+        if record.get('environment_sha256') != _environment():
+            return False
+        hashes: dict[str, str] | None = None
+        remaining: int | None = None
+        for row in record.get('guards', []):
+            path = Path(row['path'])
+            current = _signature(path)
+            if current == row:
+                continue  # Normal polling performs no byte hashing or policy load.
+            if ('ctime_ns' not in row or current.get('ctime_ns') == row['ctime_ns']
+                    or {key: value for key, value in current.items() if key != 'ctime_ns'}
+                    != {key: value for key, value in row.items() if key != 'ctime_ns'}):
+                return False
+            if hashes is None:
+                hashes = _bound_receipt_hashes(record, run_root)
+            checksum = hashes.get(str(path))
+            if checksum is None:
+                return False  # Data, code and all unbound paths retain strict ctime.
+            if remaining is None:
+                from app.bridge.execution_confirmation import confirmation_policy
+                remaining = int(confirmation_policy()['max_source_bytes'])
+            size = current.get('bytes')
+            if type(size) is not int or size < 0 or size > remaining:
+                return False
+            # Ctime may change because of chmod/xattrs on macOS. Recheck only
+            # the bounded immutable receipt, never the declared dataset bytes.
+            with path.open('rb') as stream:
+                def same_open_file() -> bool:
+                    stat = os.fstat(stream.fileno())
+                    return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_dev) == (
+                        current['bytes'], current['mtime_ns'], current['ctime_ns'], current['inode'], current['device'])
+                if not same_open_file():
+                    return False
+                content = stream.read(size)
+                if not same_open_file():
+                    return False
+            remaining -= size
+            if (len(content) != size or hashlib.sha256(content).hexdigest() != checksum
+                    or _signature(path) != current):
+                return False
+        return True
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -131,7 +195,7 @@ class ExecutionPreparations:
         status = raw['status']
         if raw.get('host_generation') != self.generation and status in {'preparing', 'ready'}:
             status = 'interrupted'
-        elif status == 'ready' and not _unchanged(raw):
+        elif status == 'ready' and not _unchanged(raw, run.root):
             status = 'stale'
         public = {key: raw[key] for key in ('run_id', 'project', 'node', 'operation_id', 'token',
             'completed', 'total', 'validation')}

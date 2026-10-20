@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -319,3 +320,82 @@ async def test_closing_coordinator_does_not_consume_a_saved_confirmation_to_star
     assert session.graph.state('execution') == NodeState.APPROVED
     assert not (session.run.root / 'execution/local_commands').exists()
     assert not (session.run.root / 'execution/jobs').exists()
+
+
+@pytest.mark.asyncio
+async def test_receipt_metadata_only_change_stays_ready_but_same_length_tampering_is_stale(
+    actual_batch: tuple[Orchestrator, RunSession, Path],
+) -> None:
+    from app.bridge.execution_preparation import _signature
+    orch, session, _ = actual_batch
+    await orch.execution_preparations.wait(session.run, 'execution')
+    ready = get_execution_preparation(session.run.run_id, session.run.project)
+    assert ready['status'] == 'ready'
+    path = Path(ready['validation'][0]['receipt_path'])
+    original = path.read_bytes()
+    before = _signature(path)
+    mode = path.stat().st_mode
+    try:
+        path.chmod(mode ^ 0o100)
+        changed = _signature(path)
+        if changed['ctime_ns'] == before['ctime_ns']:
+            pytest.skip('This filesystem does not expose chmod metadata changes in st_ctime_ns')
+        assert changed['ctime_ns'] != before['ctime_ns']
+        assert {key: value for key, value in changed.items() if key != 'ctime_ns'} == {
+            key: value for key, value in before.items() if key != 'ctime_ns'}
+        assert get_execution_preparation(session.run.run_id, session.run.project)['status'] == 'ready'
+        assert path.read_bytes() == original
+        assert len(list((session.run.root / 'execution/preflight').glob('*/validation_receipt.json'))) == 2
+        assert not (session.run.root / 'execution/confirmations').exists()
+        assert not (session.run.root / 'execution/local_commands').exists()
+        altered = original.replace(b'"status": "passed"', b'"status": "failed"', 1)
+        assert altered != original and len(altered) == len(original)
+        timestamps = path.stat()
+        path.write_bytes(altered)
+        os.utime(path, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+        assert _signature(path)['mtime_ns'] == changed['mtime_ns']
+        assert get_execution_preparation(session.run.run_id, session.run.project)['status'] == 'stale'
+    finally:
+        path.chmod(mode)
+
+
+@pytest.mark.parametrize('kind', ['receipt', 'derivation', 'data', 'unbound', 'outside', 'budget', 'budget_total'])
+def test_receipt_metadata_guard_is_hash_bound_scoped_and_byte_bounded(tmp_path: Path, kind: str) -> None:
+    from app.bridge.execution_preparation import _environment as guard_environment, _signature, _unchanged
+    root = tmp_path / 'run'
+    directory = root / 'execution/preflight/actual-files'
+    directory.mkdir(parents=True)
+    policy = tmp_path / 'review.yaml'
+    policy.write_text(yaml.safe_dump({'poll_interval_seconds': 1, 'max_source_bytes': 4,
+                                     'preflight_total_timeout_seconds': 60}))
+    with _environment({'MARS_EXECUTION_REVIEW_CONFIG_PATH': str(policy)}):
+        path = (tmp_path / 'outside.json') if kind == 'outside' else directory / 'evidence.json'
+        path.write_bytes(b'abcde' if kind == 'budget' else b'abc' if kind == 'budget_total' else b'abcd')
+        field = 'derivation' if kind == 'derivation' else 'receipt'
+        binding: dict[str, Any] = {field + '_path': str(path),
+                                  field + '_sha256': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()}
+        if kind == 'unbound':
+            binding.pop(field + '_sha256')
+        if kind == 'data':
+            binding['input_files'] = [{'path': str(path)}]
+        record: dict[str, Any] = {'environment_sha256': guard_environment(), 'guards': [_signature(path)],
+                  'configuration': {'validation': [binding]}}
+        extra: Path | None = None
+        if kind == 'budget_total':
+            extra = directory / 'second-evidence.json'
+            extra.write_bytes(b'def')
+            record['guards'].append(_signature(extra))
+            record['configuration']['validation'].append({'receipt_path': str(extra),
+                'receipt_sha256': hashlib.sha256(extra.read_bytes()).hexdigest()})
+        assert _unchanged(record, root)
+        mode = path.stat().st_mode
+        try:
+            path.chmod(mode ^ 0o100)
+            if extra is not None:
+                extra.chmod(extra.stat().st_mode ^ 0o100)
+            if _signature(path)['ctime_ns'] == record['guards'][0]['ctime_ns']:
+                pytest.skip('This filesystem does not expose chmod metadata changes in st_ctime_ns')
+            assert _signature(path)['ctime_ns'] != record['guards'][0]['ctime_ns']
+            assert _unchanged(record, root) is (kind in {'receipt', 'derivation'})
+        finally:
+            path.chmod(mode)
