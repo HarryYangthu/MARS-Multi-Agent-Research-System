@@ -286,6 +286,7 @@ def _stage_limit_user_sources(session: CommanderSession) -> list[dict[str, str]]
 
 async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     from app.bridge.commander_existing import (
+        ExistingIntentValidationError,
         existing_execution_stage_limit, materialize_existing_seed, resolve_existing_request,
         user_requests_additional_changes, validate_existing_user_intent,
     )
@@ -312,7 +313,8 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         validate_existing_user_intent(resolved, [m["content"] for m in source_messages])
         stop_after_execution = existing_execution_stage_limit(args, [m["content"] for m in source_messages])
     except ValueError as exc:
-        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc)}
+        fields = exc.structured_fields() if isinstance(exc, ExistingIntentValidationError) else {}
+        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc), **fields}
     if user_requests_additional_changes([m["content"] for m in source_messages]):
         resolved["ordinary_coding"] = True
     resolved = materialize_existing_seed(resolved)
@@ -1092,10 +1094,27 @@ async def execute_tool(name: str, args: dict[str, Any], ctx: ToolContext) -> dic
     return result
 
 
+async def _describe_tools(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.commander_native import commander_tool_input_schema
+    names = args.get("names")
+    if not isinstance(names, list) or not 1 <= len(names) <= 8 or any(
+            not isinstance(name, str) or name not in TOOLS for name in names):
+        return {"ok": False, "error": "names must contain one to eight existing tool names", "retryable": False}
+    configured = load_tool_configs()
+    return {"ok": True, "contracts": {name: commander_tool_input_schema(name, configured) for name in names}}
+
+
+TOOLS["tools.describe"] = ToolSpec("tools.describe", "Read full contracts for named tools; no operation is executed.",
+    {"names": "array of exact tool names, at most 8"}, _describe_tools, mutation_level="read")
+
+
 def tools_for_prompt() -> str:
     """Render the tool catalogue for the Commander's system prompt."""
     lines: list[str] = []
+    from app.bridge.commander_native import _ALIASES
     for spec in TOOLS.values():
+        if spec.name in _ALIASES:
+            continue
         params = ", ".join(f"{k}: {v}" for k, v in spec.parameters.items()) or "(none)"
         lines.append(f"- {spec.name}({params})\n    {spec.description}")
     return "\n".join(lines)

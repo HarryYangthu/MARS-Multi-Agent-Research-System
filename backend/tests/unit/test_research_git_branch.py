@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -163,6 +164,78 @@ def test_dirty_snapshot_captures_final_working_code_deletions_and_untracked_with
     assert receipt['initial_commit'] != receipt['baseline_commit']
     assert receipt['source_index_sha256']
     assert receipt['snapshot_is_agent_code_change'] is False and receipt['source_modified'] is False
+
+
+def test_dirty_snapshot_with_stale_index_stat_cache_preserves_source_and_starts_checkout(
+        research: tuple[RunHandle, Path]) -> None:
+    """Relocated Windows archives commonly have fresh inodes/timestamps."""
+    run, source = research
+    _dirty_source(source)
+    unchanged = source / 'baseline/ref.py'
+    info = unchanged.stat()
+    os.utime(unchanged, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+    index = (source / '.git/index').read_bytes()
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        assert (branch.root / 'main.py').read_text() == 'VALUE = 3\n'
+        assert (branch.root / 'baseline/ref.py').read_text() == 'REFERENCE = 1\n'
+        assert not (branch.root / 'configs/remove.yaml').exists()
+        assert not (branch.root / 'configs/staged_remove.yaml').exists()
+        assert git(branch.root, 'status', '--porcelain') == ''
+    # A read-only source snapshot must not refresh stat-only index entries.
+    assert (source / '.git/index').read_bytes() == index
+    assert unchanged.stat().st_mtime_ns == info.st_mtime_ns + 1_000_000_000
+    receipt = json.loads((run.root / 'input/research_source_snapshot.json').read_text())
+    assert 'baseline/ref.py' not in {row['path'] for row in receipt['files']}
+
+
+def test_index_fingerprint_tolerates_real_git_cache_refresh_but_detects_staged_changes(
+        research: tuple[RunHandle, Path]) -> None:
+    from app.harness.tools.git_source_snapshot import _index_entries_hash, _selection
+    _run, source = research
+    unchanged = source / 'baseline/ref.py'
+    info = unchanged.stat()
+    os.utime(unchanged, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+    raw_index = (source / '.git/index').read_bytes()
+    staged = _index_entries_hash(source)
+    selection = _selection(source)
+    assert selection == ([], [])
+    assert (source / '.git/index').read_bytes() == raw_index
+    assert git(source, 'status', '--porcelain') == ''
+    assert (source / '.git/index').read_bytes() != raw_index
+    assert _index_entries_hash(source) == staged
+    assert _selection(source) == selection
+    (source / 'main.py').write_text('VALUE = 5\n')
+    git(source, 'add', 'main.py')
+    assert _index_entries_hash(source) != staged
+
+
+def test_index_fingerprint_detects_source_index_visibility_flags(research: tuple[RunHandle, Path]) -> None:
+    from app.harness.tools.git_source_snapshot import _index_entries_hash
+    _run, source = research
+    staged = _index_entries_hash(source)
+    git(source, 'update-index', '--assume-unchanged', 'main.py')
+    assert _index_entries_hash(source) != staged
+    git(source, 'update-index', '--no-assume-unchanged', 'main.py')
+    assert _index_entries_hash(source) == staged
+    git(source, 'update-index', '--skip-worktree', 'main.py')
+    assert _index_entries_hash(source) != staged
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Windows does not expose a POSIX executable bit')
+def test_content_verified_snapshot_still_captures_executable_mode_only_changes(
+        research: tuple[RunHandle, Path]) -> None:
+    run, source = research
+    index = (source / '.git/index').read_bytes()
+    (source / 'main.py').chmod(0o755)
+    with research_branch_scope(run, 'coding'):
+        branch = current_git_branch(run.project); assert branch is not None
+        assert (branch.root / 'main.py').read_text() == 'VALUE = 1\n'
+        assert git(branch.root, 'ls-files', '--stage', 'main.py').startswith('100755 ')
+        assert git(branch.root, 'status', '--porcelain') == ''
+    assert (source / '.git/index').read_bytes() == index
+    receipt = json.loads((run.root / 'input/research_source_snapshot.json').read_text())
+    assert receipt['files'][0]['path'] == 'main.py' and receipt['files'][0]['mode'] == '100755'
 
 
 def test_dirty_snapshot_retry_and_new_task_use_distinct_frozen_inputs(research: tuple[RunHandle, Path]) -> None:

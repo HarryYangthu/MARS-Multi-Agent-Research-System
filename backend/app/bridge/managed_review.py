@@ -17,7 +17,7 @@ import yaml
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, digest
 from app.harness.llm.accounting import guarded_complete
 from app.harness.llm.model_registry import get_agent_config, select_provider
-from app.harness.llm.provider_base import Completion, Message
+from app.harness.llm.provider_base import Completion, Message, llm_call_deadline_seconds
 from app.harness.llm.structured_output import parse_json_object
 from app.harness.runtime.event_bus import EventBus
 from app.settings import repo_root
@@ -51,7 +51,24 @@ class ReviewDecision(BaseModel):
     _identity: str = PrivateAttr(default="")
 
 
-def parse_decision(text: str, evidence_refs: list[str]) -> ReviewDecision:
+def review_evidence_aliases(payload: dict[str, Any]) -> dict[str, str]:
+    """Map only documents actually included in the frozen project evidence."""
+    aliases: dict[str, str] = {}
+    context = payload.get('project_context')
+    canonical = 'input/folder_context.v1.json'
+    if canonical not in payload.get('evidence_refs', []) or not isinstance(context, dict):
+        return aliases
+    for item in context.get('files', []):
+        if not isinstance(item, dict) or not isinstance(item.get('content'), str) or not item['content'].strip():
+            continue
+        path = item.get('path')
+        if isinstance(path, str) and path.strip():
+            aliases[path] = canonical
+    return aliases
+
+
+def parse_decision(text: str, evidence_refs: list[str],
+                   evidence_aliases: dict[str, str] | None = None) -> ReviewDecision:
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -64,6 +81,17 @@ def parse_decision(text: str, evidence_refs: list[str]) -> ReviewDecision:
     if isinstance(value.get('decision'), str):
         value['decision'] = value['decision'].strip().casefold()
     decision = ReviewDecision.model_validate(value)
+    aliases = evidence_aliases or {}
+    normalized = []
+    for original in decision.evidence_refs:
+        ref = original.strip().strip('`')
+        if ref.startswith('./'):
+            ref = ref[2:]
+        if ref not in evidence_refs and '#' in ref and ref.split('#', 1)[0] in evidence_refs:
+            ref = ref.split('#', 1)[0]
+        ref = aliases.get(ref, ref)
+        normalized.append(ref)
+    decision.evidence_refs = list(dict.fromkeys(normalized))
     if not decision.reason.strip() or any(ref not in evidence_refs for ref in decision.evidence_refs):
         raise ValueError("review must cite provided evidence")
     return decision
@@ -196,7 +224,7 @@ async def review_once(
     await record_state(run, bus, state)
     task: asyncio.Task[Completion] | None = None
     usages: list[dict[str, Any] | None] = []
-    deadline = asyncio.get_running_loop().time() + policy.timeout_seconds
+    deadline = asyncio.get_running_loop().time() + max(policy.timeout_seconds, llm_call_deadline_seconds(config))
 
     async def receive(current: list[Message], attempt: int) -> Completion | None:
         nonlocal task
@@ -231,13 +259,13 @@ async def review_once(
             trace.emit('model_response', {'model': config.model, 'usage': raw_usage,
                 'response_attempt': attempt}, visible=result.text)
             try:
-                decision = parse_decision(result.text, payload['evidence_refs'])
+                decision = parse_decision(result.text, payload['evidence_refs'], review_evidence_aliases(payload))
                 break
             except ValueError as error:
                 # Correct a received response once, within this review's original
                 # time and resource budget. Transport failures are never replayed,
                 # and a correction is a new genuine review, not host approval.
-                if attempt or str(error) == 'review must cite provided evidence':
+                if attempt:
                     raise
                 trace.emit('review_response_correction', {'response_sha256': digest(result.text),
                     'error_type': type(error).__name__, 'approved': False})

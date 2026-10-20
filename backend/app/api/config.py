@@ -17,8 +17,10 @@ from app.settings import env_or_local, repo_root, set_runtime_env
 
 from app.bridge.model_connection_test import ConnectionTestRequest, ConnectionTestResult, probe_policy, test_model_connection
 from app.bridge.coding_backend_service import coding_backend_status, select_coding_backend
+from app.api.global_model_profiles import router as global_model_profiles_router
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+router.include_router(global_model_profiles_router)
 
 CONFIG_NAMES: tuple[str, ...] = (
     "agents",

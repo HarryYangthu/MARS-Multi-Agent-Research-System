@@ -21,7 +21,9 @@ import uuid
 import yaml
 from filelock import BaseFileLock, FileLock, Timeout as FileLockTimeout
 
-from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, MAX_LLM_RETRIES
+from app.harness.llm.provider_base import (
+    Completion, LLMConfig, LLMProvider, Message, MAX_LLM_RETRIES, llm_call_deadline_seconds,
+)
 from app.harness.persistence import atomic_write_json, path_lock
 from app.settings import repo_root
 from app.harness.llm.usage_policy import TokenUsageMode, token_usage_mode
@@ -83,6 +85,7 @@ class Reservation:
     tokens: int
     cost: float | None
     attempts: int
+    deadline_at: float | None = None
 
 
 def reserved_model_attempts(row: Mapping[str, Any]) -> int:
@@ -226,6 +229,12 @@ class RunModelBudget:
             validate_token_components(row)
             if row.get("charged_cost") is not None:
                 _number(row["charged_cost"], "charged model cost")
+            if "local_call_deadline_at" in row or "local_call_deadline_seconds" in row:
+                started = _number(row.get("started_at"), "request start time")
+                deadline = _number(row.get("local_call_deadline_at"), "request local deadline")
+                interval = _number(row.get("local_call_deadline_seconds"), "request deadline interval", positive=True)
+                if deadline < started or not math.isclose(deadline - started, interval, abs_tol=1e-6):
+                    raise ResourceBudgetError("invalid request local deadline")
         return state
 
     def recovery_snapshot(self) -> dict[str, Any]:
@@ -251,6 +260,15 @@ class RunModelBudget:
         for row in state['requests'].values():
             start = _number(row.get('started_at'), 'request start time')
             end = _number(row.get('finished_at', row.get('owner_lost_at', now)), 'request end time')
+            # Only new calls with an enforced, persisted local deadline can
+            # exclude the time between process death and a later restart.
+            # Legacy calls retain their original conservative activity charge.
+            if (row.get('status') in {'reconciliation_required', 'abandoned'}
+                    and row.get('local_call_deadline_at') is not None):
+                deadline = _number(row['local_call_deadline_at'], 'request local deadline')
+                if deadline < start:
+                    raise ResourceBudgetError('invalid request local deadline')
+                end = min(end, deadline)
             if end < start:
                 raise ResourceBudgetError('invalid request time interval')
             elapsed += end - start
@@ -334,9 +352,11 @@ class RunModelBudget:
     def _lease_path(self, request_id: str) -> Path:
         return self.path.parent / "requests" / f"{request_id}.lock"
 
-    def _mark_abandoned(self, state: dict[str, Any]) -> bool:
+    def _mark_abandoned(self, state: dict[str, Any], *, request_ids: set[str] | None = None) -> bool:
         changed = False
         for identifier, row in state["requests"].items():
+            if request_ids is not None and identifier not in request_ids:
+                continue
             if row["status"] != "in_flight":
                 continue
             lease_path = self._lease_path(identifier)
@@ -354,14 +374,15 @@ class RunModelBudget:
                 probe.release()
         return changed
 
-    def recover_abandoned(self) -> tuple[str, ...]:
+    def recover_abandoned(self, *, request_ids: tuple[str, ...] | None = None) -> tuple[str, ...]:
         """Expose orphaned requests without inventing usage or replaying them."""
         with path_lock(self.lock_path):
             state = self._read()
-            if self._mark_abandoned(state):
+            selected = set(request_ids) if request_ids is not None else None
+            if self._mark_abandoned(state, request_ids=selected):
                 atomic_write_json(self.path, state)
             return tuple(key for key, row in state["requests"].items()
-                         if row["status"] == "reconciliation_required")
+                         if row["status"] == "reconciliation_required" and (selected is None or key in selected))
 
     def reconcile_abandoned(self, request_id: str, *, actor: str, reason: str,
                             evidence_refs: tuple[str, ...]) -> None:
@@ -374,7 +395,7 @@ class RunModelBudget:
             raise ValueError("reconciliation requires actor, reason and evidence references")
         with path_lock(self.lock_path):
             state = self._read()
-            self._mark_abandoned(state)
+            self._mark_abandoned(state, request_ids={request_id})
             row = state["requests"].get(request_id)
             if row is None or row["status"] not in {"reconciliation_required", "abandoned"}:
                 raise ResourceBudgetError("only an abandoned reservation can be reconciled")
@@ -383,16 +404,30 @@ class RunModelBudget:
                 if row.get("reconciliation") != receipt:
                     raise ResourceBudgetError("reservation reconciliation is immutable")
                 return
-            row.update(status="abandoned", reconciled_at=time.time(), reconciliation=receipt,
-                       usage_complete=False)
-            atomic_write_json(self.path, state)
+            # Probe again even for an earlier reconciliation_required marker.
+            # An acknowledgement cannot take over a lease still held by a live owner.
+            lease_path = self._lease_path(request_id)
+            lease_path.parent.mkdir(parents=True, exist_ok=True)
+            probe = FileLock(lease_path, timeout=0)
+            try:
+                probe.acquire()
+            except FileLockTimeout as exc:
+                raise ResourceBudgetError("model request owner lease is still held") from exc
+            try:
+                row.update(status="abandoned", reconciled_at=time.time(), reconciliation=receipt,
+                           usage_complete=False)
+                atomic_write_json(self.path, state)
+            finally:
+                probe.release()
 
     def reserve(self, messages: list[Message], config: LLMConfig,
-                correlation: Mapping[str, Any]) -> Reservation:
+                correlation: Mapping[str, Any], *, local_deadline_seconds: float | None = None) -> Reservation:
         if type(config.max_tokens) is not int or config.max_tokens < 1:
             raise ValueError("max_tokens must bound a positive output length")
         if type(config.max_retries) is not int:
             raise ValueError("max_retries must be an integer")
+        if local_deadline_seconds is not None:
+            _number(local_deadline_seconds, 'enforced local model deadline', positive=True)
         prompt_bound = len(_canonical({"messages": [m.to_wire() for m in messages],
                                       "tools": config.tools}).encode()) + 32 * (len(messages) + 1)
         price = self.configuration.get("prices", {}).get(config.provider + "/" + config.model)
@@ -447,6 +482,15 @@ class RunModelBudget:
                 "reserved_cost": cost, "charged_cost": cost, "usage": None, "usage_complete": False,
                 "price": price, "max_sdk_attempts": attempts, "charged_attempts": attempts,
                 "observed_attempts": None, "attempts_complete": False}
+            deadline_at = None
+            if local_deadline_seconds is not None:
+                row = state["requests"][identifier]
+                remaining = self._remaining_seconds(state, row['started_at'])
+                if remaining <= 0:
+                    raise ResourceBudgetError("run elapsed-time budget exhausted")
+                deadline_at = row['started_at'] + min(local_deadline_seconds, remaining)
+                row['local_call_deadline_at'] = deadline_at
+                row['local_call_deadline_seconds'] = deadline_at - row['started_at']
             lease_path = self._lease_path(identifier)
             lease_path.parent.mkdir(parents=True, exist_ok=True)
             lease = FileLock(lease_path, timeout=0, thread_local=False)
@@ -457,7 +501,7 @@ class RunModelBudget:
                 lease.release()
                 raise
             self._leases[identifier] = lease
-        return Reservation(identifier, reserved_tokens, cost, attempts)
+        return Reservation(identifier, reserved_tokens, cost, attempts, deadline_at)
 
     def settle(self, reservation: Reservation, *, usage: Any, complete: bool,
                outcome: str, sdk_attempts: int | None = None,
@@ -526,7 +570,11 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
         budget = RunModelBudget(root, active_model_time=active_model_time)
     while True:
         try:
-            reservation = budget.reserve(messages, config, correlation or {})
+            if isinstance(budget, RunModelBudget):
+                reservation = budget.reserve(messages, config, correlation or {},
+                    local_deadline_seconds=llm_call_deadline_seconds(config))
+            else:
+                reservation = budget.reserve(messages, config, correlation or {})
             break
         except ModelConcurrencyBusy:
             await asyncio.sleep(0.05)
@@ -567,18 +615,18 @@ async def guarded_complete(provider: LLMProvider, messages: list[Message], confi
     actual = replace(config, attempt_observer=observe,
                      max_retries=min(config.max_retries, reservation.attempts - 1))
     try:
-        if isinstance(budget, RunModelBudget) and active_model_time:
+        if isinstance(budget, RunModelBudget):
             try:
-                async with asyncio.timeout(budget.remaining_seconds()):
+                if reservation.deadline_at is None:
+                    raise ResourceBudgetError('model reservation is missing its local deadline')
+                async with asyncio.timeout(max(0.0, reservation.deadline_at - time.time())):
                     result = await provider.complete(messages, actual)
             except TimeoutError as exc:
                 if budget.remaining_seconds() <= 0:
                     raise ResourceBudgetError('run elapsed-time budget exhausted') from exc
                 raise
-        elif scope is None:
-            result = await provider.complete(messages, actual)
         else:
-            from app.harness.llm.provider_base import llm_call_deadline_seconds
+            assert scope is not None
             remaining = scope.ledger.snapshot().activity_remaining_us / 1_000_000
             async with asyncio.timeout(min(remaining, llm_call_deadline_seconds(actual))):
                 result = await provider.complete(messages, actual)

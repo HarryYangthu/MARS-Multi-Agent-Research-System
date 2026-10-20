@@ -85,6 +85,10 @@ htmlcov/
 
 # Windows native managed runtimes, local credentials reports and service state.
 /local/windows/
+/local/model-profiles/
+/local/model_profiles.json
+/local/model_profile_secrets.json
+/local/model_profiles.lock
 
 # Reusable offline dependencies and generated core-update transactions.
 /dependencies/

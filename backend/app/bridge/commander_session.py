@@ -82,6 +82,7 @@ class CommanderSession:
     linked_run_id: str | None = None
     experiment_id: str = ""           # Project experiment this conversation belongs to
     auto_mode: bool = False           # Compatibility wire name: True = Commander reviews, False = human reviews.
+    selected_model_id: str = ''       # Global conversation model profile; never a project-local credential.
     metric_targets: dict[str, float] = field(default_factory=dict)
     rolling_summary: str = ""
     summary_updated_at: str | None = None
@@ -137,6 +138,7 @@ class CommanderSession:
             "linked_run_id": self.linked_run_id,
             "experiment_id": self.experiment_id,
             "auto_mode": self.auto_mode,
+            "selected_model_id": self.selected_model_id,
             "metric_targets": dict(self.metric_targets),
             "rolling_summary": self.rolling_summary,
             "summary_updated_at": self.summary_updated_at,
@@ -326,6 +328,7 @@ class CommanderSessionStore:
             linked_run_id=meta.get("linked_run_id"),
             experiment_id=str(meta.get("experiment_id", "") or ""),
             auto_mode=bool(meta.get("auto_mode", False)),
+            selected_model_id=str(meta.get("selected_model_id", '') or ''),
             metric_targets={
                 str(k): float(v) for k, v in (meta.get("metric_targets") or {}).items()
             },

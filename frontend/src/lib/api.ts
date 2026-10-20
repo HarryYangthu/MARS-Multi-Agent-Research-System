@@ -2074,6 +2074,7 @@ export type ChatMessageView = {
 };
 
 export type Conversation = {
+  selected_model_id?: string;
   processing?: boolean;
   activities?: import("./researchActivity").CommanderActivity[];
   conv_id: string;
@@ -2085,6 +2086,29 @@ export type Conversation = {
   metric_targets: Record<string, number>;
   messages: ChatMessageView[];
 };
+
+export type GlobalModelProfile = {
+  id: string; name: string; provider: string; model: string; base_url: string;
+  context_window: number; compatibility: "generic" | "qwen_200k" | "gemma_160k";
+  api_key_configured: boolean; configured: boolean;
+};
+export type GlobalModelProfiles = { default_id: string; profiles: GlobalModelProfile[] };
+export type SaveGlobalModelProfile = Omit<GlobalModelProfile, "id" | "configured" | "api_key_configured"> & { id?: string; api_key: string };
+
+export async function getGlobalModelProfiles(): Promise<GlobalModelProfiles> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config/model-profiles`, { cache: "no-store" }));
+}
+export async function saveGlobalModelProfile(body: SaveGlobalModelProfile): Promise<GlobalModelProfile> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config/model-profiles`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
+}
+export async function setConversationModel(convId: string, selectedModelId: string): Promise<Conversation> {
+  return jsonOrThrow(await fetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/model`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_model_id: selectedModelId, make_default: true }),
+  }));
+}
 
 export async function createConversation(project = "pimc", experimentId = ""): Promise<Conversation> {
   return jsonOrThrow(

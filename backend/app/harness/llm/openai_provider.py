@@ -85,6 +85,23 @@ def _public_content(content: Any) -> str:
     return ""
 
 
+def _public_final_text(text: str) -> str:
+    """Exclude explicitly tagged prefix thinking from unparsed local templates.
+
+    Only a leading model-format marker is recognized. Ordinary answer text,
+    quoted tags and instruction-like text are never interpreted as actions.
+    An unclosed thinking prefix supplies no final output evidence.
+    """
+    remaining = text
+    while remaining.lstrip().startswith('<think>'):
+        remaining = remaining.lstrip()
+        end = remaining.find('</think>', len('<think>'))
+        if end < 0:
+            return ''
+        remaining = remaining[end + len('</think>'):].lstrip()
+    return remaining
+
+
 def _decode_gateway_body(body: str | bytes) -> tuple[Any, bool]:
     """Decode a completed HTTP body when a gateway ignores the requested format.
 
@@ -203,7 +220,9 @@ class VisibleStreamAccumulator:
                 self.finish_reason = str(reason)
 
     def completion(self, *, provider: str, model: str, allow_tools: bool = False) -> Completion:
-        text = "".join(self.pieces)
+        text = _public_final_text("".join(self.pieces))
+        self.pieces = [text] if text else []
+        self.visible_chars = len(text)
         code = ("output_truncated" if self.finish_reason == "length" else
                 "incomplete_stream" if self.finish_reason not in {"stop", "tool_calls", "function_call"} else
                 "empty_final_content" if not text.strip() and not self.tool_fragments else "")
@@ -359,9 +378,31 @@ class _OpenAICompatProvider(LLMProvider):
             # Keep it in extra_body so other compatible endpoints are unchanged
             # unless their own config explicitly enables it.
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
-        if config.extra.get("gateway_plain_request") is True and not config.tools:
+        if config.extra.get("system_message_mode") == "merge_first":
+            # Qwen's official template permits a system message only first.
+            # Merge all instruction strings in original order, retaining every
+            # non-system turn and its tool call binding unchanged.
+            system = [item["content"] for item in kwargs["messages"] if item["role"] == "system"]
+            if system:
+                kwargs["messages"] = [{"role": "system", "content": "\n\n".join(system)}] + [
+                    item for item in kwargs["messages"] if item["role"] != "system"]
+        if config.extra.get("message_format") == "single_user" and not config.tools:
+            # Explicit operator compatibility for templates that accept only a
+            # user turn. Observation-only callers already label prior records.
+            # Keep each role and its JSON-escaped content visibly separated;
+            # never interpret text here as a tool execution request.
+            kwargs["messages"] = [{"role": "user", "content": json.dumps(
+                [{"role": message.role, "content": message.content} for message in messages],
+                ensure_ascii=False, allow_nan=False)}]
+        if config.extra.get("gateway_plain_request") is True and not glm_thinking:
             for optional in ("extra_body", "reasoning_effort", "response_format", "parallel_tool_calls", "top_p"):
                 kwargs.pop(optional, None)
+        if (config.extra.get("template_family") == "qwen38_instruct"
+                and config.extra.get("gateway_omit_template_options") is not True):
+            # Explicit operator-selected deployment profile, never a guessed
+            # model alias. Official Qwen3.8 non-thinking wire parameters.
+            kwargs["extra_body"] = {"chat_template_kwargs": {
+                "enable_thinking": False, "preserve_thinking": False}}
         return kwargs
 
     async def _request_with_retries(
@@ -380,6 +421,11 @@ class _OpenAICompatProvider(LLMProvider):
                 if config.attempt_observer:
                     config.attempt_observer("sdk_attempt_succeeded", {"attempt": attempt + 1})
                 return result
+            except asyncio.CancelledError:
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1,
+                        "error": "CancelledError", "interrupted": True, "retryable": False})
+                raise
             except Exception as exc:
                 details = public_error_details(exc)
                 if config.attempt_observer:
@@ -420,6 +466,8 @@ class _OpenAICompatProvider(LLMProvider):
     async def complete(
         self, messages: list[Message], config: LLMConfig
     ) -> Completion:
+        if config.extra.get("prefer_streaming") is True:
+            return await self._complete_streaming(messages, config)
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config)
         record_provider_request(config, self.name, request_kwargs)
@@ -428,6 +476,33 @@ class _OpenAICompatProvider(LLMProvider):
             config=config,
         )
         return self._completion_from_response(resp, config)
+
+    async def _complete_streaming(self, messages: list[Message], config: LLMConfig) -> Completion:
+        """One complete result from real SSE, for any configured compatible ID.
+
+        A fresh accumulator belongs to each transport attempt. A disconnected
+        prefix is discarded, never presented as a final tool instruction or
+        concatenated with a restarted request.
+        """
+        client = self._get_client()
+        kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, kwargs)
+
+        async def consume() -> Completion:
+            state = VisibleStreamAccumulator()
+            stream = await client.chat.completions.create(**kwargs)
+            if isinstance(stream, (str, bytes, Mapping)) or _envelope_field(stream, "choices") is not None:
+                return self._completion_from_response(stream, config)
+            async with stream:
+                async for chunk in stream:
+                    state.add(chunk)
+                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
+                        config.attempt_observer("sdk_stream_progress", {
+                            "chunks": state.chunks, "visible_chars": state.visible_chars,
+                        })
+            return state.completion(provider=self.name, model=config.model, allow_tools=bool(config.tools))
+
+        return await self._request_with_retries(consume, config=config)
 
     async def complete_wire(self, payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
         """Forward an owned external harness request under guarded_complete.
@@ -492,7 +567,7 @@ class _OpenAICompatProvider(LLMProvider):
         # Never surface or persist reasoning_content. It may contain hidden
         # chain-of-thought and is not the provider's final answer.
         content = _envelope_field(message, "content") if message is not None else _envelope_field(response_choice, "text")
-        text = _public_content(content)
+        text = _public_final_text(_public_content(content))
         finish_reason = _optional_string(
             _envelope_field(response_choice, "finish_reason")
         )
@@ -579,35 +654,12 @@ class ZhipuProvider(_OpenAICompatProvider):
         super().__init__(api_key=api_key, base_url=base_url, provider_name="zhipu")
 
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
-        """Consume real SSE to avoid waiting for a complete long response at a gateway.
-
-        Each retry owns a fresh accumulator. Partial content from an unsuccessful
-        attempt can never be concatenated with a subsequent attempt's answer.
-        """
-        client = self._get_client()
-        kwargs = self._request_kwargs(messages, config, stream=True)
-        record_provider_request(config, self.name, kwargs)
-
-        async def consume() -> Completion:
-            state = VisibleStreamAccumulator()
-            stream = await client.chat.completions.create(**kwargs)
-            if isinstance(stream, (str, bytes, Mapping)) or _envelope_field(stream, "choices") is not None:
-                return self._completion_from_response(stream, config)
-            async with stream:
-                async for chunk in stream:
-                    state.add(chunk)
-                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
-                        config.attempt_observer("sdk_stream_progress", {
-                            "chunks": state.chunks, "visible_chars": state.visible_chars,
-                        })
-            return state.completion(provider=self.name, model=config.model, allow_tools=bool(config.tools))
-
-        return await self._request_with_retries(consume, config=config)
+        return await self._complete_streaming(messages, config)
 
 
 class OpenAIProvider(_OpenAICompatProvider):
-    def __init__(self, *, api_key: str) -> None:
-        super().__init__(api_key=api_key, provider_name="openai")
+    def __init__(self, *, api_key: str, base_url: str | None = None) -> None:
+        super().__init__(api_key=api_key, base_url=base_url, provider_name="openai")
 
 
 class QwenProvider(_OpenAICompatProvider):

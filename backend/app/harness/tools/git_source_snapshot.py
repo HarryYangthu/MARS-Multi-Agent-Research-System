@@ -34,6 +34,17 @@ def _index_hash(root: Path) -> str | None:
     return _sha(path) if path.is_file() else None
 
 
+def _index_entries_hash(root: Path) -> str:
+    """Fingerprint staged inputs, excluding Git's mutable filesystem cache.
+
+    A normal ``git status`` may refresh index timestamps without changing any
+    staged path, mode, object, conflict stage or assume/skip-worktree flag.
+    Those cache writes cannot change the code copied into this snapshot.
+    """
+    entries = _git(root, 'ls-files', '--stage', '-v', '--full-name', '-z')
+    return hashlib.sha256(entries.encode('utf-8')).hexdigest()
+
+
 def _signature(path: Path) -> tuple[int, int, int, int, int, int] | None:
     try:
         info = path.lstat()
@@ -92,8 +103,15 @@ def snapshot_initial_commit(snapshot: SourceSnapshot, run_root: Path) -> str:
 
 def _selection(root: Path) -> tuple[list[str], list[dict[str, str]]]:
     from app.harness.tools.project_repo import TEXT_SUFFIXES
-    changed = set(filter(None, _git(root, 'diff', '--no-ext-diff', '--no-textconv', '--name-only',
-                                    '--no-renames', '-z', 'HEAD', '--').split('\0')))
+    # --no-optional-locks alone does not stop every Git version from refreshing
+    # stat-only index entries during diff. Reading source inputs must not write
+    # the user's index, even after moving/copying a repository to another PC.
+    # --name-only may report stat-dirty files whose bytes are unchanged when
+    # refreshing is disabled. --numstat verifies the actual diff instead, so a
+    # concurrent status/cache refresh cannot change the selected source set.
+    difference = _git(root, '-c', 'diff.autoRefreshIndex=false', 'diff', '--no-ext-diff', '--no-textconv',
+                      '--numstat', '--no-renames', '-z', 'HEAD', '--')
+    changed = {row.split('\t', 2)[2] for row in difference.split('\0') if row}
     untracked = set(filter(None, _git(root, 'ls-files', '--others', '--exclude-standard', '-z').split('\0')))
     excluded = [str(value) for value in storage_policy()['code_excludes']]
     selected: list[str] = []
@@ -129,6 +147,7 @@ def capture_source_snapshot(source: Path, run_root: Path, project: str, run_id: 
     head = _git(source, 'rev-parse', 'HEAD')
     branch = _git(source, 'branch', '--show-current')
     index = _index_hash(source)
+    index_entries = _index_entries_hash(source)
     if head != baseline_commit or branch != baseline_branch:
         raise ValueError('源代码版本在建立快照前已变化，请重试；没有修改源仓。')
     names, skipped = _selection(source)
@@ -166,13 +185,14 @@ def capture_source_snapshot(source: Path, run_root: Path, project: str, run_id: 
                 total += before[0]
             records.append({'path': name, 'sha256': checksum, 'bytes': 0 if before is None else before[0], 'mode': mode})
         if (_git(source, 'rev-parse', 'HEAD') != head or _git(source, 'branch', '--show-current') != branch
-                or _index_hash(source) != index or _selection(source) != (names, skipped)
+                or _index_entries_hash(source) != index_entries or _selection(source) != (names, skipped)
                 or any(_signature(source / name) != value for name, value in signatures.items())
                 or any(row['sha256'] is not None and _sha(source / row['path']) != row['sha256'] for row in records)):
             raise ValueError('源代码在建立快照期间已变化，请重试；没有修改源仓。')
         manifest = {'schema_id': 'research.source_snapshot.v1', 'project': project, 'run_id': run_id,
             'source_repo_path': str(source.resolve()), 'source_branch': branch, 'baseline_branch': baseline_branch,
             'baseline_commit': baseline_commit, 'source_head_commit': head, 'source_index_sha256': index,
+            'source_index_entries_sha256': index_entries,
             'captured_at': datetime.now(timezone.utc).isoformat(), 'files': records, 'excluded': skipped}
         atomic_json(temporary / 'manifest.json', manifest)
         (temporary / 'manifest.json').chmod(0o444)
@@ -230,4 +250,5 @@ def save_source_snapshot_binding(snapshot: SourceSnapshot, run_root: Path, initi
         'files': snapshot.manifest['files'], 'excluded': snapshot.manifest['excluded'],
         'source_head_commit': snapshot.manifest['source_head_commit'],
         'source_index_sha256': snapshot.manifest['source_index_sha256'],
+        'source_index_entries_sha256': snapshot.manifest.get('source_index_entries_sha256'),
         'source_worktree_dirty': True, 'snapshot_is_agent_code_change': False, 'source_modified': False})

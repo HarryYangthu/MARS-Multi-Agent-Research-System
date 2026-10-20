@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from app.bridge.managed_review import parse_decision, review_once, review_state, revision_count, record_state, finish_review
+from app.bridge.managed_review import review_evidence_aliases
 from app.bridge.orchestrator import Orchestrator, RunRequest, RunSession
 from app.bridge.workflow_service import build_standalone
 from app.bridge.commander_session import CommanderSessionStore, ChatMessage
@@ -63,6 +64,26 @@ from app.storage.run_state_store import RunStateStore
 def test_review_parser_requires_bound_evidence() -> None:
     decision = parse_decision('{"decision":"approve","reason":"Checked the supplied document","evidence_refs":["candidate.md"]}', ["candidate.md"])
     assert decision.decision == "approve"
+
+
+def test_review_can_cite_original_names_of_actual_frozen_project_documents() -> None:
+    refs = ['coding/code_spec.v1.md', 'input/folder_context.v1.json']
+    payload = {'evidence_refs': refs, 'project_context': {'files': [
+        {'path': 'AGENTS.md', 'content': 'Actual supplied project rules'},
+        {'path': 'README.md', 'content': 'Actual supplied background'},
+        {'path': 'unread.md', 'content': ''}]}}
+    aliases = review_evidence_aliases(payload)
+    parsed = parse_decision(json.dumps({'decision': 'approve', 'reason': 'Reviewed supplied material',
+        'evidence_refs': ['`./coding/code_spec.v1.md#frontmatter`', 'AGENTS.md', 'README.md']}), refs, aliases)
+    assert parsed.evidence_refs == refs
+    assert 'unread.md' not in aliases
+    with pytest.raises(ValueError):
+        parse_decision('{"decision":"approve","reason":"Unchecked","evidence_refs":["unread.md"]}', refs, aliases)
+
+
+def test_review_does_not_promote_unbound_project_content_to_evidence() -> None:
+    assert review_evidence_aliases({'evidence_refs': ['candidate.md'],
+        'project_context': {'files': [{'path': 'other.md', 'content': 'unbound'}]}}) == {}
 
 
 @pytest.mark.parametrize("text", [

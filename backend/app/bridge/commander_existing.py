@@ -410,6 +410,77 @@ def _budget_count(raw: str) -> int | None:
     return total + section + number
 
 
+class ExistingIntentValidationError(ValueError):
+    """A deterministic admission result; another identical model call cannot fix it."""
+
+    def __init__(
+        self, code: str, message: str, *, requires_user_input: bool = True,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = False
+        self.requires_user_input = requires_user_input
+        self.details = details or {}
+
+    def structured_fields(self) -> dict[str, Any]:
+        return {"error_code": self.code, "retryable": self.retryable,
+                "requires_user_input": self.requires_user_input, "details": self.details}
+
+
+def _intent_prefix(text: str, start: int) -> str:
+    """Keep nearby clause scope, so 'not X, but Y' cannot negate Y."""
+    prefix = re.split(r"[，,。;；!?！？\n（）()]", text[:start])[-1]
+    # A contrast ends a preceding negation even without punctuation.
+    return re.split(r"而是|而要|但(?:是)?|\bbut\b", prefix, flags=re.IGNORECASE)[-1][-80:]
+
+
+def _negated_intent(text: str, start: int, end: int) -> bool:
+    prefix = _intent_prefix(text, start)
+    negative = re.search(
+        r"(?:不是|并非|而非|不要|不用|无需|不需要|不跑|不训练|(?<![分特个类识辨区])别|不应|不应该|禁止)"
+        r"\s*(?:(?:只|仅|再|只要|把|将|设为|设置为|改成|改为|运行|训练|跑|执行)\s*)*$|"
+        r"\b(?:not|never|rather\s+than|instead\s+of|do\s+not|don't)\s*"
+        r"(?:(?:just|only|run|train|use|set|to|exactly)\s+)*$",
+        prefix, re.IGNORECASE,
+    )
+    # An explicit postfix rejection is also evidence, not an alternative budget.
+    suffix = text[end:]
+    rejected = re.match(r"\s*(?:不对|不正确|作废|不要|不用|取消|是错的|不算|is\s+wrong\b)",
+                        suffix, re.IGNORECASE)
+    return negative is not None or rejected is not None
+
+
+def _corrects_previous_intent(text: str, start: int) -> bool:
+    prefix = _intent_prefix(text, start)
+    # Keep these explicit. A later mention alone must not resolve '2 or 3 epochs'.
+    return re.search(
+        r"(?:改成|改为|改跑|改用|改回|换成|更正为|纠正为|调整为|实际(?:是|要|跑)|而是)"
+        r"\s*(?:(?:只|仅|再|训练|运行|跑|执行)\s*)*$|"
+        r"\b(?:actually|instead|change\s+to|correct\s+to)\s*"
+        r"(?:(?:run|train|use|to|exactly)\s+)*$",
+        prefix, re.IGNORECASE,
+    ) is not None or re.search(r"(?:而是|而要)\s*(?:训练|运行|跑|run|train|use)?\s*$",
+                              text[:start], re.IGNORECASE) is not None
+
+
+def _budget_mentions(text: str) -> list[tuple[int, int, str, int]]:
+    number = r"(?<![\d.\-零〇一二两三四五六七八九十百千万负])([\d零〇一二两三四五六七八九十百千万]+)"
+    found: set[tuple[int, int, str, int]] = set()
+    for unit, patterns in (
+        ("steps", (number + r"\s*(?:步|(?:次|个)?\s*(?:优化器\s*)?(?:更新|steps?(?![A-Za-z])|optimizer\s+updates?))",
+                   r"(?:max[_-]steps)\s*[:=：]\s*(\d+)(?![\d.])")),
+        ("epochs", (number + r"\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|轮(?:训练)?)",
+                    r"\bepochs?\s*[:=：]\s*(\d+)(?![\d.])")),
+    ):
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                count = _budget_count(match.group(1))
+                if count is not None:
+                    found.add((match.start(), match.end(), unit, count))
+    return sorted(found)
+
+
 def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str]) -> None:
     """Validate extracted values against actual user text, not a rewritten goal.
 
@@ -417,47 +488,86 @@ def validate_existing_user_intent(resolved: dict[str, Any], user_texts: list[str
     router. An unlabelled repetition count never becomes an optimizer budget.
     """
     budgets: set[tuple[str, int]] = set()
+    excluded_budgets: set[tuple[str, int]] = set()
     seeds: set[int] = set()
-    number = r"(?<![\d.\-零〇一二两三四五六七八九十百千万负])([\d零〇一二两三四五六七八九十百千万]+)"
+    excluded_seeds: set[int] = set()
     for text in user_texts:
         current_budgets: set[tuple[str, int]] = set()
-        for unit, patterns in (
-            ("steps", (number + r"\s*(?:步|(?:次|个)?\s*(?:优化器\s*)?(?:更新|steps?(?![A-Za-z])|optimizer\s+updates?))",
-                       r"(?:max[_-]steps)\s*[:=：]\s*(\d+)(?![\d.])")),
-            ("epochs", (number + r"\s*(?:个\s*)?(?:完整\s*)?(?:epochs?(?![A-Za-z])|轮(?:训练)?)",
-                        r"\bepochs?\s*[:=：]\s*(\d+)(?![\d.])")),
-        ):
-            for pattern in patterns:
-                for match in re.finditer(pattern, text, re.IGNORECASE):
-                    count = _budget_count(match.group(1))
-                    if count is not None:
-                        current_budgets.add((unit, count))
+        rejected_end: int | None = None
+        for start, end, unit, count in _budget_mentions(text):
+            mention = (unit, count)
+            rejected_alternative = rejected_end is not None and re.fullmatch(
+                r"\s*(?:或|和|以及|or|and)\s*", text[rejected_end:start], re.IGNORECASE) is not None
+            if _negated_intent(text, start, end) or rejected_alternative:
+                excluded_budgets.add(mention)
+                current_budgets.discard(mention)
+                budgets.discard(mention)
+                rejected_end = end
+                continue
+            rejected_end = None
+            if _corrects_previous_intent(text, start):
+                current_budgets.clear()
+            current_budgets.add(mention)
+            excluded_budgets.discard(mention)
         if current_budgets:
             budgets = current_budgets
-        current_seeds = {int(match.group(1)) for match in re.finditer(
-            r"(?:\bseed|种子)(?:设为|为)?\s*[:=：]?\s*(\d+)(?![\d.])", text, re.IGNORECASE)}
+        current_seeds: set[int] = set()
+        for match in re.finditer(
+            r"(?:(?<![A-Za-z0-9_])seed|种子)(?:设为|为)?\s*[:=：]?\s*(\d+)(?![\d.])", text, re.IGNORECASE,
+        ):
+            seed = int(match.group(1))
+            if _negated_intent(text, match.start(), match.end()):
+                excluded_seeds.add(seed)
+                current_seeds.discard(seed)
+                seeds.discard(seed)
+                continue
+            if _corrects_previous_intent(text, match.start()):
+                current_seeds.clear()
+            current_seeds.add(seed)
+            excluded_seeds.discard(seed)
         if current_seeds:
             seeds = current_seeds
     requested = resolved["requested"]
     selected = (requested["budget_unit"], requested["max_iters"])
+    budget_details = {"budgets": [{"budget_unit": unit, "max_iters": count}
+                                   for unit, count in sorted(budgets)]}
     if budgets:
+        if any(count < 1 for _, count in budgets):
+            raise ExistingIntentValidationError("budget_invalid",
+                "训练预算必须是正整数；请确认本次训练数量。", details=budget_details)
+        if len(budgets) > 1:
+            raise ExistingIntentValidationError("budget_conflict",
+                "当前用户消息包含多个训练预算；请明确本次训练数量与steps/epochs单位。", details=budget_details)
         if budgets != {selected}:
-            raise ValueError("提取的训练数量或steps/epochs单位与当前用户消息不一致；请明确本次预算。")
+            raise ExistingIntentValidationError("budget_mismatch",
+                "提取的训练数量或steps/epochs单位与当前用户消息不一致；应按用户明确预算执行。",
+                requires_user_input=False, details={**budget_details, "expected_budget": budget_details["budgets"][0]})
     else:
         default = resolved["default_budget"]
+        if selected in excluded_budgets:
+            raise ExistingIntentValidationError("budget_rejected",
+                "用户已明确否定这个训练预算；请确认要执行的预算，不能回退使用被否定的配置值。")
         if (default.get("budget_unit"), default.get("max_iters")) != selected:
-            raise ValueError("当前用户消息没有明确训练预算，配置也没有相同的显式预算；不能借用历史run预算。")
+            raise ExistingIntentValidationError("budget_missing",
+                "当前用户消息没有明确训练预算，配置也没有相同的显式预算；不能借用历史run预算。")
     if seeds:
         if seeds != {requested["seed"]}:
-            raise ValueError("提取的seed与当前用户消息不一致。")
+            raise ExistingIntentValidationError("seed_conflict" if len(seeds) > 1 else "seed_mismatch",
+                "提取的seed与当前用户消息不一致。", requires_user_input=len(seeds) > 1,
+                details={"seeds": sorted(seeds), **({"expected_seed": next(iter(seeds))} if len(seeds) == 1 else {})})
+    elif requested["seed"] in excluded_seeds:
+        raise ExistingIntentValidationError("seed_rejected",
+            "用户已明确否定这个seed；请确认本次种子，不能回退使用被否定的配置值。")
     elif resolved["default_seed"] is None and requested["seed"] is None:
         if not resolved.get("seed_generation_required") and not resolved.get("ordinary_coding"):
-            raise ValueError("当前配置没有可确认种子，必须保留普通Coding或明确登记新任务种子策略。")
+            raise ExistingIntentValidationError("seed_missing",
+                "当前配置没有可确认种子，必须保留普通Coding或明确登记新任务种子策略。")
     elif (resolved["default_seed"] is None and resolved.get("seed_source") == "generated_for_run"
           and type(requested["seed"]) is int and 0 <= requested["seed"] <= 0xFFFFFFFF):
         pass  # Generated only by the new-task boundary, never by model extraction.
     elif requested["seed"] != resolved["default_seed"] or type(resolved["default_seed"]) is not int:
-        raise ValueError("当前用户消息没有指定该seed，不能覆盖实际配置中的种子。")
+        raise ExistingIntentValidationError("seed_unconfirmed",
+            "当前用户消息没有指定该seed，不能覆盖实际配置中的种子。")
 
 
 def user_requests_additional_changes(user_texts: list[str]) -> bool:
@@ -467,16 +577,26 @@ def user_requests_additional_changes(user_texts: list[str]) -> bool:
     change instruction from disappearing when a model only extracts a budget.
     """
     subjects = r"(?:模型|代码|结构|层|抽头|参数|配置|学习率|优化器|损失|调度|LUT|kernel|learning.rate|optimizer|loss)"
+    changes = r"(?:新增|增加|减少|替换|删除|改动|修改|调整|提高|降低|改为|改变|减半|翻倍|加倍|增大|缩小)"
     assignments = (r"(?<![A-Za-z0-9_])(?:lr_init|learning_rate|batch_size|optimizer|loss(?:\.type)?|"
                    r"outer_kernel|inner_kernel|mix_kernel|memory_kernel|kernel_size|dilation|groups|"
                    r"lut_n_spline|lut_rmax|lut_init|reg_coeff|weight_decay|step_size|if_scheduler)\s*[:=]")
     for raw in user_texts:
-        if re.search(assignments, raw, re.IGNORECASE):
+        # Negation scopes over an action clause, including its object and
+        # assignments. Remove it before detecting either Chinese or English
+        # changes; "不要增加模型代码" must not request a new Coding task.
+        clauses = re.split(r"[，,。；;\n]|但是|但|不过|而是|\bbut\b|\bhowever\b", raw, flags=re.IGNORECASE)
+        positive = []
+        for clause in clauses:
+            negative = re.search(r"(?:不要|不必|无需|不用|禁止|别|不)(?:再)?(?!只)(?:" + changes + r"|改)|"
+                r"\b(?:do\s+not|don't|no\s+need\s+to|without)\s+(?:change|modify|replace|add|remove|halve|double|increase|decrease)\b", clause, re.IGNORECASE)
+            positive.append(clause[:negative.start()] if negative else clause)
+        text = '，'.join(positive)
+        if re.search(assignments, text, re.IGNORECASE):
             return True
-        text = re.sub(r"(?:不|不要|无需|禁止)(?:再)?(?:修改|改动|调整|改|改变)" + subjects, "", raw, flags=re.IGNORECASE)
-        if (re.search(r"(?:新增|增加|减少|替换|删除|改动|修改|调整|提高|降低|改为|改变).{0,18}" + subjects, text, re.IGNORECASE)
-                or re.search(subjects + r".{0,18}(?:新增|增加|减少|替换|删除|改动|修改|调整|提高|降低|改为|改变)", text, re.IGNORECASE)
-                or re.search(r"\b(?:change|modify|replace|add|remove)\b.{0,30}(?:model|layer|kernel|optimizer|loss|learning.rate)", text, re.IGNORECASE)):
+        if (re.search(changes + r".{0,18}" + subjects, text, re.IGNORECASE)
+                or re.search(subjects + r".{0,18}" + changes, text, re.IGNORECASE)
+                or re.search(r"\b(?:change|modify|replace|add|remove|halve|double|increase|decrease)\b.{0,30}(?:model|layer|kernel|optimizer|loss|learning.rate)", text, re.IGNORECASE)):
             return True
     return False
 

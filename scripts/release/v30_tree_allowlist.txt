@@ -841,3 +841,14 @@ docs/glm-gateway-compatibility.md
 configs/model_runtime_profiles.yaml
 deploy/windows-native/configure_slow_model.py
 docs/slow-intranet-model.md
+backend/app/bridge/commander_journal.py
+backend/app/bridge/commander_recovery.py
+backend/app/bridge/run_model_recovery.py
+backend/app/bridge/global_model_profiles.py
+backend/app/api/global_model_profiles.py
+backend/app/bridge/prompts/commander_runtime.md
+backend/app/bridge/prompts/commander_runtime.json
+deploy/windows-native/model_runtime_profiles.defaults.yaml
+frontend/src/components/ConversationModelPicker.tsx
+docs/intranet-core-update-20261021.md
+backend/app/harness/agent_loop/interrupted_model_resume.py

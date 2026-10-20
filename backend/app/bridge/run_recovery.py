@@ -87,6 +87,10 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     elapsed_exhausted = False
     if ledger.exists():
         try:
+            from app.bridge.run_model_recovery import recover_interrupted_run_model_requests
+            model_recovery = recover_interrupted_run_model_requests(session.run)
+            if model_recovery["status"] == "blocked":
+                return finish('blocked', str(model_recovery["message"]))
             model_budget = RunModelBudget(session.run.root, active_model_time=True)
             raw = model_budget.recovery_snapshot()
         except (ResourceBudgetError, OSError, ValueError):
