@@ -1,303 +1,43 @@
-# MARS - Multi-Agent Research System
+# Windows 离线包
 
-**Windows 原生 CPU 一键运行：** 双击根目录 `MARS-Windows.cmd`，首次自动安装依赖并引导配置本机 API，然后启动前后端。详见 [Windows 原生使用说明](deploy/windows-native/README.md)。
+适用 Windows 10/11 x64。软件依赖已包含在包里，首次安装和以后启动都不需要访问 GitHub、PyPI、npm 或其他外部安装源。模型调用使用你配置的公司模型 API。
 
-![version](https://img.shields.io/badge/release-Mars_V2.0-coral)
-![python](https://img.shields.io/badge/python-3.11%2B-blue)
-![next](https://img.shields.io/badge/next.js-15-black)
-![license](https://img.shields.io/badge/license-MIT-lightgrey)
+1. 把完整 ZIP 复制到公司电脑。若可信 ZIP 的文件属性显示“解除锁定”，先解除锁定，再解压到短路径，例如 `D:\MARS-Product`。不要直接从压缩包窗口运行。
+2. 双击 `MARS-Windows.cmd`。首次自动校验依赖，安装独立运行环境并构建前端。
+3. 首次按向导配置模型地址、模型名称和 Key。公司网关选择自定义 OpenAI 兼容服务。
+4. 安装、后端健康和前后端代理检查通过后，自动打开 `http://127.0.0.1:3001/`。
 
-> MARS is a research-grade multi-agent workbench that turns a research
-> question into auditable proposals, experiment plans, code specs, execution
-> logs, reports, memory, and evaluation records.
+以后双击同一个入口直接启动。停止用 `stop-mars-windows-native.cmd`，重新配置 API 用 `configure-mars-api.cmd`，其他管理选项用 `manage-mars-windows.cmd`。
 
-[简体中文](README.zh-CN.md) · English · [Architecture](docs/architecture.md) · [Evaluation](docs/evaluation_system.md) · [Memory](docs/memory_system.md)
+包内有 Windows 专用 Python 3.11.14、Node.js、MinGit、uv、Microsoft C++ 运行库、PyTorch CPU、SciPy、Matplotlib、TensorBoard、前后端全部锁定依赖和 ZCode 3.14.5 命令运行时。默认继续使用 ZCode，不需要安装完整 ZCode 桌面客户端。
 
-**Local research CLI:** [Run a bounded PIMC research loop](docs/cli-research.md) with `mars doctor`, `mars research`, `mars status`, and `mars resume`. Uses real models and an external static checkout; no frontend is required. A real capture is required for experimental acceptance.
+若系统缺少 C++ 运行库，首次可能需要管理员安装权限，安装器要求重启时按提示重启后再次双击。组织的脚本/软件策略仍生效，入口不绕过策略，也不修改系统执行策略。
 
-**ZCode coding engine:** [Installation, governed code tools, review and recovery](docs/zcode-integration.md). Select the engine in MARS Settings; model configuration and coding review stay in MARS.
+完整包的依赖集中保存在 `dependencies/`：`offline/` 是经过校验的安装缓存，
+`windows/` 是工具、Python 环境与安装记录，`frontend/node_modules/` 是前端依赖。
+日志、服务记录、API 配置记录保存在 `local/windows/`。不依赖目标机器已有的 Python、
+Node 或 Git。不要单独搬运安装后的虚拟环境；需要换目录时重新解压整包并双击，环境会在新位置重新生成。
 
-<p align="center">
-  <img src="docs/assets/readme/mars-hero.png" alt="MARS Mars planet hero" width="100%" />
-</p>
+不要删除 `WINDOWS-OFFLINE.json` 或 `dependencies/`。旧包的 `offline/` 和
+`local/windows/` 也仍可识别。缺文件或校验失败时入口明确停止，绝不会自动转向外网下载。
+`install-mars-windows.cmd` 可离线重建环境；重建不会删除已有研究结果。
 
-## Why MARS
+## 后续只传核心更新
 
-Research automation fails when it becomes a one-shot chat transcript. MARS is
-designed as a substrate for repeatable research work:
+完整依赖只需准备一次。以后双击 **`Update-MARS.cmd`** 只下载 GitHub 官方
+`windows-core` 分支的核心 ZIP。公司电脑不能访问 GitHub 时，在可联网电脑下载核心
+ZIP，复制到公司电脑后拖到 `Update-MARS.cmd`；也可拖入含 `CORE-UPDATE.json` 的目录。
+这种方式的更新、依赖检查、前端重新构建和启动均使用已有离线依赖，不访问外部安装源。
 
-- five specialized agents instead of one generic assistant
-- strict artifact schemas instead of loose prose
-- human review and approval at each step
-- project-level baseline protection before code changes land
-- run sedimentation so every decision can be inspected, replayed, and evaluated
-- memory and evaluation loops that improve future runs without hiding evidence
+更新只替换清单里的核心文件，保留 `dependencies/`、本机配置、Key、项目、数据、任务
+和结果。依赖指纹来自后端锁文件、前端锁文件及 Windows 工具版本/校验和，改端口或 API
+不会触发重装。核心变更需要时只重建前端，依赖不变时不执行 `npm ci` 或重建虚拟环境。
 
-The first concrete project is `projects/pimc/`: PIMC for FDD Massive MIMO under
-beam/layer switching.
+更新前会先检查兼容性，再正常停止本目录服务。实际导入、构建或启动失败会恢复旧核心；
+中断后再次运行入口会先恢复未完成事务。备份与收据在 `local/core-updates/`，不要删除。
+若新核心要求不同依赖锁，入口明确拒绝，需要获取新的完整离线包；不能忽略拒绝或删除
+安装记录强行更新。更新前请先结束或暂停研究。
 
-## Visual Tour
+源码包不包含用户 API 密钥、真实研究代码、数据、基线权重或旧任务。启动后接入 Windows 上的项目和数据；Mac 的绝对路径不能直接迁移。任意外部研究仓额外要求的库不等于 MARS 自身的运行依赖，需要按那个项目的实际要求准备。
 
-### Workbench
-
-The main workbench keeps project state, data preparation, run history, agent
-state, execution artifacts, and HITL controls in one operator-focused screen.
-
-<p align="center">
-  <img src="docs/assets/readme/mars-workbench-full.png" alt="MARS workbench full interface screenshot" width="100%" />
-</p>
-
-### Evaluation And Memory
-
-MARS V2 adds a first-class evaluation harness and memory layer. Evaluation
-suites can replay stored runs, grade artifacts, export calibration data, and
-feed self-evolution records back into the knowledge system.
-
-<p align="center">
-  <img src="docs/mars_evaluation_harness_overview.svg" alt="MARS evaluation harness overview" width="48%" />
-  <img src="docs/mars_memory_system_overview.svg" alt="MARS memory system overview" width="48%" />
-</p>
-
-<p align="center">
-  <img src="docs/mars_evaluation_self_evolution_loop.svg" alt="MARS self evolution loop" width="48%" />
-  <img src="docs/mars_memory_development_roadmap.svg" alt="MARS memory roadmap" width="48%" />
-</p>
-
-## Components
-
-The repository includes the native agent loop, workbench, evaluation, memory,
-data preparation, and local research CLI. Active research paths require real
-providers and execution evidence.
-
-| Area | What it does |
-|---|---|
-| Agent pipeline | Idea, Experiment, Coding, Execution, and Writing agents produce schema-validated artifacts. |
-| Bridge runtime | Product calls go through `backend/app/bridge/`, with topology assembled outside `harness/runtime`. |
-| HITL | Agent outputs can be reviewed, edited, approved, or rejected before downstream agents continue. |
-| Gates | System gates protect workflow quality; Gate 5 protects baseline-sensitive project surfaces from unsafe tool dispatch. |
-| Data preparation | Users can upload/select datasets, inspect metadata, and carry selected data into run context. |
-| Evaluation harness | Replay/live-smoke suites, calibration export, score aggregation, and suite reports. |
-| Memory system | Episode, semantic, importance, usage, conflict, injection, and selector-policy helpers. |
-| Knowledge base | Four zones: literature, methodology, code assets, and run archive. |
-| Post-training boundary | V0 loads post-trained models; training pipelines remain V2+ scope. |
-
-## Agent Flow
-
-```mermaid
-flowchart LR
-  U["Researcher"] --> B["Bridge / Orchestrator"]
-  B --> I["Idea Agent<br/>proposal.v1"]
-  I --> H1["HITL Review"]
-  H1 --> E["Experiment Agent<br/>experiment_plan.v1"]
-  E --> H2["HITL Review"]
-  H2 --> C["Coding Agent<br/>code_spec.v1"]
-  C --> G5["Gate 5<br/>baseline compatibility"]
-  G5 --> X["Execution Agent<br/>run_log.v1"]
-  X --> W["Writing Agent<br/>report.v1"]
-  W --> R["Report bundle + run sedimentation"]
-  R --> EV["Evaluation + memory feedback"]
-```
-
-Every artifact is Markdown body plus YAML frontmatter. The frontmatter must pass
-its JSON Schema before downstream systems treat it as valid.
-
-## Architecture
-
-```text
-frontend -> api -> bridge -> agents
-bridge / agents -> harness
-harness/runtime does not depend on bridge or agents
-```
-
-The important boundary is that `harness/` is agent-agnostic. It owns runtime
-mechanics, schemas, context loading, LLM adapters, KB access, gates, tools,
-evaluation, memory, and sedimentation. Product orchestration lives in
-`bridge/`.
-
-```text
-backend/app/
-  api/          FastAPI routes and WebSocket entrypoints
-  bridge/       product orchestration, commander, agent registry
-  agents/       Idea, Experiment, Coding, Execution, Writing
-  harness/      runtime, schema, context, llm, kb, gates, tools, eval, memory
-  hitl/         review, approval, audit helpers
-  execution/    simulation and paper-static adapters
-  storage/      run, artifact, context, data-source, self-evolution stores
-```
-
-## Quickstart
-
-Research agents require configured real model credentials. Missing credentials,
-data, or execution dependencies fail explicitly. Local static PIMC experiments
-can use CPU; see the [CLI instructions](docs/cli-research.md).
-
-### Windows one-click (V3.1 CPU)
-
-On Windows 10/11 x64, install Docker Desktop with WSL2/Linux containers, place
-`mars_v2` and the private `mars_v31_wireless` overlay beside each other, then
-double-click `start-mars-windows.cmd`. It builds the CPU image, checks both
-services and run readiness, and opens `http://127.0.0.1:3001/`. The online,
-offline, strict production (including offline), status, and stop paths are documented in
-[`deploy/windows/README.md`](deploy/windows/README.md).
-
-Script checks and Linux-container tests do not establish Windows-host acceptance.
-Validate deployment on the target Windows host.
-
-Native Windows Python and Windows containers are intentionally unsupported;
-the one-click package keeps Unix permissions, processes, and research
-workspaces inside Linux containers.
-
-### Local Python
-
-```bash
-git clone git@github.com:HarryYangthu/MARS-Multi-Agent-Research-System.git mars
-cd mars
-cp .env.example .env
-
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-PYTHONPATH=backend .venv/bin/python -m uvicorn app.main:app \
-  --host 127.0.0.1 --port 8010
-```
-
-In another shell:
-
-```bash
-cd frontend
-npm install --legacy-peer-deps
-NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8010 \
-NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8010 \
-npm run dev -- -p 3001
-```
-
-Open `http://127.0.0.1:3001`. Local defaults are shared in `configs/local_runtime.yaml`. Override `BACKEND_PORT` / `FRONTEND_PORT` when starting `scripts/dev.sh`; the API proxy follows the backend port.
-
-## Useful Commands
-
-```bash
-# backend unit tests
-PYTHONPATH=backend:posttrain/src uv run pytest backend/tests/unit -q
-
-# focused V2 evaluation / memory tests
-PYTHONPATH=backend:posttrain/src uv run pytest \
-  backend/tests/unit/test_evaluation_calibration.py \
-  backend/tests/unit/test_evaluation_suite_report.py \
-  backend/tests/unit/test_memory_system_complete.py \
-  backend/tests/unit/test_run_evaluation_replay.py -q
-
-# type/import checks
-PYTHONPATH=backend:posttrain/src uv run mypy --strict backend/
-PYTHONPATH=backend:posttrain/src uv run lint-imports
-
-# frontend typecheck
-cd frontend && npm run typecheck
-
-# run evaluation suites
-python scripts/run_evaluation_suite.py --suite configs/evaluation_suites/mars_run_replay_v0.yaml
-python scripts/run_evaluation_suite.py --suite configs/evaluation_suites/mars_live_smoke_v0.yaml
-```
-
-## Working With Real Models
-
-Put provider credentials in `.env` or `.env.local`. Do not commit real keys.
-
-```bash
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-QWEN_API_KEY=
-GEMINI_API_KEY=
-```
-
-Each agent has its own model config in `configs/agents.yaml`. The frontend
-config workbench can update model routing while keeping secrets in ignored
-local env files.
-
-## Working With Real Research Code
-
-Do not copy real research repositories into this repo. Link them through
-`projects/<name>/repo_link.yaml`:
-
-```bash
-ln -s /path/to/your/research/code workspace/repos/pimc-current
-python scripts/ingest_repo.py --project pimc
-```
-
-Reference papers and uploaded datasets stay under ignored workspace folders:
-
-```text
-workspace/uploads/
-workspace/repos/
-knowledge/
-runs/
-```
-
-Folder projects support simultaneous research runs against one baseline. Each
-run gets an independent local Git clone under the project's `code/` folder and
-its own persistent `mars/<run>-<id>` branch. Coding, review, code browsing and
-execution use that run's checkout; the baseline checkout never switches.
-Retries reuse the same branch and commits. Verified coding writes are committed
-automatically, including on interruption; unrelated edits are preserved and
-never included. Automatic saving does not approve execution or merge a candidate
-into the baseline. Legacy branches migrate with their exact saved commit and
-backups of their bindings. Only the same run's workspace is locked.
-
-Host `local_command` registrations should use `MARS_CODE_ROOT` or `{code_root}`
-for code entrypoints. Direct absolute file arguments under the configured
-baseline are routed to the run's checkout. Inline commands containing a shared
-baseline path are rejected to prevent executing a different run's code. Job
-requests record the actual checkout and commit. Data stays in the project data
-folder and execution artifacts stay under the corresponding run; code isolation
-does not override CPU/GPU resource limits.
-
-## Repository Layout
-
-```text
-mars/
-  AGENTS.md / CLAUDE.md / README.md
-  configs/                 agents, tools, gates, knowledge, context, eval suites
-  backend/app/
-    api/                   REST and WebSocket routes
-    bridge/                orchestrator, commander, registry, workflow service
-    agents/                five concrete agents and debate helpers
-    harness/               agent-agnostic runtime, schemas, memory, eval, tools
-    hitl/                  review and approval flows
-    execution/             simulation runners and static-paper adapters
-    storage/               local stores for runs, artifacts, data, evolution
-  frontend/                Next.js workbench
-  projects/pimc/           project metadata, AGENTS.md, data_gen.py
-  docs/                    architecture, evaluation, memory, CLI research
-  scripts/                 demos, ingestion, evaluation, acceptance helpers
-  templates/               artifact templates and code rules
-```
-
-## Documentation Map
-
-- [Current core implementation](docs/core-code-map.md)
-- [`AGENTS.md`](AGENTS.md) - hard project constraints for coding agents
-- [`docs/architecture.md`](docs/architecture.md) - architecture notes and diagrams
-- [`docs/evaluation_system.md`](docs/evaluation_system.md) - evaluation harness design
-- [`docs/memory_system.md`](docs/memory_system.md) - memory system design
-- [`docs/tools_catalog.md`](docs/tools_catalog.md) - tools, audit, and registry behavior
-- [`docs/tool_security.md`](docs/tool_security.md) - Gate 5, rollback, and network policy
-- [`docs/deployment_runbook.md`](docs/deployment_runbook.md) - production deployment notes
-
-## License
-
-MIT - see [LICENSE](LICENSE).
-
-## Citation
-
-If you use MARS in academic work, cite this repository:
-
-```bibtex
-@software{mars_multi_agent_research_system,
-  title = {MARS: Multi-Agent Research System},
-  author = {Harry Yang},
-  year = {2026},
-  url = {https://github.com/HarryYangthu/MARS-Multi-Agent-Research-System}
-}
-```
+构建来源：Python 来自 Astral 的 Windows 独立发行，Node/Git/uv 来自官方发行，Python 库使用 Windows wheel，前端缓存按锁文件校验，ZCode 命令运行时来自官方 Windows 发行。包内 SHA256 清单校验文件完整性，不替代软件签名或公司软件准入。

@@ -1,70 +1,42 @@
-# Execution / simulation scheduling for the dual-carrier PIM cancellation sweep.
-# Explicit backend selection; no generated metrics when dependencies are missing.
 execution:
-  # Mirrored runtime default. MARS_EXECUTION_DEVICE is the authoritative switch:
-  # cpu -> local ProcessAdapter; gpu -> fail-closed remote_gpu over SSH.
   device: cpu
   backend: local_command
-  max_concurrency: 16          # run all 16 ablation cells concurrently (asyncio semaphore)
-  batch_steps: 120             # gradient-descent steps per cell (curve resolution + convergence)
+  max_concurrency: 16
+  batch_steps: 120
   command_timeout_seconds: 60
-  # Each real command stream keeps this disk prefix and this memory tail.
-  # Receipts explicitly mark truncated logs and interrupted captures.
-  # Log cap: 1024-16777216 bytes; tail: 1-65536 bytes, no larger than log cap.
   command_log_max_bytes: 1048576
   command_output_tail_bytes: 8192
   allow_real_patch_apply: true
   paper_static:
-    # Project-specific execution is opt-in. Each installation supplies its own
-    # interpreter, code and data; a developer's paths are never product defaults.
     enabled: false
     python: python
-    repo_path: ""
+    repo_path: ''
     config_path: configs/static.yaml
-    data_path: ""
-    # Minimum real-metric smoke: loads the 333MB capture, trains one epoch, writes
-    # summary.json, and maps paper_APE_db to MARS-compatible loss/RES. Increase
-    # max_iters or set dry_run=false in experiment config for longer training.
+    data_path: ''
     default_dry_run: false
     default_max_iters: 1
     batch_experiments: 1
     max_concurrency: 1
     timeout_seconds: 900
     allowed_overrides:
-      - Etotal
-      - Epoch
-      - epoch
-      - lr_init
-      - if_scheduler
-      - step_size
-      - model.lut_n_spline
-      - model.lut_rmax
-      - model.lut_init
-  # Configure explicit real commands for local execution. No canned metrics.
+    - Etotal
+    - Epoch
+    - epoch
+    - lr_init
+    - if_scheduler
+    - step_size
+    - model.lut_n_spline
+    - model.lut_rmax
+    - model.lut_init
   local_commands: []
-  # Commands are explicitly selected by execution_jobs.config.command_id.
-  # Optional host capability restrictions: project_ids, entrypoints, config_paths.
-  # consumes_data_path: true declares consumption of the host-resolved
-  # request.config.data_path / MARS_DATA_PATH; files stay in the bound project.
-  # Optional genuine no-training preflight (same argv unless validation.argv is
-  # explicitly host-configured and command-allowlisted):
-  # validation:
-  #   environment: {MARS_VALIDATE_ONLY: '1'}
-  #   timeout_seconds: 30
-  #   max_output_bytes: 1048576
-  #   max_input_bytes: 1073741824
-  # It writes local_command_validation.v1 to MARS_RESULT_PATH. Legacy commands
-  # without validation remain available, but are described as unverified.
   remote_gpu:
     enabled: false
-    endpoint: ""               # Deprecated V2 status field; remote_job.v1 uses system OpenSSH.
-    transport: system_ssh     # Explicit legacy default; choose asyncssh for pinned password/key authentication.
+    endpoint: ''
+    transport: system_ssh
     auth_method: key
     max_output_bytes: 1048576
     protocol: remote_job.v1
     runner: app.execution.remote.runner
-    # Connection values are resolved from environment variables. The YAML only
-    # stores their names so credentials and machine-specific paths never land in git.
     env:
       enabled: MARS_REMOTE_ENABLED
       transport: MARS_REMOTE_SSH_TRANSPORT
@@ -82,17 +54,25 @@ execution:
     command_timeout_seconds: 60
     transfer_timeout_seconds: 900
     heartbeat_stale_seconds: 600
-
 code_checks:
   lint:
     enabled: true
     commands:
-      - id: python_compile
-        label: Python compile check
-        argv: ["python", "-m", "compileall", "-q", "."]
+    - id: python_compile
+      label: Python compile check
+      argv:
+      - python
+      - -m
+      - compileall
+      - -q
+      - .
   test:
     enabled: true
     commands:
-      - id: pytest_quick
-        label: Pytest quick suite
-        argv: ["python", "-m", "pytest", "-q"]
+    - id: pytest_quick
+      label: Pytest quick suite
+      argv:
+      - python
+      - -m
+      - pytest
+      - -q
