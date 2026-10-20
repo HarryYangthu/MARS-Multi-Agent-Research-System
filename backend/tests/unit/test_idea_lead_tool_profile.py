@@ -51,8 +51,16 @@ def selected(name: str) -> ResolvedIdeaProfile:
 
 def test_v5_only_narrows_lead_tools_and_old_catalog_bytes_stay_unchanged() -> None:
     original_bytes = (repo_root() / PROFILE_FILE).read_bytes()
-    assert hashlib.sha256(original_bytes[:8617]).hexdigest() == "0bda43490828872a3db4acdc452dc7035dd5d2cb8f1cb9439bc7f1f95f78c688"
+    memory_pair = b"        - knowledge.research_memory\n        - knowledge.research_memory_read\n"
+    assert original_bytes.count(memory_pair) == 3
     definitions = yaml.safe_load(original_bytes)["profiles"]
+    for version in (4, 5, 6):
+        tools = definitions[f"experimental_research_pro_per_insight_v{version}"]["child"]["tools"]
+        assert tools.count("knowledge.research_memory") == tools.count("knowledge.research_memory_read") == 1
+    # Only the explicitly integrated memory pair differs from the old catalog.
+    # Preserve the historical byte checksum for every other field/comment.
+    legacy_bytes = original_bytes.replace(memory_pair, b"")
+    assert hashlib.sha256(legacy_bytes[:8617]).hexdigest() == "0bda43490828872a3db4acdc452dc7035dd5d2cb8f1cb9439bc7f1f95f78c688"
     expected = deepcopy(definitions[V4])
     expected["lead"]["tools"] = list(LEAD_TOOLS)
     assert definitions[V5] == expected

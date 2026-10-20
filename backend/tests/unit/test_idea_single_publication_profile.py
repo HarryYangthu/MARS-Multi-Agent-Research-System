@@ -18,9 +18,15 @@ V6 = 'experimental_research_pro_per_insight_v6'
 
 def test_v6_adds_one_publisher_and_explicit_single_paper_units_only() -> None:
     data = (repo_root()/PROFILE_FILE).read_bytes()
-    # Entire catalog at ef709a6, before appending v6.
-    assert hashlib.sha256(data[:10992]).hexdigest() == '879798eaf46b5e1d2a67c49fedd9f2d19ee0c0c958c3f9e4f65e43b8e19bb249'
+    memory_pair = b"        - knowledge.research_memory\n        - knowledge.research_memory_read\n"
+    assert data.count(memory_pair) == 3
     profiles = yaml.safe_load(data)['profiles']
+    for version in (4, 5, 6):
+        tools = profiles[f'experimental_research_pro_per_insight_v{version}']['child']['tools']
+        assert tools.count('knowledge.research_memory') == tools.count('knowledge.research_memory_read') == 1
+    # Exact historical catalog before v6, allowing only the declared memory pair.
+    legacy_data = data.replace(memory_pair, b'')
+    assert hashlib.sha256(legacy_data[:10992]).hexdigest() == '879798eaf46b5e1d2a67c49fedd9f2d19ee0c0c958c3f9e4f65e43b8e19bb249'
     expected = deepcopy(profiles[V5])
     expected['lead']['research']['per_delegation_min_sources'] = 1
     expected['child']['tools'].append('search.neurips_search')
