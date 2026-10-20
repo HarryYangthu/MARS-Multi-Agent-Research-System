@@ -28,7 +28,7 @@ def path_lock(path: Path, *, timeout: float = -1) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     key = str(path.resolve())
     with _LOCKS_GUARD:
-        lock = _LOCKS.setdefault(key, FileLock(key))
+        lock = _LOCKS.setdefault(key, FileLock(key, preserve_lock_file=True))
     with lock.acquire(timeout=timeout):
         yield
 

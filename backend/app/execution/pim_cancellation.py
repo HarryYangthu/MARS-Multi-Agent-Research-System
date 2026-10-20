@@ -418,7 +418,7 @@ def curve_plot_values(curve: Sequence[float], *, value_scale: str = "linear_rati
         return values
     if value_scale != "linear_ratio":
         raise ValueError("unknown curve value scale")
-    return cast(NDArray[np.float64], 10.0 * np.log10(np.maximum(values, 1e-12)))
+    return np.asarray(10.0 * np.log10(np.maximum(values, 1e-12)), dtype=np.float64)
 
 
 def plot_loss_curves(

@@ -444,3 +444,19 @@ def test_corrupt_decoded_request_id_has_catalog_integrity_error(request_id: str)
     with pytest.raises(CreationCatalogIntegrityError):
         ResearchCreationStore._decode((request_id, "name", "1" * 64,
             binding_sha256("name", "1" * 64), None, "pending"))
+
+
+@pytest.mark.parametrize("phase", ["pending", "created", "unknown", "rejected"])
+def test_validated_catalog_phase_retains_exact_value(phase: str) -> None:
+    from app.storage.research_creation_store import binding_sha256
+    intent = ResearchCreationStore._decode(("phase-contract-request", "name", "1" * 64,
+        binding_sha256("name", "1" * 64), None, phase))
+    assert intent.phase == phase
+
+
+@pytest.mark.parametrize("phase", [None, "finished", 0, False])
+def test_invalid_catalog_phase_is_never_coerced_to_rejected(phase: object) -> None:
+    from app.storage.research_creation_store import binding_sha256
+    with pytest.raises(CreationCatalogIntegrityError):
+        ResearchCreationStore._decode(("phase-contract-request", "name", "1" * 64,
+            binding_sha256("name", "1" * 64), None, phase))
