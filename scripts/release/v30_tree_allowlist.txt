@@ -132,6 +132,7 @@ backend/app/bridge/commander_code.py
 backend/app/bridge/commander_existing.py
 backend/app/bridge/commander_existing_sources.py
 backend/app/bridge/conversation_edit.py
+backend/app/bridge/conversation_continue.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py
 backend/app/bridge/commander_observability.py

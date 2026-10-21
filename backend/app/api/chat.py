@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
+from app.bridge.conversation_continue import continuation_message, conversation_continuation
 from app.bridge.global_model_profiles import GlobalModelProfiles, resolve_selected_agent_config
 from app.harness.llm.model_registry import get_agent_config
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
@@ -46,6 +47,11 @@ class CreateConversationPayload(BaseModel):
 
 class MessagePayload(BaseModel):
     text: str = Field(..., min_length=1)
+
+
+class ContinueConversationPayload(BaseModel):
+    source_message_id: str = Field(min_length=1)
+    token: str = Field(min_length=1)
 
 
 class EditMessagePayload(MessagePayload):
@@ -93,6 +99,7 @@ class ConversationView(BaseModel):
     active_turn_id: str | None = None
     completion_state: dict[str, Any] = Field(default_factory=dict)
     activities: list[dict[str, Any]] = Field(default_factory=list)
+    continuation: dict[str, Any] = Field(default_factory=dict)
 
 
 def _msg_view(m: ChatMessage) -> MessageView:
@@ -125,6 +132,7 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         active_turn_id=s.active_turn_id,
         completion_state=dict(s.completion_state),
         activities=[asdict(item) for item in s.activities],
+        continuation=conversation_continuation(s),
     )
 
 
@@ -202,13 +210,31 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         if len(session.messages) == message_count:
             session.add(ChatMessage(role="user", content=payload.text))
         session.add(ChatMessage(role="assistant", content=message))
-        session.completion_state.update(status="blocked", reason=message)
+        latest_user = next(message for message in reversed(session.messages) if message.role == 'user')
+        session.completion_state.update(status="blocked", reason=message, turn_id=latest_user.id)
         raise HTTPException(status_code=409, detail={
             'code': code, 'error': message, 'message_saved': True,
         }) from exc
     finally:
         store.persist(session)
     return _conv_view(session)
+
+
+@router.post("/conversations/{conv_id}/continue", response_model=ConversationView)
+async def continue_conversation(conv_id: str, payload: ContinueConversationPayload) -> ConversationView:
+    session = get_session_store().get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    if session.processing:
+        return _conv_view(session)
+    try:
+        text = continuation_message(session, source_message_id=payload.source_message_id, token=payload.token)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail={'error': str(error), 'message_saved': False}) from error
+    # No await between checking the snapshot and entering the normal message
+    # handler. Commander claims processing before its first model await. A
+    # concurrent click observes that owner; a later click has a stale token.
+    return await post_message(conv_id, MessagePayload(text=text))
 
 
 @router.delete("/conversations/{conv_id}")

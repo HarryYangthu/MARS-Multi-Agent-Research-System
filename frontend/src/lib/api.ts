@@ -2097,6 +2097,7 @@ export type ChatMessageView = {
 };
 
 export type Conversation = {
+  continuation?: { enabled: boolean; source_message_id: string; token: string; message: string };
   selected_model_id?: string;
   processing?: boolean;
   activities?: import("./researchActivity").CommanderActivity[];
@@ -2196,6 +2197,23 @@ export async function sendChatMessage(convId: string, text: string): Promise<Con
       const payload: unknown = JSON.parse(body);
       messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
     } catch { /* Unknown delivery status requires a refresh before resending. */ }
+    throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
+  }
+  return response.json() as Promise<Conversation>;
+}
+
+export async function continueConversation(convId: string, sourceMessageId: string, token: string): Promise<Conversation> {
+  const response = await fetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/continue`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_message_id: sourceMessageId, token }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    let messageSaved = false;
+    try {
+      const payload: unknown = JSON.parse(body);
+      messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
+    } catch { /* Re-read the persisted conversation before another attempt. */ }
     throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
   }
   return response.json() as Promise<Conversation>;

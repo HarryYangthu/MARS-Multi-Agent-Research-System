@@ -9,7 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkUserFacingLanguage } from "@/lib/userFacingMarkdown";
 import { useRouter } from "next/navigation";
-import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
+import { ChatMessageFailure, continueConversation, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { activeActivityGroups, conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { toolWork } from "@/lib/workProgress";
@@ -44,6 +44,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const { text: draft, editing } = messageDraft;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [continuingAt, setContinuingAt] = useState<string | null>(null);
   const [modeSaving, setModeSaving] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const modeVersion = useRef(0);
@@ -71,7 +72,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const latestUser = [...(conversation?.messages ?? [])].reverse().find(message => message.role === "user");
   const pendingSaved = pending && pendingMessageSaved(conversation?.messages ?? [], pending);
   const activeUser = conversation?.messages.find(message => message.id === conversation.active_turn_id);
-  const commanderStartedAt = pending?.startedAt || activeUser?.timestamp || latestUser?.timestamp;
+  const commanderStartedAt = continuingAt || pending?.startedAt || activeUser?.timestamp || latestUser?.timestamp;
   const liveGroups = activeActivityGroups(groups, activity.run, processing, commanderStartedAt);
   const hasCommanderProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent === "commander"));
 
@@ -200,6 +201,36 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     } finally { sending.current = false; if (alive.current) setBusy(false); }
   }
 
+  async function continueLastRequest(): Promise<void> {
+    if (!conversation || sending.current || changingMode.current || processing || loading || modelSaving) return;
+    follow.current = true; sending.current = true; setContinuingAt(new Date().toISOString()); setBusy(true); setError("");
+    try {
+      // Refresh and bind the latest unfinished user message on the server.
+      // This also works after reload, when the local error banner is gone.
+      const current = await getConversation(conversation.conv_id);
+      validateConversationScope(current, project, experimentId, initialConversationId);
+      if (initialRunId && current.linked_run_id !== initialRunId) throw new Error("对话与所选研究任务不匹配。");
+      if (!alive.current) return;
+      setConversation(current); setPending(null); setNeedsRefresh(false);
+      if (current.processing) return;
+      const target = current.continuation;
+      if (!target?.enabled) throw new Error(target?.message || "当前没有未完成的对话请求。");
+      const updated = await continueConversation(current.conv_id, target.source_message_id, target.token);
+      if (alive.current) { setConversation(updated); await refreshActivity(); }
+    } catch (cause: unknown) {
+      if (alive.current) {
+        setError(cause instanceof Error ? cause.message : "继续请求未能确认，请核对最新进度。");
+        setNeedsRefresh(true);
+        // Refresh reads only. It never replays an uncertain model/tool call.
+        try {
+          const current = await getConversation(conversation.conv_id);
+          validateConversationScope(current, project, experimentId, initialConversationId);
+          if (alive.current) setConversation(current);
+        } catch { /* The visible error and explicit reload remain available. */ }
+      }
+    } finally { sending.current = false; if (alive.current) { setBusy(false); setContinuingAt(null); } }
+  }
+
   const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
   const showPending = pending && !pendingSaved && !pending.replaceId;
   return <section aria-label={ui("研究对话")} className="flex min-h-0 flex-1 flex-col">
@@ -242,7 +273,13 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     </div>
     <form onSubmit={(event) => { event.preventDefault(); void send(); }} className="shrink-0 px-4 pb-5 sm:px-6">
       <div className="mx-auto max-w-3xl">
-        {error ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200"><p>{error}</p><button type="button" disabled={loading || busy} onClick={() => void refresh()} className="mt-2 underline disabled:opacity-40">{ui("重新读取对话")}</button></div> : null}
+        {error || conversation?.continuation?.enabled ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200">
+          <p>{error || ui(conversation?.continuation?.message || "继续上一条尚未完成的请求，保留对话和已有结果。")}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <button type="button" disabled={!conversation || processing || loading || modeSaving || modelSaving || !!editing} onClick={() => void continueLastRequest()} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? ui("正在继续…") : ui("一键继续")}</button>
+            <button type="button" disabled={loading || busy} onClick={() => void refresh()} className="underline disabled:opacity-40">{ui("重新读取对话")}</button>
+          </div>
+        </div> : null}
         <div className="rounded-2xl border border-mars-border bg-mars-panel p-3 focus-within:border-indigo-400/60">
           {conversation ? <ConversationModelPicker conversationId={conversation.conv_id} selectedId={conversation.selected_model_id || ""}
             disabled={editDisabled} onChanged={setConversation} onBusyChange={value => {

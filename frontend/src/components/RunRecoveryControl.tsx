@@ -6,8 +6,10 @@ import { getRunRecovery, recoverRun, type RecoveryAction, type RunRecovery } fro
 import { CLIENT_POLICY } from "@/lib/clientPolicy";
 import { reviewResultUncertain } from "@/lib/apiError";
 import { agentLabel } from "@/lib/researchActivity";
+import { useI18n } from "@/lib/i18n";
 
 export function RunRecoveryControl({ runId, project, disabled = false, onChanged }: { runId: string; project: string; disabled?: boolean; onChanged?: () => void | Promise<void> }): JSX.Element | null {
+  const { ui } = useI18n();
   const [view, setView] = useState<RunRecovery | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -62,13 +64,16 @@ export function RunRecoveryControl({ runId, project, disabled = false, onChanged
     } finally { submitting.current = false; if (mounted.current) setBusy(false); }
   }
   if (!error && !message && (!view || ["idle", "running"].includes(view.status))) return null;
+  const preferred = view?.actions.find(action => action.action === "resume") || view?.actions[0];
   return <section aria-label="任务恢复" className="rounded-xl border border-amber-400/25 bg-amber-400/5 px-4 py-3 text-sm">
     <p role="status" className="leading-6 text-amber-100">{message || error || view?.message}</p>
     <div className="mt-3 flex flex-wrap items-center gap-3">
-      {view?.actions.map(action => <button key={`${action.action}:${action.node}`} type="button" disabled={disabled || busy || !!error || uncertain}
+      {preferred ? <button type="button" disabled={disabled || busy || !!error || uncertain} onClick={() => void act(preferred)} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? ui("正在继续…") : ui("一键继续")}</button> : null}
+      {preferred ? <span className="text-xs text-slate-400">{preferred.label} · {agentLabel(preferred.node.replace(/_attempt_\d+$/, ""))}</span> : null}
+      {(view?.actions.length ?? 0) > 1 ? <details><summary className="cursor-pointer text-xs text-indigo-300">{ui("其他恢复方式")}</summary><div className="mt-2 flex flex-wrap gap-2">{view?.actions.map(action => <button key={`${action.action}:${action.node}`} type="button" disabled={disabled || busy || !!error || uncertain}
         onClick={() => void act(action)} className="rounded-lg bg-mars-accent px-3 py-2 text-xs text-white disabled:opacity-40">
         {busy ? "正在提交…" : `${action.label} · ${agentLabel(action.node.replace(/_attempt_\d+$/, ""))}`}
-      </button>)}
+      </button>)}</div></details> : null}
       {(error || uncertain) ? <button type="button" disabled={busy} onClick={() => { setUncertain(false); setView(null); setMessage(""); setRevision(value => value + 1); }} className="text-xs text-indigo-300">核对状态</button> : null}
       <Link href={`/runs/${encodeURIComponent(runId)}`} className="text-xs text-slate-400 hover:underline">查看任务详情</Link>
     </div>
