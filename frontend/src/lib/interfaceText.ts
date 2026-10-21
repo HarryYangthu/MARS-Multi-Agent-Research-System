@@ -1,11 +1,10 @@
 // Explicit interface labels only. Never apply this dictionary to user content,
 // model responses, paths, source code or persisted research artifacts.
 const EN: Readonly<Record<string, string>> = {
-  "对话模型": "Conversation model",
+  "模型": "Model",
   "默认配置": "Default settings",
   "配置自定义模型": "Configure a model",
   "编辑配置": "Edit settings",
-  "全系统共用 · 仅用于对话主控": "Shared across projects · Conversation controller only",
   "全局模型配置": "Shared model settings",
   "保存一次，所有项目均可选择。仅切换对话主控，研究与编码任务仍使用原来的模型配置。": "Save once and select in any project. This changes only the conversation controller; research and coding tasks keep their existing model settings.",
   "显示名称": "Display name",

@@ -77,7 +77,7 @@ export function ConversationModelPicker({ conversationId, selectedId, disabled, 
   const selected = profiles.find(item => item.id === selectedId);
   return <>
     <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-mars-border px-2 pb-2">
-      <label htmlFor={`${id}-pick`} className="text-xs text-slate-400">{ui("对话模型")}</label>
+      <label htmlFor={`${id}-pick`} className="text-xs text-slate-400">{ui("模型")}</label>
       <select ref={opener} id={`${id}-pick`} value={selectedId} disabled={disabled || busy || !loaded}
         onChange={event => void choose(event.target.value)} className="max-w-[18rem] rounded-lg border border-mars-border bg-mars-bg px-2 py-1.5 text-xs text-slate-200 disabled:opacity-50">
         <option value="">{ui("默认配置")}</option>
@@ -89,7 +89,6 @@ export function ConversationModelPicker({ conversationId, selectedId, disabled, 
         onClick={() => { setError(""); setForm({ id: selected.id, name: selected.name, provider: selected.provider,
           model: selected.model, base_url: selected.base_url, context_window: selected.context_window,
           compatibility: selected.compatibility, api_key: "" }); }}>{ui("编辑配置")}</button> : null}
-      <span className="text-[11px] text-slate-500">{ui("全系统共用 · 仅用于对话主控")}</span>
     </div>
     {error && !form ? <div role="alert" className="mb-2 flex gap-2 px-2 text-xs text-amber-200"><p>{error}</p>
       {!loaded ? <button type="button" onClick={() => { setError(""); void getGlobalModelProfiles().then(value => {
