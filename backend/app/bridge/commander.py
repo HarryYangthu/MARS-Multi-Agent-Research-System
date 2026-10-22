@@ -144,6 +144,7 @@ class Commander:
             completion_reviews: dict[str, Any] = {}
             last_completion: CompletionVerdict | None = None
             pending_correction: dict[str, Any] | None = None
+            read_answer_attempted = False
 
             for _step in range(self.max_react_steps):
                 terminal_receipt = False
@@ -182,6 +183,15 @@ class Commander:
                             status="pending", reason="本轮目标已识别，等待真实执行结果",
                             missing=goal.required_effects))
                         get_session_store().persist(session)
+                from app.bridge.commander_answers import read_answer_ready, repeated_read_request
+                if not read_answer_attempted and repeated_read_request(session, decision.actions, goal):
+                    # First distinguish a lookup from an operation that still
+                    # needs source reads. Repetition alone never completes it.
+                    goal, last_completion, _read_question = await self._completion_gate(
+                        session, goal, '', completion_reviews)
+                    if read_answer_ready(goal, last_completion):
+                        read_answer_attempted = True
+                        decision = Decision(reply=await self._read_answer(session), response_mode='evidence_answer')
                 decision = _prevent_duplicate_creation(session, decision)
                 recovery = existing_run_recovery_guard(session, decision.actions)
                 if recovery is not None:
@@ -447,10 +457,25 @@ class Commander:
                         emitted.append(session.add(ChatMessage(role="assistant",
                             content=_completion_unfinished_reply(last_completion))))
                     break
+                if goal is not None and goal.intent == 'observe':
+                    # Release a pending-read constraint as soon as the actual
+                    # bound receipt arrives; only answer quality remains next.
+                    last_completion = assess_completion(session, goal, run_store=self.run_store)
+                    _store_turn_completion(session, goal, last_completion)
+                    get_session_store().persist(session)
                 # loop again so the LLM can react to tool results
             if emitted and emitted[-1].role == "tool":
                 goal, last_completion, question = await self._completion_gate(
                     session, goal, "", completion_reviews)
+                if not read_answer_attempted and read_answer_ready(goal, last_completion):
+                    # A tool budget must reserve delivery, even when every read
+                    # differed. No further tools are exposed to this request.
+                    read_answer_attempted = True
+                    answer = await self._read_answer(session)
+                    goal, last_completion, question = await self._completion_gate(
+                        session, goal, answer, completion_reviews)
+                    if last_completion.status == 'fulfilled':
+                        emitted.append(session.add(ChatMessage(role='assistant', content=answer)))
                 if last_completion.status not in {"fulfilled", "delegated"}:
                     emitted.append(session.add(ChatMessage(role="assistant",
                         content=question if last_completion.status == "needs_user" and question
@@ -458,7 +483,7 @@ class Commander:
                 elif last_completion.status == "delegated":
                     emitted.append(session.add(ChatMessage(role="assistant",
                         content=_completion_unfinished_reply(last_completion))))
-                else:
+                elif emitted[-1].role == 'tool':
                     emitted.append(session.add(ChatMessage(role="assistant", content="本轮操作已完成，实际结果已保留。")))
             if last_completion is not None:
                 _store_turn_completion(session, goal, last_completion)
@@ -538,6 +563,22 @@ class Commander:
 
     # ----------------------------------------------------------- decision
 
+    async def _read_answer(self, session: CommanderSession) -> str:
+        from app.bridge.commander_answers import synthesize_read_answer
+        from app.bridge.commander_native import commander_call_deadline_seconds
+        activity = session.begin_activity('model', '总控正在整理查询结果')
+        get_session_store().persist(session)
+        try:
+            answer = await synthesize_read_answer(session, provider=self._provider, llm_config=self._llm_config,
+                run_root=get_session_store().session_directory(session),
+                timeout_seconds=commander_call_deadline_seconds(self._llm_config,
+                    minimum_seconds=get_settings().mars_llm_timeout_seconds))
+        except BaseException:
+            session.finish_activity(activity, 'failed')
+            raise
+        session.finish_activity(activity)
+        return answer
+
     async def _decide(self, session: CommanderSession, *, continuation: str | None = None) -> Decision:
         goal = session.completion_state.get("goal")
         action_pending = (isinstance(goal, dict) and goal.get("intent") == "action"
@@ -545,12 +586,13 @@ class Commander:
         # Conversation may use normal text; operations use the provider's native
         # function channel. No text JSON or promise is dispatched as an action.
         from app.bridge.commander_native import native_commander_decision, commander_call_deadline_seconds
+        from app.bridge.commander_answers import observation_read_pending
         raw = await native_commander_decision(
             session, self._build_messages(session, continuation=continuation),
             self._provider, self._llm_config, get_session_store().session_directory(session),
             commander_call_deadline_seconds(self._llm_config,
                 minimum_seconds=get_settings().mars_llm_timeout_seconds),
-            accept_text_reply=not action_pending)
+            accept_text_reply=not action_pending and not observation_read_pending(session))
         require_native_decision(raw)
         decision = _parse_decision(json.dumps({
             "actions": raw.get("actions", []), "reply": raw.get("reply", "")}, ensure_ascii=False))
@@ -672,9 +714,14 @@ class Commander:
             '检查不等于修改，回复承诺不等于执行。缺必要信息要提出具体问题。'
         )
         if continuation:
-            sys += ("\n\n## MARS 本轮尚未完成的操作\n" + continuation
-                + '\n请直接调用相应的原生工具函数；函数参数仅填写该工具所需参数，不包操作列表。'
-                  '只有普通聊天或真正澄清时才直接自然语言回答。')
+            from app.bridge.commander_answers import read_answer_ready
+            state = session.completion_state
+            answer_pending = read_answer_ready(parse_turn_goal(state.get('goal'), session), CompletionVerdict(
+                status=str(state.get('status', 'unknown')), reason=str(state.get('reason', '')),
+                missing=tuple(state.get('missing', ()))))
+            sys += ('\n\n## MARS 本轮尚未完成的部分\n' + continuation
+                + ('\n读取已经完成，请归纳已读结果并直接答复用户。'
+                   if answer_pending else '\n需要执行操作时调用相应的原生工具函数；普通答复或澄清直接回答。'))
         msgs: list[Message] = [Message(role="system", content=sys)]
         if session.context_version >= 3:
             from app.harness.context.folder_context import load_folder_context, is_context_template
@@ -817,6 +864,14 @@ def _store_turn_completion(session: CommanderSession, goal: TurnGoal | None,
 
 
 def _completion_prompt(session: CommanderSession, goal: TurnGoal | None, verdict: CompletionVerdict) -> str:
+    from app.bridge.commander_answers import read_answer_ready
+    if read_answer_ready(goal, verdict):
+        return ('本轮真实读取已取得，只缺向用户交付答复。请根据原始问题和已读取结果给出具体答案，'
+                '明确结果范围、条件及缺失信息；不要重复查询状态，不要启动仿真。')
+    if goal is not None and goal.intent == 'observe' and 'observed' in verdict.missing:
+        return ('本轮询问的是项目实际情况，但尚未取得本轮实际读取结果。'
+                '请先调用与原始问题相符的只读工具读取必要记录，再依据回执作答；'
+                '不要再次直接复述上轮助手的答案，不要创建、启动、修改或审批任务。')
     return (
         'MARS尚未取得本轮用户目标的完成证据。请继续原始用户真正要求的操作，'
         '不要只给下一步说明；不要猜测科学参数、扩大修改范围或绕过审核。'

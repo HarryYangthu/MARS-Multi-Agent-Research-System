@@ -497,6 +497,7 @@ async def test_real_history_read_finishes_then_new_turn_can_allocate_another_tas
     from app.harness.research_memory import ResearchMemory
 
     # Exercise the declaration fallback too, without replacing any handler.
+    previous_policy = os.environ.get('MARS_TOOLS_CONFIG_PATH')
     policy = tmp_path / 'tools.yaml'
     policy.write_text('tools: {}\n')
     monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(policy))
@@ -515,7 +516,16 @@ async def test_real_history_read_finishes_then_new_turn_can_allocate_another_tas
         assert result['ok'] is True
         if tool == 'knowledge.research_memory':
             assert result['output']['hits'][0]['id'] == record_id
+            assert result['output']['coverage'] == {'total_records': 1, 'returned_records': 1,
+                'complete': True, 'ordering': 'query_relevance', 'metric_ranked': False}
         read = _observe(ctx.session, tool, result, args)
+        from app.bridge.commander_answers import evidence_answer_messages, read_answer_ready, repeated_read_request
+        pending = assess_completion(ctx.session, goal)
+        assert read_answer_ready(goal, pending)
+        assert repeated_read_request(ctx.session, [{'tool': tool, 'args': args}], goal)
+        payload = '\n'.join(message.content for message in evidence_answer_messages(ctx.session))
+        assert record_id in payload and read.id in payload
+        assert not any(run.project == ctx.session.project for run in ctx.run_store.list())
         verdict = assess_completion(ctx.session, goal, '已查到保留的人工记录，尚无实测指标。', 'answer_sufficient')
         assert verdict.status == 'fulfilled' and verdict.evidence_ids == (read.id,)
 
@@ -526,6 +536,12 @@ async def test_real_history_read_finishes_then_new_turn_can_allocate_another_tas
         new_goal = _goal(ctx.session, ('run_created',))
         assert assess_completion(ctx.session, new_goal).status == 'pending'
         assert current_turn_ledger(ctx.session) == []
+        # The follow-up uses the real complete tool configuration. An empty
+        # declaration fallback is not a deployment for the whole agent graph.
+        if previous_policy is None:
+            monkeypatch.delenv('MARS_TOOLS_CONFIG_PATH')
+        else:
+            monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', previous_policy)
         inspected = await execute_tool('code.repo_read_lines', {'path': 'config.yaml'}, ctx)
         _observe(ctx.session, 'code.repo_read_lines', inspected, {'path': 'config.yaml'})
         created = await execute_tool('run.create', {'entrypoint': 'coding', 'user_request': '仅准备另一组参数。'}, ctx)
