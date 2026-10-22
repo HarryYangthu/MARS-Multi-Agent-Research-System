@@ -19,6 +19,7 @@ from app.bridge.commander_completion import (
 )
 from app.bridge.commander_session import ChatMessage, CommanderSession, CommanderSessionStore
 from app.bridge.commander_dispatch import pending_existing_admission
+from app.bridge.commander_dispatch import action_continuation
 from app.bridge.commander import _completion_unfinished_reply
 from app.bridge.commander_tools import ToolContext, execute_tool
 from app.bridge.orchestrator import Orchestrator, RunRequest
@@ -485,3 +486,106 @@ def test_saved_previous_goal_is_explicit_and_current_ledger_does_not_fake_histor
     copy = current_turn_ledger(session); copy[0]['result']['output']['matches'].append('changed')
     assert current.tool_result is not None and current.tool_result['output']['matches'] == []
     assert old.id != current.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tool', ['knowledge.research_memory', 'knowledge.research_memory_read'])
+async def test_real_history_read_finishes_then_new_turn_can_allocate_another_task(
+    tmp_path: Path, tool: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.bridge.commander import _begin_turn_completion
+    from app.harness.research_memory import ResearchMemory
+
+    # Exercise the declaration fallback too, without replacing any handler.
+    policy = tmp_path / 'tools.yaml'
+    policy.write_text('tools: {}\n')
+    monkeypatch.setenv('MARS_TOOLS_CONFIG_PATH', str(policy))
+    with _actual_project(tmp_path) as ctx:
+        note = tmp_path / 'notes'
+        note.mkdir()
+        (note / 'research_history.json').write_text(json.dumps({'experiments': [{
+            'title': 'retained protocol note', 'conclusion': 'Human note; no measured experiment result.'}]}))
+        memory = ResearchMemory(ctx.session.project)
+        imported = memory.import_directory(str(note))
+        record_id = imported['ids'][0]
+        _user(ctx.session, '查阅已有记录。')
+        goal = _goal(ctx.session, ('observed',), intent='observe', target='none')
+        args = {'query': 'retained protocol note'} if tool == 'knowledge.research_memory' else {'record_id': record_id}
+        result = await execute_tool(tool, args, ctx)
+        assert result['ok'] is True
+        if tool == 'knowledge.research_memory':
+            assert result['output']['hits'][0]['id'] == record_id
+        read = _observe(ctx.session, tool, result, args)
+        verdict = assess_completion(ctx.session, goal, '已查到保留的人工记录，尚无实测指标。', 'answer_sufficient')
+        assert verdict.status == 'fulfilled' and verdict.evidence_ids == (read.id,)
+
+        # A follow-up must receive a fresh goal; this read cannot certify its launch.
+        ctx.session.completion_state = {'goal': goal_state(goal), 'status': verdict.status}
+        _user(ctx.session, '创建另一组参数任务，只准备，不启动。')
+        ctx.session.completion_state = _begin_turn_completion(ctx.session)
+        new_goal = _goal(ctx.session, ('run_created',))
+        assert assess_completion(ctx.session, new_goal).status == 'pending'
+        assert current_turn_ledger(ctx.session) == []
+        inspected = await execute_tool('code.repo_read_lines', {'path': 'config.yaml'}, ctx)
+        _observe(ctx.session, 'code.repo_read_lines', inspected, {'path': 'config.yaml'})
+        created = await execute_tool('run.create', {'entrypoint': 'coding', 'user_request': '仅准备另一组参数。'}, ctx)
+        assert created['ok'] is True
+        allocation = _observe(ctx.session, 'run.create', created)
+        complete = assess_completion(ctx.session, new_goal, run_store=ctx.run_store)
+        assert complete.status == 'fulfilled' and complete.evidence_ids == (allocation.id,)
+        assert assess_completion(ctx.session, replace(new_goal, required_effects=('run_started',)),
+                                 run_store=ctx.run_store).status == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_real_memory_lookup_does_not_silence_pending_simulation_continuation(tmp_path: Path) -> None:
+    with _actual_project(tmp_path) as ctx:
+        _user(ctx.session, '查阅历史后创建并启动下一次仿真。')
+        result = await execute_tool('knowledge.research_memory', {'query': 'current task'}, ctx)
+        assert result['ok'] is True and result['output']['hits'] == []
+        _observe(ctx.session, 'knowledge.research_memory', result)
+        assert action_continuation(ctx.session, '我接下来会创建并启动任务。') is not None
+        launch = _goal(ctx.session, ('run_created', 'run_started'))
+        assert assess_completion(ctx.session, launch, '已经查阅了历史。', 'answer_sufficient').missing == (
+            'run_created', 'run_started')
+
+
+@pytest.mark.asyncio
+async def test_failed_or_stale_history_read_never_certifies_current_observation(tmp_path: Path) -> None:
+    with _actual_project(tmp_path) as ctx:
+        result = await execute_tool('knowledge.research_memory', {'query': 'current task'}, ctx)
+        assert result['ok'] is True
+        _observe(ctx.session, 'knowledge.research_memory', result)
+        _user(ctx.session, '读取另一条记录。')
+        goal = _goal(ctx.session, ('observed',), intent='observe', target='none')
+        failed = await execute_tool('knowledge.research_memory_read', {'record_id': 'missing'}, ctx)
+        assert failed['ok'] is False
+        _observe(ctx.session, 'knowledge.research_memory_read', failed)
+        verdict = assess_completion(ctx.session, goal, '已查完。', 'answer_sufficient')
+        assert verdict.status == 'pending' and verdict.evidence_ids == ()
+
+
+@pytest.mark.asyncio
+async def test_run_status_reads_its_actual_evolution_record_and_preserves_partial_status(tmp_path: Path) -> None:
+    with _actual_project(tmp_path) as ctx:
+        inspected = await execute_tool('code.repo_read_lines', {'path': 'config.yaml'}, ctx)
+        _observe(ctx.session, 'code.repo_read_lines', inspected, {'path': 'config.yaml'})
+        created = await execute_tool('run.create', {'entrypoint': 'pipeline', 'user_request': '仅创建进化任务。',
+            'evolution': {'goal': 'Improve the residual under the unchanged protocol',
+                'criteria': [{'name': 'RES', 'direction': 'lte', 'target': -0.5, 'baseline_delta': True}],
+                'modules': [{'module': 'training_strategy', 'path': 'config.yaml', 'yaml_keys': ['lr_init']}]}}, ctx)
+        assert created['ok'] is True
+        status = await execute_tool('run.status', {}, ctx)
+        run = ctx.run_store.get(str(created['run_id']))
+        assert run is not None
+        state = json.loads((run.root / 'evolution/state.json').read_text())
+        assert status['ok'] is True and status['evolution']['run_id'] == run.run_id
+        assert status['evolution']['best'] == state['best'] is None
+        assert status['evolution']['attempts'] == state['attempts'] == []
+        contract = run.root / 'input/evolution_contract.v1.json'
+        saved = json.loads(contract.read_text())
+        saved['contract']['goal'] = 'Changed after the contract was frozen'
+        contract.write_text(json.dumps(saved))
+        partial = await execute_tool('run.status', {}, ctx)
+        assert partial['ok'] is True and partial['states'] == status['states']
+        assert 'changed' in partial['evolution_error'] and 'evolution' not in partial

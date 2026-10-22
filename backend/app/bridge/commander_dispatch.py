@@ -61,11 +61,6 @@ def batch_start_is_bound(session: CommanderSession, args: dict[str, Any], *,
                 and (args.get('run_id') or session.linked_run_id) == created_run_id)
 
 
-_READ_ONLY_TOOLS = _SOURCE_TOOLS | frozenset({
-    "routing.repository_check", "context.read_material", "run.status", "get_run_status",
-    "run.recovery_status", "artifact.read", "metrics.evaluate", "diagnosis.failure_analysis",
-    "get_diagnosis", "query_kb", "list_runs", "discovery.status", "knowledge.research_memory_read",
-})
 _ACTION_VERBS = (
     r"读取|查找|搜索|检查|核对|定位|修改|调整|配置|创建|启动|运行|执行|训练|仿真|"
     r"保存|提交|导出|生成|停止|恢复|重试|取消|删除|批准|"
@@ -151,8 +146,9 @@ def action_continuation(session: CommanderSession, reply: str, *,
                     and (message.tool_result or {}).get("run_id") == session.linked_run_id
                     and session.linked_run_id for message in observations)):
         return None
+    from app.bridge.commander_tools import commander_tool_is_read_only
     if any((message.tool_result or {}).get("ok") is True
-           and message.tool_name not in _READ_ONLY_TOOLS for message in observations):
+           and not commander_tool_is_read_only(message.tool_name or '') for message in observations):
         return None
     if any((message.tool_result or {}).get("requires_approval") is True
            or (message.tool_result or {}).get("blocked_by_gate")

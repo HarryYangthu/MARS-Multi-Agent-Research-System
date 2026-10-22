@@ -5,13 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from app.bridge.commander_tools import TOOLS, ToolSpec, commander_tool_mutates
+from app.bridge.commander_tools import TOOLS, ToolSpec, commander_tool_is_read_only, commander_tool_mutates
 
 
 @pytest.mark.parametrize("name", [
     "routing.repository_check", "code.repo_list", "code.repo_search", "code.repo_read_lines", "context.read_material",
     "run.recovery_status", "run.status", "artifact.read", "metrics.evaluate", "diagnosis.failure_analysis",
     "get_run_status", "get_diagnosis", "list_runs", "discovery.status", "discovery.replay",
+    "knowledge.research_memory", "knowledge.research_memory_read", "query_kb", "tools.describe",
 ])
 def test_actual_read_handlers_have_explicit_metadata(name: str) -> None:
     assert TOOLS[name].mutation_level == "read"
@@ -45,7 +46,12 @@ def test_current_real_policy_overrides_metadata_and_is_reloaded_after_edit(tmp_p
     assert commander_tool_mutates("list_runs")
     assert not commander_tool_mutates("approve_node")
     assert not commander_tool_mutates("configured.only")
+    assert not commander_tool_is_read_only("configured.only")
+    assert commander_tool_is_read_only("approve_node")
+    assert not commander_tool_is_read_only("list_runs")
     policy.write_text("tools:\n  list_runs: {mutation_level: read}\n  approve_node: {mutation_level: write}\n"
                       "  configured.only: {mutation_level: unclassified}\n")
     assert not commander_tool_mutates("list_runs")
     assert commander_tool_mutates("approve_node") and commander_tool_mutates("configured.only")
+    assert commander_tool_is_read_only("list_runs")
+    assert not commander_tool_is_read_only("approve_node")
