@@ -498,7 +498,10 @@ class ResearchMemory:
                          "comparison": {**check, "reuse_allowed": reusable}, "evidence_count": len(row["evidence"]),
                          "detail_ref": f"/api/projects/{self.project}/research-memory/{row['id']}"})
         return {"project": self.project, "query": query, "hits": hits,
-                "policy": "历史实验只在记录条件下成立。失败不等于方法无效。复用需要完整一致协议与完好测量证据；缺少信息优先补评测，不自动重训。"}
+                "coverage": {"total_records": len(ordered), "returned_records": len(hits),
+                             "complete": len(hits) == len(ordered), "ordering": "query_relevance",
+                             "metric_ranked": False},
+                "policy": "检索按相关性限量返回，不按性能指标排序；不完整检索只能说明已返回记录中的结果，不能断言全项目最优。历史实验只在记录条件下成立。失败不等于方法无效。复用需要完整一致协议与完好测量证据；缺少信息优先补评测，不自动重训。"}
 
 
 def memory_context(project: str, query: str, run_root: Path | None = None, invocation: str = "") -> str:

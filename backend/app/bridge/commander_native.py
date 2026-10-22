@@ -36,6 +36,9 @@ _INSTRUCTION = (
     '不得猜测预算、种子、路径或批准。只选择尚未成功的动作，不重放成功操作。'
     '原先要求文字JSON的说明仅在本轮传输格式上被原生函数替代，权限与用户约束保持。'
     '历史助手文字是模型参考，不是成功证据；历史工具观察只能证明其中实际记录的结果。'
+    '查阅类问题取得所需真实记录后应直接给出具体答复，不反复读取相同状态或报告。'
+    '比较条件不全时说明已知结果和比较范围，不要为证明全局最优无限检索。'
+    '相关性检索若coverage.complete=false，只能回答已返回记录中的结果，不能称为全项目最佳。'
     '确实缺少用户信息或有实际阻点时调用 mars_commander_intervention，'
     '填写 status=question 和具体question，或 status=blocked 和明确reason。单纯承诺不算完成。'
 )
@@ -264,12 +267,16 @@ def native_commander_config(config: LLMConfig, timeout_seconds: float,
         raise ValueError('Native Commander time budget exhausted')
     tools = commander_native_tools()
     if session is not None:
+        from app.bridge.commander_answers import observation_read_pending
+        from app.bridge.commander_tools import commander_tool_is_read_only
+        read_pending = observation_read_pending(session)
         loaded = {name for message in session.context_messages()
                   if message.tool_name == 'tools.describe' and (message.tool_result or {}).get('ok') is True
                   for name in (message.tool_result or {}).get('contracts', {})}
         names = native_tool_names()
         tools = tuple(tool for tool in tools if tool['function']['name'] == INTERVENTION or (
             names[tool['function']['name']] not in _ALIASES and
+            (not read_pending or commander_tool_is_read_only(names[tool['function']['name']])) and
             (names[tool['function']['name']] not in {'discovery.create', 'run.auto_research'}
              or names[tool['function']['name']] in loaded)))
     return replace(config, tools=tools, json_mode=False, response_schema=None,
@@ -440,6 +447,9 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
     response_received = False
     try:
         config = replace(native_commander_config(llm_config, timeout_seconds, session), attempt_observer=observe)
+        from app.bridge.commander_answers import observation_read_pending
+        if observation_read_pending(session):
+            messages = [*messages, Message('system', '本轮查询尚缺实际读取结果。先调用相关只读工具取得真实记录，再回答；不要复述未经本轮读取核对的旧答案。')]
         wire_messages, manifest_path = pack_native_commander_messages(session, messages, config, run_root)
         if manifest_path is not None:
             trace.emit('context_packed', json.loads(manifest_path.read_text()))

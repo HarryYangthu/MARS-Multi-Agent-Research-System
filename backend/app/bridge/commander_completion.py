@@ -18,11 +18,6 @@ from app.storage.run_store import RunStore
 _EFFECTS = frozenset({'run_created', 'run_started', 'run_stopped', 'artifact_updated',
                       'exported', 'observed', 'tool_effect'})
 _CREATORS = frozenset({'run.create', 'create_and_start_run', 'run.existing_model', 'run.auto_research'})
-_READERS = frozenset({'code.repo_list', 'code.repo_search', 'code.repo_read_lines',
-    'models.list',
-    'routing.repository_check', 'context.read_material', 'run.status', 'get_run_status',
-    'run.recovery_status', 'artifact.read', 'metrics.evaluate', 'diagnosis.failure_analysis',
-    'get_diagnosis', 'query_kb', 'list_runs', 'discovery.status'})
 _BLOCKED = frozenset({'blocked', 'waiting_approval', 'waiting_review'})
 _CHOICES = frozenset({'needs_user', 'model_selection_required', 'entrypoint_selection_required',
                       'user_intent_confirmation_required'})
@@ -334,6 +329,8 @@ def _review_effect(message: ChatMessage, session: CommanderSession, store: RunSt
 def assess_completion(session: CommanderSession, goal: TurnGoal, reply: str = '',
                       semantic_status: str | None = None, evidence_ids: tuple[str, ...] = (),
                       run_store: RunStore | None = None) -> CompletionVerdict:
+    from app.bridge.commander_tools import commander_tool_is_read_only
+
     user = _source(session, goal.source_turn_id)
     if (user is None or hashlib.sha256(user.content.encode()).hexdigest() != goal.source_user_sha256
             or goal.project and goal.project != session.project):
@@ -382,7 +379,7 @@ def assess_completion(session: CommanderSession, goal: TurnGoal, reply: str = ''
                     and isinstance(result.get('termination'), dict)
                     and result['termination'].get('cleanup_complete') is True):
                 effects.append('run_stopped')
-        if (tool in _READERS and len(set(result) - {'ok', 'error'}) > 0
+        if (commander_tool_is_read_only(tool) and len(set(result) - {'ok', 'error'}) > 0
                 and (not _run_id(m) or m in valid_runs)):
             if (not result.get('project') or result['project'] == session.project) and (
                     not goal.expected_tools or tool in goal.expected_tools):

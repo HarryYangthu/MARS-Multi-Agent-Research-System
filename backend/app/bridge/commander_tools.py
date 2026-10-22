@@ -421,12 +421,18 @@ async def _get_run_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     states = {k: s.value for k, s in rsession.graph.all_states().items()}
     waiting = [k for k, v in states.items() if v == "waiting_review"]
     from app.bridge.managed_review import review_state
+    from app.bridge.evolution_service import evolution_view
+    evolution: dict[str, Any]
+    try:
+        evolution = {'evolution': evolution_view(rsession.run)}
+    except (OSError, ValueError, KeyError) as exc:
+        evolution = {'evolution_error': str(exc)}
     return {"ok": True, "run_id": run_id, "states": states, "waiting_review": waiting,
             "entrypoint": rsession.request.extra.get('scope_entrypoint', rsession.request.entrypoint),
             "initial_entrypoint": rsession.request.entrypoint, "task_request": rsession.request.user_request,
             "routing": rsession.request.extra.get('routing'),
             "routing_note": '运行状态不证明旧任务的目标或入口正确。用户纠正需求时须重新核对代码；空字面搜索不证明没有实现。',
-            "review_mode": rsession.request.review_mode, "managed_review": review_state(rsession.run)}
+            "review_mode": rsession.request.review_mode, "managed_review": review_state(rsession.run), **evolution}
 
 
 async def _routing_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -818,11 +824,11 @@ TOOLS: dict[str, ToolSpec] = {
     "knowledge.research_memory": ToolSpec(name="knowledge.research_memory",
         description="Search this project's baseline capability and experiment history for the current task. Returns provenance, missing conditions and strict protocol compatibility. Failed execution is not a rejected hypothesis.",
         parameters={"query": "current research task", "protocol": "optional exact dataset hash, split, preprocessing and evaluator object", "limit": "1 to 10, default 4"},
-        handler=lambda args, ctx: _research_memory(args, ctx, False)),
+        handler=lambda args, ctx: _research_memory(args, ctx, False), mutation_level="read"),
     "knowledge.research_memory_read": ToolSpec(name="knowledge.research_memory_read",
         description="Read a retained research record including architecture, full config, training recipe, measured results and preserved evidence. Read-only; cannot change baseline or launch training.",
         parameters={"record_id": "mem_ record ID", "evidence_offset": "optional evidence page offset"},
-        handler=lambda args, ctx: _research_memory(args, ctx, True)),
+        handler=lambda args, ctx: _research_memory(args, ctx, True), mutation_level="read"),
 
     'run.existing_model': ToolSpec(name='run.existing_model',
         description='Run an already implemented model: call this directly as the only action, without preliminary history lookup or repeated source-reading model turns. The host reads only current registered configurations/entrypoints and always creates Coding→Execution, skipping Idea/Experiment. It resolves a unique actual model/config or returns actual choices; never guesses. Budget steps means optimizer updates, epochs means complete epochs. Omit seed unless the user explicitly supplied it: the host reads declared config defaults or generates and freezes a new seed only under an explicit host policy; never borrow a historical seed. An existing but unregistered config returns execution_registration_required, not missing-model evidence. Explicit parameter overrides use ordinary Coding, preserving their meaning. Creation is not approval or training success. Successful preparation returns a factual terminal receipt; do not request another summary model turn.',
@@ -896,7 +902,7 @@ TOOLS: dict[str, ToolSpec] = {
     ),
     "run.status": ToolSpec(
         name="run.status",
-        description="Get the per-node states of a run.",
+        description="Read the linked run's per-node states and saved evolution attempts, best candidate and goal outcome. Read this first for current-run results; project-wide memory is a separate comparison source.",
         parameters={"run_id": "optional; defaults to linked run"},
         handler=_get_run_status,
         mutation_level="read",
@@ -1023,7 +1029,7 @@ TOOLS: dict[str, ToolSpec] = {
         name="query_kb",
         description="Semantic search a KB zone (literature|methodology|code_assets|run_archive).",
         parameters={"zone": "zone name", "q": "query text", "top_k": "int, default 3"},
-        handler=_query_kb,
+        handler=_query_kb, mutation_level="read",
     ),
     "list_runs": ToolSpec(
         name="list_runs",
@@ -1086,6 +1092,11 @@ def commander_tool_mutates(name: str) -> bool:
         return configured.mutation_level != "read"
     spec = TOOLS.get(name)
     return spec is None or spec.mutation_level != "read"
+
+
+def commander_tool_is_read_only(name: str) -> bool:
+    """Share the registered tool's live policy with completion and continuation."""
+    return name in TOOLS and not commander_tool_mutates(name)
 
 
 async def execute_tool(name: str, args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
