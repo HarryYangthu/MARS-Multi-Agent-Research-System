@@ -60,10 +60,23 @@ async def run_agent_node(
     if not isinstance(saved_extra, dict):
         raise ValueError("Agent request authority has invalid options")
     if load_run_research_contract(run, saved_extra if authority is not None else None) is None:
+        if saved_extra.get('evolution') and parse_node_key(node_key).stage == 'idea':
+            from app.bridge.revision_resume import RECOVERY_RETRY_REASON
+            from app.harness.agent_loop.trace import atomic_json
+            identity = parse_node_key(node_key)
+            checkpoint = run.root / 'evolution/planning' / f'attempt_{identity.attempt}' / 'research_checkpoint.json'
+            saved = json.loads(checkpoint.read_text()) if checkpoint.is_file() else {}
+            if revision_reason in {'', RECOVERY_RETRY_REASON} and saved.get('pending'):
+                revision_reason = str(saved['reason'])
+            if revision_reason and revision_reason != RECOVERY_RETRY_REASON:
+                atomic_json(checkpoint, {'pending': True, 'reason': revision_reason})
         from app.bridge.research_branch import research_branch_scope
         with research_branch_scope(run, node_key):
-            await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
-                resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
+            from app.bridge.evolution_service import evolution_code_scope
+            identity = parse_node_key(node_key)
+            with evolution_code_scope(run, stage=identity.stage, attempt=identity.attempt):
+                await _execute_agent_node(run, node_key, bus=bus, revision_reason=revision_reason, registry=registry,
+                    resume_invocation=resume_invocation, predecessor_task_ids=predecessor_task_ids)
         return
     if revision_reason:
         raise ValueError("Contract revisions require a new bound graph attempt; legacy revision dispatch is unavailable")
@@ -233,6 +246,29 @@ async def _execute_agent_node(
     failure_phase = "build_context"
     try:
         reused = None
+        from app.bridge.revision_resume import RECOVERY_RETRY_REASON
+        if (stage == 'idea' and request_extra.get('evolution')
+                and revision_reason in {'', RECOVERY_RETRY_REASON}):
+            cached = run.root / 'evolution/planning' / f'attempt_{attempt}' / 'audited_research.md'
+            index = cached.parent / 'research_checkpoint.json'
+            if index.is_file():
+                from app.harness.runtime.project_scope import safe_scope_path
+                checkpoint = json.loads(index.read_text())
+                if checkpoint.get('pending'):
+                    cached = cached.parent / 'no_completed_revision'
+                else:
+                    if checkpoint.get('contract_sha256') != request_extra.get('evolution_contract_sha256'):
+                        raise ValueError('Audited research checkpoint belongs to another frozen goal')
+                    cached = safe_scope_path(run.root, checkpoint['artifact_ref'], must_exist=True)
+                    if not cached.is_relative_to(index.parent):
+                        raise ValueError('Audited research checkpoint belongs to another planning attempt')
+                    if hashlib.sha256(cached.read_bytes()).hexdigest() != checkpoint['artifact_sha256']:
+                        raise ValueError('Audited research checkpoint changed')
+            if cached.is_file():
+                from app.agents.base import Artifact
+                saved = parse_fm(cached.read_text())
+                reused = Artifact(text=cached.read_text(), schema_id=str(agent.output_schema),
+                                  metadata=saved.metadata, body=saved.body)
         if (stage == 'coding' and attempt == 1 and research_stage is None
                 and not revision_reason and resume_invocation is None
                 and not (run.root / 'experiment/experiment_plan.approved.md').exists()):
@@ -253,6 +289,17 @@ async def _execute_agent_node(
                 artifact = await run_loop(request, context)
             else:
                 artifact = await agent.draft(request, context)
+        if stage == 'idea' and request_extra.get('evolution'):
+            failure_phase = 'evolution_ranking'
+            from app.harness.evolution import EvolutionContract
+            contract = EvolutionContract.model_validate(request_extra['evolution'])
+            from app.bridge.global_model_profiles import GlobalModelProfiles
+            request.runtime['evolution_model_configs'] = [GlobalModelProfiles().resolve(identifier, agent.config)
+                for identifier in contract.model_profile_ids] or [agent.config]
+            rank = getattr(agent, 'rank_for_evolution', None)
+            if not callable(rank):
+                raise ValueError('Registered Idea agent does not implement evolution proposal ranking')
+            artifact = await rank(request, artifact)
     except Exception as exc:
         failure = FailureEnvelope(task_id=task.task_id, invocation_id=task.invocation_id,
             code="agent_execution_failed", message=("Contract Agent execution failed; inspect its native receipts"
@@ -334,7 +381,9 @@ async def _execute_agent_node(
         from app.harness.context.compiler import write_compiled_manifest
         context_metadata = context.metadata if reused is None else {
             "execution_reuse": artifact.metadata.get("execution_reuse", {}),
-            "model_calls": 0,
+            **({'research_checkpoint_reuse': True,
+                'reasoning_checkpoint': f'evolution/planning/attempt_{attempt}/ranking/state.v1.json'}
+               if stage == 'idea' and request_extra.get('evolution') else {'model_calls': 0}),
         }
         compiled_manifest = context_metadata.get("last_compiled_manifest")
         if isinstance(compiled_manifest, dict):
@@ -342,7 +391,8 @@ async def _execute_agent_node(
         atomic_json(run.root / "context" / (task.invocation_id + ".source_receipt.json"), {
             "schema_id": "context.consumed_sources.v1", "invocation_id": task.invocation_id,
             "task_id": task.task_id, "source": ("actual_agent_context_metadata" if reused is None
-                                                 else "host_verified_execution_reuse"),
+                                                 else ("audited_research_checkpoint_reuse" if stage == 'idea'
+                                                       else "host_verified_execution_reuse")),
             "compiled_manifest_available": isinstance(compiled_manifest, dict),
             "required_upstream_refs": context_metadata.get("required_upstream_refs", []),
             "feedback_context": feedback_context,
@@ -551,6 +601,10 @@ def load_agent_handoff_context(
         manifest = coding_write_context(run)
         if manifest is not None:
             upstream['current_written_code_manifest'] = manifest
+    from app.bridge.evolution_service import evolution_context
+    evolution = evolution_context(run, attempt=attempt, stage=stage)
+    if evolution is not None:
+        upstream['evolution_task_context'] = evolution
     return upstream, feedback_context
 
 

@@ -39,6 +39,10 @@ def stopped_draft_retry_blocker(run: RunHandle, node: str, *, stage: str,
                 return "检查点与执行记录不一致，需先核对。"
     if (run.root / "resources/model_budget.v1.json").exists():
         try:
+            from app.bridge.run_model_recovery import recover_interrupted_run_model_requests
+            recovered = recover_interrupted_run_model_requests(run)
+            if recovered["status"] == "blocked":
+                return str(recovered["message"])
             ledger = RunModelBudget(run.root).recovery_snapshot()
         except ResourceBudgetError:
             return "资源记录或预算配置无法校验，请先核对记录。"

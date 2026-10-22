@@ -127,6 +127,30 @@ class ArtifactStore:
             return approved[-1]
         return versions[-1]
 
+    def latest_candidate(self, *, agent_dir: str, stem: str) -> ArtifactRef | None:
+        """Current review candidate, separate from the last approved handoff.
+
+        A previous approval never approves a newer version produced by feedback.
+        Consumers of approved work continue to use ``latest``/approved pointers.
+        """
+        with path_lock(self.lock_path):
+            versions = self.list_versions(agent_dir=agent_dir, stem=stem)
+            drafts = [ref for ref in versions if ref.version != 'approved']
+            approved = next((ref for ref in versions if ref.version == 'approved'), None)
+            if not drafts:
+                return approved
+            candidate = drafts[-1]
+            if approved is None:
+                return candidate
+            records = sorted(self._approval_dir(agent_dir, stem).glob('*.json'))
+            if records:
+                receipt = json.loads(records[-1].read_text())
+                if receipt.get('source_version') == candidate.version:
+                    return approved
+            elif approved.path.read_bytes() == candidate.path.read_bytes():
+                return approved
+            return candidate
+
     # ------------------------------------------------------------------ write
 
     def _next_version(

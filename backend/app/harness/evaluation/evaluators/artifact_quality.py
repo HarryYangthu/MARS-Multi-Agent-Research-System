@@ -45,7 +45,7 @@ _LIMITATION_MARKERS: tuple[str, ...] = (
 
 class ArtifactQualityEvaluator:
     id = "artifact_quality.rubric"
-    version = 2
+    version = 3
 
     def evaluate(self, target: EvaluationTarget) -> EvaluationReport:
         validation = validate_document(target.text, expected_schema=target.expected_schema)
@@ -160,8 +160,16 @@ def _score_proposal(metadata: dict[str, Any], _body: str) -> dict[str, float]:
         for item in raw_list(metadata.get("quality_warnings"))
         if str(item).strip()
     }
+    focused = raw_mapping(metadata.get('research_context'))
+    sources = {str(item.get('source_id')) for item in raw_list(focused.get('sources'))
+        if isinstance(item, dict) and item.get('decision') == 'use' and item.get('source_id')
+        and str(item.get('url', '')).startswith('https://') and item.get('method_summary') and item.get('method_spec_ref')}
+    linked = {str(source) for item in raw_list(focused.get('coverage')) if isinstance(item, dict)
+              for source in raw_list(item.get('source_ids'))}
+    # This is the same presence rubric for both supported proposal contracts.
+    # The Idea research-handoff verifier separately checks actual source reads.
     evidence_score = _score_bool(
-        bool(raw_list(metadata.get("evidence_refs")) or raw_list(metadata.get("related_literature"))),
+        bool(raw_list(metadata.get("evidence_refs")) or raw_list(metadata.get("related_literature")) or sources & linked),
         fallback=0.55 if metadata.get("theoretical_basis") else 0.25,
     )
     if quality_warnings & _PROPOSAL_EVIDENCE_WARNING_IDS:

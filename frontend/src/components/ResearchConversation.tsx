@@ -1,6 +1,7 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
+import { ConversationModelPicker } from "./ConversationModelPicker";
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import Link from "next/link";
@@ -8,7 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkUserFacingLanguage } from "@/lib/userFacingMarkdown";
 import { useRouter } from "next/navigation";
-import { ChatMessageFailure, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
+import { ChatMessageFailure, continueConversation, createConversation, getConversation, sendChatMessage, setConversationAutoMode } from "@/lib/api";
 import { ActivityGroup, ResearchAgentPanel, useResearchActivity } from "./ResearchActivity";
 import { activeActivityGroups, conversationEntries, groupConversationEntries, type Activity } from "@/lib/researchActivity";
 import { toolWork } from "@/lib/workProgress";
@@ -43,7 +44,9 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const { text: draft, editing } = messageDraft;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [continuingAt, setContinuingAt] = useState<string | null>(null);
   const [modeSaving, setModeSaving] = useState(false);
+  const [modelSaving, setModelSaving] = useState(false);
   const modeVersion = useRef(0);
   const changingMode = useRef(false);
   const [error, setError] = useState("");
@@ -61,7 +64,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const processing = busy || conversation?.processing === true;
   const lastStoredMessage = conversation?.messages.at(-1);
   const settledMessage = processing ? null : `${lastStoredMessage?.id ?? ""}:${lastStoredMessage?.timestamp ?? ""}`;
-  const editDisabled = processing || loading || needsRefresh || modeSaving;
+  const editDisabled = processing || loading || needsRefresh || modeSaving || modelSaving;
   const publicActivities: Activity[] = (conversation?.activities ?? []).map(item => ({ ...item, id: `commander:${item.id}`, agent: "commander", detail: item.status === "failed" ? "本次处理失败" : item.status === "interrupted" ? "本次处理已中断" : "", title: item.kind === "model" ? "分析研究任务" : item.status === "completed" ? item.title.replace("正在调用", "已调用").replace("正在执行", "已执行") : item.title }));
   const toolActivities: Activity[] = (conversation?.messages ?? []).filter(message => message.role === "tool").map((message, index) => ({ id: `tool:${message.id || index}`, turn_id: message.turn_id, timestamp: message.timestamp, agent: "commander", title: `${toolWork(message.tool_name || "任务工具")} · ${message.tool_result?.ok === false ? "未完成" : "已返回结果"}`, detail: "", status: message.tool_result?.ok === false ? "failed" : "completed" }));
   const entries = conversationEntries((conversation?.messages ?? []).filter(message => message.role !== "tool"), [...publicActivities, ...toolActivities]);
@@ -69,7 +72,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
   const latestUser = [...(conversation?.messages ?? [])].reverse().find(message => message.role === "user");
   const pendingSaved = pending && pendingMessageSaved(conversation?.messages ?? [], pending);
   const activeUser = conversation?.messages.find(message => message.id === conversation.active_turn_id);
-  const commanderStartedAt = pending?.startedAt || activeUser?.timestamp || latestUser?.timestamp;
+  const commanderStartedAt = continuingAt || pending?.startedAt || activeUser?.timestamp || latestUser?.timestamp;
   const liveGroups = activeActivityGroups(groups, activity.run, processing, commanderStartedAt);
   const hasCommanderProgress = groups.some(group => group.kind === "activities" && liveGroups.has(group.id) && group.activities.some(item => item.agent === "commander"));
 
@@ -120,8 +123,8 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   useEffect(() => { if (follow.current) bottom.current?.scrollIntoView({ block: "end" }); }, [lastEntry, pending, busy]);
 
-  // Terminal runs stop polling, but a Commander turn can restart or correct
-  // the same run. Revalidate after its persisted reply, including replies
+  // Revalidate immediately when a Commander turn restarts or corrects the
+  // same run, without waiting for the slower terminal heartbeat. Include replies
   // observed through conversation polling from another open tab.
   useEffect(() => {
     if (conversation?.linked_run_id && settledMessage !== null) void refreshActivity();
@@ -176,7 +179,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
 
   async function send(): Promise<void> {
     const text = draft.trim();
-    if (!text || sending.current || changingMode.current || conversation?.processing || loading || needsRefresh) return;
+    if (!text || sending.current || changingMode.current || conversation?.processing || loading || needsRefresh || modelSaving) return;
     follow.current = true; sending.current = true; setBusy(true); setError("");
     setPending({ text, after: conversation?.messages.length ?? 0, startedAt: new Date().toISOString(),
       ...(editing ? { replaceId: editing.messageId, expectedTimestamp: editing.originalTimestamp } : {}) }); updateDraft({ type: "submitted" });
@@ -196,6 +199,36 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
         if (!saved) updateDraft({ type: "restore", draft: { ...messageDraft, text } });
       }
     } finally { sending.current = false; if (alive.current) setBusy(false); }
+  }
+
+  async function continueLastRequest(): Promise<void> {
+    if (!conversation || sending.current || changingMode.current || processing || loading || modelSaving) return;
+    follow.current = true; sending.current = true; setContinuingAt(new Date().toISOString()); setBusy(true); setError("");
+    try {
+      // Refresh and bind the latest unfinished user message on the server.
+      // This also works after reload, when the local error banner is gone.
+      const current = await getConversation(conversation.conv_id);
+      validateConversationScope(current, project, experimentId, initialConversationId);
+      if (initialRunId && current.linked_run_id !== initialRunId) throw new Error("对话与所选研究任务不匹配。");
+      if (!alive.current) return;
+      setConversation(current); setPending(null); setNeedsRefresh(false);
+      if (current.processing) return;
+      const target = current.continuation;
+      if (!target?.enabled) throw new Error(target?.message || "当前没有未完成的对话请求。");
+      const updated = await continueConversation(current.conv_id, target.source_message_id, target.token);
+      if (alive.current) { setConversation(updated); await refreshActivity(); }
+    } catch (cause: unknown) {
+      if (alive.current) {
+        setError(cause instanceof Error ? cause.message : "继续请求未能确认，请核对最新进度。");
+        setNeedsRefresh(true);
+        // Refresh reads only. It never replays an uncertain model/tool call.
+        try {
+          const current = await getConversation(conversation.conv_id);
+          validateConversationScope(current, project, experimentId, initialConversationId);
+          if (alive.current) setConversation(current);
+        } catch { /* The visible error and explicit reload remain available. */ }
+      }
+    } finally { sending.current = false; if (alive.current) { setBusy(false); setContinuingAt(null); } }
   }
 
   const messages = conversation?.messages.filter((message) => message.role !== "system") ?? [];
@@ -240,8 +273,18 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
     </div>
     <form onSubmit={(event) => { event.preventDefault(); void send(); }} className="shrink-0 px-4 pb-5 sm:px-6">
       <div className="mx-auto max-w-3xl">
-        {error ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200"><p>{error}</p><button type="button" disabled={loading || busy} onClick={() => void refresh()} className="mt-2 underline disabled:opacity-40">{ui("重新读取对话")}</button></div> : null}
+        {error || conversation?.continuation?.enabled ? <div role="alert" className="mb-3 rounded-lg border border-amber-500/30 p-3 text-sm text-amber-200">
+          <p>{error || ui(conversation?.continuation?.message || "继续上一条尚未完成的请求，保留对话和已有结果。")}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <button type="button" disabled={!conversation || processing || loading || modeSaving || modelSaving || !!editing} onClick={() => void continueLastRequest()} className="rounded-lg bg-mars-accent px-4 py-2 text-sm text-white disabled:opacity-40">{busy ? ui("正在继续…") : ui("一键继续")}</button>
+            <button type="button" disabled={loading || busy} onClick={() => void refresh()} className="underline disabled:opacity-40">{ui("重新读取对话")}</button>
+          </div>
+        </div> : null}
         <div className="rounded-2xl border border-mars-border bg-mars-panel p-3 focus-within:border-indigo-400/60">
+          {conversation ? <ConversationModelPicker conversationId={conversation.conv_id} selectedId={conversation.selected_model_id || ""}
+            disabled={editDisabled} onChanged={setConversation} onBusyChange={value => {
+              changingMode.current = value; modeVersion.current += 1; setModelSaving(value);
+            }} /> : null}
           {editing ? <div role="status" className="mb-2 flex items-start justify-between gap-3 border-b border-mars-border px-2 pb-3">
             <div><p className="text-sm text-indigo-200">{ui("编辑并重新发送")}</p><p className="mt-1 text-xs text-slate-400">{ui("重新发送后替换这条消息，旧回复和处理记录不保留，其他消息保持原样。")}</p></div>
             <button type="button" disabled={processing} onClick={() => { updateDraft({ type: "cancel" }); composer.current?.focus(); }} className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-300 hover:bg-white/5 focus-visible:outline focus-visible:outline-indigo-300 disabled:opacity-40">{ui("取消编辑")}</button>
@@ -250,7 +293,7 @@ export function ResearchConversation({ project, name, experimentId, initialRunId
             if (event.key === "Escape" && editing && !processing && !event.nativeEvent.isComposing) { event.preventDefault(); updateDraft({ type: "cancel" }); }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
           }} className="block w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500" />
-          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">{ui("Enter 发送 · Shift + Enter 换行")}{editing ? ui(" · Esc 取消") : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? ui("处理中…") : editing ? ui("重新发送") : ui("发送")}</button></div>
+          <div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">{ui("Enter 发送 · Shift + Enter 换行")}{editing ? ui(" · Esc 取消") : ""}</span><button type="submit" disabled={processing || loading || needsRefresh || modeSaving || modelSaving || !draft.trim()} className="rounded-xl bg-mars-accent px-5 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40">{processing ? ui("处理中…") : editing ? ui("重新发送") : ui("发送")}</button></div>
         </div>
       </div>
     </form>

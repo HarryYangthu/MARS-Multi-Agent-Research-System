@@ -17,8 +17,9 @@ from app.storage.run_store import RunStore
 
 _EFFECTS = frozenset({'run_created', 'run_started', 'run_stopped', 'artifact_updated',
                       'exported', 'observed', 'tool_effect'})
-_CREATORS = frozenset({'run.create', 'create_and_start_run', 'run.existing_model'})
+_CREATORS = frozenset({'run.create', 'create_and_start_run', 'run.existing_model', 'run.auto_research'})
 _READERS = frozenset({'code.repo_list', 'code.repo_search', 'code.repo_read_lines',
+    'models.list',
     'routing.repository_check', 'context.read_material', 'run.status', 'get_run_status',
     'run.recovery_status', 'artifact.read', 'metrics.evaluate', 'diagnosis.failure_analysis',
     'get_diagnosis', 'query_kb', 'list_runs', 'discovery.status'})
@@ -130,7 +131,7 @@ def proposed_action_goal(session: CommanderSession, actions: Any) -> TurnGoal | 
     if names == ['run.create'] or names == ['run.create', 'run.start']:
         effects = ['run_created', 'run_started'] if len(names) == 2 else ['run_created']
         target = 'new'
-    elif names == ['create_and_start_run']:
+    elif names in (['create_and_start_run'], ['run.auto_research']):
         effects, target = ['run_created', 'run_started'], 'new'
     elif names == ['run.existing_model']:
         start = actions[0].get('args', {}).get('start', True)
@@ -370,7 +371,7 @@ def assess_completion(session: CommanderSession, goal: TurnGoal, reply: str = ''
             rid = _run_id(m)
             if _created(m) and (goal.run_target != 'existing' or rid == bound):
                 effects.append('run_created')
-            if (rid == bound and (tool in {'run.start', 'create_and_start_run', 'run.recover'}
+            if (rid == bound and (tool in {'run.start', 'create_and_start_run', 'run.recover', 'run.auto_research'}
                     and status in {'started', 'already_running', 'resumed', 'recovered'}
                     or tool == 'run.recover' and status in {'resuming', 'revision_started'}
                     or tool == 'run.existing_model' and status == 'preparation_started'

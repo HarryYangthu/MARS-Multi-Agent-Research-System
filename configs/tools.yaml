@@ -711,6 +711,13 @@ tools:
     mutation_level: write
     allowed_agents: [commander]
 
+  run.auto_research:
+    enabled: true
+    bridge_only: true
+    mutation_level: write
+    allowed_agents: [commander]
+    timeout_seconds: 60
+
   run.start:
     enabled: true
     bridge_only: true

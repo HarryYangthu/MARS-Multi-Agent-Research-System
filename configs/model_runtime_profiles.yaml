@@ -1,0 +1,28 @@
+schema: mars.model_runtime_profiles.v1
+profiles:
+  slow_intranet:
+    request_timeout_seconds: 600
+    max_retries: 1
+    commander_max_tokens: 2048
+    commander_disable_optional_thinking: true
+    connection_test_timeout_seconds: 120
+    connection_test_max_tokens: 128
+  company_qwen_200k:
+    inherits: slow_intranet
+    context_window: 200000
+    commander_working_context_tokens: 12000
+    commander_tool_transport: text
+    commander_message_format: single_user
+    system_message_mode: merge_first
+    template_family: qwen38_instruct
+    prefer_streaming: true
+    gateway_plain_request: true
+  company_gemma_160k:
+    inherits: slow_intranet
+    context_window: 160000
+    commander_working_context_tokens: 12000
+    commander_tool_transport: text
+    commander_message_format: single_user
+    system_message_mode: merge_first
+    prefer_streaming: true
+    gateway_plain_request: true

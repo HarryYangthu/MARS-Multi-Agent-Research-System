@@ -112,6 +112,7 @@ class ToolSpec:
     output_schema: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_INPUT_SCHEMA))
     policy: ToolPolicy = field(default_factory=ToolPolicy)
     bridge_only: bool = False
+    permission_dependencies: tuple[str, ...] = ()
 
 
 @dataclass
@@ -596,7 +597,17 @@ def _allowed_for_agent(tool_name: str, agent_name: str, spec: ToolSpec, *,
     except KeyError:
         logger.warning("no agent config for '{}'; blocking tool '{}'", agent_name, tool_name)
         return False
-    return tool_name in set(cfg.tools)
+    granted = set(cfg.tools)
+    if tool_name in granted:
+        return True
+    # A core-owned composite action may use the intersection of already granted
+    # capabilities. Old saved configurations need no credential/config rewrite.
+    # Explicitly disabled or separately approval-gated primitives cannot grant it.
+    from app.harness.tools.config import tool_config
+    return bool(spec.permission_dependencies) and all(
+        name in granted and tool_config(name).enabled and not tool_config(name).requires_approval
+        and (not tool_config(name).allowed_agents or agent_name in tool_config(name).allowed_agents)
+        for name in spec.permission_dependencies)
 
 
 def _tool_enabled(tool_name: str) -> bool:
@@ -817,6 +828,7 @@ def _spec_from_config(spec: ToolSpec) -> ToolSpec:
         output_schema=cfg.output_schema or spec.output_schema,
         policy=policy,
         bridge_only=cfg.bridge_only or spec.bridge_only,
+        permission_dependencies=spec.permission_dependencies,
     )
 
 

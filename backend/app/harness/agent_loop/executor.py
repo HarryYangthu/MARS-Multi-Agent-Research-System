@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 from app.harness.agent_loop.context import compact, pack_context
 from app.harness.agent_loop.completion_recovery import apply_author_empty_completion_recovery, validate_author_empty_recovery_resume
 from app.harness.agent_loop.provider_rejection_resume import checkpoint_quota_rejection_receipt
+from app.harness.agent_loop.interrupted_model_resume import checkpoint_interrupted_model_receipt
 from app.harness.agent_loop.native_protocol import INSTRUCTION as NATIVE_INSTRUCTION, history_groups, native_decision, native_specs
 from app.harness.agent_loop.policy import AgentLoopPolicy
 from app.harness.agent_loop.review import ExternalReview, review_revision
@@ -25,7 +26,7 @@ from app.harness.agent_loop.review_plan import (
 from app.harness.agent_loop.protocol import INSTRUCTION, ReviewConflictError, action_protocol_feedback, invalid_output_context, is_review_format_error, parse_action, parse_review
 from app.harness.agent_loop.trace import LoopTrace, atomic_json, canonical, digest
 from app.harness.agent_loop.stop import StopCondition, evaluate_stop, stop_fingerprint
-from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking, supports_glm_observation_tools
 from app.harness.llm.provider_base import LLMCompletionError, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.llm.accounting import ResourceBudgetError, guarded_complete
 from app.harness.llm.structured_output import normalize_document_output
@@ -278,7 +279,8 @@ def validate_native_thinking(config: LLMConfig, policy: AgentLoopPolicy) -> None
             raise ModelCompatibilityError("GLM-5.3 requires thinking enabled; use reasoning_effort=low")
         return
     if (not policy.native_observation_history
-            or not (glm_thinking or config.provider == "deepseek" and config.thinking_enabled is True)):
+            or not (supports_glm_observation_tools(config.provider, config.model)
+                    or config.provider == "deepseek" and config.thinking_enabled is True)):
         raise ModelCompatibilityError("native thinking tools require supported observation-only history")
 
 
@@ -366,6 +368,7 @@ class NativeAgentLoop:
                 "Read current code again. The complete revised candidate still requires validation and independent review."
             )
         rejection_receipt = None
+        interrupted_receipt = None
         if request.resume:
             if p.trace != "full":
                 raise ValueError("resume requires full trace/checkpoint mode")
@@ -381,10 +384,19 @@ class NativeAgentLoop:
                 raise ValueError("resume requires identical inputs/configuration and an interrupted/model-error run")
             rejection_receipt = checkpoint_quota_rejection_receipt(request.trace_root, state,
                 run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)))
+            interrupted_receipt = checkpoint_interrupted_model_receipt(request.trace_root, state,
+                run_root=Path(str(request.tool_context.extra.get("run_root") or request.trace_root.parent)))
             if rejection_receipt is not None:
                 # An explicit rejection has no unknown result to replay. Keep
                 # all request/attempt counts and unknown token usage unchanged.
                 state["pending"] = None
+            elif interrupted_receipt is not None:
+                # Preserve prior observations/counts; only the lost generation
+                # is abandoned. Its partial bytes cannot become an action.
+                state["pending"] = None
+                state["usage_complete"] = False
+            elif state.get("pending") == "model":
+                raise ValueError("model outcome unknown: reconcile the original request before resuming")
             validate_author_empty_recovery_resume(state, p)
             if request.review_plan_contract_id is not None:
                 validate_review_plan_resume(state, request.trace_root, contract_id=request.review_plan_contract_id)
@@ -423,6 +435,8 @@ class NativeAgentLoop:
             state.setdefault("active_elapsed_seconds", 0.0)
         if rejection_receipt is not None:
             trace.emit("provider_rejection_reconciled", rejection_receipt)
+        if interrupted_receipt is not None:
+            trace.emit("interrupted_model_reconciled", interrupted_receipt)
         trace.emit("resumed" if request.resume else "started", {"fingerprint": fingerprint})
         if request.revision_seed is not None and not request.resume:
             trace.emit("revision_seeded", {"counts_inherited": False, "acceptance_inherited": False},

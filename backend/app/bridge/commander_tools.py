@@ -30,6 +30,7 @@ from app.harness.tools.registry import (
     ToolContext as HarnessToolContext,
     ToolResult as HarnessToolResult,
     ToolSpec as HarnessToolSpec,
+    ToolPolicy as HarnessToolPolicy,
     get_registry as get_tool_registry,
 )
 from app.storage.artifact_store import SCHEMA_TO_AGENT, ArtifactStore
@@ -138,6 +139,28 @@ async def _create_and_start_run(args: dict[str, Any], ctx: ToolContext) -> dict[
     return await _start_run({"run_id": created["run_id"]}, ctx)
 
 
+async def _auto_research(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.harness.evolution import EvolutionContract, bind_explicit_metric_deltas
+    contract = EvolutionContract.model_validate(args.get('evolution'))
+    from app.bridge.evolution_service import bind_user_protocol
+    user_texts = [row['content'] for row in _stage_limit_user_sources(ctx.session)]
+    contract = bind_explicit_metric_deltas(contract, user_texts)
+    protocol = bind_user_protocol(contract.protocol, user_texts)
+    contract = contract.model_copy(update={'protocol': protocol})
+    return await _create_and_start_run({**args, 'entrypoint': 'pipeline', 'standalone': False,
+        'user_request': '\n\n'.join(user_texts) or str(args.get('user_request', '')),
+        'evolution': contract.model_dump(mode='json')}, ctx)
+
+
+async def _available_models(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.global_model_profiles import GlobalModelProfiles
+    from app.harness.llm.model_registry import get_agent_config
+    default = get_agent_config('idea')
+    return {'ok': True, 'global_models': GlobalModelProfiles().public(),
+        'default_idea_model': {'provider': default.model_provider, 'model': default.model_name},
+        'instruction': 'Use actual configured profile IDs for multi-model research, or omit IDs for independent sessions of the default Idea model.'}
+
+
 async def _create_run(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     routing = routing_repository_check(args, ctx.session)
     if not routing['ok']:
@@ -210,6 +233,7 @@ async def _create_run_with_routing(
         data_source=data_source,
         review_mode="commander" if ctx.session.auto_mode else "manual",
         extra={"routing": routing,
+               **({'evolution': args['evolution']} if args.get('evolution') is not None else {}),
                **({"existing_execution_job": existing_job} if existing_job is not None else {}),
                **(additional_extra or {}),
                **({"stop_after": "execution"} if stop_at_execution else {}),
@@ -286,6 +310,7 @@ def _stage_limit_user_sources(session: CommanderSession) -> list[dict[str, str]]
 
 async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     from app.bridge.commander_existing import (
+        ExistingIntentValidationError,
         existing_execution_stage_limit, materialize_existing_seed, resolve_existing_request,
         user_requests_additional_changes, validate_existing_user_intent,
     )
@@ -312,7 +337,8 @@ async def _run_existing_model(args: dict[str, Any], ctx: ToolContext) -> dict[st
         validate_existing_user_intent(resolved, [m["content"] for m in source_messages])
         stop_after_execution = existing_execution_stage_limit(args, [m["content"] for m in source_messages])
     except ValueError as exc:
-        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc)}
+        fields = exc.structured_fields() if isinstance(exc, ExistingIntentValidationError) else {}
+        return {"ok": False, "status": "user_intent_confirmation_required", "error": str(exc), **fields}
     if user_requests_additional_changes([m["content"] for m in source_messages]):
         resolved["ordinary_coding"] = True
     resolved = materialize_existing_seed(resolved)
@@ -917,7 +943,10 @@ TOOLS: dict[str, ToolSpec] = {
     "create_and_start_run": ToolSpec(
         name="create_and_start_run",
         description=(
-            "Create and immediately start a pipeline/standalone run. Use the "
+            "Create and immediately start a pipeline/standalone run. For goal-driven continuous Auto Research, "
+            "supply evolution with quantitative criteria, six-module code boundaries, matched baseline and budgets; "
+            "use pipeline. The host repeats real simulations, checks objectives and constraints, and evolves "
+            "within that frozen contract until replicated success or a declared stop. Use the "
             "task-relevant source read in this turn to choose the earliest necessary stage. "
             "For a NEW existing-model simulation use coding to bind execution delivery; "
             "for an explicit unchanged configuration and resolved budget/seed, always pass "
@@ -947,6 +976,7 @@ TOOLS: dict[str, ToolSpec] = {
             "routing_reason": "evidence-backed reason for the selected stage; required when repository_scope=not_applicable",
             "seed_artifact": "RARELY used — only a complete schema-valid markdown doc",
             "existing_execution_job": "optional no-code execution intent object: {config_path: exact inspected relative configuration path, entrypoint: existing relative training entry, max_iters: positive integer from current budget, budget_unit: steps|epochs, seed: nonnegative integer}; only with coding, never command_id/data/output paths or code modifications",
+            "evolution": 'Optional continuous Auto Research contract; prefer run.auto_research and read its full contract.',
         },
         handler=_create_and_start_run,
     ),
@@ -1092,10 +1122,39 @@ async def execute_tool(name: str, args: dict[str, Any], ctx: ToolContext) -> dic
     return result
 
 
+async def _describe_tools(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    from app.bridge.commander_native import commander_tool_input_schema
+    names = args.get("names")
+    if not isinstance(names, list) or not 1 <= len(names) <= 8 or any(
+            not isinstance(name, str) or name not in TOOLS for name in names):
+        return {"ok": False, "error": "names must contain one to eight existing tool names", "retryable": False}
+    configured = load_tool_configs()
+    return {"ok": True, "contracts": {name: commander_tool_input_schema(name, configured) for name in names}}
+
+
+TOOLS['run.auto_research'] = ToolSpec('run.auto_research',
+    'Start end-to-end Auto Research from a quantitative goal and constraints. Read actual model/configuration '
+    'before choosing six-module boundaries. Idea researches evidence, independently proposes and reviews candidates, '
+    'ranks with Elo, hands off selected modules to Coding, runs real matched simulations, and evolves until '
+    'verified attainment or an explicit budget/plateau stop. Read tools.describe for the contract; never invent user thresholds.',
+    {'user_request': 'Original research objective and constraints', 'task': 'Short task slug',
+     'evolution': 'Frozen goal, criteria, modules, baseline_names, candidate_pattern, protocol and iteration budgets'}, _auto_research)
+
+TOOLS['models.list'] = ToolSpec('models.list', 'Read saved system-wide model names and IDs for multi-model research; no secrets are returned.',
+    {}, _available_models, mutation_level='read')
+
+
+TOOLS["tools.describe"] = ToolSpec("tools.describe", "Read full contracts for named tools; no operation is executed.",
+    {"names": "array of exact tool names, at most 8"}, _describe_tools, mutation_level="read")
+
+
 def tools_for_prompt() -> str:
     """Render the tool catalogue for the Commander's system prompt."""
     lines: list[str] = []
+    from app.bridge.commander_native import _ALIASES
     for spec in TOOLS.values():
+        if spec.name in _ALIASES:
+            continue
         params = ", ".join(f"{k}: {v}" for k, v in spec.parameters.items()) or "(none)"
         lines.append(f"- {spec.name}({params})\n    {spec.description}")
     return "\n".join(lines)
@@ -1119,13 +1178,15 @@ def install_registry_adapters() -> None:
                 namespace=name.split(".", 1)[0],
                 description=spec.description,
                 bridge_only=True,
+                policy=HarnessToolPolicy(mutation_level=spec.mutation_level, allowed_agents=('commander',)),
+                permission_dependencies=('run.create', 'run.start') if name == 'run.auto_research' else (),
             ),
         )
     _REGISTRY_ADAPTERS_INSTALLED = True
 
 
 def _is_registry_bridge_tool(name: str) -> bool:
-    return tool_config(name).bridge_only and name in TOOLS
+    return (tool_config(name).bridge_only or name == 'run.auto_research') and name in TOOLS
 
 
 async def _execute_via_registry(

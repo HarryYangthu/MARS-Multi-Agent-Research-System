@@ -101,3 +101,5 @@ Update-MARS.cmd
 deploy/windows-native/Update.ps1
 
 deploy/windows-native/update_core.py
+backend/app/bridge/prompts/commander_runtime.md
+backend/app/bridge/prompts/commander_runtime.json

@@ -94,6 +94,9 @@ def register_default_agents() -> None:
 
 @asynccontextmanager
 async def service_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from app.bridge.bundled_projects import bootstrap_bundled_projects
+    from app.settings import repo_root
+    await asyncio.to_thread(bootstrap_bundled_projects, repo_root())
     initialize_plot_environment()
     git_check = await asyncio.to_thread(check_git_readiness)
     _app.state.git_readiness = git_check

@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 import yaml
 
 from app.harness.llm.model_capabilities import setup_reasoning
-from app.harness.llm.model_registry import _models_config
+from app.harness.llm.model_registry import (
+    AgentConfig, _models_config, _provider_credentials, configured_runtime_options, get_agent_config,
+)
 from app.harness.llm.provider_base import LLMConfig, LLMProvider, Message
 from app.harness.llm.openai_provider import _OpenAICompatProvider, public_error_details
 from app.settings import env_or_local, repo_root
@@ -35,7 +37,7 @@ class ConnectionTestResult(BaseModel):
 
 class ProbePolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    timeout_seconds: float = Field(gt=0, le=40)
+    timeout_seconds: float = Field(gt=0, le=3600)
     max_tokens: int = Field(ge=16, le=1024)
     close_timeout_seconds: float = Field(gt=0, le=5)
     max_request_bytes: int = Field(ge=1024, le=65536)
@@ -43,8 +45,16 @@ class ProbePolicy(BaseModel):
 
 
 def probe_policy() -> ProbePolicy:
-    raw = yaml.safe_load((repo_root() / "configs/models.yaml").read_text())
+    raw = yaml.safe_load((repo_root() / "configs/models.yaml").read_text(encoding="utf-8"))
     return ProbePolicy.model_validate(raw["connection_test"])
+
+
+def matching_probe_runtime(request: ConnectionTestRequest, selected: AgentConfig, endpoint: str) -> dict[str, object]:
+    """Reuse explicitly selected compatibility only for this exact model route."""
+    if (request.provider != selected.model_provider or request.model != selected.model_name
+            or request.base_url.rstrip('/') != endpoint.rstrip('/')):
+        return {}
+    return configured_runtime_options(selected)
 
 
 def probe_provider(request: ConnectionTestRequest) -> LLMProvider:
@@ -112,9 +122,14 @@ async def test_model_connection(request: ConnectionTestRequest) -> ConnectionTes
             policy = probe_policy()
             provider = probe_provider(request)
             thinking, effort = setup_reasoning(request.provider, request.model)
+            try:
+                selected = get_agent_config("commander")
+                runtime = matching_probe_runtime(request, selected, _provider_credentials(selected)["base_url"])
+            except KeyError:
+                runtime = {}
             config = LLMConfig(provider=request.provider, model=request.model, temperature=0,
                 max_tokens=policy.max_tokens, thinking_enabled=thinking, reasoning_effort=effort,
-                request_timeout_seconds=policy.timeout_seconds, max_retries=0)
+                request_timeout_seconds=policy.timeout_seconds, max_retries=0, extra=runtime)
             async with asyncio.timeout(policy.timeout_seconds):
                 completion = await provider.complete([Message(role="user", content=policy.prompt)], config)
             if completion.is_mock or not completion.text.strip():

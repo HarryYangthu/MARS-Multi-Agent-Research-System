@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,6 +22,34 @@ _DECISION_RANK: dict[EvaluationDecision, int] = {
     "fail": 4,
 }
 _SEVERITY_RANK = {"blocker": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def refresh_stale_artifact_evaluations(run: RunHandle, ref: ArtifactRef) -> None:
+    """Re-evaluate a pending artifact after an evaluator upgrade, retaining history."""
+    from app.harness.evaluation.artifacts import write_report
+    from app.harness.evaluation.models import EvaluationTarget
+    reports = read_reports_for_artifact(run_root=run.root, agent_dir=ref.agent_dir,
+                                       stem=ref.stem, version=ref.version)
+    evaluators = {item.id: item for item in EvaluationRunner().evaluators}
+    for report in reports:
+        metadata = report.get('metadata', {})
+        evaluator = evaluators.get(metadata.get('evaluator'))
+        if evaluator is None or metadata.get('evaluator_version') == evaluator.version:
+            continue
+        path = run.root / report['path']
+        content = path.read_bytes()
+        history = path.parent / 'history' / hashlib.sha256(content).hexdigest() / path.name
+        history.parent.mkdir(parents=True, exist_ok=True)
+        if not history.exists():
+            history.write_bytes(content)
+        current = evaluator.evaluate(EvaluationTarget(project=run.project, scope='artifact',
+            target_ref=ref.path.relative_to(run.root).as_posix(), text=ref.path.read_text(),
+            expected_schema=metadata.get('target_schema')))
+        write_report(path, current)
+        run.write_event('evaluation_events', {'event': 'evaluation.pending_artifact_refreshed',
+            'artifact_ref': ref.path.relative_to(run.root).as_posix(), 'evaluator': evaluator.id,
+            'version': evaluator.version, 'previous_report_ref': history.relative_to(run.root).as_posix(),
+            'scientific_validated': False})
 
 
 def build_artifact_evaluation_summary(

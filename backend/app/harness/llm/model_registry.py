@@ -230,7 +230,7 @@ def _build_real_provider(
         if provider == "openai":
             from app.harness.llm.openai_provider import OpenAIProvider
 
-            return OpenAIProvider(api_key=credentials["api_key"])
+            return OpenAIProvider(api_key=credentials["api_key"], base_url=credentials['base_url'] or None)
         if provider == "qwen":
             from app.harness.llm.openai_provider import QwenProvider
 
@@ -287,6 +287,49 @@ def configured_context_window(agent_config: AgentConfig) -> int | None:
     return window
 
 
+def configured_runtime_options(agent_config: AgentConfig) -> dict[str, Any]:
+    """Operator-selected wire compatibility, independent of a model-name list.
+
+    The advertised context capacity is separate from the smaller working set.
+    No arbitrary request body or credential can be injected through this map.
+    """
+    raw = agent_config.raw.get("model", {}).get("runtime", {})
+    if not isinstance(raw, Mapping):
+        raise ValueError("model.runtime must be a mapping")
+    options: dict[str, Any] = {}
+    for name in ("prefer_streaming", "gateway_plain_request"):
+        if name in raw:
+            if type(raw[name]) is not bool:
+                raise ValueError(f"model.runtime.{name} must be boolean")
+            options[name] = raw[name]
+    transport = raw.get("tool_transport", "auto")
+    if transport not in {"auto", "native", "text"}:
+        raise ValueError("model.runtime.tool_transport must be auto, native or text")
+    if transport == "text":
+        options["commander_text_transport"] = True
+    message_format = raw.get("message_format", "standard")
+    if message_format not in {"standard", "single_user"}:
+        raise ValueError("model.runtime.message_format must be standard or single_user")
+    if message_format == "single_user":
+        options["message_format"] = message_format
+    system_message_mode = raw.get("system_message_mode", "standard")
+    if system_message_mode not in {"standard", "merge_first"}:
+        raise ValueError("model.runtime.system_message_mode must be standard or merge_first")
+    if system_message_mode == "merge_first":
+        options["system_message_mode"] = system_message_mode
+    template_family = raw.get("template_family", "standard")
+    if template_family not in {"standard", "qwen38_instruct"}:
+        raise ValueError("model.runtime.template_family must be standard or qwen38_instruct")
+    if template_family != "standard":
+        options["template_family"] = template_family
+    working_tokens = raw.get("working_context_tokens")
+    if working_tokens is not None:
+        if type(working_tokens) is not int or working_tokens <= 0:
+            raise ValueError("model.runtime.working_context_tokens must be a positive integer")
+        options["working_context_tokens"] = working_tokens
+    return options
+
+
 def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
     """Select an explicitly configured real model; never substitute output."""
     window = configured_context_window(agent_config)
@@ -302,7 +345,8 @@ def select_provider(agent_config: AgentConfig) -> tuple[LLMProvider, LLMConfig]:
         request_timeout_seconds=agent_config.request_timeout_seconds,
         max_retries=agent_config.max_retries,
         retry_base_delay_seconds=agent_config.retry_base_delay_seconds,
-        extra={"context_window": window} if window is not None else {},
+        extra={**configured_runtime_options(agent_config),
+               **({"context_window": window} if window is not None else {})},
     )
 
     if not provider_configured_for_agent(agent_config):

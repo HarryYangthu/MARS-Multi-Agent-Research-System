@@ -132,6 +132,7 @@ backend/app/bridge/commander_code.py
 backend/app/bridge/commander_existing.py
 backend/app/bridge/commander_existing_sources.py
 backend/app/bridge/conversation_edit.py
+backend/app/bridge/conversation_continue.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py
 backend/app/bridge/commander_observability.py
@@ -835,3 +836,28 @@ Update-MARS.cmd
 deploy/windows-native/Update.ps1
 
 deploy/windows-native/update_core.py
+backend/app/bridge/bundled_projects.py
+backend/app/bridge/commander_compat.py
+docs/glm-gateway-compatibility.md
+configs/model_runtime_profiles.yaml
+deploy/windows-native/configure_slow_model.py
+docs/slow-intranet-model.md
+backend/app/bridge/commander_journal.py
+backend/app/bridge/commander_recovery.py
+backend/app/bridge/run_model_recovery.py
+backend/app/bridge/global_model_profiles.py
+backend/app/api/global_model_profiles.py
+backend/app/bridge/prompts/commander_runtime.md
+backend/app/bridge/prompts/commander_runtime.json
+deploy/windows-native/model_runtime_profiles.defaults.yaml
+frontend/src/components/ConversationModelPicker.tsx
+docs/intranet-core-update-20261021.md
+backend/app/harness/agent_loop/interrupted_model_resume.py
+
+# Goal-bound Auto Research and six-module evolution
+backend/app/agents/idea/evolution_planner.py
+backend/app/bridge/evolution_service.py
+backend/app/bridge/managed_review_context.py
+backend/app/execution/evolution_evidence.py
+backend/app/harness/evolution.py
+docs/auto-research.md

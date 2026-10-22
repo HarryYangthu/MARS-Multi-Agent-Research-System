@@ -7,6 +7,8 @@ from app.bridge.task_runtime import resumable_task
 from app.harness.context.runtime_pack import read_material
 from app.storage.run_store import RunHandle
 
+RECOVERY_RETRY_REASON = '用户请求在原任务中重试失败阶段；保留上游产物、既有记录及累计资源用量。'
+
 
 def resume_revision_reason(run: RunHandle, node: str, invocation: str) -> str:
     task = resumable_task(run, node)

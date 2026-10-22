@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_orchestrator, get_run_store
 from app.bridge.commander import Commander
+from app.bridge.conversation_continue import continuation_message, conversation_continuation
+from app.bridge.global_model_profiles import GlobalModelProfiles, resolve_selected_agent_config
+from app.harness.llm.model_registry import get_agent_config
 from app.bridge.commander_errors import CommanderDecisionError, conversation_failure
 from app.bridge.conversation_edit import MessageEditConflict, MessageEditRequest
 from app.bridge.commander_session import (
@@ -46,6 +49,11 @@ class MessagePayload(BaseModel):
     text: str = Field(..., min_length=1)
 
 
+class ContinueConversationPayload(BaseModel):
+    source_message_id: str = Field(min_length=1)
+    token: str = Field(min_length=1)
+
+
 class EditMessagePayload(MessagePayload):
     expected_content: str
     expected_timestamp: str
@@ -58,6 +66,11 @@ class OpenRunConversationPayload(BaseModel):
 
 class AutoModePayload(BaseModel):
     auto_mode: bool
+
+
+class SelectModelPayload(BaseModel):
+    selected_model_id: str = Field(default='', max_length=32)
+    make_default: bool = True
 
 
 class MessageView(BaseModel):
@@ -79,12 +92,14 @@ class ConversationView(BaseModel):
     linked_run_id: str | None
     experiment_id: str = ""
     auto_mode: bool
+    selected_model_id: str = ''
     metric_targets: dict[str, float]
     messages: list[MessageView]
     processing: bool = False
     active_turn_id: str | None = None
     completion_state: dict[str, Any] = Field(default_factory=dict)
     activities: list[dict[str, Any]] = Field(default_factory=list)
+    continuation: dict[str, Any] = Field(default_factory=dict)
 
 
 def _msg_view(m: ChatMessage) -> MessageView:
@@ -110,12 +125,14 @@ def _conv_view(s: CommanderSession) -> ConversationView:
         linked_run_id=s.linked_run_id,
         experiment_id=s.experiment_id,
         auto_mode=s.auto_mode,
+        selected_model_id=s.selected_model_id,
         metric_targets=dict(s.metric_targets),
         messages=[_msg_view(m) for m in s.messages],
         processing=s.processing,
         active_turn_id=s.active_turn_id,
         completion_state=dict(s.completion_state),
         activities=[asdict(item) for item in s.activities],
+        continuation=conversation_continuation(s),
     )
 
 
@@ -137,6 +154,8 @@ async def create_conversation(payload: CreateConversationPayload) -> Conversatio
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     session = get_session_store().create(project=payload.project, experiment_id=payload.experiment_id)
+    session.selected_model_id = str(GlobalModelProfiles().public().get('default_id') or '')
+    get_session_store().persist(session)
     return _conv_view(session)
 
 
@@ -176,8 +195,10 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         raise HTTPException(status_code=404, detail="conversation not found")
     if session.processing:
         raise HTTPException(status_code=409, detail="conversation is already processing a message")
-    commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
+    message_count = len(session.messages)
     try:
+        commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store(),
+            agent_config=resolve_selected_agent_config(session, get_agent_config('commander')))
         await commander.handle_user_message(session, payload.text)
     except CommanderDecisionError:
         preserve_conversation_on_response_error(session)
@@ -186,11 +207,72 @@ async def post_message(conv_id: str, payload: MessagePayload) -> ConversationVie
         if failure is None:
             raise
         code, message = failure
+        if len(session.messages) == message_count:
+            session.add(ChatMessage(role="user", content=payload.text))
+        session.add(ChatMessage(role="assistant", content=message))
+        latest_user = next(message for message in reversed(session.messages) if message.role == 'user')
+        session.completion_state.update(status="blocked", reason=message, turn_id=latest_user.id)
         raise HTTPException(status_code=409, detail={
             'code': code, 'error': message, 'message_saved': True,
         }) from exc
     finally:
         store.persist(session)
+    return _conv_view(session)
+
+
+@router.post("/conversations/{conv_id}/continue", response_model=ConversationView)
+async def continue_conversation(conv_id: str, payload: ContinueConversationPayload) -> ConversationView:
+    session = get_session_store().get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    if session.processing:
+        return _conv_view(session)
+    try:
+        text = continuation_message(session, source_message_id=payload.source_message_id, token=payload.token)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail={'error': str(error), 'message_saved': False}) from error
+    # No await between checking the snapshot and entering the normal message
+    # handler. Commander claims processing before its first model await. A
+    # concurrent click observes that owner; a later click has a stale token.
+    return await post_message(conv_id, MessagePayload(text=text))
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str) -> dict[str, Any]:
+    store = get_session_store()
+    session = store.get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    run_store = get_run_store()
+    run_id = session.linked_run_id
+    run = run_store.get(run_id) if run_id else None
+    if session.processing or (run_id and get_orchestrator().run_control(run_id).get("owned_task_active")):
+        raise HTTPException(status_code=409, detail="研究正在运行，请先停止或等待完成后删除")
+    if run is not None and run.project != session.project:
+        raise HTTPException(status_code=409, detail="关联任务不属于当前项目，未删除")
+    moved_run = False
+    try:
+        if run is not None and run_id:
+            run_store.trash(run_id)
+            moved_run = True
+        store.trash(conv_id)
+    except (OSError, ValueError) as error:
+        if moved_run and run_id:
+            run_store.restore(run_id)
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if run_id:
+        get_orchestrator().discard_session(run_id)
+    return {"ok": True, "conv_id": conv_id, "run_id": run_id, "recoverable": True}
+
+
+@router.post("/conversations/{conv_id}/restore", response_model=ConversationView)
+async def restore_conversation(conv_id: str) -> ConversationView:
+    try:
+        session = get_session_store().restore(conv_id)
+        if session.linked_run_id and get_run_store().get_trashed(session.linked_run_id) is not None:
+            get_run_store().restore(session.linked_run_id)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return _conv_view(session)
 
 
@@ -202,8 +284,9 @@ async def edit_message(conv_id: str, message_id: str, payload: EditMessagePayloa
         raise HTTPException(status_code=404, detail="conversation not found")
     if session.processing:
         raise HTTPException(status_code=409, detail="conversation is already processing a message")
-    commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store())
     try:
+        commander = Commander(orchestrator=get_orchestrator(), run_store=get_run_store(),
+            agent_config=resolve_selected_agent_config(session, get_agent_config('commander')))
         await commander.handle_user_message(session, payload.text, edit=MessageEditRequest(
             message_id=message_id, expected_content=payload.expected_content, expected_timestamp=payload.expected_timestamp,
         ))
@@ -213,8 +296,12 @@ async def edit_message(conv_id: str, message_id: str, payload: EditMessagePayloa
         preserve_conversation_on_response_error(session, message_id)
     except Exception as exc:
         failure = conversation_failure(exc)
-        code, message = failure or ("regeneration_failed", "消息已替换，但重新生成回复失败。请重新读取对话核对进度；旧回复没有恢复，系统没有自动重试。")
-        raise HTTPException(status_code=409, detail={"code": code, "error": message, "message_saved": True}) from exc
+        saved = any(message.id == message_id and message.content == payload.text
+            and message.timestamp != payload.expected_timestamp for message in session.messages)
+        code, message = failure or ("regeneration_failed", (
+            "消息已替换，但重新生成回复失败。请重新读取对话核对进度；旧回复没有恢复，系统没有自动重试。" if saved
+            else "未能开始重新生成，原消息和已有进度保留。请核对模型配置后重试。"))
+        raise HTTPException(status_code=409, detail={"code": code, "error": message, "message_saved": saved}) from exc
     finally:
         store.persist(session)
     return _conv_view(session)
@@ -234,5 +321,23 @@ async def set_auto_mode(conv_id: str, payload: AutoModePayload) -> ConversationV
         except (KeyError, ValueError, OSError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail="审批方式未能保存，请重新读取对话核对。") from error
     session.auto_mode = payload.auto_mode
+    store.persist(session)
+    return _conv_view(session)
+
+
+@router.post('/conversations/{conv_id}/model', response_model=ConversationView)
+async def select_conversation_model(conv_id: str, payload: SelectModelPayload) -> ConversationView:
+    store = get_session_store()
+    session = store.get(conv_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='conversation not found')
+    if session.processing:
+        raise HTTPException(status_code=409, detail='当前消息正在处理，请等本轮结束后切换模型。')
+    models = GlobalModelProfiles()
+    if payload.selected_model_id and not any(item['id'] == payload.selected_model_id for item in models.public()['profiles']):
+        raise HTTPException(status_code=422, detail='所选全局模型配置不存在。')
+    if payload.make_default:
+        models.set_default(payload.selected_model_id)
+    session.selected_model_id = payload.selected_model_id
     store.persist(session)
     return _conv_view(session)
