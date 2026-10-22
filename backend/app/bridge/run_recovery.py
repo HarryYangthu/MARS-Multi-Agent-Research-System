@@ -36,6 +36,13 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     if session.termination and not session.read_only and not orch.owned_tasks.closing:
         termination = session.termination
         nodes = termination.get('interrupted_nodes', [])
+        approved_execution = [key for key, value in states.items()
+                              if value == 'approved' and parse_node_key(key).stage == 'execution']
+        if (termination.get('reason') == 'server_shutdown' and termination.get('cleanup_complete') is True
+                and nodes == [] and len(approved_execution) == 1
+                and not any(value == 'running' for value in states.values())):
+            result['actions'] = [{'action': 'resume', 'node': approved_execution[0], 'label': '继续核对仿真配置'}]
+            return finish('recoverable', '服务在启动检查期间退出，训练尚未启动；可继续核对已批准清单。')
         if (termination.get('type') == 'cancelled' and termination.get('cleanup_complete') is True
                 and len(nodes) == 1 and parse_node_key(nodes[0]).stage == 'execution'
                 and states.get(nodes[0]) == 'failed'):
@@ -87,6 +94,10 @@ def recovery_status(orch: Orchestrator, run_id: str, *, project: str) -> dict[st
     elapsed_exhausted = False
     if ledger.exists():
         try:
+            from app.bridge.run_model_recovery import recover_interrupted_run_model_requests
+            model_recovery = recover_interrupted_run_model_requests(session.run)
+            if model_recovery["status"] == "blocked":
+                return finish('blocked', str(model_recovery["message"]))
             model_budget = RunModelBudget(session.run.root, active_model_time=True)
             raw = model_budget.recovery_snapshot()
         except (ResourceBudgetError, OSError, ValueError):
@@ -231,10 +242,14 @@ async def recover_run(orch: Orchestrator, run_id: str, *, project: str,
     except ProductionReadinessError:
         return {'ok': False, 'status': 'not_ready', 'error': '执行配置未就绪，请先检查项目与 API 配置。'}
     if action == 'resume':
-        result = orch.resume_owned_run(run_id)
+        if orch.session(run_id).graph.state(node).value == 'approved' and parse_node_key(node).stage == 'execution':
+            result = await orch.resume_after_artifact_approval(run_id=run_id, agent='execution')
+        else:
+            result = orch.resume_owned_run(run_id)
     else:
+        from app.bridge.revision_resume import RECOVERY_RETRY_REASON
         result = await orch.request_artifact_revision(run_id=run_id, agent=parse_node_key(node).stage,
-            reason='用户请求在原任务中重试失败阶段；保留上游产物、既有记录及累计资源用量。',
+            reason=RECOVERY_RETRY_REASON,
             restart_stopped=bool(orch.session(run_id).termination))
     result['run_id'] = run_id
     if result.get('ok'):

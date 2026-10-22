@@ -108,21 +108,28 @@ def _cache_tree(tmp_path: Path) -> tuple[Path, Path]:
     (cache / 'requirements.windows.txt').write_text('# checksum fixture; nothing installed\n')
     pins = {name + '_sha256': hashlib.sha256((cache / (name + '.zip')).read_bytes()).hexdigest()
             for name in ('uv', 'node', 'git')}
+    pins['python_version'] = '3.11.14'
     (source / 'configs/windows_native.yaml').write_text(yaml.safe_dump(pins))
+    (source / 'uv.lock').write_text('# Real archive-contract fixture; no installation executed\n')
+    (source / 'frontend').mkdir(exist_ok=True)
+    (source / 'frontend/package-lock.json').write_text('{}\n')
+    (source / 'scripts/release').mkdir(parents=True)
+    (source / 'scripts/release/v30_tree_allowlist.txt').write_text('configs/windows_native.yaml\nconfigs/execution.yaml\nuv.lock\nfrontend/package-lock.json\nscripts/release/v30_tree_allowlist.txt\n')
     (source / 'configs/execution.yaml').write_text('execution:\n  paper_static: {}\n')
     (source / '.env.local').write_text('PRIVATE_TOKEN=must-not-transfer\n')
     (source / 'frontend/.next').mkdir(parents=True)
     (source / 'frontend/.next/generated.js').write_text('generated build output')
-    _cache_manifest(cache)
+    _cache_manifest(cache, source)
     return source, cache
 
 
-def _cache_manifest(cache: Path) -> None:
+def _cache_manifest(cache: Path, source: Path | None = None) -> None:
     files = [{'path': str(path.relative_to(cache)), 'bytes': path.stat().st_size,
               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
              for path in sorted(cache.iterdir()) if path.name != 'manifest.json']
+    fingerprint = OFFLINE.dependency_fingerprint(source) if source is not None else json.loads((cache / 'manifest.json').read_text())['dependency_fingerprint']
     (cache / 'manifest.json').write_text(json.dumps({'schema': 'mars.windows.dependencies.v1',
-        'platform': 'windows-x64', 'python': '3.11.14', 'files': files}))
+        'platform': 'windows-x64', 'python': '3.11.14', 'dependency_fingerprint': fingerprint, 'files': files}))
 
 
 def test_original_cache_is_verified_and_actual_archive_excludes_private_generated_files(tmp_path: Path) -> None:
@@ -140,7 +147,7 @@ def test_original_cache_is_verified_and_actual_archive_excludes_private_generate
         assert not any('.env.local' in name or '/.next/' in name for name in archive.namelist())
 
 
-@pytest.mark.parametrize('kind', ['corrupt', 'resigned-pin', 'missing', 'traversal', 'duplicate', 'symlink', 'unlisted'])
+@pytest.mark.parametrize('kind', ['corrupt', 'resigned-pin', 'missing', 'traversal', 'duplicate', 'symlink', 'unlisted', 'unbound', 'lock-changed'])
 def test_bad_prepared_cache_is_not_recertified(tmp_path: Path, kind: str) -> None:
     source, cache = _cache_tree(tmp_path)
     if kind in {'corrupt', 'resigned-pin'}:
@@ -152,6 +159,12 @@ def test_bad_prepared_cache_is_not_recertified(tmp_path: Path, kind: str) -> Non
     elif kind == 'symlink':
         original = cache / 'uv.zip'; outside = tmp_path / 'uv.zip'
         original.replace(outside); original.symlink_to(outside)
+    elif kind == 'lock-changed':
+        (source / 'uv.lock').write_text('# Changed actual lock input\n')
+    elif kind == 'unbound':
+        manifest = json.loads((cache / 'manifest.json').read_text())
+        manifest.pop('dependency_fingerprint')
+        (cache / 'manifest.json').write_text(json.dumps(manifest))
     elif kind == 'unlisted':
         (cache / 'unlisted').mkdir()
         (cache / 'unlisted/manifest.json').write_text('{}')

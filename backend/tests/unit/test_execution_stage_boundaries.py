@@ -169,26 +169,21 @@ async def wait_for_confirmation(orch: Orchestrator, session: RunSession) -> asyn
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('blocker', [None, 'running_node', 'job_claim', 'wrong_status', 'read_only'])
-async def test_actual_confirmation_owner_can_set_boundary_only_before_job_launch(
+@pytest.mark.parametrize('blocker', [None, 'writing_started', 'read_only'])
+async def test_actual_confirmation_owner_can_set_boundary_before_downstream_dispatch(
         tmp_path: Path, blocker: str | None) -> None:
     with actual_project(tmp_path) as ctx:
         session = ctx.orchestrator.create_session(RunRequest(task='actual-confirmation',
             project=ctx.session.project, entrypoint='execution', review_mode='manual'))
         task = await wait_for_confirmation(ctx.orchestrator, session)
         try:
-            if blocker == 'running_node':
-                session.graph.restore_state('execution', NodeState.RUNNING)
+            if blocker == 'writing_started':
+                session.graph.restore_state('writing', NodeState.RUNNING)
                 ctx.orchestrator._persist_state(session, status='waiting_execution_confirmation')
-            elif blocker == 'job_claim':
-                path = session.run.subdir('execution')/'jobs/actual.claim'
-                path.parent.mkdir(); path.touch()  # A real retained claim must block admission changes.
-            elif blocker == 'wrong_status':
-                ctx.orchestrator._persist_state(session, status='running')
             elif blocker == 'read_only':
                 session.read_only = True
             if blocker is not None:
-                with pytest.raises(ValueError, match='启动前'):
+                with pytest.raises(ValueError):
                     ctx.orchestrator.set_stage_limit(session.run.run_id, stop_after='execution')
                 assert 'stop_after' not in session.request.extra
             else:

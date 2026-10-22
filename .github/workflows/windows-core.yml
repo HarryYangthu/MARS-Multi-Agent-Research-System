@@ -1,0 +1,140 @@
+name: Windows core update
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'scripts/release/**'
+      - 'deploy/windows-native/**'
+      - '.github/workflows/windows-core.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    timeout-minutes: 10
+    steps:
+      - name: Preserve committed source bytes for dependency fingerprints
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify the canonical dependency lock
+        shell: bash
+        run: |
+          python -m pip install 'uv==0.11.1'
+          uv lock --check
+      - name: Install locked build and test tools
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess, sys, tomllib
+          lock = tomllib.load(open('uv.lock', 'rb'))
+          names = {'pyyaml', 'pytest', 'packaging', 'pluggy', 'iniconfig', 'pygments', 'colorama'}
+          packages = [item['name'] + '==' + item['version'] for item in lock['package'] if item['name'] in names]
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', *packages], check=True)
+          PY
+      - name: Real filesystem, updater and archive contracts
+        shell: bash
+        run: python -m pytest backend/tests/unit/test_windows_core_update.py backend/tests/unit/test_windows_core_builder.py -q
+      - name: Assemble reviewed core source without dependencies or user state
+        shell: bash
+        run: |
+          python scripts/release/build_windows_core.py --source . --output "$RUNNER_TEMP/MARS-Core-Update.zip" --version "$GITHUB_SHA" | tee "$RUNNER_TEMP/core-release.json"
+          python - <<'PY'
+          import hashlib, json, os, zipfile
+          from pathlib import Path
+          archive = Path(os.environ['RUNNER_TEMP']) / 'MARS-Core-Update.zip'
+          with zipfile.ZipFile(archive) as z:
+              manifest = json.loads(z.read('CORE-UPDATE.json'))
+              assert manifest['schema'] == 'mars.windows.core.v1'
+              assert manifest['version'] == os.environ['GITHUB_SHA']
+              assert set(z.namelist()) == {'CORE-UPDATE.json', *(row['path'] for row in manifest['files'])}
+              for row in manifest['files']:
+                  content = z.read(row['path'])
+                  assert len(content) == row['bytes'] and hashlib.sha256(content).hexdigest() == row['sha256']
+                  assert row['policy'] == ('seed' if row['path'].split('/')[0] in {'configs', 'projects'} else 'replace')
+          print('Actual core archive bytes, manifest, policies and source version verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mars-windows-core-update-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/MARS-Core-Update.zip
+            ${{ runner.temp }}/core-release.json
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mars-windows-core-update-ubuntu-latest
+          path: ${{ runner.temp }}/core-package
+      - name: Publish the sanitized fast-forward windows-core distribution branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          latest=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | cut -f1)
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            echo 'A newer main commit exists; this older build will not replace windows-core.'
+            exit 0
+          fi
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path, PurePosixPath
+          destination = Path(os.environ['RUNNER_TEMP']) / 'core-publication'
+          destination.mkdir()
+          with zipfile.ZipFile(Path(os.environ['RUNNER_TEMP']) / 'core-package/MARS-Core-Update.zip') as z:
+              for item in z.infolist():
+                  path = PurePosixPath(item.filename)
+                  assert not path.is_absolute() and '..' not in path.parts and '\\' not in item.filename
+                  assert '.git' not in path.parts and not item.is_dir()
+                  target = destination.joinpath(*path.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(z.read(item))
+          manifest = json.loads((destination / 'CORE-UPDATE.json').read_text())
+          assert manifest['version'] == os.environ['GITHUB_SHA']
+          PY
+          cd "$RUNNER_TEMP/core-publication"
+          git init -b windows-core
+          git config user.name github-actions\[bot\]
+          git config user.email 41898282+github-actions\[bot\]@users.noreply.github.com
+          remote="https://github.com/$GITHUB_REPOSITORY.git"
+          old=$(git ls-remote "$remote" refs/heads/windows-core | cut -f1)
+          parent=()
+          if [ -n "$old" ]; then
+            git fetch --depth=1 "$remote" "$old"
+            test "$(git rev-parse FETCH_HEAD)" = "$old"
+            parent=(-p "$old")
+          fi
+          git add --all
+          git add -f CORE-UPDATE.json
+          tree=$(git write-tree)
+          commit=$(printf 'Windows core %s\n' "$GITHUB_SHA" | git commit-tree "$tree" "${parent[@]}")
+          latest=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            echo 'A newer main commit exists; publication skipped.'
+            exit 0
+          fi
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.extraheader=AUTHORIZATION: basic $auth" push "$remote" "$commit:refs/heads/windows-core"

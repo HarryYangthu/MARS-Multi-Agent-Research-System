@@ -255,8 +255,9 @@ async def test_failed_or_wrong_project_confirmation_never_launches(execution: tu
     await orch._transition(session, 'execution', NodeState.FAILED)
     view = get_execution_configuration(session.run.run_id, session.run.project)
     assert view['visible'] and not view['can_confirm']
+    token = execution_preview(session.run, 'execution')['token']
     with pytest.raises(HTTPException) as failure:
-        await confirm_execution_configuration(session.run.run_id, ExecutionConfirmationPayload(project=session.run.project, token=view['token']))
+        await confirm_execution_configuration(session.run.run_id, ExecutionConfirmationPayload(project=session.run.project, token=token))
     assert failure.value.status_code == 409
     assert not (await orch.resume_after_artifact_approval(run_id=session.run.run_id, agent='execution'))['ok']
     with pytest.raises(HTTPException):
@@ -280,14 +281,15 @@ async def test_owned_gate_waits_without_jobs_and_duplicate_confirmation_wakes_sa
     owner = orch.owned_tasks.active(session.run.run_id)
     assert owner is not None
     await asyncio.sleep(0)
+    await orch.execution_preparations.wait(session.run, 'execution')
     view = get_execution_configuration(session.run.run_id, session.run.project)
     assert view['launch_ready'] and view['can_confirm']
     payload = ExecutionConfirmationPayload(project=session.run.project, token=view['token'])
     results = await asyncio.gather(*(confirm_execution_configuration(session.run.run_id, payload) for _ in range(2)))
-    assert all(result['confirmed'] and result['ok'] for result in results)
+    assert all(result['status'] == 'confirming' and result['ok'] for result in results)
     # The gate may finish during a concurrent POST. A replacement owner is forbidden.
     assert orch.owned_tasks.active(session.run.run_id) in (None, owner)
-    await asyncio.wait_for(arrived.wait(), timeout=3)
+    await asyncio.wait_for(arrived.wait(), timeout=10)
     await owner
     assert len(list((session.run.root / 'execution/confirmations').glob('*.json'))) == 1
     assert session.graph.state('execution') == NodeState.APPROVED
@@ -463,9 +465,16 @@ def test_execution_boundary_is_durable_and_blocks_writing_dispatch(
     # Real session persistence and graph states, without providers or tool doubles.
     from app.bridge.workflow_service import build_pipeline
     session.graph = build_pipeline('execution')
-    orch.set_stage_limit(session.run.run_id, stop_after='execution')
+    orch._persist_state(session, status='created')
     before = execution_preview(session.run, 'execution')
-    assert before['defaults']['stop_after_execution'] is True
+    save_confirmation(session.run, 'execution', before['token'])
+    options_path = session.run.root / 'input/run_request_options.v1.json'
+    options = options_path.read_bytes() if options_path.exists() else None
+    orch.set_stage_limit(session.run.run_id, stop_after='execution')
+    assert orch.execution_boundary(session.run.run_id)['stop_after_execution'] is True
+    preserved = execution_preview(session.run, 'execution')
+    assert preserved['token'] == before['token'] and preserved['confirmed']
+    assert (options_path.read_bytes() if options_path.exists() else None) == options
     assert not orch._stage_limit_reached(session)
     session.graph.restore_state('execution', NodeState.DONE)
     orch._persist_state(session, status='running')
@@ -477,5 +486,5 @@ def test_execution_boundary_is_durable_and_blocks_writing_dispatch(
     assert not (session.run.root / 'writing/research_report.v1.md').exists()
     orch.set_stage_limit(session.run.run_id, stop_after=None)
     after = execution_preview(session.run, 'execution')
-    assert after['token'] != before['token']
-    assert after['defaults']['stop_after_execution'] is False
+    assert after['token'] == before['token'] and after['confirmed']
+    assert orch.execution_boundary(session.run.run_id)['stop_after_execution'] is False

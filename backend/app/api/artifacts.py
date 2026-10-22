@@ -559,6 +559,11 @@ async def list_versions(
         raise HTTPException(status_code=404, detail=f"run {run_id} not found")
     art_store = ArtifactStore(run)
     versions = art_store.list_versions(agent_dir=agent_dir, stem=stem)
+    candidate = art_store.latest_candidate(agent_dir=agent_dir, stem=stem)
+    if candidate is not None:
+        # Keep history intact, but the UI's current-document slot must expose
+        # the new draft awaiting review rather than an older approval pointer.
+        versions.sort(key=lambda ref: ref.version == candidate.version)
     return [
         {
             "version": v.version,

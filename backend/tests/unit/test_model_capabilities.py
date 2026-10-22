@@ -93,7 +93,7 @@ def test_native_glm_rounds_keep_observations_without_assistant_or_tool_history()
         assert ("tools" in request) is (phase == "act")
 
 
-def test_glm_rejects_native_history_and_unsupported_tool_streaming() -> None:
+def test_glm_observation_history_guard_also_applies_to_supported_tool_streaming() -> None:
     provider = ZhipuProvider(api_key="serialization-only")
     config = LLMConfig(provider="zhipu", model="glm-5.3", tools=TOOLS, thinking_enabled=True,
                        extra={"native_observation_history": True})
@@ -103,13 +103,13 @@ def test_glm_rejects_native_history_and_unsupported_tool_streaming() -> None:
             provider._request_kwargs(messages, config)
     with pytest.raises(ModelCompatibilityError, match="observation-only"):
         provider._request_kwargs([Message("user", "input")], replace(config, extra={}))
-    with pytest.raises(ValueError, match="streaming"):
-        provider._request_kwargs([Message("user", "input")], config, stream=True)
+    request = provider._request_kwargs([Message("user", "input")], config, stream=True)
+    assert request["stream"] is True and request["tools"] == list(TOOLS)
 
 
 @pytest.mark.parametrize("provider,model,thinking,observations", [
     ("zhipu", "glm-5.3", True, False), ("zhipu", "glm-5.3", False, True),
-    ("zhipu", "glm-5.2", True, True), ("deepseek", "deepseek-chat", True, False),
+    ("zhipu", "glm-5.2", True, False), ("deepseek", "deepseek-chat", True, False),
     ("openai", "configured-model", True, True),
 ])
 def test_unsupported_native_thinking_modes_fail_before_execution(

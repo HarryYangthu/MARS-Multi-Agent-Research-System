@@ -4,7 +4,7 @@ function Read-MarsOfflineBundle {
     $marker = Join-Path $Root 'WINDOWS-OFFLINE.json'
     if (-not (Test-Path -LiteralPath $marker)) { return $null }
     $receipt = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
-    $bundle = Join-Path $Root 'offline'
+    $bundle = (Get-MarsWindowsLayout $Root).Offline
     $manifestPath = Join-Path $bundle 'manifest.json'
     if ($receipt.schema -ne 'mars.windows.offline.v1' -or -not (Test-Path -LiteralPath $manifestPath) -or
         (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ne $receipt.manifest_sha256) {
@@ -72,11 +72,8 @@ function Install-OfflineDependencies {
         '--python', $python, '-e', '.') $root
     Invoke-MarsNativeCommand $uv @('pip', 'check', '--python', $python) $root
     Invoke-MarsNativeCommand $python @('-c', 'import torch, scipy, matplotlib, tensorboard, chromadb, app.main; assert torch.ones(2).sum().item() == 2') $root
-    $npm = Join-Path (Split-Path $node) 'node_modules/npm/bin/npm-cli.js'
-    Invoke-MarsNativeCommand $node @($npm, 'ci', '--offline', '--ignore-scripts', '--include=dev', '--no-audit', '--no-fund',
-        '--cache', (Join-Path $runtime 'npm-cache')) (Join-Path $root 'frontend')
-    Invoke-MarsNativeCommand $node @($npm, 'run', 'typecheck') (Join-Path $root 'frontend')
-    Invoke-MarsNativeCommand $node @($npm, 'run', 'build') (Join-Path $root 'frontend')
+    Install-FrontendDependencies -Offline
+    Ensure-FrontendBuild
     Invoke-MarsNativeCommand $python @((Join-Path $PSScriptRoot 'probe_zcode.py')) $root
     $fingerprint = Get-MarsDependencyFingerprint $root
     $fingerprint['root'] = $root

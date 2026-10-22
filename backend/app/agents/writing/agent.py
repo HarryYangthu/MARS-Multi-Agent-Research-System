@@ -14,6 +14,7 @@ from app.harness.schema.frontmatter_parser import parse as parse_frontmatter
 
 class WritingAgent(BaseAgent):
     name = "writing"
+    native_structured_delivery = True
     project_knowledge_enabled = True
     output_schema = "report.v1"
     agent_brief = (
@@ -28,6 +29,7 @@ class WritingAgent(BaseAgent):
         "相关指标函数、优化器或训练入口，并与本次配置、执行收据及原生记录交叉核对。"
         "不得凭指标缩写猜测优劣方向，不得把优化器更新数与 epoch 混用，也不得从观测点数量推导调度单位；"
         "没有核对到实现或证据时，只报告实际测量值并明确语义尚未核实。差值与比例按原始精度计算后再格式化。"
+        "进化上下文中的computed_comparisons是MARS按实测值计算的差值与参数降幅，优先直接采用，不自行更换分母或重算近似比例。"
         "配置字符串或缩写不能当作真实实现类名；未读实现时仅引用字段原值，不自行扩写。"
         "批大小对照需核对实际训练更新次数，以及同一设置是否同时改变评价或推理分块；"
         "若共同变化，披露归因局限，不能把结果差异只归因于训练批大小，也不能在没有代码依据时声称评价条件固定。"

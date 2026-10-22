@@ -121,7 +121,8 @@ export function activityElapsedSeconds(timing: ActivityTiming, processing: boole
   return Math.max(0, Math.floor((end - timing.startedAt) / 1000));
 }
 
-export function formatActivityElapsed(seconds: number): string {
+export function formatActivityElapsed(seconds: number, language: "zh" | "en" = "zh"): string {
   const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60), remaining = seconds % 60;
+  if (language === "en") return `${hours ? `${hours}h ` : ""}${minutes ? `${minutes}m ` : ""}${remaining}s`;
   return `${hours ? `${hours} 小时 ` : ""}${minutes ? `${minutes} 分 ` : ""}${remaining} 秒`;
 }

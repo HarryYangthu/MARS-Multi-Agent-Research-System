@@ -22,8 +22,8 @@ from app.harness.runtime.conversation_state import ConversationState
 from app.harness.tools.project_repo import ProjectRepo, load_project_repo, resolve_allowed_path
 
 
-RUN_DISPATCH_TOOLS = frozenset({"run.existing_model", "run.create", "run.start", "create_and_start_run"})
-RUN_CREATION_TOOLS = frozenset({"run.existing_model", "run.create", "create_and_start_run"})
+RUN_DISPATCH_TOOLS = frozenset({"run.existing_model", "run.create", "run.start", "create_and_start_run", "run.auto_research"})
+RUN_CREATION_TOOLS = frozenset({"run.existing_model", "run.create", "create_and_start_run", "run.auto_research"})
 _SOURCE_TOOLS = frozenset({"code.repo_list", "code.repo_search", "code.repo_read_lines"})
 _FALLBACK_STATUSES = frozenset({"model_not_resolved", "capability_unavailable", "execution_registration_required"})
 PREPARING_NOTICE = "MARS 正在核对本次任务配置，创建和启动结果以实际回执为准。"
@@ -588,7 +588,7 @@ def pending_existing_admission(session: CommanderSession) -> dict[str, Any] | No
 
 def existing_run_recovery_guard(session: CommanderSession, actions: list[dict[str, Any]]) -> dict[str, Any] | None:
     """A real recovery redirect cannot be followed by another creation attempt."""
-    if not any(action.get("tool") in {"run.existing_model", "run.create", "create_and_start_run"} for action in actions):
+    if not any(action.get("tool") in RUN_CREATION_TOOLS for action in actions):
         return None
     for message in reversed(_turn_observations(session)):
         result = message.tool_result or {}

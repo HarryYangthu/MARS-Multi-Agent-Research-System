@@ -40,7 +40,7 @@ class Fixture:
 @pytest.fixture
 def actual(tmp_path: Path) -> Fixture:
     prefix = tmp_path / 'registered-check-venv'
-    venv.EnvBuilder(with_pip=False).create(prefix)
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != 'nt').create(prefix)
     python = prefix / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     project = tmp_path / 'project'
     root = project / 'code'; root.mkdir(parents=True)
@@ -185,7 +185,7 @@ def test_coding_guidance_prefers_batch_yaml_without_extra_tests() -> None:
 
 def test_actual_venv_dependency_metadata_changes_are_bound(tmp_path: Path) -> None:
     prefix=tmp_path/'actual-venv'
-    venv.EnvBuilder(with_pip=False).create(prefix)
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != 'nt').create(prefix)
     python=prefix/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     before=_dependencies(str(python))
     site=next(prefix.glob('lib/python*/site-packages')) if os.name!='nt' else prefix/'Lib/site-packages'

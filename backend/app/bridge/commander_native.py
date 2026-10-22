@@ -19,11 +19,13 @@ from app.bridge.commander_tools import TOOLS
 from app.bridge.workflow_service import EntryPoint
 from app.harness.agent_loop.trace import LoopTrace
 from app.harness.llm.accounting import guarded_complete
-from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message
+from app.harness.llm.provider_base import Completion, LLMConfig, LLMProvider, Message, llm_call_deadline_seconds
 from app.harness.tools.config import ToolConfig, load_tool_configs
 
 STEP = 'mars_commander_step'
 INTERVENTION = 'mars_commander_intervention'
+_ALIASES = frozenset({'create_and_start_run', 'get_run_status', 'get_diagnosis', 'approve_node',
+                     'reject_node', 'set_metric_targets', 'user.approval'})
 _INSTRUCTION = (
     '依据本轮真实用户目标回答或执行。普通问答可以直接自然语言答复，无需调用函数；'
     '需要实际操作时，直接调用对应的 mars_ 原生工具函数；优先调用下一步必要工具，'
@@ -57,6 +59,14 @@ def commander_tool_input_schema(name: str, configured: dict[str, ToolConfig]) ->
         return deepcopy(policy.input_schema)
     string = {'type': 'string'}
     run_id = {'type': 'string', 'description': 'Optional; defaults to the actual linked run.'}
+    if name == 'models.list':
+        return {'type': 'object', 'properties': {}, 'additionalProperties': False}
+    if name == 'run.auto_research':
+        from app.harness.evolution import EvolutionContract
+        schema = EvolutionContract.model_json_schema()
+        definitions = schema.pop('$defs', {})
+        return {'type': 'object', 'additionalProperties': False, 'required': ['user_request', 'evolution'],
+            '$defs': definitions, 'properties': {'user_request': string, 'task': string, 'evolution': schema}}
     if name in {'run.create', 'create_and_start_run'}:
         return {'type': 'object', 'additionalProperties': False, 'properties': {
             'entrypoint': {'type': 'string',
@@ -129,6 +139,10 @@ def commander_tool_input_schema(name: str, configured: dict[str, ToolConfig]) ->
             'top_k': {'type': 'integer', 'default': 3}}}
     if name == 'list_runs':
         return {'type': 'object', 'properties': {}, 'additionalProperties': False}
+    if name == 'tools.describe':
+        return {'type': 'object', 'required': ['names'], 'additionalProperties': False,
+                'properties': {'names': {'type': 'array', 'minItems': 1, 'maxItems': 8,
+                    'items': {'type': 'string', 'enum': sorted(TOOLS)}}}}
     if name == 'discovery.create':
         from app.bridge.discovery_types import DiscoveryRunSpec
         spec_schema = DiscoveryRunSpec.model_json_schema()
@@ -201,7 +215,7 @@ def pack_native_commander_messages(session: CommanderSession, messages: list[Mes
     from app.harness.context.runtime_pack import message_key, pack_messages
     from app.harness.context.runtime_policy import freeze_policy, input_budget
 
-    wire = observation_only_messages(messages)
+    wire = observation_only_messages(messages, add_instruction=config.extra.get("commander_text_transport") is not True)
     if session.context_version < 3:
         return wire, None
     materials = commander_materials(wire)
@@ -213,9 +227,16 @@ def pack_native_commander_messages(session: CommanderSession, messages: list[Mes
     policy = freeze_policy(root)
     state_path = root / 'context/commander_state.json'
     previous = json.loads(state_path.read_text()) if state_path.exists() else session.context_compaction
+    budget = input_budget(policy, int(policy['input_budget']), output_reserve=config.max_tokens,
+                          model_window=config.extra.get('context_window'))
+    defaults = json.loads((Path(__file__).parent / 'prompts/commander_runtime.json').read_text(encoding='utf-8'))
+    working = config.extra.get('working_context_tokens', defaults['working_context_tokens'])
+    if working is not None:
+        if type(working) is not int or working <= 0:
+            raise ValueError('Commander working context must be a positive integer')
+        budget = min(budget, working)
     wire, manifest = pack_messages(wire, policy=policy,
-        budget=input_budget(policy, int(policy['input_budget']), output_reserve=config.max_tokens,
-                            model_window=config.extra.get('context_window')),
+        budget=budget,
         tools=config.tools, materials=materials, root=root, previous=previous, agent='commander')
     # Packing must not reintroduce provider-incompatible assistant/tool history.
     wire = observation_only_messages(wire, add_instruction=False)
@@ -226,10 +247,32 @@ def pack_native_commander_messages(session: CommanderSession, messages: list[Mes
     return wire, path
 
 
-def native_commander_config(config: LLMConfig, timeout_seconds: float) -> LLMConfig:
+def commander_call_deadline_seconds(config: LLMConfig, *, minimum_seconds: float = 0.0) -> float:
+    """One accounted decision/review, honoring the selected model's timeout.
+
+    Both callers disable provider retries. Include only this request and its
+    cancellation grace; never shorten a slow endpoint to a hidden 30/60s cap.
+    """
+    if not math.isfinite(config.request_timeout_seconds) or config.request_timeout_seconds <= 0:
+        raise ValueError('Model request timeout must be finite and positive')
+    return llm_call_deadline_seconds(replace(config, max_retries=0), minimum_seconds=minimum_seconds)
+
+
+def native_commander_config(config: LLMConfig, timeout_seconds: float,
+                            session: CommanderSession | None = None) -> LLMConfig:
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError('Native Commander time budget exhausted')
-    return replace(config, tools=commander_native_tools(), json_mode=False, response_schema=None,
+    tools = commander_native_tools()
+    if session is not None:
+        loaded = {name for message in session.context_messages()
+                  if message.tool_name == 'tools.describe' and (message.tool_result or {}).get('ok') is True
+                  for name in (message.tool_result or {}).get('contracts', {})}
+        names = native_tool_names()
+        tools = tuple(tool for tool in tools if tool['function']['name'] == INTERVENTION or (
+            names[tool['function']['name']] not in _ALIASES and
+            (names[tool['function']['name']] not in {'discovery.create', 'run.auto_research'}
+             or names[tool['function']['name']] in loaded)))
+    return replace(config, tools=tools, json_mode=False, response_schema=None,
                    max_retries=0, request_timeout_seconds=min(timeout_seconds, config.request_timeout_seconds),
                    extra={**config.extra, 'native_observation_history': True})
 
@@ -310,6 +353,22 @@ def native_decision_unavailable(error: BaseException) -> dict[str, Any]:
             'reason': 'native_decision_unavailable:' + type(error).__name__}
 
 
+def template_options_rejected(status: Any, body: Any) -> bool:
+    """A minimal retry is allowed only for an explicitly rejected extension."""
+    if status not in {400, 422} or not isinstance(body, dict):
+        return False
+    error = body.get('error', body)
+    if not isinstance(error, dict):
+        return False
+    param = str(error.get('param', ''))
+    message = str(error.get('message', '')).casefold()
+    named = any(key in param or key in message for key in
+                ('chat_template_kwargs', 'enable_thinking', 'preserve_thinking'))
+    rejected = bool(param) or any(word in message for word in
+        ('unsupported', 'unknown', 'unexpected', 'unrecognized', 'not allowed', 'extra inputs', '不支持', '未知参数'))
+    return named and rejected
+
+
 async def native_commander_decision(session: CommanderSession, messages: list[Message],
                                     provider: LLMProvider, llm_config: LLMConfig, run_root: Path,
                                     timeout_seconds: float, *, accept_text_reply: bool = False) -> dict[str, Any]:
@@ -323,8 +382,64 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
             previous(kind, data)
         trace.emit(kind, {key: value for key, value in data.items() if key != 'wire_payload'}, visible=data.get('wire_payload'))
 
+    fallback_used = False
+
+    async def text_compatibility() -> dict[str, Any]:
+        nonlocal fallback_used
+        from app.bridge.commander_compat import parse_text_decision
+        from app.bridge.commander_errors import CommanderModelResponseError
+        from app.harness.llm.model_capabilities import requires_glm_thinking
+        if fallback_used:
+            raise CommanderModelResponseError("文本兼容模式仍未返回可执行指令。请核对公司模型网关的返回格式；本次未执行新操作。")
+        fallback_used = True
+        config = replace(llm_config, tools=(), response_schema=None, json_mode=False, max_retries=0,
+            thinking_enabled=True if requires_glm_thinking(llm_config.provider, llm_config.model) else False,
+            reasoning_effort="low" if requires_glm_thinking(llm_config.provider, llm_config.model) else None,
+            request_timeout_seconds=min(timeout_seconds, llm_config.request_timeout_seconds), attempt_observer=observe,
+            extra={**llm_config.extra, "commander_text_transport": True,
+                   "gateway_plain_request": not requires_glm_thinking(llm_config.provider, llm_config.model)})
+        instruction = Message("system", "当前接口使用文本工具交接。普通问答可直接回答。需要操作时，返回"
+            '{"actions":[{"tool":"真实工具名","args":{工具所需参数}}]}。'
+            "允许Markdown围栏、普通JSON排版；不要求额外字段。不猜科学参数、路径或授权。"
+            "成功操作不要重做，缺信息直接提问。工具与参数见前文可用工具；"
+            "需要完整参数约束先调用 tools.describe。")
+        wire, path = pack_native_commander_messages(session, [*messages, instruction], config, run_root)
+        trace.emit("compatibility_request", {"transport": "text_actions", "actions_executed": 0})
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        try:
+            completion = await asyncio.wait_for(guarded_complete(provider, wire, config, run_root=run_root,
+                active_model_time=True, correlation={**correlation, "transport": "text_actions"}), timeout=timeout_seconds)
+        except Exception as error:
+            if (config.extra.get('template_family') != 'qwen38_instruct'
+                    or config.extra.get('gateway_omit_template_options') is True
+                    or not template_options_rejected(getattr(error, 'status_code', None), getattr(error, 'body', None))):
+                raise
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError('Compatibility request time budget exhausted') from error
+            config = replace(config, request_timeout_seconds=min(remaining, config.request_timeout_seconds),
+                extra={**config.extra, 'gateway_omit_template_options': True})
+            trace.emit('compatibility_minimal_request', {'omitted': 'chat_template_kwargs', 'actions_executed': 0})
+            completion = await asyncio.wait_for(guarded_complete(provider, wire, config, run_root=run_root,
+                active_model_time=True, correlation={**correlation, 'transport': 'text_actions_minimal'}), timeout=remaining)
+        if path is not None:
+            from app.harness.context.runtime_manifest import record_usage
+            record_usage(path, completion.raw.get("usage"))
+        trace.emit("compatibility_response", {"transport": "text_actions"}, visible=completion.text)
+        parsed = parse_text_decision(completion.text)
+        if parsed is not None:
+            return parsed
+        if accept_text_reply and completion.text.strip():
+            return {"actions": [], "reply": completion.text.strip(), "native_status": "text"}
+        raise CommanderModelResponseError("已尝试原生工具调用和文本兼容模式，但模型仍未返回可执行指令。请核对公司模型网关的返回格式；本次未执行新操作。")
+
+    # Explicit deployment compatibility uses one text request immediately;
+    # never spend a slow request discovering that native tools are unsupported.
+    if llm_config.extra.get("commander_text_transport") is True:
+        return await text_compatibility()
+    response_received = False
     try:
-        config = replace(native_commander_config(llm_config, timeout_seconds), attempt_observer=observe)
+        config = replace(native_commander_config(llm_config, timeout_seconds, session), attempt_observer=observe)
         wire_messages, manifest_path = pack_native_commander_messages(session, messages, config, run_root)
         if manifest_path is not None:
             trace.emit('context_packed', json.loads(manifest_path.read_text()))
@@ -333,12 +448,20 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
                    visible=[message.to_wire() for message in wire_messages])
         completion = await asyncio.wait_for(guarded_complete(provider, wire_messages, config, run_root=run_root,
             active_model_time=True, correlation=correlation), timeout=timeout_seconds)
+        response_received = True
         if manifest_path is not None:
             from app.harness.context.runtime_manifest import record_usage
             record_usage(manifest_path, completion.raw.get('usage'))
         trace.emit('model_response', {'model': config.model, 'usage': completion.raw.get('usage')},
                    visible={'text': completion.text, 'tool_calls': [call.to_wire() for call in completion.tool_calls]})
         result = parse_native_commander_completion(completion, accept_text_reply=accept_text_reply)
+        if not completion.tool_calls and completion.text.strip():
+            from app.bridge.commander_compat import parse_text_decision
+            compatible = parse_text_decision(completion.text)
+            if compatible is not None:
+                result = compatible
+        if result.get("native_status") == "unknown":
+            return await text_compatibility()
         trace.emit('native_decision', {'status': result['native_status'], 'proposed_actions': len(result['actions']),
                                        'actions_executed': 0})
         return result
@@ -348,7 +471,12 @@ async def native_commander_decision(session: CommanderSession, messages: list[Me
     except (ValueError, ValidationError, TimeoutError) as error:
         trace.emit('model_error', {'error_type': type(error).__name__, 'actions_executed': 0,
                                   'native_status': 'unknown'})
-        return native_decision_unavailable(error)
+        if not response_received or isinstance(error, TimeoutError):
+            raise
+        return await text_compatibility()
     except Exception as error:
         trace.emit('model_error', {'error_type': type(error).__name__, 'actions_executed': 0})
+        if getattr(error, "status_code", None) in {400, 404, 422} or (
+                type(error).__name__ == "LLMCompletionError" and getattr(error, "reason", {}).get("code") == "empty_final_content"):
+            return await text_compatibility()
         raise

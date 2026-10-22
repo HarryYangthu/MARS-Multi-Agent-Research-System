@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import math
 import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
 
 from loguru import logger
 
-from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking
+from app.harness.llm.model_capabilities import ModelCompatibilityError, requires_glm_thinking, supports_glm_observation_tools
 from app.harness.llm.request_evidence import record_provider_request
 from app.harness.llm.provider_base import (
     Completion,
@@ -30,6 +32,10 @@ from app.harness.llm.provider_base import (
 
 
 _T = TypeVar("_T")
+
+
+def _envelope_field(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
 
 
 @dataclass
@@ -62,9 +68,93 @@ class ResponseModelIdentity:
                 "response_model_invalid_fields": self.invalid_fields}
 
 
+def _unwrap_completion(value: Any) -> Any:
+    for wrapper in ("data", "result"):
+        nested = _envelope_field(value, wrapper)
+        if _envelope_field(nested, "choices") is not None:
+            return nested
+    return value
+
+
+def _public_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(str(block.get("text", "")) for block in content
+                       if isinstance(block, dict) and block.get("type") in {"text", "output_text"})
+    return ""
+
+
+def _public_final_text(text: str) -> str:
+    """Exclude explicitly tagged prefix thinking from unparsed local templates.
+
+    Only a leading model-format marker is recognized. Ordinary answer text,
+    quoted tags and instruction-like text are never interpreted as actions.
+    An unclosed thinking prefix supplies no final output evidence.
+    """
+    remaining = text
+    while remaining.lstrip().startswith('<think>'):
+        remaining = remaining.lstrip()
+        end = remaining.find('</think>', len('<think>'))
+        if end < 0:
+            return ''
+        remaining = remaining[end + len('</think>'):].lstrip()
+    return remaining
+
+
+def _decode_gateway_body(body: str | bytes) -> tuple[Any, bool]:
+    """Decode a completed HTTP body when a gateway ignores the requested format.
+
+    SSE event data may span lines; comments, heartbeat events and [DONE] are
+    transport markers, never final-output evidence. Invalid events fail visibly
+    rather than accepting a prefix that might omit an execution instruction.
+    """
+    text = body.decode("utf-8-sig") if isinstance(body, bytes) else body.lstrip("\ufeff")
+    try:
+        return json.loads(text), False
+    except json.JSONDecodeError:
+        pass
+    events: list[Any] = []
+    data: list[str] = []
+    done = False
+
+    def flush() -> None:
+        nonlocal done
+        if not data:
+            return
+        payload = "\n".join(data)
+        data.clear()
+        if payload.strip() == "[DONE]":
+            done = True
+            return
+        if done:
+            raise ValueError("Invalid upstream SSE: data after end marker")
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            raise ValueError("Invalid upstream SSE event JSON") from None
+        if not isinstance(event, dict):
+            raise ValueError("Invalid upstream SSE event envelope")
+        events.append(event)
+
+    for line in text.splitlines():
+        if not line:
+            flush()
+        elif line.startswith("data:"):
+            data.append(line[5:].removeprefix(" "))
+        elif line.startswith((":", "event:", "id:", "retry:")):
+            continue
+        else:
+            raise ValueError("Invalid upstream completion transport")
+    flush()
+    if not events:
+        raise ValueError("Empty upstream SSE body")
+    return events, True
+
+
 @dataclass
 class VisibleStreamAccumulator:
-    """Pure public-output parser; reasoning fields are never copied or retained."""
+    """Assemble public text and indexed tool deltas, never private reasoning."""
 
     pieces: list[str] = field(default_factory=list)
     usage: dict[str, Any] | None = None
@@ -73,37 +163,83 @@ class VisibleStreamAccumulator:
     chunks: int = 0
     visible_chars: int = 0
     identity: ResponseModelIdentity = field(default_factory=ResponseModelIdentity)
+    tool_fragments: dict[int, dict[str, str]] = field(default_factory=dict)
 
     def add(self, chunk: Any) -> None:
+        chunk = _unwrap_completion(chunk)
+        if _envelope_field(chunk, "error"):
+            raise ValueError("Upstream SSE returned an error event")
         self.chunks += 1
-        self.identity.add(getattr(chunk, "model", None))
-        usage = _usage_payload(getattr(chunk, "usage", None))
+        self.identity.add(_envelope_field(chunk, "model"))
+        usage = _usage_payload(_envelope_field(chunk, "usage"))
         if usage is not None:
             self.usage = usage
-        fingerprint = getattr(chunk, "system_fingerprint", None)
+        fingerprint = _envelope_field(chunk, "system_fingerprint")
         if fingerprint:
             self.fingerprint = str(fingerprint)
-        if not chunk.choices:
-            return
-        choice = chunk.choices[0]
-        piece = str(choice.delta.content or "")
-        if piece:
-            self.pieces.append(piece)
-            self.visible_chars += len(piece)
-        reason = getattr(choice, "finish_reason", None)
-        if reason is not None:
-            self.finish_reason = str(reason)
+        choices = _envelope_field(chunk, "choices") or ()
+        for choice in choices:
+            if (_envelope_field(choice, "index") or 0) != 0:
+                continue
+            delta = _envelope_field(choice, "delta")
+            # Some gateways wrap a complete message in a single SSE event.
+            if delta is None:
+                delta = _envelope_field(choice, "message")
+            piece = _public_content(_envelope_field(delta, "content"))
+            if piece:
+                self.pieces.append(piece)
+                self.visible_chars += len(piece)
+            calls = _envelope_field(delta, "tool_calls") or ()
+            legacy = _envelope_field(delta, "function_call")
+            if legacy and not calls:
+                calls = ({"index": 0, "function": legacy},)
+            for call in calls:
+                index = _envelope_field(call, "index")
+                if index is None and len(calls) == 1:
+                    index = 0
+                if not isinstance(index, int) or index < 0:
+                    raise ValueError("Invalid upstream tool call index")
+                parts = self.tool_fragments.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                call_id = _envelope_field(call, "id")
+                if call_id:
+                    if parts["id"] and parts["id"] != call_id:
+                        raise ValueError("Conflicting upstream tool call identity")
+                    parts["id"] = str(call_id)
+                function = _envelope_field(call, "function")
+                for key in ("name", "arguments"):
+                    value = _envelope_field(function, key)
+                    if value is None:
+                        continue
+                    if key == "arguments" and isinstance(value, dict):
+                        value = json.dumps(value, ensure_ascii=False, allow_nan=False)
+                    if not isinstance(value, str):
+                        raise ValueError("Invalid upstream tool call fragment")
+                    parts[key] += value
+            reason = _envelope_field(choice, "finish_reason")
+            if reason is not None:
+                self.finish_reason = str(reason)
 
-    def completion(self, *, provider: str, model: str) -> Completion:
-        text = "".join(self.pieces)
+    def completion(self, *, provider: str, model: str, allow_tools: bool = False) -> Completion:
+        text = _public_final_text("".join(self.pieces))
+        self.pieces = [text] if text else []
+        self.visible_chars = len(text)
         code = ("output_truncated" if self.finish_reason == "length" else
-                "incomplete_stream" if self.finish_reason != "stop" else
-                "empty_final_content" if not text.strip() else "")
+                "incomplete_stream" if self.finish_reason not in {"stop", "tool_calls", "function_call"} else
+                "empty_final_content" if not text.strip() and not self.tool_fragments else "")
         if code:
             raise LLMCompletionError(code=code, provider=provider, model=model,
-                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip()), usage=self.usage,
-                                     model_identity=self.identity.metadata(model))
-        return Completion(text=text, provider=provider, model=self.identity.model,
+                                     finish_reason=self.finish_reason, empty_final=not bool(text.strip() or self.tool_fragments),
+                                     usage=self.usage, model_identity=self.identity.metadata(model))
+        if self.tool_fragments and not allow_tools:
+            raise ValueError("unsolicited tool calls without configured tools")
+        calls = []
+        for _, parts in sorted(self.tool_fragments.items()):
+            if not parts["name"] or not parts["arguments"]:
+                raise ValueError("Incomplete upstream streamed tool call")
+            call_id = parts["id"] or "compat_" + hashlib.sha256(
+                (parts["name"] + parts["arguments"]).encode()).hexdigest()[:24]
+            calls.append(ToolCall(id=call_id, name=parts["name"], arguments=parts["arguments"]))
+        return Completion(text=text, tool_calls=tuple(calls), provider=provider, model=self.identity.model,
                           raw={"usage": self.usage, "finish_reason": self.finish_reason,
                                "system_fingerprint": self.fingerprint, "streamed": True, "stream_chunks": self.chunks,
                                **self.identity.metadata(model)})
@@ -188,14 +324,12 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["temperature"] = config.temperature
             kwargs["top_p"] = config.top_p
         if config.tools:
-            if self.name == "zhipu" and stream:
-                raise ValueError("native tool streaming is not implemented for zhipu")
             if thinking_enabled:
                 # Each request is a new reasoning turn over public observations.
                 # Never replay incomplete assistant/tool turns without the private
                 # reasoning history. GLM and DeepSeek use the same explicit
                 # observation-only contract; no hidden reasoning is replayed.
-                if ((self.name != "deepseek" and not glm_thinking)
+                if ((self.name != "deepseek" and not supports_glm_observation_tools(self.name, config.model))
                         or config.extra.get("native_observation_history") is not True
                         or any(m.role in {"assistant", "tool"} or m.tool_calls for m in messages)):
                     raise ModelCompatibilityError("native thinking tools require supported observation-only history")
@@ -244,6 +378,31 @@ class _OpenAICompatProvider(LLMProvider):
             # Keep it in extra_body so other compatible endpoints are unchanged
             # unless their own config explicitly enables it.
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        if config.extra.get("system_message_mode") == "merge_first":
+            # Qwen's official template permits a system message only first.
+            # Merge all instruction strings in original order, retaining every
+            # non-system turn and its tool call binding unchanged.
+            system = [item["content"] for item in kwargs["messages"] if item["role"] == "system"]
+            if system:
+                kwargs["messages"] = [{"role": "system", "content": "\n\n".join(system)}] + [
+                    item for item in kwargs["messages"] if item["role"] != "system"]
+        if config.extra.get("message_format") == "single_user" and not config.tools:
+            # Explicit operator compatibility for templates that accept only a
+            # user turn. Observation-only callers already label prior records.
+            # Keep each role and its JSON-escaped content visibly separated;
+            # never interpret text here as a tool execution request.
+            kwargs["messages"] = [{"role": "user", "content": json.dumps(
+                [{"role": message.role, "content": message.content} for message in messages],
+                ensure_ascii=False, allow_nan=False)}]
+        if config.extra.get("gateway_plain_request") is True and not glm_thinking:
+            for optional in ("extra_body", "reasoning_effort", "response_format", "parallel_tool_calls", "top_p"):
+                kwargs.pop(optional, None)
+        if (config.extra.get("template_family") == "qwen38_instruct"
+                and config.extra.get("gateway_omit_template_options") is not True):
+            # Explicit operator-selected deployment profile, never a guessed
+            # model alias. Official Qwen3.8 non-thinking wire parameters.
+            kwargs["extra_body"] = {"chat_template_kwargs": {
+                "enable_thinking": False, "preserve_thinking": False}}
         return kwargs
 
     async def _request_with_retries(
@@ -262,6 +421,11 @@ class _OpenAICompatProvider(LLMProvider):
                 if config.attempt_observer:
                     config.attempt_observer("sdk_attempt_succeeded", {"attempt": attempt + 1})
                 return result
+            except asyncio.CancelledError:
+                if config.attempt_observer:
+                    config.attempt_observer("sdk_attempt_failed", {"attempt": attempt + 1,
+                        "error": "CancelledError", "interrupted": True, "retryable": False})
+                raise
             except Exception as exc:
                 details = public_error_details(exc)
                 if config.attempt_observer:
@@ -302,6 +466,8 @@ class _OpenAICompatProvider(LLMProvider):
     async def complete(
         self, messages: list[Message], config: LLMConfig
     ) -> Completion:
+        if config.extra.get("prefer_streaming") is True:
+            return await self._complete_streaming(messages, config)
         client = self._get_client()
         request_kwargs = self._request_kwargs(messages, config)
         record_provider_request(config, self.name, request_kwargs)
@@ -310,6 +476,33 @@ class _OpenAICompatProvider(LLMProvider):
             config=config,
         )
         return self._completion_from_response(resp, config)
+
+    async def _complete_streaming(self, messages: list[Message], config: LLMConfig) -> Completion:
+        """One complete result from real SSE, for any configured compatible ID.
+
+        A fresh accumulator belongs to each transport attempt. A disconnected
+        prefix is discarded, never presented as a final tool instruction or
+        concatenated with a restarted request.
+        """
+        client = self._get_client()
+        kwargs = self._request_kwargs(messages, config, stream=True)
+        record_provider_request(config, self.name, kwargs)
+
+        async def consume() -> Completion:
+            state = VisibleStreamAccumulator()
+            stream = await client.chat.completions.create(**kwargs)
+            if isinstance(stream, (str, bytes, Mapping)) or _envelope_field(stream, "choices") is not None:
+                return self._completion_from_response(stream, config)
+            async with stream:
+                async for chunk in stream:
+                    state.add(chunk)
+                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
+                        config.attempt_observer("sdk_stream_progress", {
+                            "chunks": state.chunks, "visible_chars": state.visible_chars,
+                        })
+            return state.completion(provider=self.name, model=config.model, allow_tools=bool(config.tools))
+
+        return await self._request_with_retries(consume, config=config)
 
     async def complete_wire(self, payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
         """Forward an owned external harness request under guarded_complete.
@@ -326,35 +519,80 @@ class _OpenAICompatProvider(LLMProvider):
         response = await self._request_with_retries(
             lambda: client.post("/chat/completions", body=payload, cast_to=ChatCompletion,
                                 options={"timeout": config.request_timeout_seconds}), config=config)
-        result = response.model_dump(exclude_none=True)
+        return self._wire_from_response(response, payload, config)
+
+    def _wire_from_response(self, response: Any, payload: dict[str, Any], config: LLMConfig) -> dict[str, Any]:
+        if isinstance(response, (str, bytes)):
+            decoded, is_sse = _decode_gateway_body(response)
+            if is_sse:
+                state = VisibleStreamAccumulator()
+                for chunk in decoded:
+                    state.add(chunk)
+                result_config = replace(config, tools=tuple(payload.get("tools") or ()))
+                completion = state.completion(provider=self.name, model=result_config.model,
+                                              allow_tools=bool(result_config.tools))
+                message: dict[str, Any] = {"role": "assistant", "content": completion.text or None}
+                if completion.tool_calls:
+                    message["tool_calls"] = [call.to_wire() for call in completion.tool_calls]
+                return {"object": "chat.completion", "model": completion.model,
+                        "choices": [{"index": 0, "message": message, "finish_reason": state.finish_reason}],
+                        "usage": state.usage}
+            response = decoded
+        result = (_unwrap_completion(response) if isinstance(response, Mapping)
+                  else response.model_dump(exclude_none=True))
         if not isinstance(result, dict):
             raise ValueError("Invalid upstream completion envelope")
         return result
 
     def _completion_from_response(self, resp: Any, config: LLMConfig) -> Completion:
         """Pure SDK-envelope parsing; it performs no model/service execution."""
+        if isinstance(resp, (str, bytes)):
+            resp, is_sse = _decode_gateway_body(resp)
+            if is_sse:
+                state = VisibleStreamAccumulator()
+                for chunk in resp:
+                    state.add(chunk)
+                return state.completion(provider=self.name, model=config.model, allow_tools=bool(config.tools))
+        resp = _unwrap_completion(resp)
         identity = ResponseModelIdentity()
-        identity.add(getattr(resp, "model", None))
-        if not resp.choices:
+        identity.add(_envelope_field(resp, "model"))
+        choices = _envelope_field(resp, "choices")
+        if not choices:
             raise LLMCompletionError(code="empty_final_content", provider=self.name, model=config.model,
                                      finish_reason=None, empty_final=True,
-                                     usage=_usage_payload(getattr(resp, "usage", None)),
+                                     usage=_usage_payload(_envelope_field(resp, "usage")),
                                      model_identity=identity.metadata(config.model))
-        response_choice = resp.choices[0]
-        message = response_choice.message
+        response_choice = choices[0]
+        message = _envelope_field(response_choice, "message")
         # Never surface or persist reasoning_content. It may contain hidden
         # chain-of-thought and is not the provider's final answer.
-        text = str(message.content or "")
+        content = _envelope_field(message, "content") if message is not None else _envelope_field(response_choice, "text")
+        text = _public_final_text(_public_content(content))
         finish_reason = _optional_string(
-            getattr(response_choice, "finish_reason", None)
+            _envelope_field(response_choice, "finish_reason")
         )
-        calls = tuple(ToolCall(id=call.id, name=call.function.name,
-                               arguments=call.function.arguments)
-                      for call in (getattr(message, "tool_calls", None) or ()))
+        calls_list: list[ToolCall] = []
+        raw_calls = _envelope_field(message, "tool_calls") or ()
+        legacy = _envelope_field(message, "function_call")
+        if not raw_calls and legacy:
+            raw_calls = ({"function": legacy},)
+        for call in raw_calls:
+            function = call.get("function", {}) if isinstance(call, dict) else call.function
+            name = function.get("name") if isinstance(function, dict) else getattr(function, "name", None)
+            arguments = function.get("arguments", {}) if isinstance(function, dict) else getattr(function, "arguments", "{}")
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+            if not isinstance(name, str) or not name or not isinstance(arguments, str):
+                raise ValueError("Invalid upstream completion envelope")
+            call_id = call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+            if not call_id:
+                call_id = "compat_" + hashlib.sha256((name + arguments).encode()).hexdigest()[:24]
+            calls_list.append(ToolCall(id=call_id, name=name, arguments=arguments))
+        calls = tuple(calls_list)
         if calls and not config.tools:
             raise ValueError("unsolicited tool calls without configured tools")
         self._check_final(config, finish_reason, bool(text.strip()) or bool(calls),
-                          usage=_usage_payload(getattr(resp, "usage", None)),
+                          usage=_usage_payload(_envelope_field(resp, "usage")),
                           model_identity=identity.metadata(config.model))
         return Completion(
             text=text,
@@ -363,9 +601,9 @@ class _OpenAICompatProvider(LLMProvider):
             model=identity.model,
             is_mock=False,
             raw={
-                "usage": _usage_payload(getattr(resp, "usage", None)),
+                "usage": _usage_payload(_envelope_field(resp, "usage")),
                 "system_fingerprint": _optional_string(
-                    getattr(resp, "system_fingerprint", None)
+                    _envelope_field(resp, "system_fingerprint")
                 ),
                 "finish_reason": finish_reason,
                 **identity.metadata(config.model),
@@ -416,38 +654,12 @@ class ZhipuProvider(_OpenAICompatProvider):
         super().__init__(api_key=api_key, base_url=base_url, provider_name="zhipu")
 
     async def complete(self, messages: list[Message], config: LLMConfig) -> Completion:
-        """Consume real SSE to avoid waiting for a complete long response at a gateway.
-
-        Each retry owns a fresh accumulator. Partial content from an unsuccessful
-        attempt can never be concatenated with a subsequent attempt's answer.
-        """
-        if config.tools:
-            # The visible-text SSE parser deliberately ignores private fields
-            # and cannot reconstruct streamed tool argument fragments. Native
-            # tools use the real non-streaming envelope parser instead.
-            return await super().complete(messages, config)
-        client = self._get_client()
-        kwargs = self._request_kwargs(messages, config, stream=True)
-        record_provider_request(config, self.name, kwargs)
-
-        async def consume() -> Completion:
-            state = VisibleStreamAccumulator()
-            stream = await client.chat.completions.create(**kwargs)
-            async with stream:
-                async for chunk in stream:
-                    state.add(chunk)
-                    if config.attempt_observer and (state.chunks == 1 or state.chunks % 128 == 0):
-                        config.attempt_observer("sdk_stream_progress", {
-                            "chunks": state.chunks, "visible_chars": state.visible_chars,
-                        })
-            return state.completion(provider=self.name, model=config.model)
-
-        return await self._request_with_retries(consume, config=config)
+        return await self._complete_streaming(messages, config)
 
 
 class OpenAIProvider(_OpenAICompatProvider):
-    def __init__(self, *, api_key: str) -> None:
-        super().__init__(api_key=api_key, provider_name="openai")
+    def __init__(self, *, api_key: str, base_url: str | None = None) -> None:
+        super().__init__(api_key=api_key, base_url=base_url, provider_name="openai")
 
 
 class QwenProvider(_OpenAICompatProvider):

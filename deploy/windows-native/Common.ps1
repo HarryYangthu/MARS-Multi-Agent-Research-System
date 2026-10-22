@@ -106,12 +106,122 @@ function Get-MarsOwnedProcess {
 function Get-MarsDependencyFingerprint {
     param([string]$Root)
     $result = @{}
-    foreach ($file in @('pyproject.toml', 'uv.lock', 'frontend/package-lock.json', 'configs/windows_native.yaml')) {
-        $result[$file] = (Get-FileHash -LiteralPath (Join-Path $Root $file) -Algorithm SHA256).Hash
+    foreach ($file in @('uv.lock', 'frontend/package-lock.json')) {
+        $result[$file] = (Get-FileHash -LiteralPath (Join-Path $Root $file) -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    $marker = Join-Path $Root 'WINDOWS-OFFLINE.json'
-    if (Test-Path -LiteralPath $marker) {
-        $result['WINDOWS-OFFLINE.json'] = (Get-FileHash -LiteralPath $marker -Algorithm SHA256).Hash
+    $native = Read-MarsNativeConfig (Join-Path $Root 'configs/windows_native.yaml')
+    foreach ($key in @('python_version', 'uv_sha256', 'node_sha256', 'git_sha256')) {
+        $result["windows.$key"] = ([string]$native[$key]).ToLowerInvariant()
     }
     return $result
+}
+
+function Get-MarsWindowsLayout {
+    param([string]$Root)
+    $modern = Join-Path $Root 'dependencies/windows'
+    $legacy = Join-Path $Root 'local/windows'
+    $runtime = $modern
+    if (-not (Test-Path -LiteralPath $modern) -and
+        ((Test-Path -LiteralPath (Join-Path $legacy 'installed.json')) -or
+         (Test-Path -LiteralPath (Join-Path $legacy 'tools')))) { $runtime = $legacy }
+    $offline = Join-Path $Root 'dependencies/offline'
+    $marker = Join-Path $Root 'WINDOWS-OFFLINE.json'
+    if (Test-Path -LiteralPath $marker) {
+        $receipt = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+        if ('dependency_directory' -in $receipt.PSObject.Properties.Name) {
+            if ($receipt.dependency_directory -notin @('dependencies/offline', 'offline')) {
+                throw 'Unsupported offline dependency directory.'
+            }
+            $offline = Join-Path $Root $receipt.dependency_directory
+        } elseif (-not (Test-Path -LiteralPath $offline)) { $offline = Join-Path $Root 'offline' }
+    } elseif (-not (Test-Path -LiteralPath $offline)) { $offline = Join-Path $Root 'offline' }
+    return @{ Runtime = $runtime; State = $legacy; Offline = $offline;
+        Frontend = (Join-Path $Root 'dependencies/frontend') }
+}
+
+function Get-MarsFrontendFingerprint {
+    param([string]$Root)
+    $result = @{}
+    $frontend = Join-Path $Root 'frontend'
+    foreach ($directory in @('src', 'public', 'scripts')) {
+        $path = Join-Path $frontend $directory
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        foreach ($file in Get-ChildItem -LiteralPath $path -Recurse -File) {
+            if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'Frontend source fingerprint cannot follow a symbolic file.'
+            }
+            $relative = $file.FullName.Substring($frontend.Length + 1).Replace('\', '/')
+            $result[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    foreach ($name in @('package.json', 'package-lock.json', 'next.config.js', 'next.config.mjs', 'next.config.ts',
+        'tsconfig.json', 'tailwind.config.js', 'tailwind.config.ts', 'postcss.config.js', 'postcss.config.mjs', '.eslintrc.json')) {
+        $path = Join-Path $frontend $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    foreach ($name in @('configs/frontend.yaml', 'configs/local_runtime.yaml')) {
+        $path = Join-Path $Root $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $result[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $native = Read-MarsNativeConfig (Join-Path $Root 'configs/windows_native.yaml')
+    $result['windows.backend_port'] = $native.backend_port
+    $result['windows.frontend_port'] = $native.frontend_port
+    return $result
+}
+
+function Test-MarsFingerprint {
+    param($Saved, [hashtable]$Current)
+    if ($null -eq $Saved -or @($Saved.PSObject.Properties.Name).Count -ne $Current.Count) { return $false }
+    foreach ($key in $Current.Keys) {
+        if ($key -notin $Saved.PSObject.Properties.Name -or $Saved.$key -cne $Current[$key]) { return $false }
+    }
+    return $true
+}
+
+function Test-MarsInstalledFingerprint {
+    param($Saved, [string]$Root)
+    if ($null -eq $Saved) { return $false }
+    $current = Get-MarsDependencyFingerprint $Root
+    $names = @($Saved.PSObject.Properties.Name)
+    if ('windows.python_version' -notin $names) {
+        # Legacy receipts bind the entire native manifest. Accept unchanged
+        # locked dependencies only when that stronger original binding agrees.
+        foreach ($key in @('uv.lock', 'frontend/package-lock.json')) {
+            if ($key -notin $names -or $Saved.$key -ne $current[$key]) { return $false }
+        }
+        $nativeHash = (Get-FileHash -LiteralPath (Join-Path $Root 'configs/windows_native.yaml') -Algorithm SHA256).Hash
+        return ('configs/windows_native.yaml' -in $names -and $Saved.'configs/windows_native.yaml' -eq $nativeHash)
+    }
+    foreach ($key in $current.Keys) {
+        if ($key -notin $names -or $Saved.$key -ne $current[$key]) { return $false }
+    }
+    return $true
+}
+
+function Connect-MarsFrontendDependencies {
+    param([string]$Root)
+    $layout = Get-MarsWindowsLayout $Root
+    $target = Join-Path $layout.Frontend 'node_modules'
+    $link = Join-Path $Root 'frontend/node_modules'
+    New-Item -ItemType Directory -Force -Path $layout.Frontend | Out-Null
+    if (Test-Path -LiteralPath $link) {
+        $item = Get-Item -LiteralPath $link -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $resolved = [IO.Path]::GetFullPath([string]@($item.Target)[0]).TrimEnd('\')
+            if ($resolved -ne [IO.Path]::GetFullPath($target).TrimEnd('\')) {
+                throw 'Frontend node_modules points to another dependency folder.'
+            }
+            return
+        }
+        if (Test-Path -LiteralPath $target) {
+            throw 'Two frontend dependency folders exist; neither was overwritten.'
+        }
+        Move-Item -LiteralPath $link -Destination $target
+    }
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    New-Item -ItemType Junction -Path $link -Target $target | Out-Null
 }

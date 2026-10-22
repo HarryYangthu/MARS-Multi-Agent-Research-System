@@ -19,10 +19,10 @@ def test_prompt_exposes_task_directed_reads_but_not_code_contents() -> None:
     session = CommanderSession(conv_id="inspection-prompt", project="pimc")
     prompt = _system_prompt(session)
     assert "code.repo_list" in prompt and "code.repo_search" in prompt and "code.repo_read_lines" in prompt
-    assert "通过 code.repo_list" in prompt and "非代码问题无需读取仓库" in prompt
+    assert "未知先浏览或搜索" in prompt and "纯问答无需代码核查" in prompt
     assert "class StaticPIMC" not in prompt
-    assert '已有模型但缺执行适配或清单时从 Coding' in prompt
-    assert '请求简短、模型名称简写或预算未给齐不表示需要 Idea' in prompt
+    assert '快捷工具未覆盖时' in prompt and '再从Coding创建' in prompt
+    assert '不先调研、设计实验或翻阅全仓' in prompt
     assert "def forward(" not in repository_summary("pimc")
     for name in ("code.repo_list", "code.repo_search", "code.repo_read_lines"):
         assert name in TOOLS

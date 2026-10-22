@@ -113,3 +113,17 @@ def test_latest_prefers_approved(tmp_path: Path) -> None:
     versions = art.list_versions(agent_dir="idea", stem="idea_proposal")
     assert {v.version for v in versions} == {"v1", "v2", "approved"}
     assert ref2.version == "v2"
+
+
+def test_previous_approval_does_not_hide_a_new_revision_from_review(tmp_path: Path) -> None:
+    art = ArtifactStore(RunStore(tmp_path).create(task='review-version-admission', project='pimc'))
+    first = art.write(text=_proposal_text())
+    art.approve(first)
+    second = art.write(text=_proposal_text())
+    approved = art.latest(agent_dir='idea', stem='idea_proposal')
+    candidate = art.latest_candidate(agent_dir='idea', stem='idea_proposal')
+    assert approved is not None and approved.version == 'approved'
+    assert candidate is not None and candidate.version == second.version
+    art.approve(second)
+    approved = art.latest_candidate(agent_dir='idea', stem='idea_proposal')
+    assert approved is not None and approved.version == 'approved'

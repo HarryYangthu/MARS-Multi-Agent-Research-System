@@ -4,6 +4,7 @@
 # See scripts/release/README.md and docs/productization/CLEANUP_INVENTORY.md.
 
 # Build metadata and license
+.gitattributes
 LICENSE
 pyproject.toml
 uv.lock
@@ -131,6 +132,7 @@ backend/app/bridge/commander_code.py
 backend/app/bridge/commander_existing.py
 backend/app/bridge/commander_existing_sources.py
 backend/app/bridge/conversation_edit.py
+backend/app/bridge/conversation_continue.py
 backend/app/bridge/commander_agent.py
 backend/app/bridge/commander_eval.py
 backend/app/bridge/commander_observability.py
@@ -347,7 +349,9 @@ backend/app/harness/tools/execution/local_command.py
 backend/app/harness/tools/execution/command_preflight.py
 configs/execution_review.yaml
 frontend/src/components/ExecutionConfigurationReview.tsx
+frontend/src/components/ExecutionBoundaryControl.tsx
 frontend/src/lib/executionReview.ts
+frontend/src/lib/executionBoundaryState.ts
 backend/app/bridge/git_code_delivery.py
 backend/app/bridge/research_branch.py
 backend/app/harness/tools/git_branch.py
@@ -458,6 +462,7 @@ frontend/package.json
 frontend/postcss.config.mjs
 frontend/scripts/clean-next-types.cjs
 frontend/scripts/context-workbench-smoke.ts
+frontend/scripts/language-smoke.ts
 frontend/scripts/message-draft-smoke.ts
 frontend/scripts/message-replacement-smoke.ts
 frontend/src/app/config/agents/page.tsx
@@ -532,6 +537,7 @@ frontend/src/lib/contextWorkbench.ts
 frontend/src/lib/dashboard.ts
 frontend/src/lib/dataSourceSelection.ts
 frontend/src/lib/i18n.tsx
+frontend/src/lib/interfaceText.ts
 frontend/src/lib/messageDraft.ts
 frontend/src/lib/project.tsx
 frontend/src/lib/socket.ts
@@ -747,6 +753,8 @@ backend/app/bridge/context_preview.py
 backend/app/bridge/execution_batch_deadline.py
 backend/app/bridge/execution_batch_plan.py
 backend/app/bridge/execution_confirmation.py
+backend/app/bridge/execution_preparation.py
+backend/app/harness/process_group.py
 backend/app/bridge/execution_evidence_handoff.py
 backend/app/bridge/handoff_context_bindings.py
 backend/app/bridge/idea_revision_context.py
@@ -807,6 +815,7 @@ frontend/src/lib/codingBackend.ts
 frontend/src/lib/completedCodeChanges.ts
 frontend/src/lib/conversationHistory.ts
 frontend/src/lib/executionReviewPresentation.ts
+frontend/src/lib/executionPreparationState.ts
 frontend/src/lib/literatureEvidence.ts
 frontend/src/lib/reportExports.ts
 frontend/src/lib/runConversation.ts
@@ -819,3 +828,36 @@ configs/model_usage.yaml
 configs/zcode.yaml
 projects/.gitkeep
 templates/code_rules/pimc_python.md
+
+scripts/release/build_windows_core.py
+
+Update-MARS.cmd
+
+deploy/windows-native/Update.ps1
+
+deploy/windows-native/update_core.py
+backend/app/bridge/bundled_projects.py
+backend/app/bridge/commander_compat.py
+docs/glm-gateway-compatibility.md
+configs/model_runtime_profiles.yaml
+deploy/windows-native/configure_slow_model.py
+docs/slow-intranet-model.md
+backend/app/bridge/commander_journal.py
+backend/app/bridge/commander_recovery.py
+backend/app/bridge/run_model_recovery.py
+backend/app/bridge/global_model_profiles.py
+backend/app/api/global_model_profiles.py
+backend/app/bridge/prompts/commander_runtime.md
+backend/app/bridge/prompts/commander_runtime.json
+deploy/windows-native/model_runtime_profiles.defaults.yaml
+frontend/src/components/ConversationModelPicker.tsx
+docs/intranet-core-update-20261021.md
+backend/app/harness/agent_loop/interrupted_model_resume.py
+
+# Goal-bound Auto Research and six-module evolution
+backend/app/agents/idea/evolution_planner.py
+backend/app/bridge/evolution_service.py
+backend/app/bridge/managed_review_context.py
+backend/app/execution/evolution_evidence.py
+backend/app/harness/evolution.py
+docs/auto-research.md

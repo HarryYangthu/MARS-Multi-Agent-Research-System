@@ -1128,6 +1128,29 @@ export async function listTrashedRuns(project?: string): Promise<TrashRunSummary
 export async function getRun(runId: string): Promise<RunDetail> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${runId}`));
 }
+
+export type EvolutionView = {
+  status: string; verification_count: number;
+  contract: { goal: string; max_iterations: number; verification_runs: number };
+  best: { attempt: number; winner: { experiment_id: string; metrics: Record<string, number> } } | null;
+  last_decision?: { continue: boolean; reason: string };
+  proposal?: { mechanism: string; approval_recorded: boolean; modules: { module: string; path: string }[] };
+  attempts: { attempt: number; iteration?: number; passed: boolean; metrics_ref: string;
+    winner: { experiment_id: string; checks: { name: string; observed: number | null; target: number;
+      value: number | null; baseline: number | null; comparison: string;
+      direction: string; passed: boolean; gap: number | null }[] } | null;
+    protocol_errors: string[]; decision: { status: string; reason: string } }[];
+};
+
+export async function getEvolution(runId: string, project: string): Promise<{ evolution: EvolutionView | null }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/evolution?project=${encodeURIComponent(project)}`, { cache: "no-store" }));
+}
+
+export async function continueEvolution(runId: string, project: string): Promise<{ ok: boolean; status: string }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/runs/${encodeURIComponent(runId)}/evolution/continue`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project }),
+  }));
+}
 export type IdeaContext = Partial<Record<
   "background" | "baseline_code" | "data_description" | "analysis_results" | "metric_definition" | "literature_notes",
   string
@@ -2074,6 +2097,8 @@ export type ChatMessageView = {
 };
 
 export type Conversation = {
+  continuation?: { enabled: boolean; source_message_id: string; token: string; message: string };
+  selected_model_id?: string;
   processing?: boolean;
   activities?: import("./researchActivity").CommanderActivity[];
   conv_id: string;
@@ -2085,6 +2110,29 @@ export type Conversation = {
   metric_targets: Record<string, number>;
   messages: ChatMessageView[];
 };
+
+export type GlobalModelProfile = {
+  id: string; name: string; provider: string; model: string; base_url: string;
+  context_window: number; compatibility: "generic" | "qwen_200k" | "gemma_160k";
+  api_key_configured: boolean; configured: boolean;
+};
+export type GlobalModelProfiles = { default_id: string; profiles: GlobalModelProfile[] };
+export type SaveGlobalModelProfile = Omit<GlobalModelProfile, "id" | "configured" | "api_key_configured"> & { id?: string; api_key: string };
+
+export async function getGlobalModelProfiles(): Promise<GlobalModelProfiles> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config/model-profiles`, { cache: "no-store" }));
+}
+export async function saveGlobalModelProfile(body: SaveGlobalModelProfile): Promise<GlobalModelProfile> {
+  return jsonOrThrow(await fetch(`${BASE}/api/config/model-profiles`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
+}
+export async function setConversationModel(convId: string, selectedModelId: string): Promise<Conversation> {
+  return jsonOrThrow(await fetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/model`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_model_id: selectedModelId, make_default: true }),
+  }));
+}
 
 export async function createConversation(project = "pimc", experimentId = ""): Promise<Conversation> {
   return jsonOrThrow(
@@ -2098,6 +2146,14 @@ export async function createConversation(project = "pimc", experimentId = ""): P
 
 export async function getConversation(convId: string): Promise<Conversation> {
   return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${convId}`));
+}
+
+export async function deleteConversation(convId: string): Promise<{ ok: boolean; recoverable: boolean }> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" }));
+}
+
+export async function restoreConversation(convId: string): Promise<Conversation> {
+  return jsonOrThrow(await boundedFetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/restore`, { method: "POST" }));
 }
 
 export class ChatMessageFailure extends Error {
@@ -2141,6 +2197,23 @@ export async function sendChatMessage(convId: string, text: string): Promise<Con
       const payload: unknown = JSON.parse(body);
       messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
     } catch { /* Unknown delivery status requires a refresh before resending. */ }
+    throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
+  }
+  return response.json() as Promise<Conversation>;
+}
+
+export async function continueConversation(convId: string, sourceMessageId: string, token: string): Promise<Conversation> {
+  const response = await fetch(`${BASE}/api/chat/conversations/${encodeURIComponent(convId)}/continue`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_message_id: sourceMessageId, token }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    let messageSaved = false;
+    try {
+      const payload: unknown = JSON.parse(body);
+      messageSaved = isRecord(payload) && isRecord(payload.detail) && payload.detail.message_saved === true;
+    } catch { /* Re-read the persisted conversation before another attempt. */ }
     throw new ChatMessageFailure(errorDetailText(response.status, body), messageSaved);
   }
   return response.json() as Promise<Conversation>;

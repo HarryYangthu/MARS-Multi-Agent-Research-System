@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -79,7 +80,7 @@ def genuine_api(tmp_path: Path) -> Iterator[tuple[FastAPI, RunSession, Path, lis
 
 
 @pytest.mark.asyncio
-async def test_execution_get_retains_real_json_cause_and_owned_run_log_context(
+async def test_explicit_preparation_retains_real_json_cause_without_blocking_lazy_reads(
     genuine_api: tuple[FastAPI, RunSession, Path, list[str]],
 ) -> None:
     app, session, _, messages = genuine_api
@@ -87,11 +88,20 @@ async def test_execution_get_retains_real_json_cause_and_owned_run_log_context(
     path.parent.mkdir(parents=True)
     path.write_text("not valid JSON", encoding="utf-8")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get(f"/api/runs/{session.run.run_id}/execution-configuration",
-                                    params={"project": session.run.project})
-    assert response.status_code == 409
-    assert "Expecting value" in response.json()["detail"]
-    assert any(session.run.run_id in line and "JSONDecodeError" in line for line in messages)
+        shell = await client.get(f"/api/runs/{session.run.run_id}/execution-configuration",
+                                 params={"project": session.run.project})
+        assert shell.status_code == 200 and shell.json()['preparation_status'] == 'unprepared'
+        started = await client.post(f"/api/runs/{session.run.run_id}/execution-configuration/prepare",
+                                    json={"project": session.run.project})
+        assert started.status_code == 202
+        for _ in range(100):
+            response = await client.get(f"/api/runs/{session.run.run_id}/execution-configuration/preparation",
+                                        params={"project": session.run.project})
+            if response.json()['status'] != 'preparing':
+                break
+            await asyncio.sleep(.01)
+        assert response.status_code == 200 and response.json()['status'] == 'failed'
+        assert "Expecting value" in response.json()['error']
     assert path.read_text() == "not valid JSON"
     assert not (session.run.root / "execution/local_commands").exists()
 

@@ -44,6 +44,10 @@ def stopped_coding_retry_blocker(run: RunHandle, node_key: str) -> str:
     state = json.loads(checkpoint.read_text())
     if state.get("pending") == "tool" or state.get("pending_batch"):
         return "有结果未确认的工具操作，不能重新执行编码阶段。"
+    from app.bridge.run_model_recovery import recover_interrupted_run_model_requests
+    recovered = recover_interrupted_run_model_requests(run)
+    if recovered["status"] == "blocked":
+        return str(recovered["message"])
     if any(row.get("status") in {"in_flight", "reconciliation_required"}
            for row in RunModelBudget(run.root).recovery_snapshot()["requests"].values()):
         return "有结果未确认的模型请求，请先核对调用记录。"

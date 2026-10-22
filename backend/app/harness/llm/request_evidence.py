@@ -16,4 +16,11 @@ def record_provider_request(config: LLMConfig, provider: str, body: dict[str, An
     if isinstance(extra, dict):
         # The OpenAI SDK merges extra_body into the HTTP JSON body.
         payload.update({key: value for key, value in extra.items() if key in {"thinking", "reasoning_effort"}})
+        template = extra.get("chat_template_kwargs")
+        if isinstance(template, dict):
+            # Only our known public switches, never an arbitrary provider blob.
+            public = {key: value for key, value in template.items()
+                      if key in {"enable_thinking", "preserve_thinking"} and type(value) is bool}
+            if public:
+                payload["chat_template_kwargs"] = public
     config.attempt_observer("provider_request", {"provider": provider, "model": config.model, "wire_payload": payload})

@@ -32,6 +32,18 @@ def test_actual_source_has_path_and_hash_but_no_consumption_claim(tmp_path: Path
     assert updated["files"][0]["sha256"] != context["files"][0]["sha256"]
 
 
+@pytest.mark.parametrize('prefix', ['repo_reader:', 'code.repo_reader:'])
+def test_reader_provenance_prefix_preserves_the_actual_file_scope(tmp_path: Path, prefix: str) -> None:
+    path = tmp_path / 'model.py'
+    path.write_text('VALUE = 1\n')
+    result = json.loads(baseline_repository_context(repo(tmp_path), proposal(prefix + 'model.py')))
+    assert result['files'][0]['path'] == 'model.py'
+    assert result['files'][0]['sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+    for unsafe in ['../outside.py', '.env.py']:
+        with pytest.raises(ValueError):
+            baseline_repository_context(repo(tmp_path), proposal(prefix + unsafe))
+
+
 @pytest.mark.parametrize("name", ["missing.py", "../outside.py", ".env.py"])
 def test_missing_escaping_or_credential_source_is_not_available(tmp_path: Path, name: str) -> None:
     with pytest.raises(ValueError):

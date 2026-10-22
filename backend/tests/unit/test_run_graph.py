@@ -83,3 +83,17 @@ def test_to_dict_round_trip_keys() -> None:
     assert {n["key"] for n in out["nodes"]} == {"a", "b"}
     assert out["edges"] == [{"src": "a", "dst": "b"}]
     assert out["entrypoints"] == ["a"]
+
+
+def test_failed_dependency_only_releases_explicit_recovery_edge() -> None:
+    graph = RunGraph()
+    for name in ('failed', 'repair', 'ordinary'):
+        graph.add_node(name)
+    graph.add_edge('failed', 'repair', allow_failure=True)
+    graph.add_edge('failed', 'ordinary')
+    graph.transition('failed', NodeState.RUNNING)
+    graph.transition('failed', NodeState.FAILED)
+    assert graph.ready_nodes() == ['repair']
+    restored = RunGraph.from_dict(graph.to_dict())
+    assert restored.ready_nodes() == ['repair']
+    assert restored.nodes['failed'].state == NodeState.FAILED

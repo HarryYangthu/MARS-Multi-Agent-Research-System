@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
+from app.harness.evolution import EvolutionContract
 
 from app.api.dependencies import existing_orchestrator, get_orchestrator, get_run_store
 from app.bridge.orchestrator import RunRequest, RunSession
@@ -22,6 +23,23 @@ from app.storage.data_source_store import DataSourceStore
 from app.storage.run_state_store import RunStateIntegrityError, RunStateStore
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+@router.get('/{run_id}/evolution')
+def get_evolution(run_id: str, project: str) -> dict[str, Any]:
+    from app.bridge.evolution_service import evolution_view
+    run = get_run_store().get(run_id)
+    if run is None or run.project != project:
+        raise HTTPException(status_code=404, detail='研究任务不存在或不属于当前项目')
+    return {'evolution': evolution_view(run)}
+
+
+@router.post('/{run_id}/evolution/continue')
+async def continue_evolution(run_id: str, payload: dict[str, str]) -> dict[str, Any]:
+    run = get_run_store().get(run_id)
+    if run is None or run.project != payload.get('project'):
+        raise HTTPException(status_code=404, detail='研究任务不存在或不属于当前项目')
+    return await get_orchestrator().start_feedback_loop(run_id=run_id, diagnosis_version='evolution')
 
 
 @router.get('/{run_id}/code-repository')
@@ -96,7 +114,6 @@ class ExecutionConfirmationPayload(BaseModel):
 
 
 def _execution_configuration(run_id: str, project: str, *, include_hidden: bool = False) -> tuple[RunSession, dict[str, Any]]:
-    from app.bridge.execution_confirmation import execution_preview
     from app.bridge.node_key import parse_node_key
     from app.harness.runtime.state_machine import NodeState
     session = _execution_session(run_id)
@@ -117,9 +134,14 @@ def _execution_configuration(run_id: str, project: str, *, include_hidden: bool 
         from app.execution.job_journal import job_states
         return session, {'visible': visible, 'state': state.value, 'run_id': run_id, 'project': project,
             'node': node, 'runtime_mode': 'deterministic', 'token': '', 'launch_ready': False,
-            'can_confirm': False, 'confirmed': True, 'jobs': job_states(session.run.root)}
+            'can_confirm': False, 'confirmed': True, 'jobs': job_states(session.run.root),
+            'experiments': [], 'source_configs': [], 'blockers': [], 'warnings': [], 'defaults': {}, 'budget': {}}
     try:
-        view = execution_preview(session.run, node)
+        preparation = get_orchestrator().execution_preparations.status(session.run, node)
+        view = preparation.get('configuration') or {'run_id': run_id, 'project': project,
+            'node': node, 'runtime_mode': 'deterministic', 'token': '', 'inputs_token': '',
+            'base_inputs_token': '', 'confirmed': False, 'defaults': {}, 'experiments': [],
+            'source_configs': [], 'blockers': [], 'warnings': [], 'budget': {}, 'validation': [], 'jobs': []}
     except (OSError, ValueError, RuntimeError) as exc:
         cause = bounded_error(str(exc)) or type(exc).__name__
         logger.warning('Execution configuration invalid: run={} project={} node={} error_type={} reason={}',
@@ -127,8 +149,10 @@ def _execution_configuration(run_id: str, project: str, *, include_hidden: bool 
         raise HTTPException(status_code=409, detail='仿真配置无法核验：' + cause
                             + '。请检查项目配置与任务记录。') from exc
     return session, {**view, 'visible': visible,
+        'preparation_status': preparation['status'],
         'state': state.value, 'launch_ready': state == NodeState.APPROVED,
-        'can_confirm': state == NodeState.APPROVED and not view['blockers'] and not session.read_only}
+        'can_confirm': state == NodeState.APPROVED and preparation['status'] == 'ready'
+            and not view['blockers'] and not session.read_only}
 
 
 @router.get('/{run_id}/execution-configuration')
@@ -136,13 +160,70 @@ def get_execution_configuration(run_id: str, project: str) -> dict[str, Any]:
     return _execution_configuration(run_id, project)[1]
 
 
+class ExecutionPreparationPayload(BaseModel):
+    project: str
+    token: str | None = Field(default=None, min_length=64, max_length=64, pattern='^[0-9a-f]+$')
+
+
+def _preparation_status(run_id: str, project: str, operation_id: str | None = None) -> tuple[RunSession, dict[str, Any]]:
+    session, shell = _execution_configuration(run_id, project, include_hidden=True)
+    node = shell.get('node')
+    if not node:
+        raise HTTPException(status_code=409, detail='当前任务没有执行阶段。')
+    try:
+        state = get_orchestrator().execution_preparations.status(session.run, node, operation_id=operation_id)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=bounded_error(str(exc))) from exc
+    state.update(launch_state=shell['state'])
+    from app.execution.job_journal import job_states
+    jobs = job_states(session.run.root)
+    if isinstance(state.get('configuration'), dict):
+        state['configuration'].update(visible=shell.get('visible', False), state=shell['state'],
+            launch_ready=shell['launch_ready'], can_confirm=shell['can_confirm'], jobs=jobs)
+    elif shell['state'] in {'running', 'done'}:
+        state['configuration'] = {**shell, 'jobs': jobs}
+        state['confirmed'] = bool(shell.get('confirmed'))
+        if state['confirmed']:
+            state['confirmation_status'] = 'confirmed'
+    state['jobs'] = jobs
+    return session, state
+
+
+@router.get('/{run_id}/execution-configuration/preparation')
+def get_execution_preparation(run_id: str, project: str, operation_id: str | None = None) -> dict[str, Any]:
+    return _preparation_status(run_id, project, operation_id)[1]
+
+
+@router.post('/{run_id}/execution-configuration/prepare', status_code=202)
+async def prepare_execution_configuration(run_id: str, payload: ExecutionPreparationPayload) -> dict[str, Any]:
+    session, state = _preparation_status(run_id, payload.project)
+    if session.read_only or state['launch_state'] not in {'approved', 'waiting_review', 'pending'}:
+        raise HTTPException(status_code=409, detail='当前执行阶段不可重新准备；已有作业未受影响。')
+    try:
+        await get_orchestrator().execution_preparations.start(session.run, state['node'], token=payload.token)
+        return _preparation_status(run_id, payload.project)[1]
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=bounded_error(str(exc))) from exc
+
+
 class ExecutionBoundaryPayload(BaseModel):
     project: str
     stop_after_execution: bool
 
 
+@router.get('/{run_id}/execution-boundary')
+async def get_execution_boundary(run_id: str, project: str) -> dict[str, Any]:
+    session = _execution_session(run_id)
+    if session.run.project != project:
+        raise HTTPException(status_code=409, detail='任务不属于当前项目。')
+    try:
+        return get_orchestrator().execution_boundary(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post('/{run_id}/execution-boundary')
-def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
+async def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> dict[str, Any]:
     session = _execution_session(run_id)
     if session.run.project != payload.project:
         raise HTTPException(status_code=409, detail='任务不属于当前项目。')
@@ -150,30 +231,26 @@ def set_execution_boundary(run_id: str, payload: ExecutionBoundaryPayload) -> di
         get_orchestrator().set_stage_limit(run_id, stop_after='execution' if payload.stop_after_execution else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _execution_configuration(run_id, payload.project)[1]
+    # This control does not prepare, validate or confirm any simulation inputs.
+    return get_orchestrator().execution_boundary(run_id)
 
 
-@router.post('/{run_id}/execution-configuration/confirm')
+@router.post('/{run_id}/execution-configuration/confirm', status_code=202)
 async def confirm_execution_configuration(run_id: str, payload: ExecutionConfirmationPayload) -> dict[str, Any]:
-    import asyncio
-    from app.bridge.execution_confirmation import save_confirmation
-    session, view = await asyncio.to_thread(_execution_configuration, run_id, payload.project, include_hidden=True)
-    if view.get('token') != payload.token:
+    session, state = _preparation_status(run_id, payload.project)
+    if state.get('token') != payload.token:
         raise HTTPException(status_code=409, detail='配置或代码已变化，请重新核对；尚未启动新的仿真。')
-    if view.get('confirmed') and view.get('state') in {'running', 'done'}:
+    if state.get('confirmed') and state['launch_state'] in {'running', 'done'}:
         return {'ok': True, 'confirmed': True, 'status': 'already_started', 'run_id': run_id}
-    if not view.get('can_confirm'):
-        raise HTTPException(status_code=409, detail='当前配置还不可启动：' + '；'.join(view.get('blockers', [])))
+    if state['launch_state'] != 'approved' or session.read_only:
+        raise HTTPException(status_code=409, detail='当前执行计划尚未批准，或任务不可修改。')
     try:
-        receipt = await asyncio.to_thread(save_confirmation, session.run, view['node'], payload.token)
+        return await get_orchestrator().execution_preparations.confirm(session.run, state['node'], payload.token,
+            resume=lambda: get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution'))
     except (OSError, ValueError, RuntimeError) as exc:
         from app.harness.tools.execution.command_preflight import bounded_error
         raise HTTPException(status_code=409, detail='运行前核对未通过：' + bounded_error(str(exc))
                             + '。尚未启动新的训练，请按原因修正后重新核对。') from exc
-    if not receipt['created']:
-        return {'ok': True, 'confirmed': True, 'status': 'already_confirmed', 'run_id': run_id}
-    result = await get_orchestrator().resume_after_artifact_approval(run_id=run_id, agent='execution')
-    return {**result, 'confirmed': True}
 
 
 @router.get('/{run_id}/recovery')
@@ -228,6 +305,7 @@ class CreateRunPayload(BaseModel):
     evaluation_policy: dict[str, Any] | None = None
     selected_skills_by_agent: dict[str, list[str]] = Field(default_factory=dict)
     experiment_id: str = Field(default="", max_length=64)
+    evolution: EvolutionContract | None = None
 
     @field_validator("idea_mode", mode="before")
     @classmethod
@@ -366,6 +444,8 @@ async def create_run(payload: CreateRunPayload) -> RunDetail:
         payload = payload.model_copy(update={"execution_context": context})
     orch = get_orchestrator()
     request_extra: dict[str, Any] = payload.idea_request_extra()
+    if payload.evolution is not None:
+        request_extra['evolution'] = payload.evolution.model_dump(mode='json')
     if payload.idea_mode is not None:
         request_extra["idea_mode"] = payload.idea_mode
     if payload.idea_budget_profile is not None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,6 +82,7 @@ class CommanderSession:
     linked_run_id: str | None = None
     experiment_id: str = ""           # Project experiment this conversation belongs to
     auto_mode: bool = False           # Compatibility wire name: True = Commander reviews, False = human reviews.
+    selected_model_id: str = ''       # Global conversation model profile; never a project-local credential.
     metric_targets: dict[str, float] = field(default_factory=dict)
     rolling_summary: str = ""
     summary_updated_at: str | None = None
@@ -136,6 +138,7 @@ class CommanderSession:
             "linked_run_id": self.linked_run_id,
             "experiment_id": self.experiment_id,
             "auto_mode": self.auto_mode,
+            "selected_model_id": self.selected_model_id,
             "metric_targets": dict(self.metric_targets),
             "rolling_summary": self.rolling_summary,
             "summary_updated_at": self.summary_updated_at,
@@ -238,6 +241,37 @@ class CommanderSessionStore:
 
     # ------------------------------------------------------------- persist
 
+    def trash(self, conv_id: str) -> CommanderSession:
+        session = self.get(conv_id)
+        if session is None:
+            raise FileNotFoundError(conv_id)
+        if session.processing:
+            raise ValueError("对话正在处理，请先等待本轮结束")
+        source = self.session_directory(session)
+        target = source.parent / ".trash" / conv_id
+        if target.exists():
+            raise FileExistsError("回收站中已有同名对话")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+        self._sessions.pop(conv_id, None)
+        return session
+
+    def restore(self, conv_id: str) -> CommanderSession:
+        self._find(conv_id)
+        for root in self._roots():
+            source = root / ".trash" / conv_id
+            if not (source / "session.json").is_file():
+                continue
+            target = root / conv_id
+            if target.exists():
+                raise FileExistsError("已有同名对话，未覆盖")
+            shutil.move(str(source), str(target))
+            session = self.get(conv_id)
+            if session is None:
+                raise ValueError("无法读取恢复的对话")
+            return session
+        raise FileNotFoundError(conv_id)
+
     def persist(self, session: CommanderSession) -> None:
         self._persist(session)
 
@@ -294,6 +328,7 @@ class CommanderSessionStore:
             linked_run_id=meta.get("linked_run_id"),
             experiment_id=str(meta.get("experiment_id", "") or ""),
             auto_mode=bool(meta.get("auto_mode", False)),
+            selected_model_id=str(meta.get("selected_model_id", '') or ''),
             metric_targets={
                 str(k): float(v) for k, v in (meta.get("metric_targets") or {}).items()
             },
