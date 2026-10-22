@@ -149,6 +149,11 @@ async def _execute_agent_node(
             from app.bridge.revision_resume import resume_revision_reason
             revision_reason = resume_revision_reason(run, node_key, resume_invocation)
         upstream, feedback_context = load_agent_handoff_context(run, node_key, revision_reason=revision_reason, registry=reg)
+        if stage == 'coding':
+            from app.bridge.coding_execution import feedback_for_coding
+            execution_feedback = feedback_for_coding(run, node_key)
+            if execution_feedback is not None:
+                upstream['coding_execution_feedback'] = json.dumps(execution_feedback, ensure_ascii=False)
         from app.harness.tools.git_branch import current_git_branch
         branch = current_git_branch(run.project, run.run_id)
         if branch is not None:
@@ -240,6 +245,8 @@ async def _execute_agent_node(
     if stage == "coding":
         from app.bridge.coding_approval import coding_candidate_errors
         request.candidate_validator = lambda text: coding_candidate_errors(run, text)
+        if research_stage is None and execution_feedback is not None:
+            request.runtime['zcode_continuation'] = execution_feedback['continuation']
     if research_stage is None and branch is not None and request.progress_sink is not None:
         await request.progress_sink({"kind": "action", "phase": "workspace",
             "message": f"使用实验分支 {branch.branch}，原分支 {branch.baseline_branch} 保留。"})
@@ -336,6 +343,9 @@ async def _execute_agent_node(
         if issues:
             raise ValueError(issues[0])
     ref = art_store.write(text=artifact.text, expected_schema=str(agent.output_schema))
+    if stage == 'coding' and research_stage is None:
+        from app.bridge.coding_execution import record_candidate
+        record_candidate(run, node_key, task.invocation_id, ref.path)
     _save_stage_result(run, research_stage, ResultEnvelope(task_id=task.task_id, invocation_id=task.invocation_id, status="awaiting_review",
             artifact_ref=ref.path.relative_to(run.root).as_posix(), schema_valid=True,
             artifact_sha256=hashlib.sha256(ref.path.read_bytes()).hexdigest()))

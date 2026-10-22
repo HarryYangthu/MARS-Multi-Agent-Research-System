@@ -15,6 +15,7 @@ from app.harness.agent_loop.zcode.config import ZCodeConfig, model_config, runti
 from app.harness.agent_loop.zcode.gateway import ZCodeGateway, protocol_tool_name, wire_tools
 from app.harness.agent_loop.zcode.limits import invocation_limits
 from app.harness.agent_loop.zcode.protocol import ZCodeClient, ZCodeProtocolError
+from app.harness.agent_loop.zcode.continuation import continue_state, safe_trace
 
 
 class ZCodeLoopExecutor:
@@ -35,17 +36,27 @@ class ZCodeLoopExecutor:
                 or request.final_schema is None):
             raise ValueError("ZCode requires a structured ReAct task; configured reviews must not be bypassed")
         command = self.config.resolve_command()
+        root = Path(str(request.tool_context.extra['run_root']))
+        compatibility = digest({'generation': generation_fingerprint(request.config, request.provider),
+            'tools': wire_tools(request), 'policy': request.policy.fingerprint_data(),
+            'config': self.config.__dict__, 'command': command, 'runtime': runtime_identity(command),
+            'project': request.tool_context.project, 'run': request.tool_context.run_id})
         fingerprint = digest({"backend": "zcode", "contract": 2,
             "generation": generation_fingerprint(request.config, request.provider),
             "messages": [m.to_wire() for m in request.messages], "tools": wire_tools(request),
             "final_schema": request.final_schema, "policy": request.policy.fingerprint_data(),
             "config": self.config.__dict__, "command": command, "runtime": runtime_identity(command),
-            "correlation": request.correlation})
+            "correlation": request.correlation, **({'continuation': request.session_continuation}
+                if request.session_continuation else {})})
         state = self._state(request, fingerprint)
+        if request.session_continuation and not request.resume:
+            state.update(continue_state(root, request.session_continuation, compatibility))
+        state['continuation_compatibility'] = compatibility
         limits = invocation_limits(self.config, request.policy)
         trace = LoopTrace(request.trace_root, request.policy.trace, resume=request.resume, correlation=request.correlation)
         gateway = ZCodeGateway(request, self.config, secrets.token_urlsafe(32), state, trace)
-        runtime_root = request.trace_root / "zcode_runtime"
+        owner = safe_trace(root, state['session_owner_ref']) if state.get('session_owner_ref') else request.trace_root
+        runtime_root = owner / "zcode_runtime"
         workspace = runtime_root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         client: ZCodeClient | None = None
@@ -69,20 +80,21 @@ class ZCodeLoopExecutor:
                                  timeout=self.config.rpc_timeout_seconds,
                                  max_line_bytes=self.config.max_protocol_line_bytes)
             await client.start()
-            permissions = {"workspace": {"workspacePath": str(workspace), "workspaceKey": digest(str(request.trace_root))},
+            permissions = {"workspace": {"workspacePath": str(workspace), "workspaceKey": digest(str(owner))},
                 "toolAllowlist": [protocol_tool_name(t["name"]) for t in gateway.tools], "toolDenylist": [],
                 "mcpServers": [{"name": "mars", "type": "http", "url": gateway.endpoint + "/mcp",
                     "headers": [{"name": "Authorization", "value": "Bearer " + gateway.token}],
                     "isolation": "session", "protocolVersion": "legacy"}],
                 "offPeakToolEnabled": False, "dynamicWorkflowEnabled": False}
-            if request.resume:
+            continuing = bool(request.resume or request.session_continuation)
+            if continuing:
                 result = await client.call("session/resume", {**permissions, "sessionId": state["session_id"], "thoughtLevel": "low"})
             else:
                 result = await client.call("session/create", {**permissions, "mode": "build",
                     "titleGenerationEnabled": False, "thoughtLevel": "low",
                     "model": {"providerId": "mars", "modelId": request.config.model, "options": {"reasoningLevel": "low"}}})
             session_id = session_identity(result)
-            if not session_id or (request.resume and session_id != state["session_id"]):
+            if not session_id or (continuing and session_id != state["session_id"]):
                 raise ZCodeProtocolError("ZCode session identity is missing or changed")
             state["session_id"] = session_id
             gateway.save()
@@ -90,6 +102,15 @@ class ZCodeLoopExecutor:
             event_task = asyncio.create_task(self._events(client, gateway))
             prompt = ("Continue this exact MARS task using completed observations; verify current files before further edits. "
                       "Do not repeat a completed mutation.\n" if request.resume else self._prompt(request))
+            if request.session_continuation and not request.resume:
+                trace.emit('session_continued', {'session_id': session_id,
+                    'source': request.session_continuation['trace_ref']})
+                prompt = ('Continue this same coding/execution work session. MARS ran the approved jobs and '
+                    'returned actual execution feedback below. Retain your prior code understanding and observations; '
+                    'read only changed files or specific missing evidence. Repair implementation defects only, '
+                    'preserving the approved experiment/data/seed/budget/metric definitions. Submit a revised '
+                    'delivery for the existing approval process. Never replay a training launch or claim success '
+                    'from a process status alone.\n\n' + prompt)
             if request.resume and state.get("candidate"):
                 errors = await request.validate(state["candidate"], state["history"])
                 if not errors:

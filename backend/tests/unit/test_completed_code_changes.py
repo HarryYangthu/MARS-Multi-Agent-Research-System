@@ -63,7 +63,7 @@ async def test_copied_yaml_keeps_reviewable_net_diff_and_archived_postimages(tmp
 @pytest.mark.asyncio
 async def test_multiple_writes_show_net_changes_and_new_file(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "existing.py").write_text("value = 1\nkeep = True\n")
+    (root / "existing.py").write_text("value = 1\nkeep = True\n", encoding='utf-8', newline='')
     for path, content in [("existing.py", "value = 2\nkeep = True\n"),
                           ("new.py", "first = 1\n"), ("new.py", "first = 2\nsecond = 3\n"),
                           ("existing.py", "value = 3\nkeep = True\nextra = 4\n")]:
@@ -127,9 +127,27 @@ async def test_external_edit_cannot_be_labelled_as_verified(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_write_and_rollback_preserve_exact_utf8_crlf_bytes(tmp_path: Path) -> None:
+    run, root, ctx, browser = setup(tmp_path)
+    original = '# 中文\r\nVALUE = 1\r\n'.encode('utf-8')
+    path = root / 'value.py'
+    path.write_bytes(original)
+    result = await get_registry().dispatch('code.write_file',
+        {'path': 'value.py', 'content': '# 中文\nVALUE = 2\n'}, ctx)
+    assert result.ok, result.error
+    assert path.read_bytes() == '# 中文\nVALUE = 2\n'.encode('utf-8')
+    snapshot = json.loads(Path(result.rollback_ref or '').read_text(encoding='utf-8'))
+    assert snapshot['snapshots'][0]['content'].encode('utf-8') == original
+    assert not completed_code_changes(run, project=run.project, repository=browser)['warnings']
+    restored = await get_registry().dispatch('code.rollback_patch', {'rollback_ref': result.rollback_ref}, ctx)
+    assert restored.ok, restored.error
+    assert path.read_bytes() == original
+
+
+@pytest.mark.asyncio
 async def test_reverted_edits_are_not_changes(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "value.py").write_text("value = 1\n")
+    (root / "value.py").write_text("value = 1\n", encoding='utf-8', newline='')
     for content in ["value = 2\n", "value = 1\n"]:
         assert (await get_registry().dispatch("code.write_file", {"path": "value.py", "content": content}, ctx)).ok
     view = completed_code_changes(run, project=run.project, repository=browser)
@@ -140,7 +158,7 @@ async def test_reverted_edits_are_not_changes(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_noop_is_verified_reuse_and_retry_retains_task_net_addition(tmp_path: Path) -> None:
     run, root, ctx, browser = setup(tmp_path)
-    (root / "existing.py").write_text("VALUE = 1\n")
+    (root / "existing.py").write_text("VALUE = 1\n", encoding='utf-8', newline='')
     for path in ("existing.py", "new.py", "new.py"):
         result = await get_registry().dispatch("code.write_file", {"path": path, "content": "VALUE = 1\n"}, ctx)
         assert result.ok

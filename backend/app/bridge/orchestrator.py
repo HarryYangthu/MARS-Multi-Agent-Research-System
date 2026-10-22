@@ -769,6 +769,9 @@ class Orchestrator:
             return
         graph = session.graph
         await self.replay_state_events(run_id)
+        if not session.request.extra.get('research_task_sha256') and not session.request.extra.get('evolution'):
+            from app.bridge.coding_execution import restore_pending_repairs
+            restore_pending_repairs(session.run, graph)
         from app.bridge.evolution_service import load_evolution, record_execution, record_failed_execution
         if load_evolution(session.run) is not None:
             latest = self._latest_node_for_stage(session, 'execution')
@@ -834,6 +837,8 @@ class Orchestrator:
         failed_nodes = sorted(
             key for key, state in states.items() if state == NodeState.FAILED
         )
+        from app.bridge.coding_execution import repaired_failure
+        failed_nodes = [key for key in failed_nodes if not repaired_failure(graph, key)]
         quality_blocked = quality_gate.get("completion_allowed") is False
         if session.request.extra.get('evolution'):
             from app.bridge.evolution_service import evolution_view
@@ -1317,6 +1322,8 @@ class Orchestrator:
                     channel=f"run.{session.run.run_id}.failure",
                     payload={"node": node_key, "error": failure.message, "failure": failure.model_dump()},
                 )
+                if await self._repair_coding_execution(session, node_key, failure.message):
+                    return
                 from app.bridge.evolution_service import record_failed_execution
                 repair = record_failed_execution(session.run, attempt=parse_node_key(node_key).attempt,
                                                  error=failure.message)
@@ -1332,7 +1339,45 @@ class Orchestrator:
                 return
         await self._transition(session, node_key, NodeState.DONE)
         if parse_node_key(node_key).stage == "execution":
+            from app.bridge.coding_execution import record_completed
+            try:
+                record_completed(session.run, node_key)
+            except (OSError, ValueError, KeyError) as error:
+                logger.warning('Execution completed but coupled session receipt could not be bound: {}', error)
             await self._after_execution(session, node_key)
+
+    async def _repair_coding_execution(self, session: RunSession, node_key: str, error: str, *,
+                                      preparation: dict[str, Any] | None = None) -> bool:
+        # Sealed research contracts and evolutionary search own their own graphs.
+        # This mode cannot silently widen either authority or an evolutionary budget.
+        if (self._stopping(session) or session.read_only or session.request.extra.get('research_task_sha256')
+                or session.request.extra.get('evolution')):
+            return False
+        from app.bridge.coding_execution import repair_record, append_repair
+        try:
+            record = repair_record(session.run, session.graph, node_key, error, preparation=preparation)
+            if record is None:
+                return False
+            if session.graph.state(node_key) != NodeState.FAILED:
+                await self._transition(session, node_key, NodeState.RUNNING)
+                await self._transition(session, node_key, NodeState.FAILED)
+            append_repair(session.graph, record)
+            self._persist_state(session, status='running')
+            await self._publish_state(session, channel=f'run.{session.run.run_id}.coding', payload={
+                'event': 'coding_execution.repair_scheduled', 'node': record['target_node'],
+                'source_node': node_key, 'error': error,
+                'message': '真实执行反馈已交回原 ZCode 会话修复；研究条件保留，修订后重新核对与审批。'})
+            return True
+        except (OSError, ValueError, KeyError) as blocked:
+            from app.harness.agent_loop.trace import digest
+            signature = digest(str(blocked))
+            if session.graph.metadata(node_key).get('coding_execution_blocked') == signature:
+                return False
+            session.graph.nodes[node_key].metadata['coding_execution_blocked'] = signature
+            await self._publish_state(session, channel=f'run.{session.run.run_id}.coding', payload={
+                'event': 'coding_execution.repair_blocked', 'node': node_key,
+                'message': str(blocked), 'error': error})
+            return False
 
     async def _await_execution_confirmation(self, session: RunSession, node_key: str) -> bool:
         from app.bridge.execution_confirmation import confirmation_policy
@@ -1346,6 +1391,9 @@ class Orchestrator:
         while not self._stopping(session) and not self.owned_tasks.closing and not self.execution_preparations.closing:
             try:
                 preparation = self.execution_preparations.status(session.run, node_key)
+                if preparation['status'] == 'failed' and await self._repair_coding_execution(
+                        session, node_key, str(preparation.get('error', '运行前检查失败')), preparation=preparation):
+                    return False
                 view = preparation.get('configuration') or {'blockers': ['运行前检查正在准备。']}
                 if preparation['status'] != 'ready':
                     view = {**view, 'blockers': [preparation.get('error') or '运行前检查尚未完成，请查看检查进度。']}

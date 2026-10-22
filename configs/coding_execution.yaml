@@ -1,0 +1,3 @@
+# Same ZCode work session receives host execution failures; approvals still apply.
+enabled: true
+max_repairs: 3

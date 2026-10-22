@@ -72,7 +72,8 @@ def test_private_config_contains_only_loopback_token_and_runtime_hash(tmp_path: 
     assert rule["access"]["apiKey"] == "private-local-token"
     assert rule["api"]["baseUrl"] == "http://127.0.0.1:10000/v1"
     assert not any("API_KEY" in key for key in env)
-    assert (tmp_path / "provider.json").stat().st_mode & 0o777 == 0o600
+    if os.name != 'nt':  # POSIX mode bits do not represent Windows inherited ACLs.
+        assert (tmp_path / "provider.json").stat().st_mode & 0o777 == 0o600
     binary = tmp_path / "runtime"; binary.write_text("runtime source")
     first = runtime_identity((str(binary),))
     binary.write_text("updated runtime source")

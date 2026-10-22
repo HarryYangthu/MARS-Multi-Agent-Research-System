@@ -23,7 +23,7 @@ def proposal(ref: str, project: str = "local") -> dict[str, str]:
 
 def test_actual_source_has_path_and_hash_but_no_consumption_claim(tmp_path: Path) -> None:
     path = tmp_path / "train.py"
-    path.write_text("value = 1\n")
+    path.write_text("value = 1\n", encoding='utf-8', newline='')
     context = json.loads(baseline_repository_context(repo(tmp_path), proposal("train.py")))
     assert context["files"] == [{"path": "train.py", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": 10}]
     assert context["contents_loaded"] is False

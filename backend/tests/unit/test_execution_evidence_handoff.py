@@ -1,5 +1,6 @@
 """Reference validation and actual archived job evidence; no service substitutes."""
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,19 @@ def test_reference_scope_rejects_escape_and_symlink(tmp_path: Path) -> None:
     (tmp_path / "outside.md").write_text("Authored parser text")
     root = tmp_path / "run"
     root.mkdir()
-    (root / "link.md").symlink_to(tmp_path / "outside.md")
-    assert len(report_source_errors(root, report(["../outside.md", "link.md"]))) == 2
+    if os.name == 'nt':
+        import _winapi
+        outside = tmp_path / 'external'; outside.mkdir()
+        (outside / 'outside.md').write_text('External evidence')
+        junction = root / 'link'
+        getattr(_winapi, 'CreateJunction')(str(outside), str(junction))
+        try:
+            assert len(report_source_errors(root, report(['../outside.md', 'link/outside.md']))) == 2
+        finally:
+            junction.rmdir()
+    else:
+        (root / "link.md").symlink_to(tmp_path / "outside.md")
+        assert len(report_source_errors(root, report(["../outside.md", "link.md"]))) == 2
 
 
 def test_direct_coding_report_catalogue_does_not_invent_skipped_stages(tmp_path: Path) -> None:

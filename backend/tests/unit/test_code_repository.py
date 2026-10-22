@@ -74,6 +74,8 @@ def test_exclusions_are_enforced_for_directory_and_direct_file_access(tmp_path: 
 
 
 def test_no_symlink_hardlink_special_file_or_path_escape(tmp_path: Path) -> None:
+    if os.name == 'nt':
+        pytest.skip('POSIX FIFO/symlink case; Windows handles have a separate real filesystem test')
     root = tmp_path / 'repo'; root.mkdir()
     outside = tmp_path / 'secret'; outside.write_text('PRIVATE')
     (root / 'linked.py').symlink_to(outside)
@@ -109,3 +111,34 @@ def test_run_project_mismatch_is_rejected_before_loading_repository(tmp_path: Pa
     run = RunStore(tmp_path / 'runs').create(task='browse', project='test')
     with pytest.raises(ValueError, match='项目不匹配'):
         run_code_repository(run, project='other')
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows native handles and junctions')
+def test_windows_hardlinks_junctions_and_pinned_ancestors(tmp_path: Path) -> None:
+    import _winapi
+    from app.harness.windows_read import file_descriptor
+    root = tmp_path / 'repo'; root.mkdir()
+    (root / 'normal.py').write_bytes(b'NORMAL\r\n')
+    outside = tmp_path / 'outside'; outside.mkdir()
+    (outside / 'private.py').write_bytes(b'PRIVATE')
+    os.link(outside / 'private.py', root / 'hard.py')
+    junction = root / 'junction'
+    getattr(_winapi, 'CreateJunction')(str(outside), str(junction))
+    try:
+        repo = browser(root)
+        assert [item['path'] for item in repo.directory()['entries']] == ['normal.py']
+        for name in ['hard.py', 'junction/private.py', '../outside/private.py', 'normal.py:stream']:
+            with pytest.raises((ValueError, OSError)):
+                repo.file(name)
+        with pytest.raises((ValueError, OSError)):
+            repo.directory('junction')
+        with file_descriptor(root, 'normal.py') as fd:
+            assert os.read(fd, 100) == b'NORMAL\r\n'
+            with pytest.raises(OSError):
+                root.rename(tmp_path / 'renamed')
+            with pytest.raises(OSError):
+                (root / 'normal.py').unlink()
+        (root / 'normal.py').rename(root / 'renamed.py')
+        assert (outside / 'private.py').read_bytes() == b'PRIVATE'
+    finally:
+        junction.rmdir()

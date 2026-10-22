@@ -117,7 +117,7 @@ class CodingAgent(BaseAgent):
             '避免上一组残留的 scheduler 等字段污染下一组。')
         from app.harness.tools.execution.handoff import execution_delivery_context
         context.upstream['configured_execution_delivery'] = json.dumps(
-            execution_delivery_context(), ensure_ascii=False)
+            execution_delivery_context(project=request.project), ensure_ascii=False)
         from app.harness.schema.experiment_contract import document_hash, document_metadata
         for supplied in request.upstream_artifacts.values():
             text = supplied.split('\n', 1)[1] if supplied.startswith('[upstream artifact: ') else supplied
@@ -126,6 +126,10 @@ class CodingAgent(BaseAgent):
                     'experiment_plan_sha256': document_hash(text),
                     'instruction': '此哈希由 MARS 计算，直接用于编码交付；不得自行猜测或改变实验约束。'})
         return context
+
+    def loop_session_continuation(self, request: RunRequest) -> dict[str, Any] | None:
+        value = request.runtime.get('zcode_continuation')
+        return value if isinstance(value, dict) else None
 
     async def validate_candidate(self, request: RunRequest, text: str,
                                  observations: list[dict[str, Any]]) -> list[str]:
@@ -175,6 +179,8 @@ class CodingAgent(BaseAgent):
         # A persisted invocation chooses its recovery engine. A default change
         # must never reinterpret a native checkpoint as a ZCode session.
         backend = settings.mars_coding_backend
+        if request.runtime.get('zcode_continuation'):
+            backend = 'zcode'
         invocation = request.extra.get("resume_invocation")
         if invocation:
             root = Path(str(request.extra["run_root"]))

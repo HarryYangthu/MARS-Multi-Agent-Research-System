@@ -29,6 +29,22 @@ def test_windows_paths_preserve_spaces_and_do_not_search_current_directory() -> 
                      r"C:\Users\研究 User\AppData\Local\Programs\Git\cmd\git.exe")
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows Git path limit')
+def test_real_git_can_create_a_research_ref_beyond_max_path(tmp_path: Path) -> None:
+    root = tmp_path / ('nested-' + 'a' * 60) / ('research-' + 'b' * 50)
+    root.mkdir(parents=True)
+    git(root, 'init', '-b', 'baseline')
+    (root / 'main.py').write_text('VALUE = 1\n', encoding='utf-8', newline='')
+    git(root, 'add', 'main.py')
+    git(root, '-c', 'user.name=MARS Test', '-c', 'user.email=test@localhost',
+        '-c', 'commit.gpgsign=false', 'commit', '-m', 'baseline')
+    branch = 'mars/' + 'candidate-' * 8
+    assert len(str(root / '.git/logs/refs/heads' / branch)) > 260
+    git(root, 'switch', '-c', branch)
+    assert git(root, 'branch', '--show-current') == branch
+    assert git(root, 'config', '--local', '--get', 'core.bare') == 'false'
+
+
 def test_macos_paths_deduplicate_and_skip_relative_directories() -> None:
     assert candidate_paths(platform="darwin", environment={"PATH": ":.:relative:/usr/bin:/usr/bin"},
         fallback_paths=["/opt/homebrew/bin/git", "/usr/local/bin/git"]) == (
@@ -67,6 +83,7 @@ def test_discovery_skips_unusable_file_and_uses_real_git(tmp_path: Path) -> None
     ("fatal: detected dubious ownership in repository", "git_unsafe_repository"),
     ("Unable to create index.lock: File exists", "git_repository_locked"),
     ("not a git repository", "git_repository_missing"),
+    ("Filename too long", "git_path_too_long"),
     ("git: switch is not a git command", "git_unsupported"),
     ("hook output containing PRIVATE_DATA", "git_operation_failed"),
 ])

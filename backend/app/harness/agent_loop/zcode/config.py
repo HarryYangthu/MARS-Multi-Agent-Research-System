@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -27,7 +28,12 @@ class ZCodeConfig:
 
     @classmethod
     def load(cls, path: Path | None = None) -> ZCodeConfig:
-        raw = yaml.safe_load((path or repo_root() / "configs/zcode.yaml").read_text())
+        override = os.environ.get('MARS_ZCODE_CONFIG_PATH')
+        if path is None and override:
+            path = Path(override)
+            if not path.is_absolute():
+                raise ValueError('MARS_ZCODE_CONFIG_PATH must be absolute')
+        raw = yaml.safe_load((path or repo_root() / "configs/zcode.yaml").read_text(encoding='utf-8'))
         if not isinstance(raw, dict) or set(raw) != set(cls.__dataclass_fields__):
             raise ValueError("Invalid ZCode configuration fields")
         command = raw.pop("command")

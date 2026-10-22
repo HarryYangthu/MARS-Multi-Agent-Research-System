@@ -89,6 +89,7 @@ class LoopInput:
     correlation: dict[str, str] = field(default_factory=dict)
     context_metadata: dict[str, Any] = field(default_factory=dict)
     revision_seed: RevisionSeed | None = None
+    session_continuation: dict[str, Any] | None = None
 
 
 @dataclass

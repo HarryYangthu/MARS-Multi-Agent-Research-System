@@ -475,6 +475,9 @@ class BaseAgent(ABC):
     def loop_stop_contract_id(self, request: RunRequest) -> str | None:
         return None
 
+    def loop_session_continuation(self, request: RunRequest) -> dict[str, Any] | None:
+        return None
+
     def loop_registry(self, request: RunRequest, context: ContextPack) -> "ToolRegistry":
         from app.harness.tools.registry import get_registry
         return get_registry()
@@ -547,6 +550,7 @@ class BaseAgent(ABC):
             stop_contract_id=self.loop_stop_contract_id(request),
             final_schema=structured_schema or self.submission_schema(request),
             revision_seed=self.loop_revision_seed(request, context),
+            session_continuation=self.loop_session_continuation(request),
             external_review=(ExternalReview.from_mapping(request.extra["external_review"])
                              if "external_review" in request.extra else None),
         ))

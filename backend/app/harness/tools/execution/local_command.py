@@ -107,6 +107,12 @@ def _relative_capability(value: Any, name: str) -> str:
     return value.replace('\\', '/')
 
 
+def command_supports_project(row: dict[str, Any], project: str) -> bool:
+    patterns = row.get('project_ids')
+    return patterns is None or (isinstance(patterns, list) and bool(patterns)
+        and all(isinstance(value, str) and bool(value) for value in patterns) and project in patterns)
+
+
 def _registered_command(job: LocalCommandJob) -> dict[str, Any]:
     cfg = load_execution_config()["execution"]
     rows = cfg.get("local_commands", [])
@@ -120,20 +126,18 @@ def _registered_command(job: LocalCommandJob) -> dict[str, Any]:
     if len(matching) != 1:
         raise ValueError('registered command_id is unavailable or ambiguous: ' + command_id)
     selected: dict[str, Any] = matching[0]
-    for field, value in (('project_ids', job.project), ('entrypoints', job.config.get('entrypoint')),
+    if not command_supports_project(selected, job.project):
+        raise ValueError('registered command does not support this project')
+    for field, value in (('entrypoints', job.config.get('entrypoint')),
                          ('config_paths', job.config.get('config_path') or job.config.get('cfg'))):
         patterns = selected.get(field)
         if patterns is None:
             continue  # Existing explicit registrations have no new capability restriction.
         if not isinstance(patterns, list) or not patterns or any(not isinstance(p, str) or not p for p in patterns):
             raise ValueError('registered command ' + field + ' must be a nonempty string list')
-        if field == 'project_ids':
-            if value not in patterns:
-                raise ValueError('registered command does not support this project')
-        else:
-            name = _relative_capability(value, field)
-            if not any(fnmatchcase(name, _relative_capability(pattern, field)) for pattern in patterns):
-                raise ValueError('registered command does not support this ' + field + ': ' + name)
+        name = _relative_capability(value, field)
+        if not any(fnmatchcase(name, _relative_capability(pattern, field)) for pattern in patterns):
+            raise ValueError('registered command does not support this ' + field + ': ' + name)
     return selected
 
 

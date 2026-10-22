@@ -26,7 +26,7 @@ class FileChange:
     valid: bool = True
 
 
-def _snapshots(run: RunHandle, record: dict[str, Any], limit: int) -> dict[str, str | None]:
+def _snapshots(run: RunHandle, record: dict[str, Any], limit: int, *, key: str = 'snapshots') -> dict[str, str | None]:
     ref = record.get("rollback_ref")
     if not isinstance(ref, str) or not ref:
         raise ValueError("missing write snapshot")
@@ -38,7 +38,7 @@ def _snapshots(run: RunHandle, record: dict[str, Any], limit: int) -> dict[str, 
             or data.get("project") != run.project or data.get("tool") != record["tool"]):
         raise ValueError("snapshot identity mismatch")
     snapshots: dict[str, str | None] = {}
-    for snapshot in data["snapshots"]:
+    for snapshot in data[key]:
         path, content, existed = snapshot["path"], snapshot["content"], snapshot["existed"]
         if not isinstance(path, str) or not isinstance(content, str) or type(existed) is not bool or path in snapshots:
             raise ValueError("invalid snapshot")
@@ -122,6 +122,16 @@ def _operations(run: RunHandle, record: dict[str, Any], limit: int) -> list[tupl
     files = parse_diff(args["diff"])
     if not files:
         raise ValueError("missing applied patch")
+    try:
+        actual_after = _snapshots(run, record, limit, key='after_snapshots')
+    except KeyError as exc:
+        if exc.args != ('after_snapshots',):
+            raise ValueError('malformed patch after image') from exc
+        actual_after = None  # Historical patches predate byte-exact after images.
+    if actual_after is not None:
+        if set(actual_after) != {item['path'] for item in files}:
+            raise ValueError('patch after images differ from changed paths')
+        return [(item['path'], snapshots[item['path']], actual_after[item['path']]) for item in files]
     return [(item["path"], snapshots[item["path"]], _patched(snapshots[item["path"]], item)) for item in files]
 
 

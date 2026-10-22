@@ -167,7 +167,7 @@ async def write_file_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if ctx.dry_run:
         return ToolResult(ok=True, output={"dry_run": True, "path": rel})
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    target.write_text(content, encoding="utf-8", newline="")
     rollback_ref = _write_rollback(ctx, "code.write_file", snapshots)
     _record_branch_write(ctx, [rel])
     return ToolResult(
@@ -288,11 +288,12 @@ async def apply_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolResult
         for snapshot in snapshots:
             target = root / snapshot.path
             if snapshot.existed:
-                target.write_text(snapshot.content)
+                target.write_text(snapshot.content, encoding='utf-8', newline='')
             else:
                 target.unlink(missing_ok=True)
         return ToolResult(ok=False, error=str(exc))
-    rollback_ref = _write_rollback(ctx, "code.apply_patch", snapshots)
+    rollback_ref = _write_rollback(ctx, "code.apply_patch", snapshots,
+        after_snapshots=[_snapshot(rel, root / rel) for rel in files])
     payload = _patch_result_payload(
         ctx,
         version,
@@ -363,7 +364,8 @@ async def rollback_patch_tool(args: dict[str, Any], ctx: ToolContext) -> ToolRes
         existed = bool(item.get("existed", False))
         if existed:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(item.get("content", "")), encoding="utf-8")
+            target.write_text(str(item.get("content", "")), encoding="utf-8",
+                newline='' if data.get('text_mode') == 'utf8_exact' else None)
         elif target.exists():
             target.unlink()
         restored.append(rel)
@@ -674,7 +676,7 @@ def _is_ignored_path(project: str, rel: str) -> bool:
 def _snapshot(rel: str, target: Path) -> FileSnapshot:
     if not target.exists():
         return FileSnapshot(path=rel, existed=False, sha256="", content="")
-    text = target.read_text(encoding="utf-8", errors="replace")
+    text = target.read_bytes().decode('utf-8')
     return FileSnapshot(path=rel, existed=True, sha256=_sha_text(text), content=text)
 
 
@@ -702,6 +704,7 @@ def _write_rollback(ctx: ToolContext, tool_name: str, snapshots: list[FileSnapsh
         "project": ctx.project,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "snapshots": [asdict(item) for item in snapshots],
+        "text_mode": "utf8_exact",
     }
     if after_snapshots is not None:
         payload["after_snapshots"] = [asdict(item) for item in after_snapshots]
@@ -777,7 +780,8 @@ def _bound_rollback(ctx: ToolContext, rollback_ref: str) -> ToolResult:
             for _name, target, existed, content in validated:
                 if existed:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(content, encoding="utf-8")
+                    target.write_text(content, encoding="utf-8",
+                        newline='' if data.get('text_mode') == 'utf8_exact' else None)
                 elif target.exists():
                     target.unlink()
         return ToolResult(ok=True, output={"rolled_back": [item[0] for item in validated], "dry_run": ctx.dry_run})

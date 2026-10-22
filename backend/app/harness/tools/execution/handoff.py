@@ -13,11 +13,14 @@ from app.harness.tools.project_repo import load_project_repo
 from app.settings import get_settings
 
 
-def execution_delivery_context() -> dict[str, Any]:
+def execution_delivery_context(*, project: str | None = None) -> dict[str, Any]:
     """Expose the same host bindings the coding handoff validator consumes."""
     backend = get_settings().mars_execution_backend
     policy = load_execution_config()['execution']
     rows = policy.get('local_commands', [])
+    if project is not None:
+        from app.harness.tools.execution.local_command import command_supports_project
+        rows = [row for row in rows if isinstance(row, dict) and command_supports_project(row, project)] if isinstance(rows, list) else []
     commands = [{key: row[key] for key in ('id', 'label', 'argv', 'required_metrics', 'project_ids',
                 'entrypoints', 'config_paths', 'consumes_data_path', 'validation') if key in row}
                 for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -36,6 +39,7 @@ def execution_delivery_context() -> dict[str, Any]:
             '登记命令的项目、入口和配置能力必须与本项匹配；旧命令不能作为其他模型的通用入口。'
             '声明 consumes_data_path 时必须消费 MARS 交付的数据；验证模式只检查，不训练。'
             '若没有登记命令，明确说明执行配置未就绪，不得捏造 command_id 或声称可执行。'
+            '登记入口尚不存在时，应在允许修改范围内创建该交付文件，不将其误报为用户缺失的输入。'
             if backend == 'local_command' else
             '按当前执行适配器交付实际入口、配置、种子和预算；不能替换批准的训练条件。'
         ),
