@@ -1,0 +1,28 @@
+schema_version: 2
+name: 示例：一维拟合
+objective: 在特征个数不超过 4 的前提下降低验证误差
+repo:
+  path: source
+  ref: HEAD
+  editable_files: [model.py]
+  context_files: [model.py, train.py]
+datasets:
+  - {name: clean, data: data/clean.csv}
+  - {name: noisy, data: data/noisy.csv}
+evaluate:
+  command: "{python} {pack}/evaluate.py --data {data} --steps {steps} --seed {seed} --output {output} --overrides {overrides}"
+  timeout_seconds: 600
+  max_parallel: 2
+metrics:
+  primary: val_mse
+  fields:
+    val_mse: {label: 验证误差, better: lower}
+    params: {label: 参数个数, better: lower}
+checks:
+  build: "{python} {pack}/check.py"
+editable_config_keys: [learning_rate]
+search_space:
+  learning_rate: {type: float, low: 0.005, high: 0.2, log: true}
+prompts:
+  domain: .mars/pack/prompts/domain.md
+context_sources: [context/notes.md]

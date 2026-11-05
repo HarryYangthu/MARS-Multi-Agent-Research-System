@@ -1,0 +1,25 @@
+[project]
+name = "mars-core"
+version = "0.1.0"
+description = "MARS minimal core: Step1 proposal generation + Step2 analysis-driven evolution"
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph>=1.2", "langgraph-checkpoint-sqlite>=3.1", "litellm[proxy]>=1.106", "mcp>=2.3",
+  "typer>=0.27", "pydantic>=2.14", "pyyaml", "httpx[socks]", "ddgs>=9.16", "pymupdf>=2.0", "trafilatura>=2.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+mars = "mars.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mars*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

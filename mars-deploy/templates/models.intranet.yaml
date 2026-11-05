@@ -1,0 +1,49 @@
+# 内网模型连接模板：地址换成本单位的网关；打包时可用 --site-defaults 预置实际地址。Key保存在安装目录local/models.env，不进入源码。
+# strong/fast/coding各自独立保存连接和Key；coding初始Key与strong相同。
+env_files:
+- models.env
+providers:
+  strong:
+    api_base: http://<内网模型网关>/v1
+    api_key_env: MARS_STRONG_API_KEY
+    models:
+    - GLM-V5.2
+    - GLM-V5
+  fast:
+    api_base: http://<内网fast模型地址>:4000
+    api_key_env: MARS_FAST_API_KEY
+    models:
+    - model1
+    - model2
+  coder:
+    api_base: http://<内网模型网关>/v1
+    api_key_env: MARS_CODER_API_KEY
+    models:
+    - GLM-V5.2
+    - GLM-V5
+roles:
+  strong:
+    provider: strong
+    model: GLM-V5.2
+    max_tokens: 48000
+    timeout: 1800
+    idle_timeout: 240
+    stream: false
+    concurrency: 2
+  fast:
+    provider: fast
+    model: model1
+    max_tokens: 8000
+    timeout: 900
+    idle_timeout: 240
+    stream: false
+    concurrency: 2
+  coder:
+    provider: coder
+    model: GLM-V5.2
+    max_tokens: 16000
+    timeout: 900
+    stream: false
+    concurrency: 2
+fallbacks: {}
+retries: 1

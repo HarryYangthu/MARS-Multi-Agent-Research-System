@@ -1,0 +1,23 @@
+id: toy_research
+title: 示例：降低验证误差
+objective: 在特征个数不超过 4 的前提下降低验证误差
+constraints:
+  - 只修改 model.py 的 features(x)
+targets:
+  gates:
+    - {metric: val_mse, max_worse: 0.0}
+  checks:
+    - {check: build, field: params, max: 4, stop: true}
+budget:
+  proposers: 3
+  routes: 2
+  research_sources: 6
+  repair_turns: 2
+  codingagent_minutes: 10
+  max_iterations_per_route: 3
+  max_step1_rounds: 1
+  prequick: {dataset: clean, steps: 200, gates: [{metric: val_mse, max: 1.0}]}
+  screen: {steps: 500, seeds: [1, 2, 3], margin_floor: 0.0001}
+  verify: {steps: 2000, seed: 1}
+human_approval: true
+execution: {environment: local}

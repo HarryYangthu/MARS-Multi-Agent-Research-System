@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+workspace/
+runs/
+.pytest_cache/
+configs/models.yaml
+configs/machine.yaml
+configs/sources.yaml
+.DS_Store
+*.egg-info/
+knowledge/

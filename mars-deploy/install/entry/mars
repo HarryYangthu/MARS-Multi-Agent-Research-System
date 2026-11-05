@@ -1,0 +1,9 @@
+#!/bin/sh
+# MARS 一键入口（Linux）：首次运行完成安装，之后直接启动 mars-app 并打开浏览器。
+set -e
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+PY="$ROOT/runtime/python/bin/python3"
+[ -x "$PY" ] || { mkdir -p "$ROOT/runtime"; tar -xzf "$ROOT/bundle/python.tar.gz" -C "$ROOT/runtime"; }
+[ -f "$ROOT/code/mars-deploy/local/paths.json" ] || { echo "首次运行：正在离线安装（仅此一次）..."; "$PY" -I "$ROOT/code/mars-deploy/install/install.py" --no-check; }
+echo "正在启动 MARS，浏览器稍后会自动打开 http://127.0.0.1:8020/ （Ctrl+C 停止）"
+exec "$PY" -I "$ROOT/code/mars-deploy/install/run.py" app --open

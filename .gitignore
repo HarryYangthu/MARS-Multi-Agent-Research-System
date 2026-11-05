@@ -1,0 +1,6 @@
+# Each subproject keeps its own .gitignore; these apply everywhere.
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

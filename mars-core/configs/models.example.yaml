@@ -1,0 +1,36 @@
+# 模板：复制为 configs/models.yaml 后填写（configs/models.yaml 不进仓库；也可用 MARS_MODELS_CONFIG 指定路径）
+# 模型角色 → 实际部署。内网替换 api_base / model 即可，代码不变。
+# strong：低频高价值（分析、提方案、辩论、诊断）；fast：高频（检索规划、阅读摘要、证据卡）。
+env_files:
+  - <你的 .env 文件路径>               # 只从这里读 API Key 环境变量（如 ZHIPU_API_KEY=...），Key 不写进本文件
+providers:
+  zhipu:
+    api_base: https://open.bigmodel.cn/api/paas/v4
+    api_key_env: ZHIPU_API_KEY
+roles:
+  strong:
+    provider: zhipu
+    model: glm-5.2          # 与公司内网同版本
+    max_tokens: 48000        # 思考与正文共用；长修订需要较大上限
+    timeout: 1800            # 单次调用总上限（持续输出时）
+    idle_timeout: 240        # 连续无输出多久判为卡住
+    thinking: true
+    concurrency: 3
+  fast:
+    provider: zhipu
+    model: glm-5.3-flash    # 本机替代内网 Qwen 27B 档
+    max_tokens: 8000
+    timeout: 900
+    idle_timeout: 120
+    reasoning_effort: low    # 该模型始终思考，不能关闭，只能选档位
+    concurrency: 4
+  coder:                    # CodingAgent 使用的模型
+    provider: zhipu
+    model: glm-5.2
+    max_tokens: 16000
+    timeout: 900
+    thinking: true
+    concurrency: 2
+fallbacks:
+  strong: fast              # strong 重试仍失败时降级，并记录在调用日志里
+retries: 3

@@ -1,0 +1,21 @@
+# 调研来源注册表模板。内核合入 proposals/mars-core.patch 第 5 节后才生效；安装脚本会把它复制成
+# code/mars-deploy/local/sources.yaml，启动器通过 MARS_SOURCES_CONFIG 指给内核。改完运行 checks/check_sources.py。
+# 代理不写在这里，写在 local/mars.env：HTTPS_PROXY / HTTP_PROXY（公网 API）、NO_PROXY（内网地址、127.0.0.1、
+# localhost、模型网关，必须写全，否则模型请求也会走代理）、DDGS_PROXY（网页搜索）。
+engines:
+  arxiv:    {enabled: true}           # 经代理访问；内网有镜像时加 base_url: https://<镜像>/api/query
+  openalex: {enabled: true}           # base_url 默认 https://api.openalex.org/works
+  crossref: {enabled: true}           # 能检索到 IEEE 论文的 DOI，全文由下面的 fulltext 规则从 IEEE 取
+  web:      {enabled: false}          # 网页搜索靠抓取搜索引擎页面，经公司代理通常不稳定；确实需要时再打开
+  library:                            # 内部文献检索系统的 JSON 检索接口。拿到接口说明后填写并改成 enabled: true
+    enabled: false
+    kind: json
+    url: "https://LIBRARY.example.corp/api/search?q={query}&rows={limit}"
+    items: data.records               # 结果列表在返回 JSON 里的路径，用点号分隔
+    fields: {title: title, abstract: abstract, year: year, url: doi_url, pdf_url: pdf_link}
+fulltext:                             # 按 DOI 前缀取订阅全文（机构 IP 认证）
+  - doi_prefix: "10.1109/"            # IEEE：DOI 跳转到 ieeexplore.ieee.org/document/<编号>，再取 stampPDF
+    resolve: "https://doi.org/{doi}"
+    match: "ieeexplore\\.ieee\\.org/document/(\\d+)"
+    pdf_url: "https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber={0}&ref="
+on_unavailable: continue              # 所有检索来源都没有结果时：continue = 只用知识库继续（事件里会写明）；fail = 停止

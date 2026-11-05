@@ -1,0 +1,16 @@
+# 本机配置模板：安装脚本把它复制成 code/mars-core/configs/machine.yaml（文件已存在时不覆盖）。
+# 项目的 .mars/project.yaml 没有写 python 时，评测与检查命令用这里的 python。
+# Windows 路径请用正斜杠或单引号，例如 'D:/envs/project/python.exe'。
+python: D:/envs/project/python.exe
+
+# 远程 GPU（可选）：项目声明 remote: {enabled: true, name: intranet-gpu, data_path: ...} 时使用。
+# 代码经 git 推送到服务器上的裸仓库，在服务器上执行项目的评测命令，结果经 ssh + tar 取回。只用专用密钥登录。
+# remote:
+#   name: intranet-gpu        # 参与评测缓存键：GPU 与 CPU 的数值不同，换服务器时请改名
+#   host: gpu01.example.corp
+#   port: 22
+#   user: <你的账号>
+#   key: C:/Users/<你>/.ssh/mars_gpu_ed25519    # 专用私钥的绝对路径；私钥不要放进任何仓库
+#   root: /home/<你的账号>/mars                 # 服务器上的工作目录（绝对路径）
+#   device: cuda:0
+#   max_parallel: 4

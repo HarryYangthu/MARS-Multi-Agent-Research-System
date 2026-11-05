@@ -1,0 +1,12 @@
+# 本机配置：复制为 configs/machine.yaml（不进仓库）。项目未指定 python 时使用这里的 python。
+python: /usr/bin/python3
+# 远程 GPU（可选）：项目 remote.name 与这里的 name 一致时启用；只用专用密钥登录。
+remote:
+  name: gpu1
+  host: gpu.example.com
+  port: 22
+  user: mars
+  key: ~/.ssh/mars_gpu
+  root: /home/mars/mars-runs
+  device: "cuda:0"
+  max_parallel: 2

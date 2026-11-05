@@ -1,0 +1,6 @@
+# build downloads and bundles, local configs/credentials/check reports: never commit
+dist/
+local/
+__pycache__/
+*.pyc
+.DS_Store

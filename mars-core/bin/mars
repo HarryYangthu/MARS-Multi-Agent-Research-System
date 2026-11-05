@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launcher independent of .pth files (macOS may flag venv files hidden; Python 3.13 then skips .pth files).
+# On macOS, caffeinate keeps the machine from idle-sleeping during multi-hour runs (a closed lid still sleeps).
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+KEEP_AWAKE=""
+command -v caffeinate >/dev/null 2>&1 && KEEP_AWAKE="caffeinate -i -s"
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec $KEEP_AWAKE "$ROOT/.venv/bin/python" -m mars.cli "$@"

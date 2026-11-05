@@ -1,0 +1,4 @@
+#!/bin/sh
+# MARS: run.py check (see code/mars-deploy/install/run.py)
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+exec "$ROOT/runtime/python/bin/python3" -I "$ROOT/code/mars-deploy/install/run.py" check "$@"
